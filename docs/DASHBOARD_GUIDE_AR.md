@@ -79,7 +79,7 @@
 | Open Deals | الـDeals المفتوحة المرتبطة بالـContacts | Associated deals where `hs_is_closed != true` |
 | Open Pipeline | قيمة الـDeals المفتوحة | مجموع `amount_in_home_currency` ثم `amount` كبديل |
 
-الضغط على أي KPI يفتح قائمة الـobject المقابل داخل HubSpot.
+الضغط على أي KPI يفتح **Drill-down drawer داخل الداشبورد** يعرض السجلات التي تكوّن الرقم. يمكن البحث داخل النتيجة، وفتح سجل الـContact أو Company أو Activity أو Deal المطلوب في HubSpot من الرابط الموجود داخل كل صف. رابط **Open full object list in HubSpot** أسفل الـdrawer يفتح القائمة العامة فقط عند الحاجة.
 
 ### Daily SDR Execution
 
@@ -92,6 +92,8 @@
 - Emails Sent.
 
 كل نشاط يتم وضعه في اليوم الخاص به باستخدام منطقة HubSpot الزمنية `Asia/Riyadh`.
+
+كل series في الرسم قابلة للضغط. مثال: الضغط على Connected في يوم محدد يعرض المكالمات المتصلة لذلك اليوم فقط، بينما الضغط على Completed Tasks يعرض الـTasks المكتملة لذلك اليوم.
 
 ### Today's Execution Focus
 
@@ -132,7 +134,18 @@
 - Missing meeting outcomes.
 - Missing Original Traffic Source.
 
-الضغط على التنبيه يفتح قائمة الـContacts أو الـTasks المناسبة داخل HubSpot.
+الضغط على التنبيه يفتح داخل الداشبورد قائمة الـContacts أو الـTasks أو Meetings المتأثرة بالتنبيه، مع رابط HubSpot مستقل لكل سجل.
+
+### طريقة عمل الـDrill-down
+
+- الـKPI يفتح السجلات التي تكوّن الرقم، وليس صفحة HubSpot عامة.
+- شريحة الـDonut أو عمود الـBar يفتح السجلات الموجودة داخل الجزء المختار فقط.
+- نقطة أو عمود التاريخ يفتح سجلات نوع النشاط في اليوم المختار.
+- Funnel stage يفتح الـContacts أو الـDeals المكوِّنة لتلك المرحلة.
+- Data Quality card يفتح السجلات الناقصة في الحقل المحدد.
+- البحث داخل الـdrawer يعمل على الاسم والشركة والدولة والحالة والمصدر والمالك وباقي التفاصيل المعروضة.
+- يتم تحميل أول 50 سجل في الواجهة، ويمكن عرض 50 إضافية في كل مرة بدون مغادرة الصفحة.
+- الضغط على اسم سجل في الجداول الأصلية أو على زر **Open record in HubSpot** داخل الـdrawer يفتح السجل الأصلي في تبويب جديد.
 
 ### Priority Leads
 
