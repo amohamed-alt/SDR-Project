@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle, CalendarDays, CheckCircle2, ChevronRight, Clock3, ExternalLink,
   Mail, MapPin, Phone, Sparkles, Target, UserRound, Video,
@@ -9,6 +9,14 @@ import type { Drilldown } from "@/components/DrilldownDrawer";
 import type { ActivityRow, ContactRow, DashboardData } from "@/lib/types";
 
 type QueueMode = "tasks" | "leads" | "meetings";
+type CalendarStatus = { configured: boolean; connected: boolean; email?: string; connectedAt?: string; error?: string };
+type BookingResult = {
+  calendarUrl: string;
+  meetLink?: string;
+  hubspotContactUrl: string;
+  salesOwner: { name: string; email: string };
+  contact: { name: string; email: string };
+};
 
 function localDay(value: string, timezone: string) {
   if (!value) return "";
@@ -54,6 +62,11 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
   const [meetingType, setMeetingType] = useState("google-meet");
   const [agenda, setAgenda] = useState("Introduction, current recruitment workflow, priorities, and next steps.");
   const [preview, setPreview] = useState(false);
+  const [calendarStatus, setCalendarStatus] = useState<CalendarStatus | null>(null);
+  const [calendarError, setCalendarError] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState("");
+  const [bookingResult, setBookingResult] = useState<BookingResult | null>(null);
 
   const today = localDay(new Date().toISOString(), data.meta.timezone);
   const tasks = useMemo(
@@ -73,6 +86,33 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
   const salesOwners = data.filterOptions.owners.filter((owner) => owner.id !== data.meta.ownerId);
   const selectedSalesOwner = salesOwners.find((owner) => owner.id === selectedSalesOwnerId) ?? salesOwners[0];
 
+  async function loadCalendarStatus() {
+    try {
+      const response = await fetch("/api/google/status", { cache: "no-store" });
+      const payload = await response.json() as CalendarStatus;
+      if (!response.ok) throw new Error(payload.error || "Unable to load Google Calendar status");
+      setCalendarStatus(payload);
+    } catch (error) {
+      setCalendarError(error instanceof Error ? error.message : "Unable to load Google Calendar status");
+    }
+  }
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { void loadCalendarStatus(); }, []);
+
+  async function disconnectCalendar() {
+    if (!window.confirm("Disconnect Marita's Google Calendar from this dashboard?")) return;
+    setCalendarError("");
+    const response = await fetch("/api/google/status", { method: "DELETE" });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      setCalendarError(payload.error || "Unable to disconnect Google Calendar");
+      return;
+    }
+    setCalendarStatus({ configured: true, connected: false });
+    setPreview(false);
+  }
+
   function openActivities(title: string, description: string, rows: ActivityRow[], url: string) {
     onOpen({ kind: "activities", title, description, rows, hubspotUrl: url });
   }
@@ -83,13 +123,50 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
 
   function submitPreview(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setSendError("");
+    setBookingResult(null);
     setPreview(true);
+  }
+
+  async function sendMeeting() {
+    if (!calendarStatus?.connected || !selectedContact || !selectedSalesOwner) return;
+    const confirmation = window.confirm(
+      `Send a real calendar invitation to ${selectedSalesOwner.email || selectedSalesOwner.name} and ${selectedContact.email || selectedContact.name}?`,
+    );
+    if (!confirmation) return;
+    setSending(true);
+    setSendError("");
+    setBookingResult(null);
+    try {
+      const response = await fetch("/api/google/meetings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requestId: crypto.randomUUID(),
+          contactId: selectedContact.id,
+          salesOwnerId: selectedSalesOwner.id,
+          title: subject,
+          date: meetingDate,
+          time: meetingTime,
+          durationMinutes: Number(duration),
+          meetingType,
+          agenda,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to create the meeting");
+      setBookingResult(payload as BookingResult);
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "Unable to create the meeting");
+    } finally {
+      setSending(false);
+    }
   }
 
   return <div className="marita-workspace">
     <section className="workspace-hero">
       <div><span className="workspace-eyebrow"><Sparkles size={13}/>MARITA WORKSPACE</span><h2>Good morning, Marita</h2><p>Your live execution queue, lead shortcuts, and meeting preparation in one place.</p></div>
-      <div className="calendar-connection"><span><i/>MARITA · GOOGLE CALENDAR</span><strong>OAuth setup required</strong><small>Marita organizes · Sales rep + lead receive the invite</small></div>
+      <div className={"calendar-connection" + (calendarStatus?.connected ? " connected" : "")}><span><i/>MARITA · GOOGLE CALENDAR</span><strong>{calendarStatus?.connected ? "Connected" : calendarStatus ? calendarStatus.configured ? "Ready to connect" : "Server setup missing" : "Checking connection…"}</strong><small>{calendarStatus?.connected ? calendarStatus.email : calendarError || "Marita organizes · Sales rep + lead receive the invite"}</small><div className="calendar-connection-actions">{calendarStatus?.configured && !calendarStatus.connected && <a href="/api/google/connect">Connect calendar</a>}{calendarStatus?.connected && <button type="button" onClick={() => void disconnectCalendar()}>Disconnect</button>}</div></div>
     </section>
 
     <div className="workspace-stat-grid">
@@ -131,14 +208,16 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
           <div className="meeting-guest"><div className="meeting-avatar">{selectedContact?.name.split(" ").map((part) => part[0]).join("").slice(0,2).toUpperCase() || "?"}</div><div><strong>{selectedContact?.name ?? "Select a contact"}</strong><span>{selectedContact?.email || "No email address in HubSpot"}</span></div>{selectedContact && <HubSpotButton href={selectedContact.url} label="Profile"/>}</div>
           <label><span>Meeting title</span><input value={subject} onChange={(event) => { setSubject(event.target.value); setPreview(false); }}/></label>
           <div className="meeting-form-row"><label><span>Date</span><input type="date" value={meetingDate} onChange={(event) => { setMeetingDate(event.target.value); setPreview(false); }}/></label><label><span>Time</span><input type="time" value={meetingTime} onChange={(event) => { setMeetingTime(event.target.value); setPreview(false); }}/></label><label><span>Duration</span><select value={duration} onChange={(event) => { setDuration(event.target.value); setPreview(false); }}><option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option></select></label></div>
-          <label><span>Location</span><select value={meetingType} onChange={(event) => { setMeetingType(event.target.value); setPreview(false); }}><option value="google-meet">Google Meet</option><option value="custom">Custom meeting link</option><option value="no-video">No video link</option></select></label>
+          <label><span>Location</span><select value={meetingType} onChange={(event) => { setMeetingType(event.target.value); setPreview(false); }}><option value="google-meet">Google Meet</option><option value="no-video">Calendar invitation without video</option></select></label>
           <label><span>Agenda</span><textarea rows={3} value={agenda} onChange={(event) => { setAgenda(event.target.value); setPreview(false); }}/></label>
           <button className="meeting-preview-button" type="submit"><Sparkles size={15}/>Preview invitation</button>
         </form>
         {preview && <div className="meeting-preview">
           <div className="meeting-preview-title"><CheckCircle2 size={17}/><div><strong>Invitation preview ready</strong><span>No calendar event or HubSpot meeting has been created.</span></div></div>
-          <dl><div><dt>Organizer</dt><dd>Marita Chedid · Google Calendar</dd></div><div><dt>Sales host</dt><dd>{selectedSalesOwner?.name || "Missing Sales Rep"} · invitation recipient · HubSpot meeting owner</dd></div><div><dt>Lead guest</dt><dd>{selectedContact?.name || "—"} · {selectedContact?.email || "Missing email"}</dd></div><div><dt>When</dt><dd>{meetingDate} at {meetingTime} · {duration} minutes</dd></div><div><dt>Location</dt><dd>{meetingType === "google-meet" ? "A Google Meet link will be generated and included in both invitations" : meetingType === "custom" ? "Custom link" : "No video link"}</dd></div><div><dt>After send</dt><dd>Google invites Sales + Lead; HubSpot logs the meeting under {selectedSalesOwner?.name || "the selected Sales Rep"} and associates it with the contact.</dd></div></dl>
-          <button disabled title="Google OAuth is not configured yet"><Video size={14}/>Connect Marita Calendar to activate sending</button>
+          <dl><div><dt>Organizer</dt><dd>Marita Chedid · {calendarStatus?.email || "Google Calendar"}</dd></div><div><dt>Sales host</dt><dd>{selectedSalesOwner?.name || "Missing Sales Rep"} · invitation recipient · HubSpot meeting owner</dd></div><div><dt>Lead guest</dt><dd>{selectedContact?.name || "—"} · {selectedContact?.email || "Missing email"}</dd></div><div><dt>When</dt><dd>{meetingDate} at {meetingTime} · {duration} minutes</dd></div><div><dt>Location</dt><dd>{meetingType === "google-meet" ? "A unique Google Meet link will be included in both invitations" : "Calendar invitation without a video link"}</dd></div><div><dt>After send</dt><dd>Google invites Sales + Lead; HubSpot logs the meeting under {selectedSalesOwner?.name || "the selected Sales Rep"} and associates it with the contact.</dd></div></dl>
+          {calendarStatus?.connected ? <button className="meeting-send-button" type="button" onClick={() => void sendMeeting()} disabled={sending || !selectedContact?.email || !selectedSalesOwner?.email}>{sending ? "Creating meeting and sending invitations…" : <><Video size={14}/>Confirm & send invitations</>}</button> : <a className="meeting-connect-button" href="/api/google/connect"><Video size={14}/>Connect Marita Calendar first</a>}
+          {sendError && <div className="meeting-send-message error"><AlertTriangle size={14}/><span><strong>Meeting not created</strong>{sendError}</span></div>}
+          {bookingResult && <div className="meeting-send-message success"><CheckCircle2 size={15}/><span><strong>Meeting created and invitations sent</strong>{bookingResult.salesOwner.name} and {bookingResult.contact.name} were invited.</span><div><a href={bookingResult.meetLink || bookingResult.calendarUrl} target="_blank" rel="noreferrer">Open Google Meet<ExternalLink size={11}/></a><a href={bookingResult.hubspotContactUrl} target="_blank" rel="noreferrer">Open HubSpot timeline<ExternalLink size={11}/></a></div></div>}
         </div>}
       </section>
     </div>
