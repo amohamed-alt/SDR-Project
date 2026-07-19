@@ -93,7 +93,10 @@ async function hubspotRequest<T>(path: string, init: RequestInit = {}): Promise<
         cache: "no-store",
       });
 
-      if (response.ok) return (await response.json()) as T;
+      if (response.ok) {
+        if (response.status === 204) return undefined as T;
+        return (await response.json()) as T;
+      }
 
       const body = await response.text();
       if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
@@ -231,4 +234,44 @@ export async function getPropertyDefinitions(
       ),
     ),
   );
+}
+
+export interface CreateMeetingInput {
+  contactId: string;
+  ownerId: string;
+  title: string;
+  body: string;
+  internalNotes: string;
+  startAt: string;
+  endAt: string;
+  externalUrl: string;
+  location: string;
+}
+
+export async function createMeeting(input: CreateMeetingInput): Promise<HubSpotRecord> {
+  return hubspotRequest<HubSpotRecord>("/crm/v3/objects/meetings", {
+    method: "POST",
+    body: JSON.stringify({
+      properties: {
+        hs_timestamp: input.startAt,
+        hubspot_owner_id: input.ownerId,
+        hs_meeting_title: input.title,
+        hs_meeting_body: input.body,
+        hs_internal_meeting_notes: input.internalNotes,
+        hs_meeting_external_url: input.externalUrl,
+        hs_meeting_location: input.location,
+        hs_meeting_start_time: input.startAt,
+        hs_meeting_end_time: input.endAt,
+        hs_meeting_outcome: "SCHEDULED",
+      },
+      associations: [{
+        to: { id: input.contactId },
+        types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 200 }],
+      }],
+    }),
+  });
+}
+
+export async function archiveMeeting(meetingId: string): Promise<void> {
+  await hubspotRequest<void>(`/crm/v3/objects/meetings/${encodeURIComponent(meetingId)}`, { method: "DELETE" });
 }
