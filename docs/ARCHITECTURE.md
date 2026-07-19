@@ -10,6 +10,11 @@ flowchart TD
     HS --> ASSOC["CRM associations"]
     API --> AGG["Attribution, quality, funnel, alerts"]
     AGG --> UI
+    UI --> OAUTH["Marita Google OAuth"]
+    OAUTH --> TOKENS["AES-256-GCM encrypted refresh token"]
+    UI --> BOOK["Confirmed meeting booking"]
+    BOOK --> GCAL["Google Calendar + unique Meet"]
+    BOOK --> HSM["HubSpot meeting + contact association"]
 ```
 
 ## Design decisions
@@ -20,6 +25,9 @@ flowchart TD
 4. Meetings are deduplicated before performance metrics are calculated.
 5. Optional sources fail visibly with warnings instead of being treated as zero without explanation.
 6. Synthetic demo mode supports UI development and CI without CRM access.
+7. Google Calendar only accepts the configured Marita email and uses OAuth state validation.
+8. Calendar events are created without guests first; after HubSpot logging succeeds, Sales and Lead are added with notifications enabled.
+9. The encrypted refresh token is stored in a dedicated Docker volume so container rebuilds do not disconnect Calendar.
 
 ## Production scale
 
