@@ -315,6 +315,28 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
 
   const ownerMap = new Map(owners.map((owner) => [owner.id, owner.name]));
   const ownerName = ownerMap.get(filters.ownerId) ?? (filters.ownerId === "31644369" ? "Marita Chedid" : filters.ownerId);
+  const contactNameMap = new Map(allContacts.map((contact) => [
+    contact.id,
+    [value(contact, "firstname"), value(contact, "lastname")].filter(Boolean).join(" ") || "Unnamed contact",
+  ]));
+  const activityContact = (contactIds: string[], fallbackType: "call" | "meeting" | "task" | "email") => {
+    const contactId = contactIds.find((id) => selectedIds.has(id)) ?? contactIds[0];
+    if (!contactId) {
+      return {
+        relatedContactId: undefined,
+        relatedContactName: undefined,
+        relatedContactUrl: undefined,
+        url: hubspotListUrl(fallbackType),
+      };
+    }
+    const contactUrl = hubspotRecordUrl("contact", contactId);
+    return {
+      relatedContactId: contactId,
+      relatedContactName: contactNameMap.get(contactId) ?? `Contact #${contactId}`,
+      relatedContactUrl: contactUrl,
+      url: contactUrl,
+    };
+  };
   const meetingGroups = dedupeMeetings(meetings, meetingContacts);
   const connectedCalls = calls.filter((call) => value(call, "hs_call_disposition") === CONNECTED_CALL_DISPOSITION);
   const outgoingEmails = emails.filter((email) => value(email, "hs_email_direction").includes("OUTGOING") || value(email, "hs_email_direction") === "EMAIL");
@@ -495,7 +517,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       assignedTo: ownerMap.get(value(call, "hubspot_owner_id")) ?? ownerName,
       occurredAt: value(call, "hs_timestamp"), metricAt: value(call, "hs_timestamp"), dueAt: "", dueBucket: "", isOpen: false, isHighPriority: false,
       opened: false, clicked: false, replied: false,
-      url: hubspotRecordUrl("call", call.id),
+      ...activityContact(callContacts.get(call.id) ?? [], "call"),
     })),
     ...meetingGroups.map((meeting): ActivityRow => ({
       id: meeting.booking.id,
@@ -507,7 +529,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       occurredAt: meeting.startAt || meeting.createdAt, metricAt: meeting.createdAt, dueAt: "", dueBucket: "",
       isOpen: !["COMPLETED", "CANCELED"].includes(meeting.outcome), isHighPriority: false,
       opened: false, clicked: false, replied: false,
-      url: hubspotRecordUrl("meeting", meeting.booking.id),
+      ...activityContact(meeting.contactIds, "meeting"),
     })),
     ...taskRecords.map((task): ActivityRow => ({
       id: task.id,
@@ -521,7 +543,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       dueAt: value(task, "hs_timestamp"), dueBucket: taskDueBucket(task),
       isOpen: value(task, "hs_task_status") !== "COMPLETED", isHighPriority: value(task, "hs_task_priority") === "HIGH",
       opened: false, clicked: false, replied: false,
-      url: hubspotRecordUrl("task", task.id),
+      ...activityContact(taskContacts.get(task.id) ?? [], "task"),
     })),
     ...outgoingEmails.map((email): ActivityRow => ({
       id: email.id,
@@ -534,7 +556,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       opened: number(value(email, "hs_email_open_count")) > 0,
       clicked: number(value(email, "hs_email_click_count")) > 0,
       replied: number(value(email, "hs_email_reply_count")) > 0,
-      url: hubspotRecordUrl("email", email.id),
+      ...activityContact(emailContacts.get(email.id) ?? [], "email"),
     })),
   ].sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
 
