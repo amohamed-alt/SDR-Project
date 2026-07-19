@@ -143,6 +143,9 @@ export interface ActivityRow {
   opened: boolean;
   clicked: boolean;
   replied: boolean;
+  relatedContactId?: string;
+  relatedContactName?: string;
+  relatedContactUrl?: string;
   url: string;
 }
 
