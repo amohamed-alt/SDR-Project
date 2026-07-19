@@ -19,6 +19,8 @@ The project is configured for Talentera's EU1 HubSpot portal and defaults to Mar
 
 See [docs/METRICS.md](docs/METRICS.md) for exact property definitions and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the data flow.
 
+For a detailed Arabic walkthrough of every dashboard tab, KPI, filter, HubSpot field, source rule, and drill-down link, see [docs/DASHBOARD_GUIDE_AR.md](docs/DASHBOARD_GUIDE_AR.md).
+
 ## Security model
 
 - `HUBSPOT_PRIVATE_APP_TOKEN` is server-only and is never sent to the browser.
