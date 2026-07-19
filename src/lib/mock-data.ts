@@ -77,7 +77,8 @@ export function createMockDashboard(from: string, to: string, ownerId: string): 
       ["3", "Layla Farouk", "CHRO", "Nile Digital", "Egypt", 91],
       ["4", "Fahad Al-Qahtani", "VP People", "Riyadh Logistics", "Saudi Arabia", 89],
     ].map(([id, name, title, company, country, score]) => ({
-      id: String(id), name: String(name), title: String(title), company: String(company), country: String(country),
+      id: String(id), name: String(name), email: String(name).toLowerCase().replace(/\s+/g, ".") + "@example.com",
+      phone: "+966 50 000 0000", linkedinUrl: "https://www.linkedin.com", title: String(title), company: String(company), country: String(country),
       originalSource: "Offline Sources", latestSource: "Direct Traffic", recordSource: "Integration", leadStatus: "New", lifecycleStage: "Lead",
       originalSourceDetail: "Integration", latestSourceDetail: "Direct", recordSourceDetail: "Extensive-Lighter", leadSource: "Outbound", contactSource: "SDR Outbound",
       tier: "Tier 1", contactPriority: "High", persona: "Talent Acquisition", emailStatus: "Valid", phoneStatus: "Pending",
