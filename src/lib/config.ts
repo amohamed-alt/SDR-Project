@@ -171,7 +171,24 @@ export const BOOKING_MEETING_SOURCES = new Set([
   "MEETINGS_EMBED",
 ]);
 
-export function hubspotRecordUrl(objectType: "contact" | "company" | "deal", id: string) {
-  const typeId = objectType === "contact" ? "0-1" : objectType === "company" ? "0-2" : "0-3";
+const HUBSPOT_OBJECT_TYPE_IDS = {
+  contact: "0-1",
+  company: "0-2",
+  deal: "0-3",
+  task: "0-27",
+  meeting: "0-47",
+  call: "0-48",
+  email: "0-49",
+} as const;
+
+export type HubSpotObjectType = keyof typeof HUBSPOT_OBJECT_TYPE_IDS;
+
+export function hubspotRecordUrl(objectType: HubSpotObjectType, id: string) {
+  const typeId = HUBSPOT_OBJECT_TYPE_IDS[objectType];
   return `https://${HUBSPOT_UI_DOMAIN}/contacts/${HUBSPOT_PORTAL_ID}/record/${typeId}/${id}?utm_source=sdr_project&utm_medium=dashboard&utm_campaign=drilldown`;
+}
+
+export function hubspotListUrl(objectType: HubSpotObjectType) {
+  const typeId = HUBSPOT_OBJECT_TYPE_IDS[objectType];
+  return `https://${HUBSPOT_UI_DOMAIN}/contacts/${HUBSPOT_PORTAL_ID}/objects/${typeId}/views/all/list?utm_source=sdr_project&utm_medium=dashboard&utm_campaign=object_list`;
 }
