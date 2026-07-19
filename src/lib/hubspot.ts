@@ -48,6 +48,13 @@ interface PipelinesResponse {
   }>;
 }
 
+export interface HubSpotPropertyDefinition {
+  name: string;
+  label: string;
+  type: string;
+  options?: Array<{ value: string; label: string; hidden?: boolean }>;
+}
+
 export class HubSpotApiError extends Error {
   constructor(
     message: string,
@@ -211,4 +218,17 @@ export async function listDealStages(): Promise<Map<string, string>> {
     for (const stage of pipeline.stages) stages.set(stage.id, stage.label);
   }
   return stages;
+}
+
+export async function getPropertyDefinitions(
+  objectType: string,
+  propertyNames: readonly string[],
+): Promise<HubSpotPropertyDefinition[]> {
+  return Promise.all(
+    propertyNames.map((propertyName) =>
+      hubspotRequest<HubSpotPropertyDefinition>(
+        `/crm/v3/properties/${objectType}/${encodeURIComponent(propertyName)}`,
+      ),
+    ),
+  );
 }
