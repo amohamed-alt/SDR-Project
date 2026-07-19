@@ -425,6 +425,8 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     return {
       id: contact.id,
       name: [value(contact, "firstname"), value(contact, "lastname")].filter(Boolean).join(" ") || "Unnamed contact",
+      email: value(contact, "email"), phone: value(contact, "phone") || value(contact, "mobilephone"),
+      linkedinUrl: value(contact, "gtm_linkedin_url"),
       title: value(contact, "jobtitle"), company: value(contact, "company"), country: value(contact, "country"),
       originalSource: displayValue(value(contact, "hs_analytics_source"), originalSourceLabels),
       originalSourceDetail: value(contact, "hs_analytics_source_data_1") || "—",
