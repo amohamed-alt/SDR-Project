@@ -8,6 +8,9 @@ export function createMockDashboard(from: string, to: string, ownerId: string): 
       generatedAt: new Date().toISOString(), from, to, timezone: "Asia/Riyadh", ownerId,
       ownerName: "Marita Chedid", portalId: "145742477", isDemo: true,
       warnings: ["Demo mode is active. Connect a HubSpot private app token to load live CRM data."],
+      hubspotUrls: {
+        contacts: "#", companies: "#", calls: "#", meetings: "#", tasks: "#", emails: "#", deals: "#",
+      },
     },
     kpis: {
       portfolioContacts: 529, newContacts: 220, companies: 387, calls: 424, connectedCalls: 106,
@@ -36,6 +39,8 @@ export function createMockDashboard(from: string, to: string, ownerId: string): 
     recordSources: [
       { name: "Integration", value: 311 }, { name: "CRM UI", value: 96 }, { name: "Import", value: 71 }, { name: "Forms", value: 51 },
     ],
+    integrationSources: [{ name: "Extensive Lighter", value: 287 }, { name: "Other Integration", value: 24 }],
+    sourceAudit: { integrationRecords: 311, extensiveLighterRecords: 287, formRecords: 51, apiShare: 58.8 },
     leadStatuses: [
       { name: "Attempted To Contact", value: 211 }, { name: "New", value: 128 }, { name: "Connected", value: 106 }, { name: "Open Deal", value: 39 }, { name: "Unknown", value: 45 },
     ],
@@ -72,8 +77,14 @@ export function createMockDashboard(from: string, to: string, ownerId: string): 
     ].map(([id, name, title, company, country, score]) => ({
       id: String(id), name: String(name), title: String(title), company: String(company), country: String(country),
       originalSource: "Offline Sources", latestSource: "Direct Traffic", recordSource: "Integration", leadStatus: "New", lifecycleStage: "Lead",
+      originalSourceDetail: "Integration", latestSourceDetail: "Direct", recordSourceDetail: "Extensive-Lighter", leadSource: "Outbound", contactSource: "SDR Outbound",
       tier: "A", persona: "Talent Acquisition", emailStatus: "Valid", phoneStatus: "Unknown", lastContacted: "", nextActivity: "", priorityScore: Number(score), url: "#",
     })),
+    recentActivities: [
+      { id: "call-1", type: "Call", subject: "Discovery call", status: "Connected", detail: "Connected", assignedTo: "Marita Chedid", occurredAt: "2026-07-19T10:30:00Z", url: "#" },
+      { id: "meeting-1", type: "Meeting", subject: "Talentera demo", status: "Completed", detail: "Meetings Public", assignedTo: "Marita Chedid", occurredAt: "2026-07-19T09:00:00Z", url: "#" },
+      { id: "task-1", type: "Task", subject: "Follow up with HR Director", status: "Not Started", detail: "High priority", assignedTo: "Marita Chedid", occurredAt: "2026-07-19T08:00:00Z", url: "#" },
+    ],
     companies: [
       ["1", "Gulf Health Group", "gulfhealth.example", "Saudi Arabia", "Healthcare", "5000", "A", "Oracle HCM", 4],
       ["2", "Emirates Industrial", "emiratesindustrial.example", "United Arab Emirates", "Manufacturing", "2400", "A", "SAP SuccessFactors", 3],
@@ -87,9 +98,12 @@ export function createMockDashboard(from: string, to: string, ownerId: string): 
       { id: "2", name: "Emirates Industrial — Talentera", stage: "Proposal Shared", owner: "Ursula Waked", amount: 68000, closeDate: "2026-09-15", url: "#" },
     ],
     filterOptions: {
-      countries: ["Egypt", "Qatar", "Saudi Arabia", "United Arab Emirates"], originalSources: ["OFFLINE", "DIRECT_TRAFFIC", "ORGANIC_SEARCH", "PAID_SOCIAL"],
-      latestSources: ["DIRECT_TRAFFIC", "EMAIL_MARKETING", "OFFLINE", "ORGANIC_SEARCH"], tiers: ["A", "B", "C"],
-      personas: ["CHRO", "HR Director", "Talent Acquisition"], owners: [{ id: ownerId, name: "Marita Chedid" }],
+      countries: ["Egypt", "Qatar", "Saudi Arabia", "United Arab Emirates"].map((value) => ({ value, label: value })),
+      originalSources: [{ value: "OFFLINE", label: "Offline Sources" }, { value: "DIRECT_TRAFFIC", label: "Direct Traffic" }, { value: "ORGANIC_SEARCH", label: "Organic Search" }, { value: "PAID_SOCIAL", label: "Paid Social" }],
+      latestSources: [{ value: "DIRECT_TRAFFIC", label: "Direct Traffic" }, { value: "EMAIL_MARKETING", label: "Email Marketing" }, { value: "OFFLINE", label: "Offline Sources" }, { value: "ORGANIC_SEARCH", label: "Organic Search" }],
+      tiers: ["A", "B", "C"].map((value) => ({ value, label: `Tier ${value}` })),
+      personas: ["CHRO", "HR Director", "Talent Acquisition"].map((value) => ({ value, label: value })),
+      owners: [{ id: ownerId, name: "Marita Chedid" }],
     },
   };
 }
