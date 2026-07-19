@@ -60,6 +60,22 @@
 
 القيمة التي تظهر للمستخدم هي **HubSpot display label** وليست الـinternal value. تستخدم الـinternal values في الخلفية فقط لتنفيذ الفلتر.
 
+## Marita Workspace — Top Tab
+
+يوجد أعلى محتوى اللوحة Tab منفصل باسم **Marita Workspace** بجانب **Analytics Dashboard**. هذا الـTab لا يغيّر الـSidebar أو صفحات التقارير الحالية.
+
+يعرض الـWorkspace:
+
+- Tasks المستحقة اليوم والـHigh-priority Tasks.
+- Contacts التي لم يتم تسجيل تواصل معها.
+- Meetings المجدولة اليوم والاجتماعات القادمة.
+- My Day Queue يمكن التبديل فيها بين Tasks وLeads وMeetings.
+- اختصارات Call وEmail وفتح السجل في HubSpot.
+- Priority Leads مرتبة حسب الـpriority score.
+- Meeting Composer لاختيار الـContact والموعد والمدة والمكان والـagenda.
+
+زر **Preview Invitation** يعرض معاينة الدعوة فقط. لا ينشئ Calendar Event ولا Meeting داخل HubSpot ولا يرسل بريدًا. الإرسال الحقيقي وإنشاء Google Meet يحتاج ربط Google Calendar الخاص بماريتا عن طريق OAuth، ويظهر في الصفحة حاليًا باسم **Not connected**.
+
 ## 4. Overview
 
 ### بطاقات الـKPIs
