@@ -336,6 +336,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   const highPriorityOpenTasks = openTasks.filter((task) => value(task, "hs_task_priority") === "HIGH").length;
   const completedMeetings = meetingGroups.filter((meeting) => meeting.outcome === "COMPLETED").length;
   const openDeals = dealsRaw.filter((deal) => value(deal, "hs_is_closed") !== "true");
+  const openDealIds = new Set(openDeals.map((deal) => deal.id));
   const dealsCreated = dealsRaw.filter((deal) => isBetween(value(deal, "createdate"), filters.from, filters.to));
   const untouchedContacts = selectedContacts.filter((contact) => !value(contact, "notes_last_contacted")).length;
   const untouchedCutoff = now.getTime() - 86_400_000;
@@ -356,12 +357,20 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     ? leadResponseTimes[Math.floor((leadResponseTimes.length - 1) / 2)]
     : 0;
   const medianLeadResponseHours = Math.round((medianResponseMilliseconds / 3_600_000) * 10) / 10;
+  const taskDueBucket = (task: HubSpotRecord) => {
+    const day = localDay(value(task, "hs_timestamp"));
+    if (!day) return "No due date";
+    if (day < todayDay) return "Overdue before today";
+    if (day === todayDay) return "Due today";
+    if (day === tomorrowDay) return "Due tomorrow";
+    return "Future";
+  };
   const taskDueBuckets: ChartDatum[] = [
-    { name: "Overdue before today", value: openTasks.filter((task) => { const day = localDay(value(task, "hs_timestamp")); return Boolean(day) && day < todayDay; }).length },
+    { name: "Overdue before today", value: openTasks.filter((task) => taskDueBucket(task) === "Overdue before today").length },
     { name: "Due today", value: dueToday },
     { name: "Due tomorrow", value: dueTomorrow },
-    { name: "Future", value: openTasks.filter((task) => localDay(value(task, "hs_timestamp")) > tomorrowDay).length },
-    { name: "No due date", value: openTasks.filter((task) => !value(task, "hs_timestamp")).length },
+    { name: "Future", value: openTasks.filter((task) => taskDueBucket(task) === "Future").length },
+    { name: "No due date", value: openTasks.filter((task) => taskDueBucket(task) === "No due date").length },
   ].filter((item) => item.value > 0);
 
   const dailyMap = new Map<string, DailyActivityDatum>(eachDay(filters.from, filters.to).map((date) => [date, {
@@ -391,6 +400,8 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     completeness("hs_time_to_first_engagement", "Lead response time coverage", responseCohort),
   ];
 
+  const connectedContactIds = new Set(connectedCalls.flatMap((call) => callContacts.get(call.id) ?? []).filter((id) => selectedIds.has(id)));
+  const meetingContactIds = new Set(meetingGroups.flatMap((meeting) => meeting.contactIds).filter((id) => selectedIds.has(id)));
   const priorityContacts: ContactRow[] = selectedContacts.map((contact) => {
     const tier = value(contact, "gtm_icp_tier");
     const icpScore = number(value(contact, "gtm_icp_score"));
@@ -408,6 +419,9 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     if (!nextActivity) priorityScore += 10;
     if (/valid|verified|deliverable/i.test(emailStatus)) priorityScore += 3;
     if (/correct|valid|verified/i.test(phoneStatus)) priorityScore += 2;
+    const associatedDealIds = contactDeals.get(contact.id) ?? [];
+    const responseRaw = value(contact, "hs_time_to_first_engagement");
+    const responseMilliseconds = Number(responseRaw);
     return {
       id: contact.id,
       name: [value(contact, "firstname"), value(contact, "lastname")].filter(Boolean).join(" ") || "Unnamed contact",
@@ -424,11 +438,30 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       lifecycleStage: displayValue(value(contact, "lifecyclestage"), lifecycleStageLabels),
       tier: displayValue(tier, tierLabels), contactPriority: displayValue(contactPriority, contactPriorityLabels),
       persona: displayValue(value(contact, "gtm_persona"), personaLabels),
-      emailStatus: displayValue(emailStatus, emailStatusLabels), phoneStatus: displayValue(phoneStatus, phoneStatusLabels), lastContacted, nextActivity,
+      emailStatus: displayValue(emailStatus, emailStatusLabels), phoneStatus: displayValue(phoneStatus, phoneStatusLabels),
+      createdAt: value(contact, "createdate"), lastContacted, nextActivity,
+      leadResponseTimeHours: responseRaw && Number.isFinite(responseMilliseconds) && responseMilliseconds >= 0
+        ? Math.round((responseMilliseconds / 3_600_000) * 10) / 10
+        : null,
+      hasConnectedCall: connectedContactIds.has(contact.id), hasMeeting: meetingContactIds.has(contact.id),
+      hasDeal: associatedDealIds.length > 0, hasOpenDeal: associatedDealIds.some((dealId) => openDealIds.has(dealId)),
+      qualityIssues: [
+        !value(contact, "email") && "email",
+        !/valid|verified|deliverable/i.test(emailStatus) && "gtm_email_status",
+        !(value(contact, "phone") || value(contact, "mobilephone")) && "phone",
+        !/correct|valid|verified/i.test(phoneStatus) && "phone_number_status",
+        !value(contact, "gtm_linkedin_url") && "gtm_linkedin_url",
+        !value(contact, "company_id") && "company_id",
+        !value(contact, "country") && "country",
+        !value(contact, "hs_analytics_source") && "hs_analytics_source",
+        !value(contact, "gtm_icp_tier") && "gtm_icp_tier",
+        !value(contact, "signalhire_match_status") && "signalhire_match_status",
+        !responseRaw && "hs_time_to_first_engagement",
+      ].filter((item): item is string => Boolean(item)),
       priorityScore: Math.max(0, Math.round(priorityScore)), url: hubspotRecordUrl("contact", contact.id),
       companyUrl: value(contact, "company_id") ? hubspotRecordUrl("company", value(contact, "company_id")) : undefined,
     };
-  }).sort((a, b) => b.priorityScore - a.priorityScore).slice(0, 100);
+  }).sort((a, b) => b.priorityScore - a.priorityScore);
 
   const companyRows: CompanyRow[] = companiesRaw.map((company) => ({
     id: company.id, name: value(company, "name") || "Unnamed company", domain: value(company, "domain"),
@@ -442,7 +475,8 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   const dealRows: DealRow[] = dealsRaw.map((deal) => ({
     id: deal.id, name: value(deal, "dealname") || "Unnamed deal", stage: stageLabels.get(value(deal, "dealstage")) ?? pretty(value(deal, "dealstage")),
     owner: ownerMap.get(value(deal, "hubspot_owner_id")) ?? value(deal, "hubspot_owner_id"),
-    amount: number(value(deal, "amount_in_home_currency") || value(deal, "amount")), closeDate: value(deal, "closedate"),
+    amount: number(value(deal, "amount_in_home_currency") || value(deal, "amount")), createdAt: value(deal, "createdate"),
+    closeDate: value(deal, "closedate"), isOpen: value(deal, "hs_is_closed") !== "true",
     url: hubspotRecordUrl("deal", deal.id),
   })).sort((a, b) => b.amount - a.amount);
 
@@ -457,7 +491,8 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       status: CALL_DISPOSITION_LABELS[value(call, "hs_call_disposition")] ?? pretty(value(call, "hs_call_status")),
       detail: CALL_DISPOSITION_LABELS[value(call, "hs_call_disposition")] ?? "No disposition",
       assignedTo: ownerMap.get(value(call, "hubspot_owner_id")) ?? ownerName,
-      occurredAt: value(call, "hs_timestamp"),
+      occurredAt: value(call, "hs_timestamp"), metricAt: value(call, "hs_timestamp"), dueAt: "", dueBucket: "", isOpen: false, isHighPriority: false,
+      opened: false, clicked: false, replied: false,
       url: hubspotRecordUrl("call", call.id),
     })),
     ...meetingGroups.map((meeting): ActivityRow => ({
@@ -467,7 +502,9 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       status: displayValue(meeting.outcome, meetingOutcomeLabels),
       detail: displayValue(meeting.source, meetingSourceLabels),
       assignedTo: ownerMap.get(meeting.ownerId) ?? (meeting.ownerId || "Unassigned"),
-      occurredAt: meeting.startAt || meeting.createdAt,
+      occurredAt: meeting.startAt || meeting.createdAt, metricAt: meeting.createdAt, dueAt: "", dueBucket: "",
+      isOpen: !["COMPLETED", "CANCELED"].includes(meeting.outcome), isHighPriority: false,
+      opened: false, clicked: false, replied: false,
       url: hubspotRecordUrl("meeting", meeting.booking.id),
     })),
     ...taskRecords.map((task): ActivityRow => ({
@@ -478,6 +515,10 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       detail: displayValue(value(task, "hs_task_priority"), taskPriorityLabels),
       assignedTo: ownerMap.get(value(task, "hubspot_owner_id")) ?? ownerName,
       occurredAt: value(task, "hs_task_completion_date") || value(task, "hs_timestamp") || value(task, "hs_createdate"),
+      metricAt: value(task, "hs_task_completion_date") || value(task, "hs_timestamp") || value(task, "hs_createdate"),
+      dueAt: value(task, "hs_timestamp"), dueBucket: taskDueBucket(task),
+      isOpen: value(task, "hs_task_status") !== "COMPLETED", isHighPriority: value(task, "hs_task_priority") === "HIGH",
+      opened: false, clicked: false, replied: false,
       url: hubspotRecordUrl("task", task.id),
     })),
     ...outgoingEmails.map((email): ActivityRow => ({
@@ -487,10 +528,13 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       status: pretty(value(email, "hs_email_status") || "Sent"),
       detail: number(value(email, "hs_email_reply_count")) > 0 ? "Replied" : "No reply",
       assignedTo: ownerMap.get(value(email, "hubspot_owner_id")) ?? ownerName,
-      occurredAt: value(email, "hs_timestamp"),
+      occurredAt: value(email, "hs_timestamp"), metricAt: value(email, "hs_timestamp"), dueAt: "", dueBucket: "", isOpen: false, isHighPriority: false,
+      opened: number(value(email, "hs_email_open_count")) > 0,
+      clicked: number(value(email, "hs_email_click_count")) > 0,
+      replied: number(value(email, "hs_email_reply_count")) > 0,
       url: hubspotRecordUrl("email", email.id),
     })),
-  ].sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()).slice(0, 100);
+  ].sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
 
   const highIcpUntouched = selectedContacts.filter((contact) => /^a$|tier a|tier_1|tier 1|high/i.test(value(contact, "gtm_icp_tier")) && !value(contact, "notes_last_contacted")).length;
   const highPriorityUntouched = selectedContacts.filter((contact) => value(contact, "gtm_contact_priority") === "high" && !value(contact, "notes_last_contacted")).length;
@@ -523,8 +567,6 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   }
   const mapToChart = (map: Map<string, number>) => [...map.entries()].map(([name, itemValue]) => ({ name, value: itemValue })).sort((a, b) => b.value - a.value);
 
-  const connectedContactIds = new Set(connectedCalls.flatMap((call) => callContacts.get(call.id) ?? []).filter((id) => selectedIds.has(id)));
-  const meetingContactIds = new Set(meetingGroups.flatMap((meeting) => meeting.contactIds).filter((id) => selectedIds.has(id)));
   const contactedCount = selectedContacts.filter((contact) => Boolean(value(contact, "notes_last_contacted"))).length;
 
   return {
@@ -581,7 +623,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       if (existing) { existing.value += 1; existing.amount = (existing.amount ?? 0) + deal.amount; } else acc.push({ name: deal.stage, value: 1, amount: deal.amount });
       return acc;
     }, []).sort((a, b) => b.value - a.value),
-    quality, alerts, priorityContacts, recentActivities, companies: companyRows.slice(0, 200), deals: dealRows.slice(0, 200),
+    quality, alerts, priorityContacts, recentActivities, companies: companyRows, deals: dealRows,
     filterOptions: {
       countries: uniqueOptions(allContacts, "country"), originalSources: uniqueOptions(allContacts, "hs_analytics_source", originalSourceLabels),
       latestSources: uniqueOptions(allContacts, "hs_latest_source", latestSourceLabels), tiers: uniqueOptions(allContacts, "gtm_icp_tier", tierLabels),
