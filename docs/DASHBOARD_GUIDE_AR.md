@@ -93,6 +93,21 @@
 
 كل نشاط يتم وضعه في اليوم الخاص به باستخدام منطقة HubSpot الزمنية `Asia/Riyadh`.
 
+### Today's Execution Focus
+
+يعرض أهم عناصر التنفيذ التي تحتاج تدخلًا مباشرًا:
+
+| البطاقة | التعريف |
+|---|---|
+| Untouched over 24h | Contacts أقدم من 24 ساعة ولا يوجد لها Last Contacted |
+| No next activity | Contacts لا يوجد لها Next Activity Date |
+| Tasks due today | Tasks مفتوحة مستحقة اليوم حسب توقيت HubSpot |
+| High-priority tasks | Tasks مفتوحة وقيمة Priority عندها High |
+| Response time coverage | نسبة Contacts الفترة التي لديها Lead Response Time |
+| Median response time | وسيط Lead Response Time للسجلات التي تحتوي قيمة، بالساعات |
+
+> يتم عرض Coverage بجانب Median حتى لا يتم تقديم وقت استجابة مضلل عندما يكون الحقل ناقصًا في عدد كبير من السجلات.
+
 ### SDR Conversion Funnel
 
 المراحل المعروضة:
@@ -260,6 +275,16 @@
 | Open Tasks | Not Started + In Progress + Waiting + Deferred |
 | Overdue | Task مفتوحة وDue Date قبل الوقت الحالي |
 | Due Tomorrow | Task مفتوحة وDue Date غدًا |
+| Due Today | Task مفتوحة وDue Date اليوم |
+| High-priority Open | Task مفتوحة وPriority = High |
+
+تعرض اللوحة أيضًا **Open Task Workload by Due Date** مقسمًا إلى:
+
+- Overdue before today.
+- Due today.
+- Due tomorrow.
+- Future.
+- No due date.
 
 ### Emails
 
@@ -300,6 +325,7 @@
 | Original Source Coverage | وجود Original Traffic Source |
 | ICP Tier Coverage | وجود GTM ICP Tier |
 | SignalHire Enrichment | وجود SignalHire Match Status |
+| Lead Response Time Coverage | وجود `hs_time_to_first_engagement` في Contacts فترة التقرير |
 
 كما يعرض توصيات تشغيلية للأتمتة، مثل:
 
