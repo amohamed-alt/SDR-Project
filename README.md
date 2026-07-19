@@ -17,7 +17,7 @@ The project is configured for Talentera's EU1 HubSpot portal and defaults to Mar
 - Deals associated with SDR-owned contacts, stage conversion, open pipeline, and meeting-to-deal conversion
 - In-dashboard searchable drill-down drawers for KPI cards, alerts, funnel stages, chart slices, bars, and daily activity points
 - Safe HubSpot links inside every drill-down result: CRM records open directly, while activities open their associated contact timeline instead of unsupported standalone activity URLs
-- A separate Marita Workspace top tab with My Day queues, direct call/email shortcuts, priority leads, Sales Rep meeting ownership, and a safe Google Meet invitation preview
+- A separate Marita Workspace top tab with My Day queues, direct call/email shortcuts, priority leads, Google Calendar OAuth, Sales Rep meeting ownership, Google Meet invitations, and HubSpot meeting logging
 
 See [docs/METRICS.md](docs/METRICS.md) for exact property definitions and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the data flow.
 
@@ -26,6 +26,8 @@ For a detailed Arabic walkthrough of every dashboard tab, KPI, filter, HubSpot f
 ## Security model
 
 - `HUBSPOT_PRIVATE_APP_TOKEN` is server-only and is never sent to the browser.
+- Google refresh tokens are encrypted with AES-256-GCM and persisted only in the Docker data volume.
+- A booking requires an explicit preview and browser confirmation before invitations are sent.
 - Production requests require HTTP Basic Auth unless platform-level authentication is used and `DISABLE_AUTH=true` is deliberately set.
 - No CRM data, API token, or generated HubSpot snapshot is committed to Git.
 - The repository may remain public only while it contains code and synthetic demo data. Make it private before adding exports, logs, screenshots, or CRM snapshots.
@@ -63,6 +65,8 @@ The live dashboard needs read access for:
 - CRM associations
 - Deal pipelines
 
+Marita Workspace also needs **write access for Meetings** so a confirmed Google Calendar booking can be logged and associated with the selected contact. No other CRM object is written by the workspace.
+
 HubSpot scope names differ slightly between private-app screens and API versions. Enable the corresponding `crm.objects.*.read` scopes for every object above. The dashboard handles an optional data source being unavailable and surfaces a warning instead of silently replacing it with fake data.
 
 ## Environment variables
@@ -78,6 +82,12 @@ HubSpot scope names differ slightly between private-app screens and API versions
 | `DASHBOARD_USERNAME` | Internal dashboard username |
 | `DASHBOARD_PASSWORD` | Internal dashboard password |
 | `DISABLE_AUTH` | Disable built-in auth only when deployment protection replaces it |
+| `GOOGLE_CLIENT_ID` | Server-only Google OAuth web client ID |
+| `GOOGLE_CLIENT_SECRET` | Server-only Google OAuth client secret |
+| `GOOGLE_REDIRECT_URI` | Exact OAuth callback URL |
+| `GOOGLE_TOKEN_ENCRYPTION_KEY` | 32-byte key used to encrypt the stored refresh token |
+| `MARITA_GOOGLE_EMAIL` | Only Google account accepted by the OAuth callback |
+| `GOOGLE_TOKEN_STORE_PATH` | Encrypted credential path; defaults to `/app/data/google-calendar.json` |
 | `DEMO_MODE` | Use safe synthetic data without calling HubSpot |
 
 ## Quality checks
@@ -101,6 +111,7 @@ curl http://127.0.0.1:3010/api/health
 ```
 
 Put the service behind the existing reverse proxy and TLS. Do not expose port `3010` publicly.
+Keep the `sdr-google-data:/app/data` named volume from `docker-compose.example.yml`; it preserves the encrypted Calendar connection across image rebuilds.
 
 ## Scaling path
 
