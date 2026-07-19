@@ -92,6 +92,9 @@ export interface AlertItem {
 export interface ContactRow {
   id: string;
   name: string;
+  email: string;
+  phone: string;
+  linkedinUrl: string;
   title: string;
   company: string;
   country: string;
