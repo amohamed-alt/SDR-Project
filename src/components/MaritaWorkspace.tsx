@@ -44,6 +44,9 @@ function HubSpotButton({ href, label = "Open" }: { href: string; label?: string 
 export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen: (drilldown: Drilldown) => void }) {
   const [queueMode, setQueueMode] = useState<QueueMode>("tasks");
   const [selectedContactId, setSelectedContactId] = useState(data.priorityContacts[0]?.id ?? "");
+  const [selectedSalesOwnerId, setSelectedSalesOwnerId] = useState(
+    data.filterOptions.owners.find((owner) => owner.id !== data.meta.ownerId)?.id ?? "",
+  );
   const [subject, setSubject] = useState("Talentera discovery call");
   const [meetingDate, setMeetingDate] = useState(tomorrowDate);
   const [meetingTime, setMeetingTime] = useState("10:00");
@@ -67,6 +70,8 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
   const generatedAt = new Date(data.meta.generatedAt).getTime();
   const upcomingMeetings = meetings.filter((row) => new Date(row.occurredAt).getTime() >= generatedAt);
   const selectedContact = data.priorityContacts.find((row) => row.id === selectedContactId) ?? data.priorityContacts[0];
+  const salesOwners = data.filterOptions.owners.filter((owner) => owner.id !== data.meta.ownerId);
+  const selectedSalesOwner = salesOwners.find((owner) => owner.id === selectedSalesOwnerId) ?? salesOwners[0];
 
   function openActivities(title: string, description: string, rows: ActivityRow[], url: string) {
     onOpen({ kind: "activities", title, description, rows, hubspotUrl: url });
@@ -84,7 +89,7 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
   return <div className="marita-workspace">
     <section className="workspace-hero">
       <div><span className="workspace-eyebrow"><Sparkles size={13}/>MARITA WORKSPACE</span><h2>Good morning, Marita</h2><p>Your live execution queue, lead shortcuts, and meeting preparation in one place.</p></div>
-      <div className="calendar-connection"><span><i/>Google Calendar</span><strong>Not connected</strong><small>Preview mode · no invites will be sent</small></div>
+      <div className="calendar-connection"><span><i/>MARITA · GOOGLE CALENDAR</span><strong>OAuth setup required</strong><small>Marita organizes · Sales rep + lead receive the invite</small></div>
     </section>
 
     <div className="workspace-stat-grid">
@@ -118,8 +123,10 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
       </section>
 
       <section className="workspace-card meeting-composer">
-        <div className="workspace-card-heading"><div><span>MEETING COMPOSER</span><h3>Create a Google Meet</h3><p>Prepare the invite now. Calendar sending activates after OAuth connection.</p></div><Video size={20}/></div>
+        <div className="workspace-card-heading"><div><span>MEETING COMPOSER</span><h3>Book a Google Meet for Sales</h3><p>Marita organizes the event, while the selected Sales Rep owns the HubSpot meeting and receives the invite with the lead.</p></div><Video size={20}/></div>
         <form onSubmit={submitPreview}>
+          <label><span>Sales Rep · Meeting owner</span><select value={selectedSalesOwner?.id ?? ""} onChange={(event) => { setSelectedSalesOwnerId(event.target.value); setPreview(false); }} disabled={!salesOwners.length}>{salesOwners.length ? salesOwners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}{owner.email ? " · " + owner.email : ""}</option>) : <option value="">No Sales Rep owner available</option>}</select></label>
+          <div className="meeting-host"><div className="meeting-avatar host"><UserRound size={15}/></div><div><strong>{selectedSalesOwner?.name ?? "Select a Sales Rep"}</strong><span>{selectedSalesOwner?.email || "HubSpot owner email is missing"}</span></div><em>Host · HubSpot owner</em></div>
           <label><span>Contact</span><select value={selectedContactId} onChange={(event) => { setSelectedContactId(event.target.value); setPreview(false); }}>{data.priorityContacts.map((row) => <option key={row.id} value={row.id}>{row.name}{row.company ? " · " + row.company : ""}</option>)}</select></label>
           <div className="meeting-guest"><div className="meeting-avatar">{selectedContact?.name.split(" ").map((part) => part[0]).join("").slice(0,2).toUpperCase() || "?"}</div><div><strong>{selectedContact?.name ?? "Select a contact"}</strong><span>{selectedContact?.email || "No email address in HubSpot"}</span></div>{selectedContact && <HubSpotButton href={selectedContact.url} label="Profile"/>}</div>
           <label><span>Meeting title</span><input value={subject} onChange={(event) => { setSubject(event.target.value); setPreview(false); }}/></label>
@@ -130,8 +137,8 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
         </form>
         {preview && <div className="meeting-preview">
           <div className="meeting-preview-title"><CheckCircle2 size={17}/><div><strong>Invitation preview ready</strong><span>No calendar event or HubSpot meeting has been created.</span></div></div>
-          <dl><div><dt>Guest</dt><dd>{selectedContact?.name || "—"} · {selectedContact?.email || "Missing email"}</dd></div><div><dt>When</dt><dd>{meetingDate} at {meetingTime} · {duration} minutes</dd></div><div><dt>Location</dt><dd>{meetingType === "google-meet" ? "Google Meet link will be generated" : meetingType === "custom" ? "Custom link" : "No video link"}</dd></div></dl>
-          <button disabled title="Connect Marita's Google Calendar first"><Video size={14}/>Connect Google Calendar to send</button>
+          <dl><div><dt>Organizer</dt><dd>Marita Chedid · Google Calendar</dd></div><div><dt>Sales host</dt><dd>{selectedSalesOwner?.name || "Missing Sales Rep"} · invitation recipient · HubSpot meeting owner</dd></div><div><dt>Lead guest</dt><dd>{selectedContact?.name || "—"} · {selectedContact?.email || "Missing email"}</dd></div><div><dt>When</dt><dd>{meetingDate} at {meetingTime} · {duration} minutes</dd></div><div><dt>Location</dt><dd>{meetingType === "google-meet" ? "A Google Meet link will be generated and included in both invitations" : meetingType === "custom" ? "Custom link" : "No video link"}</dd></div><div><dt>After send</dt><dd>Google invites Sales + Lead; HubSpot logs the meeting under {selectedSalesOwner?.name || "the selected Sales Rep"} and associates it with the contact.</dd></div></dl>
+          <button disabled title="Google OAuth is not configured yet"><Video size={14}/>Connect Marita Calendar to activate sending</button>
         </div>}
       </section>
     </div>
@@ -148,7 +155,7 @@ function WorkspaceStat({ icon: Icon, label, value, helper, tone, onClick }: { ic
 }
 
 function TaskQueueItem({ row, timezone }: { row: ActivityRow; timezone: string }) {
-  return <article className="queue-item"><div className={"queue-icon " + (row.isHighPriority ? "urgent" : "")}><CheckCircle2 size={16}/></div><div className="queue-item-main"><strong>{row.subject}</strong><span>{row.detail} · Due {shortTime(row.dueAt, timezone)}</span></div><span className={"queue-status " + (row.isHighPriority ? "high" : "")}>{row.isHighPriority ? "High" : row.status}</span><HubSpotButton href={row.url} label="Task"/></article>;
+  return <article className="queue-item"><div className={"queue-icon " + (row.isHighPriority ? "urgent" : "")}><CheckCircle2 size={16}/></div><div className="queue-item-main"><strong>{row.subject}</strong><span>{row.relatedContactName ? row.relatedContactName + " · " : ""}{row.detail} · Due {shortTime(row.dueAt, timezone)}</span></div><span className={"queue-status " + (row.isHighPriority ? "high" : "")}>{row.isHighPriority ? "High" : row.status}</span><HubSpotButton href={row.url} label={row.relatedContactUrl ? "Timeline" : "Tasks"}/></article>;
 }
 
 function LeadQueueItem({ row }: { row: ContactRow }) {
@@ -156,7 +163,7 @@ function LeadQueueItem({ row }: { row: ContactRow }) {
 }
 
 function MeetingQueueItem({ row, timezone }: { row: ActivityRow; timezone: string }) {
-  return <article className="queue-item"><div className="queue-icon meeting"><Video size={16}/></div><div className="queue-item-main"><strong>{row.subject}</strong><span>{shortDate(row.occurredAt, timezone)} · {shortTime(row.occurredAt, timezone)} · {row.assignedTo}</span></div><span className="queue-status scheduled">{row.status}</span><HubSpotButton href={row.url} label="Meeting"/></article>;
+  return <article className="queue-item"><div className="queue-icon meeting"><Video size={16}/></div><div className="queue-item-main"><strong>{row.subject}</strong><span>{row.relatedContactName ? row.relatedContactName + " · " : ""}{shortDate(row.occurredAt, timezone)} · {shortTime(row.occurredAt, timezone)} · {row.assignedTo}</span></div><span className="queue-status scheduled">{row.status}</span><HubSpotButton href={row.url} label={row.relatedContactUrl ? "Timeline" : "Meetings"}/></article>;
 }
 
 function QueueEmpty({ label, helper }: { label: string; helper: string }) {
