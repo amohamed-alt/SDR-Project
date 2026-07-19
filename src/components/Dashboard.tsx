@@ -324,7 +324,7 @@ export function Dashboard() {
               <Section title="Meeting assigned to" action={<DrilldownHint/>}><HorizontalBars data={data.meetingOwners} onSelect={(item) => showActivities("Meetings assigned to " + item.name, "Meetings assigned to the selected owner.", activitiesOf("Meeting").filter((row) => row.assignedTo === item.name), data.meta.hubspotUrls.meetings)}/></Section>
               <Section title="Meeting Source" action={<DrilldownHint/>}><HorizontalBars data={data.meetingSources} color="#d98d25" onSelect={(item) => showActivities("Meeting Source · " + item.name, "Meetings created through the selected source.", activitiesOf("Meeting").filter((row) => row.detail === item.name), data.meta.hubspotUrls.meetings)}/></Section>
             </div>
-            <Section title="Recent activity records" description="Calls, meetings, tasks, and emails — each row opens the original HubSpot activity." action={<HubSpotLink href={data.meta.hubspotUrls.calls} label="Open activities"/>}><ActivityTable rows={data.recentActivities.slice(0, 100)}/></Section>
+            <Section title="Recent activity records" description="Calls, meetings, tasks, and emails with their associated contact. HubSpot links open the contact timeline where the activity is stored." action={<HubSpotLink href={data.meta.hubspotUrls.calls} label="Open activities"/>}><ActivityTable rows={data.recentActivities.slice(0, 100)}/></Section>
           </>}
 
           {activeTab === "quality" && <>
@@ -379,7 +379,7 @@ function ContactTable({ rows, attribution = false }: { rows: DashboardData["prio
 }
 
 function ActivityTable({ rows }: { rows: ActivityRow[] }) {
-  return <div className="table-wrap"><table><thead><tr><th>Activity</th><th>Subject</th><th>Status / Outcome</th><th>Source / Detail</th><th>Assigned to</th><th>Date</th><th/></tr></thead><tbody>{rows.map((row) => <tr key={row.type + "-" + row.id}><td><span className={"activity-type type-" + row.type.toLowerCase()}>{row.type}</span></td><td><a className="record-link" href={row.url} target="_blank" rel="noreferrer"><strong>{row.subject}</strong></a></td><td>{row.status}</td><td>{row.detail}</td><td>{row.assignedTo}</td><td>{dateTime(row.occurredAt)}</td><td><HubSpotLink href={row.url} label=""/></td></tr>)}</tbody></table></div>;
+  return <div className="table-wrap"><table><thead><tr><th>Activity</th><th>Subject</th><th>Associated contact</th><th>Status / Outcome</th><th>Source / Detail</th><th>Assigned to</th><th>Date</th><th/></tr></thead><tbody>{rows.map((row) => <tr key={row.type + "-" + row.id}><td><span className={"activity-type type-" + row.type.toLowerCase()}>{row.type}</span></td><td><strong>{row.subject}</strong></td><td>{row.relatedContactUrl ? <a className="text-link" href={row.relatedContactUrl} target="_blank" rel="noreferrer">{row.relatedContactName}</a> : "Not associated"}</td><td>{row.status}</td><td>{row.detail}</td><td>{row.assignedTo}</td><td>{dateTime(row.occurredAt)}</td><td><HubSpotLink href={row.url} label={row.relatedContactUrl ? "Contact timeline" : "Activity list"}/></td></tr>)}</tbody></table></div>;
 }
 
 function CompanyTable({ rows }: { rows: CompanyRow[] }) {
