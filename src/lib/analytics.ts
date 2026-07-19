@@ -11,10 +11,21 @@ import {
   HUBSPOT_TIMEZONE,
   MEETING_PROPERTIES,
   TASK_PROPERTIES,
+  hubspotListUrl,
   hubspotRecordUrl,
 } from "@/lib/config";
-import { batchRead, listDealStages, listOwners, readAssociations, searchAll, type SearchFilter } from "@/lib/hubspot";
+import {
+  batchRead,
+  getPropertyDefinitions,
+  listDealStages,
+  listOwners,
+  readAssociations,
+  searchAll,
+  type HubSpotPropertyDefinition,
+  type SearchFilter,
+} from "@/lib/hubspot";
 import type {
+  ActivityRow,
   AlertItem,
   ChartDatum,
   CompanyRow,
@@ -25,6 +36,7 @@ import type {
   DealRow,
   HubSpotOwner,
   HubSpotRecord,
+  LabelOption,
   QualityMetric,
 } from "@/lib/types";
 
@@ -93,8 +105,22 @@ function countBy(records: HubSpotRecord[], getter: (record: HubSpotRecord) => st
   return [...counts.entries()].map(([name, count]) => ({ name, value: count })).sort((a, b) => b.value - a.value);
 }
 
-function uniqueValues(records: HubSpotRecord[], key: string) {
-  return [...new Set(records.map((record) => value(record, key)).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+function propertyOptions(definitions: HubSpotPropertyDefinition[], propertyName: string) {
+  return Object.fromEntries(
+    (definitions.find((definition) => definition.name === propertyName)?.options ?? [])
+      .filter((option) => !option.hidden)
+      .map((option) => [option.value, option.label]),
+  );
+}
+
+function displayValue(raw: string, labels: Record<string, string>) {
+  return labels[raw] ?? pretty(raw);
+}
+
+function uniqueOptions(records: HubSpotRecord[], key: string, labels: Record<string, string> = {}): LabelOption[] {
+  return [...new Set(records.map((record) => value(record, key)).filter(Boolean))]
+    .map((item) => ({ value: item, label: labels[item] ?? pretty(item) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 }
 
 function completeness(key: string, label: string, records: HubSpotRecord[], predicate?: (record: HubSpotRecord) => boolean): QualityMetric {
@@ -155,7 +181,20 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   const warnings: string[] = [];
   const cohortFilterEnabled = Boolean(filters.country || filters.originalSource || filters.latestSource || filters.tier || filters.persona);
 
-  const [allContacts, callsRaw, meetingsRaw, tasksDueRaw, tasksCompletedRaw, emailsRaw, owners, stageLabels, ...openTaskGroups] = await Promise.all([
+  const [
+    allContacts,
+    callsRaw,
+    meetingsRaw,
+    tasksDueRaw,
+    tasksCompletedRaw,
+    emailsRaw,
+    owners,
+    stageLabels,
+    contactDefinitions,
+    meetingDefinitions,
+    taskDefinitions,
+    ...openTaskGroups
+  ] = await Promise.all([
     searchAll("contacts", CONTACT_PROPERTIES, [{ propertyName: "sdr_owner", operator: "EQ", value: filters.ownerId }], ["createdate"]),
     optional("Calls", warnings, () => searchAll("calls", CALL_PROPERTIES, activityFilters(filters.ownerId, "hs_timestamp", filters.from, filters.to), ["hs_timestamp"]), []),
     optional("Meetings", warnings, () => searchAll("meetings", MEETING_PROPERTIES, activityFilters(filters.ownerId, "hs_createdate", filters.from, filters.to, "hs_created_by_user_id"), ["hs_createdate"]), []),
@@ -164,6 +203,14 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     optional("Emails", warnings, () => searchAll("emails", EMAIL_PROPERTIES, activityFilters(filters.ownerId, "hs_timestamp", filters.from, filters.to), ["hs_timestamp"]), []),
     optional("Owners", warnings, () => listOwners(), [] as HubSpotOwner[]),
     optional("Deal stages", warnings, () => listDealStages(), new Map<string, string>()),
+    optional("Contact property labels", warnings, () => getPropertyDefinitions("contacts", [
+      "hs_analytics_source", "hs_latest_source", "hs_object_source_label", "hs_lead_status",
+      "lifecyclestage", "contact_source", "gtm_icp_tier", "gtm_persona",
+    ]), [] as HubSpotPropertyDefinition[]),
+    optional("Meeting property labels", warnings, () => getPropertyDefinitions("meetings", [
+      "hs_meeting_outcome", "hs_meeting_source",
+    ]), [] as HubSpotPropertyDefinition[]),
+    optional("Task property labels", warnings, () => getPropertyDefinitions("tasks", ["hs_task_status"]), [] as HubSpotPropertyDefinition[]),
     ...OPEN_TASK_STATUSES.map((status) =>
       optional(`Open tasks (${status})`, warnings, () => searchAll("tasks", TASK_PROPERTIES, [
         { propertyName: "hubspot_owner_id", operator: "EQ", value: filters.ownerId },
@@ -171,6 +218,18 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       ]), []),
     ),
   ]);
+
+  const originalSourceLabels = propertyOptions(contactDefinitions, "hs_analytics_source");
+  const latestSourceLabels = propertyOptions(contactDefinitions, "hs_latest_source");
+  const recordSourceLabels = propertyOptions(contactDefinitions, "hs_object_source_label");
+  const leadStatusLabels = propertyOptions(contactDefinitions, "hs_lead_status");
+  const lifecycleStageLabels = propertyOptions(contactDefinitions, "lifecyclestage");
+  const contactSourceLabels = propertyOptions(contactDefinitions, "contact_source");
+  const tierLabels = propertyOptions(contactDefinitions, "gtm_icp_tier");
+  const personaLabels = propertyOptions(contactDefinitions, "gtm_persona");
+  const meetingOutcomeLabels = propertyOptions(meetingDefinitions, "hs_meeting_outcome");
+  const meetingSourceLabels = propertyOptions(meetingDefinitions, "hs_meeting_source");
+  const taskStatusLabels = propertyOptions(taskDefinitions, "hs_task_status");
 
   const selectedContacts = allContacts.filter((contact) => {
     if (filters.country && value(contact, "country") !== filters.country) return false;
@@ -217,6 +276,11 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   const emailReplies = outgoingEmails.filter((email) => number(value(email, "hs_email_reply_count")) > 0).length;
   const newContacts = selectedContacts.filter((contact) => isBetween(value(contact, "createdate"), filters.from, filters.to));
   const sourceContacts = newContacts.length ? newContacts : selectedContacts;
+  const integrationContacts = sourceContacts.filter((contact) => value(contact, "hs_object_source_label") === "INTEGRATION");
+  const extensiveLighterContacts = integrationContacts.filter((contact) =>
+    value(contact, "hs_object_source_detail_1").toLowerCase() === "extensive-lighter",
+  );
+  const formContacts = sourceContacts.filter((contact) => value(contact, "hs_object_source_label") === "FORM");
   const now = new Date();
   const tomorrow = new Date(now.getTime() + 86_400_000);
   const tomorrowDay = localDay(tomorrow.toISOString());
@@ -271,11 +335,20 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       id: contact.id,
       name: [value(contact, "firstname"), value(contact, "lastname")].filter(Boolean).join(" ") || "Unnamed contact",
       title: value(contact, "jobtitle"), company: value(contact, "company"), country: value(contact, "country"),
-      originalSource: pretty(value(contact, "hs_analytics_source")), latestSource: pretty(value(contact, "hs_latest_source")),
-      recordSource: value(contact, "hs_object_source_label") || "Unknown", leadStatus: pretty(value(contact, "hs_lead_status")),
-      lifecycleStage: pretty(value(contact, "lifecyclestage")), tier: tier || "Unknown", persona: value(contact, "gtm_persona") || "Unknown",
+      originalSource: displayValue(value(contact, "hs_analytics_source"), originalSourceLabels),
+      originalSourceDetail: value(contact, "hs_analytics_source_data_1") || "—",
+      latestSource: displayValue(value(contact, "hs_latest_source"), latestSourceLabels),
+      latestSourceDetail: value(contact, "hs_latest_source_data_1") || "—",
+      recordSource: displayValue(value(contact, "hs_object_source_label"), recordSourceLabels),
+      recordSourceDetail: value(contact, "hs_object_source_detail_1") || "—",
+      leadSource: value(contact, "lead_source") || "—",
+      contactSource: displayValue(value(contact, "contact_source"), contactSourceLabels),
+      leadStatus: displayValue(value(contact, "hs_lead_status"), leadStatusLabels),
+      lifecycleStage: displayValue(value(contact, "lifecyclestage"), lifecycleStageLabels),
+      tier: displayValue(tier, tierLabels), persona: displayValue(value(contact, "gtm_persona"), personaLabels),
       emailStatus: emailStatus || "Unknown", phoneStatus: phoneStatus || "Unknown", lastContacted, nextActivity,
       priorityScore: Math.round(priorityScore), url: hubspotRecordUrl("contact", contact.id),
+      companyUrl: value(contact, "company_id") ? hubspotRecordUrl("company", value(contact, "company_id")) : undefined,
     };
   }).sort((a, b) => b.priorityScore - a.priorityScore).slice(0, 100);
 
@@ -294,6 +367,52 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     amount: number(value(deal, "amount_in_home_currency") || value(deal, "amount")), closeDate: value(deal, "closedate"),
     url: hubspotRecordUrl("deal", deal.id),
   })).sort((a, b) => b.amount - a.amount);
+
+  const taskRecords = [...new Map(
+    [...tasksDue, ...tasksCompleted, ...openTasks].map((task) => [task.id, task]),
+  ).values()];
+  const recentActivities: ActivityRow[] = [
+    ...calls.map((call): ActivityRow => ({
+      id: call.id,
+      type: "Call",
+      subject: value(call, "hs_call_title") || "Logged call",
+      status: CALL_DISPOSITION_LABELS[value(call, "hs_call_disposition")] ?? pretty(value(call, "hs_call_status")),
+      detail: CALL_DISPOSITION_LABELS[value(call, "hs_call_disposition")] ?? "No disposition",
+      assignedTo: ownerMap.get(value(call, "hubspot_owner_id")) ?? ownerName,
+      occurredAt: value(call, "hs_timestamp"),
+      url: hubspotRecordUrl("call", call.id),
+    })),
+    ...meetingGroups.map((meeting): ActivityRow => ({
+      id: meeting.booking.id,
+      type: "Meeting",
+      subject: value(meeting.booking, "hs_meeting_title") || "Meeting",
+      status: displayValue(meeting.outcome, meetingOutcomeLabels),
+      detail: displayValue(meeting.source, meetingSourceLabels),
+      assignedTo: ownerMap.get(meeting.ownerId) ?? (meeting.ownerId || "Unassigned"),
+      occurredAt: meeting.startAt || meeting.createdAt,
+      url: hubspotRecordUrl("meeting", meeting.booking.id),
+    })),
+    ...taskRecords.map((task): ActivityRow => ({
+      id: task.id,
+      type: "Task",
+      subject: value(task, "hs_task_subject") || "Task",
+      status: displayValue(value(task, "hs_task_status"), taskStatusLabels),
+      detail: pretty(value(task, "hs_task_priority") || "Normal priority"),
+      assignedTo: ownerMap.get(value(task, "hubspot_owner_id")) ?? ownerName,
+      occurredAt: value(task, "hs_task_completion_date") || value(task, "hs_timestamp") || value(task, "hs_createdate"),
+      url: hubspotRecordUrl("task", task.id),
+    })),
+    ...outgoingEmails.map((email): ActivityRow => ({
+      id: email.id,
+      type: "Email",
+      subject: value(email, "hs_email_subject") || "Sales email",
+      status: pretty(value(email, "hs_email_status") || "Sent"),
+      detail: number(value(email, "hs_email_reply_count")) > 0 ? "Replied" : "No reply",
+      assignedTo: ownerMap.get(value(email, "hubspot_owner_id")) ?? ownerName,
+      occurredAt: value(email, "hs_timestamp"),
+      url: hubspotRecordUrl("email", email.id),
+    })),
+  ].sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()).slice(0, 100);
 
   const highIcpUntouched = selectedContacts.filter((contact) => /^a$|tier a|high/i.test(value(contact, "gtm_icp_tier")) && !value(contact, "notes_last_contacted")).length;
   const wrongPhones = selectedContacts.filter((contact) => /wrong/i.test(value(contact, "phone_number_status"))).length;
@@ -314,8 +433,8 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   for (const meeting of meetingGroups) {
     const assigned = ownerMap.get(meeting.ownerId) ?? (meeting.ownerId || "Unassigned");
     meetingOwnerCounts.set(assigned, (meetingOwnerCounts.get(assigned) ?? 0) + 1);
-    const outcome = pretty(meeting.outcome); meetingOutcomeCounts.set(outcome, (meetingOutcomeCounts.get(outcome) ?? 0) + 1);
-    const source = pretty(meeting.source); meetingSourceCounts.set(source, (meetingSourceCounts.get(source) ?? 0) + 1);
+    const outcome = displayValue(meeting.outcome, meetingOutcomeLabels); meetingOutcomeCounts.set(outcome, (meetingOutcomeCounts.get(outcome) ?? 0) + 1);
+    const source = displayValue(meeting.source, meetingSourceLabels); meetingSourceCounts.set(source, (meetingSourceCounts.get(source) ?? 0) + 1);
   }
   const mapToChart = (map: Map<string, number>) => [...map.entries()].map(([name, itemValue]) => ({ name, value: itemValue })).sort((a, b) => b.value - a.value);
 
@@ -324,7 +443,14 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   const contactedCount = selectedContacts.filter((contact) => Boolean(value(contact, "notes_last_contacted"))).length;
 
   return {
-    meta: { generatedAt: new Date().toISOString(), from: filters.from, to: filters.to, timezone: HUBSPOT_TIMEZONE, ownerId: filters.ownerId, ownerName, portalId: HUBSPOT_PORTAL_ID, isDemo: false, warnings },
+    meta: {
+      generatedAt: new Date().toISOString(), from: filters.from, to: filters.to, timezone: HUBSPOT_TIMEZONE,
+      ownerId: filters.ownerId, ownerName, portalId: HUBSPOT_PORTAL_ID, isDemo: false, warnings,
+      hubspotUrls: {
+        contacts: hubspotListUrl("contact"), companies: hubspotListUrl("company"), calls: hubspotListUrl("call"),
+        meetings: hubspotListUrl("meeting"), tasks: hubspotListUrl("task"), emails: hubspotListUrl("email"), deals: hubspotListUrl("deal"),
+      },
+    },
     kpis: {
       portfolioContacts: selectedContacts.length, newContacts: newContacts.length, companies: companiesRaw.length,
       calls: calls.length, connectedCalls: connectedCalls.length, connectionRate: calls.length ? Math.round((connectedCalls.length / calls.length) * 1000) / 10 : 0,
@@ -340,14 +466,21 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       { name: "Connected", value: connectedContactIds.size }, { name: "Meeting", value: meetingContactIds.size },
       { name: "Deal", value: dealsRaw.length }, { name: "Open Deal", value: openDeals.length },
     ],
-    originalSources: countBy(sourceContacts, (record) => value(record, "hs_analytics_source")),
-    latestSources: countBy(sourceContacts, (record) => value(record, "hs_latest_source")),
-    recordSources: countBy(sourceContacts, (record) => value(record, "hs_object_source_label")),
-    leadStatuses: countBy(selectedContacts, (record) => value(record, "hs_lead_status")),
-    lifecycleStages: countBy(selectedContacts, (record) => value(record, "lifecyclestage")),
+    originalSources: countBy(sourceContacts, (record) => value(record, "hs_analytics_source"), originalSourceLabels),
+    latestSources: countBy(sourceContacts, (record) => value(record, "hs_latest_source"), latestSourceLabels),
+    recordSources: countBy(sourceContacts, (record) => value(record, "hs_object_source_label"), recordSourceLabels),
+    integrationSources: countBy(integrationContacts, (record) => value(record, "hs_object_source_detail_1")),
+    sourceAudit: {
+      integrationRecords: integrationContacts.length,
+      extensiveLighterRecords: extensiveLighterContacts.length,
+      formRecords: formContacts.length,
+      apiShare: sourceContacts.length ? Math.round((integrationContacts.length / sourceContacts.length) * 1000) / 10 : 0,
+    },
+    leadStatuses: countBy(selectedContacts, (record) => value(record, "hs_lead_status"), leadStatusLabels),
+    lifecycleStages: countBy(selectedContacts, (record) => value(record, "lifecyclestage"), lifecycleStageLabels),
     callOutcomes: countBy(calls, (record) => value(record, "hs_call_disposition"), CALL_DISPOSITION_LABELS),
     meetingOutcomes: mapToChart(meetingOutcomeCounts), meetingOwners: mapToChart(meetingOwnerCounts), meetingSources: mapToChart(meetingSourceCounts),
-    taskStatuses: countBy([...openTasks, ...tasksCompleted], (record) => value(record, "hs_task_status")),
+    taskStatuses: countBy([...openTasks, ...tasksCompleted], (record) => value(record, "hs_task_status"), taskStatusLabels),
     emailPerformance: [
       { name: "Sent", value: outgoingEmails.length }, { name: "Opened", value: outgoingEmails.filter((email) => number(value(email, "hs_email_open_count")) > 0).length },
       { name: "Clicked", value: outgoingEmails.filter((email) => number(value(email, "hs_email_click_count")) > 0).length }, { name: "Replied", value: emailReplies },
@@ -360,10 +493,11 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       if (existing) { existing.value += 1; existing.amount = (existing.amount ?? 0) + deal.amount; } else acc.push({ name: deal.stage, value: 1, amount: deal.amount });
       return acc;
     }, []).sort((a, b) => b.value - a.value),
-    quality, alerts, priorityContacts, companies: companyRows.slice(0, 200), deals: dealRows.slice(0, 200),
+    quality, alerts, priorityContacts, recentActivities, companies: companyRows.slice(0, 200), deals: dealRows.slice(0, 200),
     filterOptions: {
-      countries: uniqueValues(allContacts, "country"), originalSources: uniqueValues(allContacts, "hs_analytics_source"),
-      latestSources: uniqueValues(allContacts, "hs_latest_source"), tiers: uniqueValues(allContacts, "gtm_icp_tier"), personas: uniqueValues(allContacts, "gtm_persona"), owners,
+      countries: uniqueOptions(allContacts, "country"), originalSources: uniqueOptions(allContacts, "hs_analytics_source", originalSourceLabels),
+      latestSources: uniqueOptions(allContacts, "hs_latest_source", latestSourceLabels), tiers: uniqueOptions(allContacts, "gtm_icp_tier", tierLabels),
+      personas: uniqueOptions(allContacts, "gtm_persona", personaLabels), owners,
     },
   };
 }
