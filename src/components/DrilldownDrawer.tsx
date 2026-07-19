@@ -44,8 +44,8 @@ function ContactCard({ row }: { row: ContactRow }) {
 function ActivityCard({ row }: { row: ActivityRow }) {
   return <article className="drawer-record-card">
     <div className="drawer-record-main"><span className={`activity-type type-${row.type.toLowerCase()}`}><Activity size={12}/>{row.type}</span><h3>{row.subject}</h3><p>{row.status} · {row.detail}</p></div>
-    <div className="drawer-record-fields activity-fields"><span><b>Assigned to</b>{row.assignedTo || "Unassigned"}</span><span><b>{row.type === "Task" ? "Due / Activity date" : "Activity date"}</b>{dateTime(row.dueAt || row.occurredAt)}</span>{row.type === "Task" && <span><b>Workload bucket</b>{row.dueBucket}</span>}<span><b>State</b>{row.isOpen ? "Open" : "Closed / completed"}</span></div>
-    <div className="drawer-record-actions">{externalLink(row.url)}</div>
+    <div className="drawer-record-fields activity-fields"><span><b>Associated contact</b>{row.relatedContactName || "Not associated"}</span><span><b>Assigned to</b>{row.assignedTo || "Unassigned"}</span><span><b>{row.type === "Task" ? "Due / Activity date" : "Activity date"}</b>{dateTime(row.dueAt || row.occurredAt)}</span>{row.type === "Task" && <span><b>Workload bucket</b>{row.dueBucket}</span>}<span><b>State</b>{row.isOpen ? "Open" : "Closed / completed"}</span></div>
+    <div className="drawer-record-actions">{externalLink(row.url, row.relatedContactUrl ? "Open contact timeline in HubSpot" : "Open activity list in HubSpot")}</div>
   </article>;
 }
 
