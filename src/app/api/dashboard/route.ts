@@ -23,7 +23,7 @@ const querySchema = z.object({
 
 const cachedDashboard = unstable_cache(
   async (serializedFilters: string) => buildDashboard(JSON.parse(serializedFilters) as DashboardFilters),
-  ["sdr-dashboard-live-v1"],
+  ["sdr-dashboard-live-v2-labels"],
   { revalidate: 900, tags: ["sdr-dashboard"] },
 );
 
