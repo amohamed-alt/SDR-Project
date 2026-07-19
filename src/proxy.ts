@@ -8,7 +8,11 @@ function secureEqual(left: string, right: string) {
 }
 
 export function proxy(request: NextRequest) {
-  if (process.env.DISABLE_AUTH === "true" || request.nextUrl.pathname === "/api/health") return NextResponse.next();
+  if (
+    process.env.DISABLE_AUTH === "true"
+    || request.nextUrl.pathname === "/api/health"
+    || request.nextUrl.pathname === "/api/google/callback"
+  ) return NextResponse.next();
 
   const expectedUsername = process.env.DASHBOARD_USERNAME;
   const expectedPassword = process.env.DASHBOARD_PASSWORD;
