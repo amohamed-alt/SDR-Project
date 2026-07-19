@@ -42,6 +42,35 @@ import type {
 
 const OPEN_TASK_STATUSES = ["NOT_STARTED", "IN_PROGRESS", "WAITING", "DEFERRED"];
 const OUTCOME_PRIORITY = ["COMPLETED", "NO_SHOW", "CANCELED", "RESCHEDULED", "SCHEDULED"];
+const HUBSPOT_LABEL_FALLBACKS: Record<string, Record<string, string>> = {
+  hs_analytics_source: {
+    ORGANIC_SEARCH: "Organic Search", PAID_SEARCH: "Paid Search", EMAIL_MARKETING: "Email Marketing",
+    SOCIAL_MEDIA: "Organic Social", REFERRALS: "Referrals", OTHER_CAMPAIGNS: "Other Campaigns",
+    DIRECT_TRAFFIC: "Direct Traffic", OFFLINE: "Offline Sources", PAID_SOCIAL: "Paid Social", AI_REFERRALS: "AI Referrals",
+  },
+  hs_latest_source: {
+    ORGANIC_SEARCH: "Organic Search", PAID_SEARCH: "Paid Search", EMAIL_MARKETING: "Email Marketing",
+    SOCIAL_MEDIA: "Organic Social", REFERRALS: "Referrals", OTHER_CAMPAIGNS: "Other Campaigns",
+    DIRECT_TRAFFIC: "Direct Traffic", OFFLINE: "Offline Sources", PAID_SOCIAL: "Paid Social", AI_REFERRALS: "AI Referrals",
+  },
+  hs_object_source_label: {
+    INTEGRATION: "Integration", FORM: "Forms", IMPORT: "Import", CRM_UI: "CRM UI", CRM_UI_BULK_ACTION: "CRM UI Bulk Action",
+    BATCH_UPDATE: "Batch Update", DATA_ENRICHMENT: "Data Enrichment", DI_WRITE_TO_CRM: "Data Integration",
+  },
+  hs_lead_status: {
+    NEW: "New / Non contacted", IN_PROGRESS: "In Progress", OPEN_DEAL: "Open Deal", UNQUALIFIED: "Unqualified",
+    ATTEMPTED_TO_CONTACT: "Attempted to Contact / No Reply", BAD_TIMING: "Bad Timing", "Existing Client": "Existing Client",
+  },
+  lifecyclestage: {
+    "2259904717": "Prospect", "2259904712": "Subscriber", "2261180638": "Lead", "4588753129": "MQL",
+    "2259904715": "Unqualified", "2261180639": "SQL", "2261180640": "Opportunity", "2261180641": "Customer",
+    "2595963108": "Lost", "2261180642": "Churned",
+  },
+  contact_source: { "Inbound Marketing": "Inbound Marketing", "SDR Outbound": "SDR Outbound", "Sales Generated": "Sales Generated" },
+  hs_meeting_outcome: { SCHEDULED: "Scheduled", COMPLETED: "Completed", CANCELED: "Canceled", NO_SHOW: "No show", RESCHEDULED: "Rescheduled" },
+  hs_meeting_source: { BIDIRECTIONAL_API: "Bidirectional API", BIDIRECTIONAL_SYNC: "Bidirectional Sync", MEETINGS_PUBLIC: "Meetings Public", MEETINGS_EMBED: "Meetings Embed", CRM_UI: "CRM UI" },
+  hs_task_status: { NOT_STARTED: "Not Started", IN_PROGRESS: "In Progress", WAITING: "Waiting", DEFERRED: "Deferred", COMPLETED: "Completed" },
+};
 
 function value(record: HubSpotRecord, key: string) {
   return record.properties[key]?.trim() ?? "";
@@ -106,11 +135,14 @@ function countBy(records: HubSpotRecord[], getter: (record: HubSpotRecord) => st
 }
 
 function propertyOptions(definitions: HubSpotPropertyDefinition[], propertyName: string) {
-  return Object.fromEntries(
+  return {
+    ...(HUBSPOT_LABEL_FALLBACKS[propertyName] ?? {}),
+    ...Object.fromEntries(
     (definitions.find((definition) => definition.name === propertyName)?.options ?? [])
       .filter((option) => !option.hidden)
       .map((option) => [option.value, option.label]),
-  );
+    ),
+  };
 }
 
 function displayValue(raw: string, labels: Record<string, string>) {
