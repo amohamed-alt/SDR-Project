@@ -110,8 +110,15 @@ export interface ContactRow {
   persona: string;
   emailStatus: string;
   phoneStatus: string;
+  createdAt: string;
   lastContacted: string;
   nextActivity: string;
+  leadResponseTimeHours: number | null;
+  hasConnectedCall: boolean;
+  hasMeeting: boolean;
+  hasDeal: boolean;
+  hasOpenDeal: boolean;
+  qualityIssues: string[];
   priorityScore: number;
   url: string;
   companyUrl?: string;
@@ -125,6 +132,14 @@ export interface ActivityRow {
   detail: string;
   assignedTo: string;
   occurredAt: string;
+  metricAt: string;
+  dueAt: string;
+  dueBucket: string;
+  isOpen: boolean;
+  isHighPriority: boolean;
+  opened: boolean;
+  clicked: boolean;
+  replied: boolean;
   url: string;
 }
 
@@ -149,7 +164,9 @@ export interface DealRow {
   stage: string;
   owner: string;
   amount: number;
+  createdAt: string;
   closeDate: string;
+  isOpen: boolean;
   url: string;
 }
 
