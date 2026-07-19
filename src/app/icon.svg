@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Talentera SDR</title>
+  <rect width="64" height="64" rx="15" fill="#0f513f"/>
+  <path
+    d="M13.5 30.5C14.8 20.9 22.7 13.8 32 13.8s17.2 7.1 18.5 16.7"
+    fill="none"
+    stroke="#f7b718"
+    stroke-linecap="round"
+    stroke-width="6"
+  />
+  <path d="M20.5 25.5h23v7h-8v19h-7v-19h-8z" fill="#ffffff"/>
+  <circle cx="32" cy="29" r="3.5" fill="#0f513f"/>
+</svg>
