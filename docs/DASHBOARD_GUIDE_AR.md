@@ -74,9 +74,9 @@
 - Priority Leads مرتبة حسب الـpriority score.
 - Meeting Composer لاختيار الـSales Rep صاحب الاجتماع، والـContact، والموعد، والمدة، والمكان، والـagenda.
 
-زر **Preview Invitation** يعرض معاينة الدعوة فقط. لا ينشئ Calendar Event ولا Meeting داخل HubSpot ولا يرسل بريدًا.
+زر **Preview Invitation** يعرض معاينة الدعوة فقط. بعد ربط ماريتا Calendar يظهر زر **Confirm & send invitations**، ولا يتم أي إنشاء أو إرسال إلا بعد الضغط عليه ثم تأكيد الرسالة النهائية.
 
-تدفق الحجز المصمم للمرحلة التالية هو:
+تدفق الحجز الفعلي هو:
 
 1. تربط ماريتا Google Calendar الخاص بها مرة واحدة عن طريق OAuth.
 2. ماريتا تختار الـSales Rep من قائمة HubSpot Owners؛ هذا الشخص يصبح **Meeting owner** داخل HubSpot.
@@ -85,7 +85,7 @@
 5. الـSales Rep والـLead يتم إضافتهما كـattendees، وبالتالي تصل الدعوة والـMeet link لكليهما.
 6. التطبيق يسجل Meeting داخل HubSpot باسم الـSales Rep ويربطها بالـContact، مع الاحتفاظ بأن ماريتا هي التي قامت بالحجز.
 
-يظهر حاليًا **OAuth setup required** لأن OAuth والإرسال الحقيقي لم يتم تفعليهما بعد؛ لذلك لا يمكن إرسال دعوة بالخطأ أثناء تجربة الصفحة.
+الاتصال يتم مرة واحدة من زر **Connect calendar**. يتم حفظ Google refresh token مشفّرًا داخل Docker volume ولا يظهر في المتصفح أو GitHub. قبل الإرسال يتحقق السيرفر من أن الـContact داخل Portfolio ماريتا، وأن Email الـContact والـSales Rep موجودان في HubSpot. إذا فشل Google أو HubSpot أثناء العملية، يحاول النظام حذف الـCalendar event وأرشفة HubSpot meeting حتى لا يترك حجزًا ناقصًا.
 
 ## 4. Overview
 
