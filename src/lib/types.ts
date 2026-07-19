@@ -21,6 +21,11 @@ export interface ChartDatum {
   amount?: number;
 }
 
+export interface LabelOption {
+  value: string;
+  label: string;
+}
+
 export interface DailyActivityDatum {
   date: string;
   calls: number;
@@ -85,8 +90,13 @@ export interface ContactRow {
   company: string;
   country: string;
   originalSource: string;
+  originalSourceDetail: string;
   latestSource: string;
+  latestSourceDetail: string;
   recordSource: string;
+  recordSourceDetail: string;
+  leadSource: string;
+  contactSource: string;
   leadStatus: string;
   lifecycleStage: string;
   tier: string;
@@ -96,6 +106,18 @@ export interface ContactRow {
   lastContacted: string;
   nextActivity: string;
   priorityScore: number;
+  url: string;
+  companyUrl?: string;
+}
+
+export interface ActivityRow {
+  id: string;
+  type: "Call" | "Meeting" | "Task" | "Email";
+  subject: string;
+  status: string;
+  detail: string;
+  assignedTo: string;
+  occurredAt: string;
   url: string;
 }
 
@@ -125,11 +147,11 @@ export interface DealRow {
 }
 
 export interface FilterOptions {
-  countries: string[];
-  originalSources: string[];
-  latestSources: string[];
-  tiers: string[];
-  personas: string[];
+  countries: LabelOption[];
+  originalSources: LabelOption[];
+  latestSources: LabelOption[];
+  tiers: LabelOption[];
+  personas: LabelOption[];
   owners: HubSpotOwner[];
 }
 
@@ -144,6 +166,15 @@ export interface DashboardData {
     portalId: string;
     isDemo: boolean;
     warnings: string[];
+    hubspotUrls: {
+      contacts: string;
+      companies: string;
+      calls: string;
+      meetings: string;
+      tasks: string;
+      emails: string;
+      deals: string;
+    };
   };
   kpis: DashboardKpis;
   dailyActivities: DailyActivityDatum[];
@@ -151,6 +182,13 @@ export interface DashboardData {
   originalSources: ChartDatum[];
   latestSources: ChartDatum[];
   recordSources: ChartDatum[];
+  integrationSources: ChartDatum[];
+  sourceAudit: {
+    integrationRecords: number;
+    extensiveLighterRecords: number;
+    formRecords: number;
+    apiShare: number;
+  };
   leadStatuses: ChartDatum[];
   lifecycleStages: ChartDatum[];
   callOutcomes: ChartDatum[];
@@ -166,6 +204,7 @@ export interface DashboardData {
   quality: QualityMetric[];
   alerts: AlertItem[];
   priorityContacts: ContactRow[];
+  recentActivities: ActivityRow[];
   companies: CompanyRow[];
   deals: DealRow[];
   filterOptions: FilterOptions;
