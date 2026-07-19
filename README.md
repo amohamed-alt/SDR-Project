@@ -16,8 +16,8 @@ The project is configured for Talentera's EU1 HubSpot portal and defaults to Mar
 - Company country, industry, employee count, ICP context, detected ATS, and ATS confidence
 - Deals associated with SDR-owned contacts, stage conversion, open pipeline, and meeting-to-deal conversion
 - In-dashboard searchable drill-down drawers for KPI cards, alerts, funnel stages, chart slices, bars, and daily activity points
-- Exact HubSpot record links inside every drill-down result
-- A separate Marita Workspace top tab with My Day queues, direct call/email shortcuts, priority leads, and a safe Google Meet invitation preview
+- Safe HubSpot links inside every drill-down result: CRM records open directly, while activities open their associated contact timeline instead of unsupported standalone activity URLs
+- A separate Marita Workspace top tab with My Day queues, direct call/email shortcuts, priority leads, Sales Rep meeting ownership, and a safe Google Meet invitation preview
 
 See [docs/METRICS.md](docs/METRICS.md) for exact property definitions and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the data flow.
 
