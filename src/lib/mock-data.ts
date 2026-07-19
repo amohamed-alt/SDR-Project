@@ -15,9 +15,10 @@ export function createMockDashboard(from: string, to: string, ownerId: string): 
     kpis: {
       portfolioContacts: 529, newContacts: 220, companies: 387, calls: 424, connectedCalls: 106,
       connectionRate: 25, bookedMeetings: 21, completedMeetings: 9, meetingCompletionRate: 42.9,
-      openTasks: 309, overdueTasks: 0, dueTomorrow: 174, completedTasks: 280,
+      openTasks: 311, overdueTasks: 0, dueToday: 176, dueTomorrow: 0, highPriorityOpenTasks: 187, completedTasks: 280,
       emailsSent: 318, emailReplies: 31, emailReplyRate: 9.7, dealsCreated: 12, openDeals: 9,
-      pipelineValue: 186500, untouchedContacts: 128, nextActivityCoverage: 61.4,
+      pipelineValue: 186500, untouchedContacts: 176, untouchedOver24h: 114, noNextActivity: 315,
+      nextActivityCoverage: 39.5, leadResponseCoverage: 6.5, medianLeadResponseHours: 2.9,
     },
     dailyActivities: daily.map((calls, index) => ({
       date: `2026-07-${String(index + 1).padStart(2, "0")}`, calls, connected: Math.round(calls * 0.25),
@@ -52,6 +53,7 @@ export function createMockDashboard(from: string, to: string, ownerId: string): 
     meetingOwners: [{ name: "Marita Chedid", value: 18 }, { name: "Zein Fares", value: 2 }, { name: "Ursula Waked", value: 1 }],
     meetingSources: [{ name: "Bidirectional Sync", value: 11 }, { name: "Bidirectional Api", value: 9 }, { name: "Meetings Public", value: 1 }],
     taskStatuses: [{ name: "Completed", value: 280 }, { name: "Not Started", value: 309 }],
+    taskDueBuckets: [{ name: "Due today", value: 176 }, { name: "Future", value: 135 }],
     emailPerformance: [{ name: "Sent", value: 318 }, { name: "Opened", value: 117 }, { name: "Clicked", value: 46 }, { name: "Replied", value: 31 }],
     countries: [{ name: "Egypt", value: 141 }, { name: "United Arab Emirates", value: 85 }, { name: "Saudi Arabia", value: 71 }, { name: "Qatar", value: 34 }, { name: "Unknown", value: 18 }],
     industries: [{ name: "Technology", value: 74 }, { name: "Healthcare", value: 62 }, { name: "Education", value: 54 }, { name: "Government", value: 41 }, { name: "Retail", value: 36 }],
@@ -78,7 +80,7 @@ export function createMockDashboard(from: string, to: string, ownerId: string): 
       id: String(id), name: String(name), title: String(title), company: String(company), country: String(country),
       originalSource: "Offline Sources", latestSource: "Direct Traffic", recordSource: "Integration", leadStatus: "New", lifecycleStage: "Lead",
       originalSourceDetail: "Integration", latestSourceDetail: "Direct", recordSourceDetail: "Extensive-Lighter", leadSource: "Outbound", contactSource: "SDR Outbound",
-      tier: "A", persona: "Talent Acquisition", emailStatus: "Valid", phoneStatus: "Unknown", lastContacted: "", nextActivity: "", priorityScore: Number(score), url: "#",
+      tier: "Tier 1", contactPriority: "High", persona: "Talent Acquisition", emailStatus: "Valid", phoneStatus: "Pending", lastContacted: "", nextActivity: "", priorityScore: Number(score), url: "#",
     })),
     recentActivities: [
       { id: "call-1", type: "Call", subject: "Discovery call", status: "Connected", detail: "Connected", assignedTo: "Marita Chedid", occurredAt: "2026-07-19T10:30:00Z", url: "#" },
