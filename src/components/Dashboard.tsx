@@ -136,6 +136,13 @@ export function Dashboard() {
   const [draft, setDraft] = useState<DashboardFilters>({ from: defaultStart, to: today, ownerId: "31644369" });
   const [applied, setApplied] = useState<DashboardFilters>(draft);
 
+  // Return directly to Marita Workspace after the Google OAuth callback.
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (query.get("workspace") === "1") setPageMode("workspace");
+  }, []);
+
   const loadDashboard = useCallback(async () => {
     setLoading(true);
     setError("");
