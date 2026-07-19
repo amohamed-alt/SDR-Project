@@ -37,7 +37,11 @@
 | New contacts | Portfolio contacts whose `createdate` is inside the selected period |
 | Distinct companies | Unique populated contact `company_id`, batch-read as company records |
 | Untouched | `notes_last_contacted` is blank |
+| Untouched over 24h | Untouched contact whose `createdate` is more than 24 hours old |
 | Next activity coverage | Contacts with `notes_next_activity_date` / portfolio contacts |
+| No next activity | Portfolio contacts without `notes_next_activity_date` |
+| Lead response time coverage | Reporting-period contacts with `hs_time_to_first_engagement` / reporting-period contacts |
+| Median lead response time | Median populated `hs_time_to_first_engagement`, converted from milliseconds to hours |
 | Verified email | `gtm_email_status` contains a valid/verified/deliverable value |
 | Tested phone | `phone_number_status` contains a correct/valid/verified value |
 | SignalHire coverage | `signalhire_match_status` is populated |
@@ -59,7 +63,7 @@
 - Meeting date: `hs_meeting_start_time`.
 - Outcome: `hs_meeting_outcome`.
 - Source: `hs_meeting_source`.
-- Calendar booking sources include `BIDIRECTIONAL_API`, `BIDIRECTIONAL_SYNC`, `MEETINGS_PUBLIC`, and `MEETINGS_EMBED`.
+- Calendar booking sources include `BIDIRECTIONAL_API`, `BIDIRECTIONAL_SYNC`, `MEETINGS_PUBLIC`, and `MEETINGS_EMBEDDED`.
 
 HubSpot currently contains calendar-sync meeting records plus separate CRM UI outcome records for some meetings. The dashboard groups records by associated contact, local meeting date, and hour, then merges the strongest outcome in this order: Completed, No Show, Canceled, Rescheduled, Scheduled. The operational process should still update the original meeting outcome instead of creating another meeting activity.
 
@@ -71,6 +75,9 @@ HubSpot currently contains calendar-sync meeting records plus separate CRM UI ou
 - Status: `hs_task_status`.
 - Open workload combines `NOT_STARTED`, `IN_PROGRESS`, `WAITING`, and `DEFERRED`.
 - Overdue = open task with a due timestamp before now.
+- Due today and due tomorrow use the HubSpot account timezone.
+- High-priority open tasks use `hs_task_priority = HIGH`.
+- Task workload buckets separate overdue-before-today, due today, due tomorrow, future, and missing due date.
 
 ## Emails
 
