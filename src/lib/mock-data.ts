@@ -80,12 +80,15 @@ export function createMockDashboard(from: string, to: string, ownerId: string): 
       id: String(id), name: String(name), title: String(title), company: String(company), country: String(country),
       originalSource: "Offline Sources", latestSource: "Direct Traffic", recordSource: "Integration", leadStatus: "New", lifecycleStage: "Lead",
       originalSourceDetail: "Integration", latestSourceDetail: "Direct", recordSourceDetail: "Extensive-Lighter", leadSource: "Outbound", contactSource: "SDR Outbound",
-      tier: "Tier 1", contactPriority: "High", persona: "Talent Acquisition", emailStatus: "Valid", phoneStatus: "Pending", lastContacted: "", nextActivity: "", priorityScore: Number(score), url: "#",
+      tier: "Tier 1", contactPriority: "High", persona: "Talent Acquisition", emailStatus: "Valid", phoneStatus: "Pending",
+      createdAt: "2026-07-10T08:00:00Z", lastContacted: "", nextActivity: "", leadResponseTimeHours: null,
+      hasConnectedCall: Number(score) >= 93, hasMeeting: Number(score) >= 91, hasDeal: Number(score) >= 93,
+      hasOpenDeal: Number(score) >= 93, qualityIssues: ["hs_time_to_first_engagement"], priorityScore: Number(score), url: "#",
     })),
     recentActivities: [
-      { id: "call-1", type: "Call", subject: "Discovery call", status: "Connected", detail: "Connected", assignedTo: "Marita Chedid", occurredAt: "2026-07-19T10:30:00Z", url: "#" },
-      { id: "meeting-1", type: "Meeting", subject: "Talentera demo", status: "Completed", detail: "Meetings Public", assignedTo: "Marita Chedid", occurredAt: "2026-07-19T09:00:00Z", url: "#" },
-      { id: "task-1", type: "Task", subject: "Follow up with HR Director", status: "Not Started", detail: "High priority", assignedTo: "Marita Chedid", occurredAt: "2026-07-19T08:00:00Z", url: "#" },
+      { id: "call-1", type: "Call", subject: "Discovery call", status: "Connected", detail: "Connected", assignedTo: "Marita Chedid", occurredAt: "2026-07-19T10:30:00Z", metricAt: "2026-07-19T10:30:00Z", dueAt: "", dueBucket: "", isOpen: false, isHighPriority: false, opened: false, clicked: false, replied: false, url: "#" },
+      { id: "meeting-1", type: "Meeting", subject: "Talentera demo", status: "Completed", detail: "Meetings Public", assignedTo: "Marita Chedid", occurredAt: "2026-07-19T09:00:00Z", metricAt: "2026-07-19T09:00:00Z", dueAt: "", dueBucket: "", isOpen: false, isHighPriority: false, opened: false, clicked: false, replied: false, url: "#" },
+      { id: "task-1", type: "Task", subject: "Follow up with HR Director", status: "Not Started", detail: "High", assignedTo: "Marita Chedid", occurredAt: "2026-07-19T08:00:00Z", metricAt: "2026-07-19T08:00:00Z", dueAt: "2026-07-19T08:00:00Z", dueBucket: "Due today", isOpen: true, isHighPriority: true, opened: false, clicked: false, replied: false, url: "#" },
     ],
     companies: [
       ["1", "Gulf Health Group", "gulfhealth.example", "Saudi Arabia", "Healthcare", "5000", "A", "Oracle HCM", 4],
@@ -96,8 +99,8 @@ export function createMockDashboard(from: string, to: string, ownerId: string): 
       ats: String(ats), atsCategory: "Enterprise ATS", atsConfidence: "High", associatedContacts: Number(contacts), url: "#",
     })),
     deals: [
-      { id: "1", name: "Gulf Health — Talentera", stage: "Demo Done", owner: "Zein Fares", amount: 72500, closeDate: "2026-08-30", url: "#" },
-      { id: "2", name: "Emirates Industrial — Talentera", stage: "Proposal Shared", owner: "Ursula Waked", amount: 68000, closeDate: "2026-09-15", url: "#" },
+      { id: "1", name: "Gulf Health — Talentera", stage: "Demo Done", owner: "Zein Fares", amount: 72500, createdAt: "2026-07-08", closeDate: "2026-08-30", isOpen: true, url: "#" },
+      { id: "2", name: "Emirates Industrial — Talentera", stage: "Proposal Shared", owner: "Ursula Waked", amount: 68000, createdAt: "2026-07-12", closeDate: "2026-09-15", isOpen: true, url: "#" },
     ],
     filterOptions: {
       countries: ["Egypt", "Qatar", "Saudi Arabia", "United Arab Emirates"].map((value) => ({ value, label: value })),
