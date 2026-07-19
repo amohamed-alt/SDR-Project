@@ -15,7 +15,8 @@ The project is configured for Talentera's EU1 HubSpot portal and defaults to Mar
 - Contact data quality across email, phone, LinkedIn, company association, country, source, ICP, Apollo, SignalHire, and MillionVerifier fields
 - Company country, industry, employee count, ICP context, detected ATS, and ATS confidence
 - Deals associated with SDR-owned contacts, stage conversion, open pipeline, and meeting-to-deal conversion
-- Priority leads and operational alerts with direct HubSpot drill-down links
+- In-dashboard searchable drill-down drawers for KPI cards, alerts, funnel stages, chart slices, bars, and daily activity points
+- Exact HubSpot record links inside every drill-down result
 
 See [docs/METRICS.md](docs/METRICS.md) for exact property definitions and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the data flow.
 
