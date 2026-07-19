@@ -54,7 +54,9 @@ export interface DashboardKpis {
   meetingCompletionRate: number;
   openTasks: number;
   overdueTasks: number;
+  dueToday: number;
   dueTomorrow: number;
+  highPriorityOpenTasks: number;
   completedTasks: number;
   emailsSent: number;
   emailReplies: number;
@@ -63,7 +65,11 @@ export interface DashboardKpis {
   openDeals: number;
   pipelineValue: number;
   untouchedContacts: number;
+  untouchedOver24h: number;
+  noNextActivity: number;
   nextActivityCoverage: number;
+  leadResponseCoverage: number;
+  medianLeadResponseHours: number;
 }
 
 export interface QualityMetric {
@@ -100,6 +106,7 @@ export interface ContactRow {
   leadStatus: string;
   lifecycleStage: string;
   tier: string;
+  contactPriority: string;
   persona: string;
   emailStatus: string;
   phoneStatus: string;
@@ -196,6 +203,7 @@ export interface DashboardData {
   meetingOwners: ChartDatum[];
   meetingSources: ChartDatum[];
   taskStatuses: ChartDatum[];
+  taskDueBuckets: ChartDatum[];
   emailPerformance: ChartDatum[];
   countries: ChartDatum[];
   industries: ChartDatum[];
