@@ -50,12 +50,9 @@ a { color: inherit; text-decoration: none; }
 
 .workspace { display: grid; grid-template-columns: 244px minmax(0,1fr); min-height: calc(100vh - 68px); }
 .sidebar { width: 244px; position: fixed; inset: 0 auto 0 0; z-index: 40; display: flex; flex-direction: column; padding: 20px 14px; background: var(--sidebar); color: #fff; }
-.brand { display: flex; align-items: center; gap: 10px; padding: 0 12px 22px; border-bottom: 1px solid rgba(255,255,255,.13); }
-.brand-mark { position: relative; width: 37px; height: 37px; display: grid; place-items: center; border-radius: 50%; background: #fff; color: var(--sidebar); font: 800 20px/1 "Manrope", sans-serif; }
-.brand-mark::before { content: ""; position: absolute; width: 30px; height: 15px; border: 4px solid var(--yellow); border-bottom: 0; border-radius: 30px 30px 0 0; top: -5px; left: 0; transform: rotate(-9deg); }
-.brand > div:last-child { display: flex; flex-direction: column; }
-.brand strong { font: 800 18px/1.1 "Manrope", sans-serif; letter-spacing: -.02em; }
-.brand span { color: #a9c7ba; font-size: 9px; margin-top: 4px; text-transform: uppercase; letter-spacing: .12em; }
+.brand { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; padding: 2px 12px 20px; border-bottom: 1px solid rgba(255,255,255,.13); }
+.brand-logo { width: 150px; height: 34px; background: url("https://talimg1.b8cdn.com/wp-content/themes/talentera-2018/images/new-design/Talentera-ATS-white-logo.svg") left center / contain no-repeat; }
+.brand-subtitle { color: #a9c7ba; font-size: 8px; text-transform: uppercase; letter-spacing: .16em; }
 .nav-label { color: #78a797; font-size: 8px; font-weight: 700; letter-spacing: .14em; padding: 24px 10px 9px; }
 .owner-label { padding-top: 25px; }
 .sidebar nav { display: flex; flex-direction: column; gap: 4px; }
@@ -197,7 +194,7 @@ td strong { display: block; color: var(--text); font-size: 9px; }.table-wrap td 
   .topbar { margin-left: 76px; padding: 0 14px; }
   .workspace { grid-template-columns: 76px minmax(0,1fr); }
   .sidebar { width: 76px; padding: 15px 9px; }
-  .brand { padding: 0 10px 18px; justify-content: center; }.brand > div:last-child, .nav-label, .owner-card div:nth-child(2), .owner-card > svg, .sidebar nav button span, .sidebar nav button svg:last-child, .sync-card div { display: none; }
+  .brand { padding: 0 4px 18px; align-items: center; }.brand-logo { width: 46px; background-size: contain; background-position: center; }.brand-subtitle, .nav-label, .owner-card div:nth-child(2), .owner-card > svg, .sidebar nav button span, .sidebar nav button svg:last-child, .sync-card div { display: none; }
   .owner-card, .sidebar nav button, .sync-card { justify-content: center; }.sidebar nav button { padding: 11px; }
   .content { grid-column: 2; padding: 22px 14px 70px; }.loading-overlay { left: 76px; }
   .two-column, .wide-left, .alerts-layout { grid-template-columns: 1fr; }.filter-grid { grid-template-columns: repeat(2,1fr); }.quality-grid { grid-template-columns: repeat(2,1fr); }
