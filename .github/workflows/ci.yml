@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -22,3 +25,43 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm run smoke
+
+  diagnose-hostinger:
+    if: github.head_ref == 'diagnostic/hostinger-containers'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect Hostinger Docker diagnostics
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          mkdir -p hostinger-diagnostics
+          API_BASE="https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210/docker/sdr-project"
+
+          if [ -z "$HOSTINGER_API_KEY" ]; then
+            printf '{"error":"HOSTINGER_API_KEY is unavailable to this workflow"}\n' > hostinger-diagnostics/error.json
+            exit 0
+          fi
+
+          for endpoint in containers logs; do
+            HTTP_STATUS=$(curl --silent --show-error \
+              --connect-timeout 5 --max-time 60 \
+              -H "Authorization: Bearer ${HOSTINGER_API_KEY}" \
+              -H "Accept: application/json" \
+              -o "hostinger-diagnostics/${endpoint}.json" \
+              -w '%{http_code}' \
+              "${API_BASE}/${endpoint}" || true)
+            printf '%s\n' "$HTTP_STATUS" > "hostinger-diagnostics/${endpoint}.status"
+            echo "${endpoint}: HTTP ${HTTP_STATUS}"
+          done
+
+          echo "Container summary:"
+          jq -c '.. | objects | select(has("name") or has("service") or has("status") or has("state") or has("health")) | {name,service,status,state,health,image,ports}' hostinger-diagnostics/containers.json 2>/dev/null | head -50 || true
+
+      - name: Upload Hostinger diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hostinger-diagnostics
+          path: hostinger-diagnostics
+          if-no-files-found: warn
+          retention-days: 2
