@@ -1,0 +1,45 @@
+name: sdr-project
+
+services:
+  sdr-dashboard:
+    build:
+      context: "https://github.com/amohamed-alt/SDR-Project.git#${SDR_BUILD_REF:-main}"
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - /root/SDR-Project/.env
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      ACQUISITION_SNAPSHOT_PATH: /app/data/acquisition-dashboard.json
+      GOOGLE_TOKEN_STORE_PATH: /app/data/google-calendar.json
+    ports:
+      - "127.0.0.1:3010:3000"
+    volumes:
+      - /root/SDR-Project/data:/app/data
+    networks:
+      - default
+      - traefik_proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=n8n_default"
+      - "traefik.http.routers.sdr-dashboard.rule=Host(`sdr.dashboardtalentera.tech`)"
+      - "traefik.http.routers.sdr-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.sdr-dashboard.tls=true"
+      - "traefik.http.routers.sdr-dashboard.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.sdr-dashboard.loadbalancer.server.port=3000"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 8s
+      start_period: 30s
+      retries: 5
+
+networks:
+  traefik_proxy:
+    external: true
+    name: n8n_default
