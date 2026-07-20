@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: hostinger-sdr-production
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   deploy:
@@ -20,7 +20,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 20
     env:
       DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
       DEPLOY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -73,8 +73,10 @@ jobs:
           set +e
           API_BASE="https://developers.hostinger.com/api/vps/v1/virtual-machines/${HOSTINGER_VM_ID}/docker/${HOSTINGER_PROJECT}"
 
-          for attempt in $(seq 1 60); do
-            if curl --fail --silent --show-error --max-time 15 "$PUBLIC_HEALTH_URL" >/tmp/public-health.json 2>/tmp/public-health.error; then
+          for attempt in $(seq 1 45); do
+            if curl --fail --silent --show-error \
+              --connect-timeout 3 --max-time 6 \
+              "$PUBLIC_HEALTH_URL" >/tmp/public-health.json 2>/tmp/public-health.error; then
               echo "Public health check succeeded on attempt ${attempt}."
               cat /tmp/public-health.json
               exit 0
@@ -82,7 +84,8 @@ jobs:
 
             if [ "$attempt" -eq 1 ] || [ $((attempt % 3)) -eq 0 ]; then
               echo "::group::Hostinger container status · attempt ${attempt}"
-              CONTAINERS=$(curl --silent --show-error --max-time 20 \
+              CONTAINERS=$(curl --silent --show-error \
+                --connect-timeout 3 --max-time 10 \
                 -H "Authorization: Bearer ${HOSTINGER_API_KEY}" \
                 -H "Accept: application/json" \
                 "${API_BASE}/containers" 2>&1)
@@ -97,11 +100,12 @@ jobs:
               echo "::endgroup::"
             fi
 
-            sleep 10
+            sleep 8
           done
 
           echo "::group::Hostinger project logs"
-          PROJECT_LOGS=$(curl --silent --show-error --max-time 30 \
+          PROJECT_LOGS=$(curl --silent --show-error \
+            --connect-timeout 3 --max-time 20 \
             -H "Authorization: Bearer ${HOSTINGER_API_KEY}" \
             -H "Accept: application/json" \
             "${API_BASE}/logs" 2>&1)
@@ -113,7 +117,7 @@ jobs:
           fi
           echo "::endgroup::"
 
-          echo "::error::Docker deployment was initiated, but the public health endpoint did not become ready within 10 minutes."
+          echo "::error::Docker deployment was initiated, but the public health endpoint did not become ready."
           exit 1
 
       - name: Mark deployment successful
