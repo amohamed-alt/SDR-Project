@@ -13,7 +13,15 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const ALLOWED_SALES_REP_WORDS = new Set(["faizan", "fadi", "jihad", "bassam", "ursula", "zein", "zain"]);
+const ALLOWED_SALES_REP_OWNER_IDS = new Set([
+  "76369995", // Mohammed Faizan
+  "76369998", // Fadi Zanona
+  "76370000", // Mohammad Jehad Al-Barqawi
+  "75863674", // Bassam Hamed
+  "76369997", // Ursula Waked
+  "31558980", // Zein Fares
+  "31594536", // Abdullah Muhammed · a.mohamed@talentera.com
+]);
 
 const bookingSchema = z.object({
   requestId: z.string().uuid(),
@@ -31,14 +39,6 @@ const bookingSchema = z.object({
 
 function value(record: { properties: Record<string, string | null | undefined> }, key: string) {
   return record.properties[key]?.trim() ?? "";
-}
-
-function identityWords(text: string) {
-  return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter(Boolean);
-}
-
-function isAllowedSalesOwner(owner: { name: string; email?: string }) {
-  return identityWords(`${owner.name} ${owner.email ?? ""}`).some((word) => ALLOWED_SALES_REP_WORDS.has(word));
 }
 
 function validOrigin(request: NextRequest) {
@@ -112,8 +112,8 @@ export async function POST(request: NextRequest) {
     }
 
     const salesOwner = owners.find((owner) => owner.id === input.salesOwnerId);
-    if (!salesOwner || !isAllowedSalesOwner(salesOwner)) {
-      return NextResponse.json({ error: "Choose Faizan, Fadi, Jihad, Bassam, Ursula, or Zein as the Sales Rep" }, { status: 400 });
+    if (!salesOwner || !ALLOWED_SALES_REP_OWNER_IDS.has(salesOwner.id)) {
+      return NextResponse.json({ error: "Choose Faizan, Fadi, Jehad, Bassam, Ursula, Zein, or Abdullah as the Sales Rep" }, { status: 400 });
     }
     if (!salesOwner.email) return NextResponse.json({ error: "The selected Sales Rep has no email address in HubSpot" }, { status: 400 });
 

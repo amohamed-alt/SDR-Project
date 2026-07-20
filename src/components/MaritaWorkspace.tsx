@@ -20,16 +20,19 @@ type BookingResult = {
   organizerIncluded: boolean;
 };
 
-const SALES_REP_WORDS = new Set(["faizan", "fadi", "jihad", "bassam", "ursula", "zein", "zain"]);
-const SALES_REP_ORDER = ["faizan", "fadi", "jihad", "bassam", "ursula", "zein", "zain"];
+const SALES_REP_OWNER_IDS: readonly string[] = [
+  "76369995", // Mohammed Faizan
+  "76369998", // Fadi Zanona
+  "76370000", // Mohammad Jehad Al-Barqawi
+  "75863674", // Bassam Hamed
+  "76369997", // Ursula Waked
+  "31558980", // Zein Fares
+  "31594536", // Abdullah Muhammed · a.mohamed@talentera.com
+];
 
-function identityWords(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter(Boolean);
-}
-
-function salesRepWord(owner: { name: string; email?: string }) {
-  return identityWords(`${owner.name} ${owner.email ?? ""}`).find((word) => SALES_REP_WORDS.has(word)) ?? "";
-}
+const SALES_REP_ORDER = new Map<string, number>(
+  SALES_REP_OWNER_IDS.map((ownerId, index) => [ownerId, index]),
+);
 
 function localDay(value: string, timezone: string) {
   if (!value) return "";
@@ -100,8 +103,8 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
     .filter((row): row is ContactRow => Boolean(row));
   const availableContacts = data.priorityContacts.filter((row) => Boolean(row.email) && !selectedContactIds.includes(row.id));
   const salesOwners = data.filterOptions.owners
-    .filter((owner) => Boolean(salesRepWord(owner)))
-    .sort((left, right) => SALES_REP_ORDER.indexOf(salesRepWord(left)) - SALES_REP_ORDER.indexOf(salesRepWord(right)));
+    .filter((owner) => SALES_REP_ORDER.has(owner.id))
+    .sort((left, right) => (SALES_REP_ORDER.get(left.id) ?? 999) - (SALES_REP_ORDER.get(right.id) ?? 999));
   const selectedSalesOwner = salesOwners.find((owner) => owner.id === selectedSalesOwnerId);
 
   async function loadCalendarStatus() {
@@ -246,7 +249,7 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
         <div className="workspace-card-heading"><div><span>MEETING COMPOSER</span><h3>Book a Google Meet for Sales</h3><p>Marita chooses the Sales Rep and one or more contacts. Nothing is selected automatically.</p></div><Video size={20}/></div>
         <form onSubmit={submitPreview}>
           <label><span>Sales Rep · Meeting owner</span><select value={selectedSalesOwnerId} onChange={(event) => { setSelectedSalesOwnerId(event.target.value); setPreview(false); }} required disabled={!salesOwners.length}><option value="">Select Sales Rep</option>{salesOwners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}{owner.email ? " · " + owner.email : ""}</option>)}</select></label>
-          <div className="meeting-host"><div className="meeting-avatar host"><UserRound size={15}/></div><div><strong>{selectedSalesOwner?.name ?? "Select Faizan, Fadi, Jihad, Bassam, Ursula, or Zein"}</strong><span>{selectedSalesOwner?.email || "No Sales Rep selected"}</span></div><em>Host · HubSpot owner</em></div>
+          <div className="meeting-host"><div className="meeting-avatar host"><UserRound size={15}/></div><div><strong>{selectedSalesOwner?.name ?? "Select Faizan, Fadi, Jehad, Bassam, Ursula, Zein, or Abdullah"}</strong><span>{selectedSalesOwner?.email || "No Sales Rep selected"}</span></div><em>Host · HubSpot owner</em></div>
 
           <div className={styles.contactPickerRow}>
             <label><span>Add contact attendee</span><select value={contactCandidateId} onChange={(event) => setContactCandidateId(event.target.value)} disabled={!availableContacts.length}><option value="">{availableContacts.length ? "Select a HubSpot contact" : "No more contacts available"}</option>{availableContacts.map((row) => <option key={row.id} value={row.id}>{row.name}{row.company ? " · " + row.company : ""}</option>)}</select></label>
