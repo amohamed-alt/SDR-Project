@@ -1,0 +1,153 @@
+.contactPickerRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: end;
+}
+
+.addContactButton {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 12px;
+  border: 1px solid #087a50;
+  border-radius: 8px;
+  background: #f1f9f5;
+  color: #087a50;
+  font-size: 8px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.addContactButton:hover:not(:disabled) {
+  background: #e5f4ec;
+}
+
+.addContactButton:disabled {
+  border-color: #d5dfda;
+  background: #f3f6f4;
+  color: #95a39c;
+  cursor: not-allowed;
+}
+
+.selectedContacts {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.contactEmpty {
+  min-height: 55px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px dashed #c7d9d0;
+  border-radius: 9px;
+  background: #f8fbf9;
+  color: #70847a;
+  font-size: 8px;
+}
+
+.contactEmpty svg {
+  color: #087a50;
+  flex: 0 0 auto;
+}
+
+.selectedContactCard {
+  position: relative;
+  padding-right: 34px;
+}
+
+.contactRole {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #e2f2e9;
+  color: #087a50;
+  font-size: 6px;
+  font-style: normal;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.removeContactButton {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 1px solid #ead2ce;
+  border-radius: 7px;
+  background: #fff6f4;
+  color: #b44c40;
+  cursor: pointer;
+}
+
+.removeContactButton:hover {
+  background: #ffeae6;
+}
+
+.organizerToggle {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid #dbe5e0;
+  border-radius: 9px;
+  background: #fbfcfb;
+  text-align: left;
+  cursor: pointer;
+}
+
+.organizerToggle > span {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #eef4f1;
+  color: #73877d;
+}
+
+.organizerToggle > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.organizerToggle strong {
+  font-size: 8px;
+}
+
+.organizerToggle small {
+  margin-top: 2px;
+  color: #71847a;
+  font-size: 7px;
+}
+
+.organizerToggleActive {
+  border-color: #b8daca;
+  background: #f1f9f5;
+}
+
+.organizerToggleActive > span {
+  background: #e2f2e9;
+  color: #087a50;
+}
+
+@media (max-width: 640px) {
+  .contactPickerRow {
+    grid-template-columns: 1fr;
+  }
+
+  .addContactButton {
+    width: 100%;
+  }
+}
