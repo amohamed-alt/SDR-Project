@@ -13,10 +13,14 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+const ALLOWED_SALES_REP_WORDS = new Set(["faizan", "fadi", "jihad", "bassam", "ursula", "zein", "zain"]);
+
 const bookingSchema = z.object({
   requestId: z.string().uuid(),
-  contactId: z.string().regex(/^\d+$/),
+  contactIds: z.array(z.string().regex(/^\d+$/)).min(1).max(20)
+    .refine((ids) => new Set(ids).size === ids.length, "Contact IDs must be unique"),
   salesOwnerId: z.string().regex(/^\d+$/),
+  includeOrganizerAsAttendee: z.boolean().default(false),
   title: z.string().trim().min(3).max(180),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
@@ -27,6 +31,14 @@ const bookingSchema = z.object({
 
 function value(record: { properties: Record<string, string | null | undefined> }, key: string) {
   return record.properties[key]?.trim() ?? "";
+}
+
+function identityWords(text: string) {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter(Boolean);
+}
+
+function isAllowedSalesOwner(owner: { name: string; email?: string }) {
+  return identityWords(`${owner.name} ${owner.email ?? ""}`).some((word) => ALLOWED_SALES_REP_WORDS.has(word));
 }
 
 function validOrigin(request: NextRequest) {
@@ -74,18 +86,36 @@ export async function POST(request: NextRequest) {
     }
 
     const [contacts, owners] = await Promise.all([
-      batchRead("contacts", [input.contactId], ["firstname", "lastname", "email", "company", "sdr_owner"]),
+      batchRead("contacts", input.contactIds, ["firstname", "lastname", "email", "company", "sdr_owner"]),
       listOwners(),
     ]);
-    const contact = contacts[0];
-    if (!contact || value(contact, "sdr_owner") !== DEFAULT_SDR_OWNER_ID) {
-      return NextResponse.json({ error: "The selected contact is not in Marita's SDR portfolio" }, { status: 400 });
+    const contactsById = new Map(contacts.map((contact) => [contact.id, contact]));
+    const contactRecords = input.contactIds
+      .map((contactId) => contactsById.get(contactId))
+      .filter((contact): contact is (typeof contacts)[number] => Boolean(contact));
+    if (contactRecords.length !== input.contactIds.length) {
+      return NextResponse.json({ error: "One or more selected contacts could not be found in HubSpot" }, { status: 400 });
     }
-    const contactEmail = value(contact, "email").toLowerCase();
-    if (!contactEmail) return NextResponse.json({ error: "The selected contact has no email address in HubSpot" }, { status: 400 });
-    const contactName = [value(contact, "firstname"), value(contact, "lastname")].filter(Boolean).join(" ") || "HubSpot contact";
+    if (contactRecords.some((contact) => value(contact, "sdr_owner") !== DEFAULT_SDR_OWNER_ID)) {
+      return NextResponse.json({ error: "Every selected contact must be in Marita's SDR portfolio" }, { status: 400 });
+    }
+
+    const contactDetails = contactRecords.map((contact) => ({
+      id: contact.id,
+      name: [value(contact, "firstname"), value(contact, "lastname")].filter(Boolean).join(" ") || "HubSpot contact",
+      email: value(contact, "email").toLowerCase(),
+      company: value(contact, "company"),
+    }));
+    const missingEmailContact = contactDetails.find((contact) => !contact.email);
+    if (missingEmailContact) {
+      return NextResponse.json({ error: `${missingEmailContact.name} has no email address in HubSpot` }, { status: 400 });
+    }
+
     const salesOwner = owners.find((owner) => owner.id === input.salesOwnerId);
-    if (!salesOwner?.email) return NextResponse.json({ error: "The selected Sales Rep has no email address in HubSpot" }, { status: 400 });
+    if (!salesOwner || !isAllowedSalesOwner(salesOwner)) {
+      return NextResponse.json({ error: "Choose Faizan, Fadi, Jihad, Bassam, Ursula, or Zein as the Sales Rep" }, { status: 400 });
+    }
+    if (!salesOwner.email) return NextResponse.json({ error: "The selected Sales Rep has no email address in HubSpot" }, { status: 400 });
 
     const startUtc = localDateTimeToUtc(input.date, input.time, HUBSPOT_TIMEZONE);
     if (new Date(startUtc).getTime() < Date.now() - 300_000) {
@@ -95,13 +125,16 @@ export async function POST(request: NextRequest) {
     const endUtc = localDateTimeToUtc(localEndValue.date, localEndValue.time.slice(0, 5), HUBSPOT_TIMEZONE);
     const startLocal = `${input.date}T${input.time}:00`;
     const endLocal = `${localEndValue.date}T${localEndValue.time}`;
+    const primaryContact = contactDetails[0];
+    const contactLines = contactDetails.map((contact, index) =>
+      `${index === 0 ? "Primary contact" : "Additional contact"}: ${contact.name} (${contact.email}) · HubSpot ID ${contact.id}`,
+    );
     const description = [
       input.agenda,
       "",
       `Booked by: Marita Chedid (${connection.email})`,
       `Sales host: ${salesOwner.name} (${salesOwner.email})`,
-      `Lead: ${contactName} (${contactEmail})`,
-      `HubSpot contact ID: ${input.contactId}`,
+      ...contactLines,
     ].join("\n").trim();
 
     const draft = await createCalendarDraft({
@@ -111,7 +144,7 @@ export async function POST(request: NextRequest) {
       startDateTime: startLocal,
       endDateTime: endLocal,
       timeZone: HUBSPOT_TIMEZONE,
-      hubspotContactId: input.contactId,
+      hubspotContactId: primaryContact.id,
       hubspotOwnerId: input.salesOwnerId,
       createGoogleMeet: input.meetingType === "google-meet",
     });
@@ -119,11 +152,11 @@ export async function POST(request: NextRequest) {
     calendarAccessToken = draft.accessToken;
 
     const hubspotMeeting = await createMeeting({
-      contactId: input.contactId,
+      contactIds: contactDetails.map((contact) => contact.id),
       ownerId: input.salesOwnerId,
       title: input.title,
       body: input.agenda,
-      internalNotes: `Booked by Marita Chedid through SDR Command Center. Google organizer: ${connection.email}.`,
+      internalNotes: `Booked by Marita Chedid through SDR Command Center. Google organizer: ${connection.email}. Associated contacts: ${contactDetails.map((contact) => `${contact.name} (${contact.id})`).join(", ")}.`,
       startAt: startUtc,
       endAt: endUtc,
       externalUrl: draft.event.htmlLink,
@@ -133,20 +166,25 @@ export async function POST(request: NextRequest) {
 
     const publishedEvent = await sendCalendarInvitations(
       draft.event.id,
-      [salesOwner.email, contactEmail],
+      [
+        salesOwner.email,
+        ...contactDetails.map((contact) => contact.email),
+        ...(input.includeOrganizerAsAttendee ? [connection.email] : []),
+      ],
       draft.accessToken,
     );
 
     revalidateTag("sdr-dashboard", "max");
     return NextResponse.json({
       success: true,
-      contact: { id: input.contactId, name: contactName, email: contactEmail },
+      contacts: contactDetails.map(({ id, name, email }) => ({ id, name, email })),
+      organizerIncluded: input.includeOrganizerAsAttendee,
       salesOwner: { id: salesOwner.id, name: salesOwner.name, email: salesOwner.email },
       calendarEventId: publishedEvent.id,
       calendarUrl: publishedEvent.htmlLink || draft.event.htmlLink,
       meetLink: publishedEvent.hangoutLink || draft.meetLink,
       hubspotMeetingId,
-      hubspotContactUrl: hubspotRecordUrl("contact", input.contactId),
+      hubspotContactUrl: hubspotRecordUrl("contact", primaryContact.id),
     });
   } catch (error) {
     if (calendarEventId) {
@@ -166,4 +204,3 @@ export async function POST(request: NextRequest) {
     }, { status: status >= 400 && status < 600 ? status : 500 });
   }
 }
-

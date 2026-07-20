@@ -237,7 +237,7 @@ export async function getPropertyDefinitions(
 }
 
 export interface CreateMeetingInput {
-  contactId: string;
+  contactIds: string[];
   ownerId: string;
   title: string;
   body: string;
@@ -249,6 +249,9 @@ export interface CreateMeetingInput {
 }
 
 export async function createMeeting(input: CreateMeetingInput): Promise<HubSpotRecord> {
+  const contactIds = [...new Set(input.contactIds)];
+  if (!contactIds.length) throw new HubSpotApiError("At least one contact association is required", 400, "Missing contactIds");
+
   return hubspotRequest<HubSpotRecord>("/crm/v3/objects/meetings", {
     method: "POST",
     body: JSON.stringify({
@@ -264,10 +267,10 @@ export async function createMeeting(input: CreateMeetingInput): Promise<HubSpotR
         hs_meeting_end_time: input.endAt,
         hs_meeting_outcome: "SCHEDULED",
       },
-      associations: [{
-        to: { id: input.contactId },
+      associations: contactIds.map((contactId) => ({
+        to: { id: contactId },
         types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 200 }],
-      }],
+      })),
     }),
   });
 }
