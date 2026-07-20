@@ -2,6 +2,8 @@
 
 A secure, full-stack HubSpot dashboard for SDR performance, multi-touch attribution, data quality, account intelligence, meetings, tasks, calls, email engagement, and SDR-attributed pipeline.
 
+The same command center now includes a separate Acquisition dashboard with a live team overview, rep switching, Yesterday / MTD / YTD execution, lead-contact focus, Rank A/B coverage, deal risk, source performance, and open pipeline by stage.
+
 The project is configured for Talentera's EU1 HubSpot portal and defaults to Marita Chedid (`ownerId=31644369`) with a reporting start date of `2026-07-01`.
 
 ## What it measures
@@ -78,6 +80,7 @@ HubSpot scope names differ slightly between private-app screens and API versions
 | `HUBSPOT_UI_DOMAIN` | EU1 UI domain for drill-down URLs |
 | `HUBSPOT_TIMEZONE` | Reporting timezone; defaults to `Asia/Riyadh` |
 | `DEFAULT_SDR_OWNER_ID` | Default SDR owner; Marita is `31644369` |
+| `ACQUISITION_OWNER_IDS` | Comma-separated HubSpot owners included in the Acquisition team dashboard |
 | `NEXT_PUBLIC_DEFAULT_START_DATE` | Initial dashboard start date |
 | `DASHBOARD_USERNAME` | Internal dashboard username |
 | `DASHBOARD_PASSWORD` | Internal dashboard password |
