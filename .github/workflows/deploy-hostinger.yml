@@ -1,0 +1,102 @@
+name: Deploy SDR Dashboard to Hostinger
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: hostinger-sdr-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      DEPLOY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Mark deployment pending
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.DEPLOY_SHA,
+              state: 'pending',
+              context: 'hostinger/deploy',
+              description: 'Deploying SDR dashboard to Hostinger',
+              target_url: process.env.DEPLOY_URL,
+            });
+
+      - name: Checkout validated revision
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+
+      - name: Validate Hostinger API key
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          test -n "$HOSTINGER_API_KEY" || {
+            echo "::error::Add HOSTINGER_API_KEY as a repository secret."
+            exit 1
+          }
+
+      - name: Deploy Docker Compose
+        uses: hostinger/deploy-on-vps@v2
+        with:
+          api-key: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+          virtual-machine: "1604210"
+          project-name: sdr-project
+          docker-compose-path: docker-compose.yml
+          environment-variables: |
+            SDR_BUILD_REF=${{ env.DEPLOY_SHA }}
+
+      - name: Verify public health
+        run: |
+          curl --fail --silent --show-error \
+            --retry 45 \
+            --retry-delay 8 \
+            --retry-all-errors \
+            https://sdr.dashboardtalentera.tech/api/health
+
+      - name: Mark deployment successful
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.DEPLOY_SHA,
+              state: 'success',
+              context: 'hostinger/deploy',
+              description: 'SDR dashboard deployed successfully',
+              target_url: process.env.DEPLOY_URL,
+            });
+
+      - name: Mark deployment failed
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.DEPLOY_SHA,
+              state: 'failure',
+              context: 'hostinger/deploy',
+              description: 'SDR dashboard deployment failed',
+              target_url: process.env.DEPLOY_URL,
+            });
