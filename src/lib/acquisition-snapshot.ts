@@ -8,6 +8,7 @@ const SNAPSHOT_TTL_MS = Math.max(
   60_000,
   Number(process.env.ACQUISITION_SNAPSHOT_TTL_MS ?? "900000") || 900_000,
 );
+const CURRENT_SCHEMA_VERSION = 2;
 
 type SnapshotSource = "memory" | "disk" | "live";
 type RefreshState = "idle" | "started" | "running" | "completed";
@@ -59,7 +60,8 @@ function ageSeconds(data: AcquisitionData) {
 }
 
 function isStale(data: AcquisitionData) {
-  return ageSeconds(data) * 1_000 >= SNAPSHOT_TTL_MS;
+  return data.meta.schemaVersion !== CURRENT_SCHEMA_VERSION
+    || ageSeconds(data) * 1_000 >= SNAPSHOT_TTL_MS;
 }
 
 async function loadSnapshotFromDisk() {
@@ -85,9 +87,7 @@ async function loadSnapshotFromDisk() {
     return { data: parsed, serialized, source: "disk" as SnapshotSource };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code !== "ENOENT") {
-      console.error("Unable to read Acquisition snapshot", error);
-    }
+    if (code !== "ENOENT") console.error("Unable to read Acquisition snapshot", error);
     return null;
   }
 }
