@@ -1,9 +1,17 @@
 import type { HubSpotOwner, HubSpotRecord } from "@/lib/types";
 
 const API_BASE = "https://api.hubapi.com";
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 4;
 const SEARCH_PAGE_SIZE = 200;
 const BATCH_SIZE = 100;
+const ASSOCIATION_BATCH_SIZE = 500;
+const MIN_REQUEST_INTERVAL_MS = Math.max(
+  100,
+  Number(process.env.HUBSPOT_MIN_REQUEST_INTERVAL_MS ?? "225") || 225,
+);
+
+let requestQueue: Promise<void> = Promise.resolve();
+let nextRequestAt = 0;
 
 export interface SearchFilter {
   propertyName: string;
@@ -72,10 +80,59 @@ function getToken() {
   return token;
 }
 
+function sleep(milliseconds: number) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function waitForRequestSlot() {
+  let release: (() => void) | undefined;
+  const previous = requestQueue;
+  requestQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  await previous;
+  try {
+    const wait = Math.max(0, nextRequestAt - Date.now());
+    if (wait > 0) await sleep(wait);
+    nextRequestAt = Date.now() + MIN_REQUEST_INTERVAL_MS;
+  } finally {
+    release?.();
+  }
+}
+
 function chunks<T>(items: T[], size = BATCH_SIZE) {
   const result: T[][] = [];
   for (let index = 0; index < items.length; index += size) result.push(items.slice(index, index + size));
   return result;
+}
+
+function compactErrorDetails(details: string) {
+  if (!details) return "";
+  try {
+    const payload = JSON.parse(details) as {
+      message?: string;
+      category?: string;
+      subCategory?: string;
+      errors?: Array<{ message?: string }>;
+    };
+    return [
+      payload.message,
+      payload.category,
+      payload.subCategory,
+      payload.errors?.map((item) => item.message).filter(Boolean).join("; "),
+    ].filter(Boolean).join(" · ").slice(0, 500);
+  } catch {
+    return details.replace(/\s+/g, " ").trim().slice(0, 500);
+  }
+}
+
+export function describeHubSpotError(error: unknown) {
+  if (error instanceof HubSpotApiError) {
+    const details = compactErrorDetails(error.details);
+    return `${error.message} (HTTP ${error.status})${details ? ` · ${details}` : ""}`;
+  }
+  return error instanceof Error ? error.message : "HubSpot request unavailable";
 }
 
 async function hubspotRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -83,6 +140,7 @@ async function hubspotRequest<T>(path: string, init: RequestInit = {}): Promise<
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     try {
+      await waitForRequestSlot();
       const response = await fetch(`${API_BASE}${path}`, {
         ...init,
         headers: {
@@ -101,16 +159,18 @@ async function hubspotRequest<T>(path: string, init: RequestInit = {}): Promise<
       const body = await response.text();
       if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
         const retryAfter = Number(response.headers.get("retry-after") ?? "0");
-        const delay = retryAfter > 0 ? retryAfter * 1000 : 500 * 2 ** attempt;
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        const delay = retryAfter > 0
+          ? retryAfter * 1000
+          : Math.min(8_000, 750 * 2 ** attempt + Math.floor(Math.random() * 250));
+        await sleep(delay);
         continue;
       }
 
-      throw new HubSpotApiError(`HubSpot request failed: ${path}`, response.status, body.slice(0, 1_000));
+      throw new HubSpotApiError(`HubSpot request failed: ${path}`, response.status, body.slice(0, 2_000));
     } catch (error) {
       lastError = error;
       if (error instanceof HubSpotApiError || attempt === MAX_RETRIES) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+      await sleep(Math.min(8_000, 750 * 2 ** attempt + Math.floor(Math.random() * 250)));
     }
   }
 
@@ -140,9 +200,40 @@ export async function searchAll(
 
     records.push(...response.results);
     after = response.paging?.next?.after;
+
+    if (after && Number(after) >= 10_000) {
+      throw new HubSpotApiError(
+        `HubSpot search exceeded the 10,000-record query limit: ${objectType}`,
+        422,
+        "Split the search into smaller owner or date partitions.",
+      );
+    }
   } while (after);
 
   return records;
+}
+
+export async function searchAllByPropertyValues(
+  objectType: string,
+  properties: readonly string[],
+  partitionProperty: string,
+  partitionValues: readonly string[],
+  additionalFilters: SearchFilter[] = [],
+  sorts: string[] = [],
+): Promise<HubSpotRecord[]> {
+  const records = new Map<string, HubSpotRecord>();
+
+  for (const partitionValue of [...new Set(partitionValues)].filter(Boolean)) {
+    const partitionRecords = await searchAll(
+      objectType,
+      properties,
+      [{ propertyName: partitionProperty, operator: "EQ", value: partitionValue }, ...additionalFilters],
+      sorts,
+    );
+    for (const record of partitionRecords) records.set(record.id, record);
+  }
+
+  return [...records.values()];
 }
 
 export async function batchRead(
@@ -175,16 +266,16 @@ export async function readAssociations(
   const associationMap = new Map<string, string[]>();
   if (!fromIds.length) return associationMap;
 
-  const responses = await Promise.all(
-    chunks([...new Set(fromIds)]).map((batch) =>
-      hubspotRequest<AssociationResponse>(`/crm/v4/associations/${fromObjectType}/${toObjectType}/batch/read`, {
+  const uniqueIds = [...new Set(fromIds)];
+  for (const batch of chunks(uniqueIds, ASSOCIATION_BATCH_SIZE)) {
+    const response = await hubspotRequest<AssociationResponse>(
+      `/crm/v4/associations/${fromObjectType}/${toObjectType}/batch/read`,
+      {
         method: "POST",
         body: JSON.stringify({ inputs: batch.map((id) => ({ id })) }),
-      }),
-    ),
-  );
+      },
+    );
 
-  for (const response of responses) {
     for (const item of response.results) {
       associationMap.set(item.from.id, item.to.map((target) => String(target.toObjectId)));
     }
@@ -200,7 +291,7 @@ export async function listOwners(): Promise<HubSpotOwner[]> {
   do {
     const query = new URLSearchParams({ limit: "500", archived: "false" });
     if (after) query.set("after", after);
-    const response = await hubspotRequest<OwnersResponse>(`/crm/v3/owners/?${query.toString()}`);
+    const response = await hubspotRequest<OwnersResponse>(`/crm/v3/owners?${query.toString()}`);
     owners.push(
       ...response.results.map((owner) => ({
         id: String(owner.id),
