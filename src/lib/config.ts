@@ -2,6 +2,19 @@ export const HUBSPOT_PORTAL_ID = process.env.HUBSPOT_PORTAL_ID ?? "145742477";
 export const HUBSPOT_UI_DOMAIN = process.env.HUBSPOT_UI_DOMAIN ?? "app-eu1.hubspot.com";
 export const HUBSPOT_TIMEZONE = process.env.HUBSPOT_TIMEZONE ?? "Asia/Riyadh";
 export const DEFAULT_SDR_OWNER_ID = process.env.DEFAULT_SDR_OWNER_ID ?? "31644369";
+export const ACQUISITION_OWNER_IDS = (process.env.ACQUISITION_OWNER_IDS ?? [
+  "31644369",
+  "31558980",
+  "76369997",
+  "32332250",
+  "32332251",
+  "76370000",
+  "76369998",
+  "76369995",
+].join(","))
+  .split(",")
+  .map((ownerId) => ownerId.trim())
+  .filter(Boolean);
 
 export const CONNECTED_CALL_DISPOSITION = "f240bbac-87c9-4f6e-bf70-924b57d47db7";
 
