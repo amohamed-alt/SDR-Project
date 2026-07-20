@@ -16,6 +16,30 @@ export const ACQUISITION_OWNER_IDS = (process.env.ACQUISITION_OWNER_IDS ?? [
   .map((ownerId) => ownerId.trim())
   .filter(Boolean);
 
+export const ACQUISITION_DEAL_ONLY_OWNER_IDS = (process.env.ACQUISITION_DEAL_ONLY_OWNER_IDS ?? [
+  "76369998",
+  "76369995",
+].join(","))
+  .split(",")
+  .map((ownerId) => ownerId.trim())
+  .filter(Boolean);
+
+const ACQUISITION_DEAL_ONLY_OWNER_SET = new Set(ACQUISITION_DEAL_ONLY_OWNER_IDS);
+export const ACQUISITION_ACTIVITY_OWNER_IDS = ACQUISITION_OWNER_IDS.filter(
+  (ownerId) => !ACQUISITION_DEAL_ONLY_OWNER_SET.has(ownerId),
+);
+
+export const ACQUISITION_RANK_PROPERTY_CANDIDATES = (process.env.ACQUISITION_RANK_PROPERTY_CANDIDATES ?? [
+  "rank",
+  "talentera_rank",
+  "company_rank",
+  "anp_rank",
+  "gtm_rank",
+].join(","))
+  .split(",")
+  .map((propertyName) => propertyName.trim())
+  .filter(Boolean);
+
 export const CONNECTED_CALL_DISPOSITION = "f240bbac-87c9-4f6e-bf70-924b57d47db7";
 
 export const CALL_DISPOSITION_LABELS: Record<string, string> = {
@@ -197,9 +221,6 @@ const HUBSPOT_OBJECT_TYPE_IDS = {
 export type HubSpotObjectType = keyof typeof HUBSPOT_OBJECT_TYPE_IDS;
 export type HubSpotRecordObjectType = "contact" | "company" | "deal";
 
-// HubSpot activities are timeline engagements rather than reliable standalone UI
-// records. Link calls, meetings, tasks, and emails through an associated CRM
-// record instead of generating /record/0-27, /0-47, /0-48, or /0-49 URLs.
 export function hubspotRecordUrl(objectType: HubSpotRecordObjectType, id: string) {
   const typeId = HUBSPOT_OBJECT_TYPE_IDS[objectType];
   return `https://${HUBSPOT_UI_DOMAIN}/contacts/${HUBSPOT_PORTAL_ID}/record/${typeId}/${id}?utm_source=sdr_project&utm_medium=dashboard&utm_campaign=drilldown`;
