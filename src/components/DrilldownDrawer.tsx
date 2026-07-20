@@ -36,7 +36,7 @@ function externalLink(url: string, label = "Open record in HubSpot") {
 function ContactCard({ row }: { row: ContactRow }) {
   return <article className="drawer-record-card">
     <div className="drawer-record-main"><span className="drawer-record-type"><UsersRound size={14}/>Contact</span><h3>{row.name}</h3><p>{row.title || "No job title"}{row.company ? ` · ${row.company}` : ""}</p></div>
-    <div className="drawer-record-fields"><span><b>Country</b>{row.country || "—"}</span><span><b>ICP Tier</b>{row.tier}</span><span><b>Priority</b>{row.contactPriority}</span><span><b>Lead Status</b>{row.leadStatus}</span><span><b>Original Source</b>{row.originalSource}</span><span><b>Record Source</b>{row.recordSourceDetail !== "—" ? `${row.recordSource} · ${row.recordSourceDetail}` : row.recordSource}</span><span><b>Created</b>{shortDate(row.createdAt)}</span><span><b>Next Activity</b>{shortDate(row.nextActivity)}</span></div>
+    <div className="drawer-record-fields"><span><b>Country</b>{row.country || "—"}</span><span><b>Company Rank</b>{row.companyRank ? `Rank ${row.companyRank}` : "—"}</span><span><b>ICP Tier</b>{row.tier}</span><span><b>Company contacted</b>{row.companyTouched ? "Yes" : "No"}</span><span><b>Priority</b>{row.contactPriority}</span><span><b>Lead Status</b>{row.leadStatus}</span><span><b>Original Source</b>{row.originalSource}</span><span><b>Record Source</b>{row.recordSourceDetail !== "—" ? `${row.recordSource} · ${row.recordSourceDetail}` : row.recordSource}</span><span><b>Created</b>{shortDate(row.createdAt)}</span><span><b>Next Activity</b>{shortDate(row.nextActivity)}</span></div>
     <div className="drawer-record-actions"><span className={`score ${row.priorityScore >= 85 ? "high" : row.priorityScore >= 65 ? "medium" : "low"}`}>{row.priorityScore}</span>{row.companyUrl && externalLink(row.companyUrl, "Company")}{externalLink(row.url)}</div>
   </article>;
 }
@@ -85,7 +85,7 @@ export function DrilldownDrawer({ drilldown, onClose }: { drilldown: Drilldown; 
     <button className="drilldown-backdrop" onClick={onClose} aria-label="Close details" />
     <aside className="drilldown-drawer">
       <header className="drilldown-header"><div><span>DRILL-DOWN · LIVE HUBSPOT DATA</span><h2>{drilldown.title}</h2><p>{drilldown.description}</p></div><button className="drawer-close" onClick={onClose} aria-label="Close"><X size={20}/></button></header>
-      <div className="drilldown-toolbar"><label><Search size={15}/><input value={query} onChange={(event) => { setQuery(event.target.value); setLimit(50); }} placeholder="Search these records…" /></label><div><strong>{filtered.length}</strong><span>{query ? `matching of ${drilldown.rows.length}` : "records"}</span></div></div>
+      <div className="drilldown-toolbar"><label><Search size={15}/><input value={query} onChange={(event: { target: { value: string } }) => { setQuery(event.target.value); setLimit(50); }} placeholder="Search these records…" /></label><div><strong>{filtered.length}</strong><span>{query ? `matching of ${drilldown.rows.length}` : "records"}</span></div></div>
       <div className="drilldown-list">
         {!filtered.length && <div className="drawer-empty"><Search size={26}/><strong>No matching records</strong><span>Try a different search inside this result set.</span></div>}
         {filtered.slice(0, limit).map((row) => {
