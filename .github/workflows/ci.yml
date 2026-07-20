@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, rollback/calendar-stable]
   pull_request:
 
 jobs:
