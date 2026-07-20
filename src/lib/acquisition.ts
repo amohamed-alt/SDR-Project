@@ -12,11 +12,12 @@ import {
   hubspotRecordUrl,
 } from "@/lib/config";
 import {
+  describeHubSpotError,
   getPropertyDefinitions,
   listDealStages,
   listOwners,
   readAssociations,
-  searchAll,
+  searchAllByPropertyValues,
   type HubSpotPropertyDefinition,
   type SearchFilter,
 } from "@/lib/hubspot";
@@ -34,6 +35,16 @@ import type {
 } from "@/lib/types";
 
 const REP_COLORS = ["#744bc4", "#3a7de0", "#c52d69", "#b95b16", "#087a50", "#197f94", "#56677e", "#1aa6a0"];
+const ACQUISITION_OWNER_FALLBACKS: Record<string, HubSpotOwner> = {
+  "31644369": { id: "31644369", name: "Marita Chedid" },
+  "31558980": { id: "31558980", name: "Zein Fares" },
+  "76369997": { id: "76369997", name: "Ursula Waked" },
+  "32332250": { id: "32332250", name: "Ahmad Khawajah" },
+  "32332251": { id: "32332251", name: "Mohammed Khalid" },
+  "76370000": { id: "76370000", name: "Mohammad Jehad Al-Bargawi" },
+  "76369998": { id: "76369998", name: "Fadi Zanona" },
+  "76369995": { id: "76369995", name: "Mohammed Faizan" },
+};
 
 function value(record: HubSpotRecord, key: string) {
   return record.properties[key]?.trim() ?? "";
@@ -70,18 +81,34 @@ function inPeriod(raw: string, from: string, to: string) {
   return Boolean(day && day >= from && day <= to);
 }
 
-function ownerFilters(propertyName: string, from?: string, dateProperty?: string): SearchFilter[] {
-  return [
-    { propertyName, operator: "IN", values: ACQUISITION_OWNER_IDS },
-    ...(from && dateProperty ? [{ propertyName: dateProperty, operator: "GTE", value: `${from}T00:00:00+03:00` }] : []),
-  ];
+function dateFilters(from?: string, dateProperty?: string): SearchFilter[] {
+  return from && dateProperty
+    ? [{ propertyName: dateProperty, operator: "GTE", value: `${from}T00:00:00+03:00` }]
+    : [];
+}
+
+function searchOwnedRecords(
+  objectType: string,
+  properties: readonly string[],
+  from?: string,
+  dateProperty?: string,
+  sorts: string[] = [],
+) {
+  return searchAllByPropertyValues(
+    objectType,
+    properties,
+    "hubspot_owner_id",
+    ACQUISITION_OWNER_IDS,
+    dateFilters(from, dateProperty),
+    sorts,
+  );
 }
 
 async function optional<T>(label: string, warnings: string[], action: () => Promise<T>, fallback: T) {
   try {
     return await action();
   } catch (error) {
-    warnings.push(`${label}: ${error instanceof Error ? error.message : "unavailable"}`);
+    warnings.push(`${label}: ${describeHubSpotError(error)}`);
     return fallback;
   }
 }
@@ -122,6 +149,16 @@ function dedupe(records: HubSpotRecord[]) {
   return [...new Map(records.map((record) => [record.id, record])).values()];
 }
 
+function ownerDirectory(owners: HubSpotOwner[]) {
+  const directory = new Map<string, HubSpotOwner>(owners.map((owner) => [owner.id, owner]));
+  for (const ownerId of ACQUISITION_OWNER_IDS) {
+    if (!directory.has(ownerId) && ACQUISITION_OWNER_FALLBACKS[ownerId]) {
+      directory.set(ownerId, ACQUISITION_OWNER_FALLBACKS[ownerId]);
+    }
+  }
+  return directory;
+}
+
 export function createMockAcquisitionDashboard(): AcquisitionData {
   const today = localDay(new Date().toISOString());
   const yesterday = addDays(today, -1);
@@ -136,20 +173,11 @@ export function createMockAcquisitionDashboard(): AcquisitionData {
     leadsNeedContact: 0, rankABUntouched: 0, dealsAtRisk: 0, contactedLeads: 0,
     eligibleLeads: 0, contactRate: 0, openDeals: 0, openPipeline: 0,
   };
-  const knownNames: Record<string, string> = {
-    "31644369": "Marita Chedid",
-    "31558980": "Zein Fares",
-    "76369997": "Ursula Waked",
-    "32332250": "Ahmad Khawajah",
-    "32332251": "Mohammed Khalid",
-    "76370000": "Jehad Al-Bargawi",
-    "76369998": "Fadi Zanona",
-    "76369995": "Mohammed Faizan",
-  };
   const summary = (ownerId = "all", index = 0): AcquisitionRepSummary => {
-    const name = ownerId === "all" ? "Team Overview" : knownNames[ownerId] ?? `Owner ${ownerId}`;
+    const fallback = ACQUISITION_OWNER_FALLBACKS[ownerId];
+    const name = ownerId === "all" ? "Team Overview" : fallback?.name ?? `Owner ${ownerId}`;
     return {
-      ownerId, name, email: "", initials: ownerId === "all" ? "TM" : initials(name),
+      ownerId, name, email: fallback?.email ?? "", initials: ownerId === "all" ? "TM" : initials(name),
       color: ownerId === "all" ? "#087a50" : REP_COLORS[index % REP_COLORS.length], focus,
       yesterday: period(yesterday, yesterday), mtd: period(monthStart, today), ytd: period(yearStart, today),
     };
@@ -178,20 +206,18 @@ export async function buildAcquisitionDashboard(): Promise<AcquisitionData> {
   const [
     contacts,
     calls,
-    meetingsCreated,
-    meetingsHeld,
+    meetings,
     tasksCompleted,
     deals,
     owners,
     dealStageLabels,
     contactDefinitions,
   ] = await Promise.all([
-    optional("Contacts", warnings, () => searchAll("contacts", CONTACT_PROPERTIES, ownerFilters("hubspot_owner_id"), ["createdate"]), []),
-    optional("Calls", warnings, () => searchAll("calls", CALL_PROPERTIES, ownerFilters("hubspot_owner_id", yearStart, "hs_timestamp"), ["hs_timestamp"]), []),
-    optional("Meetings booked", warnings, () => searchAll("meetings", MEETING_PROPERTIES, ownerFilters("hubspot_owner_id", yearStart, "hs_createdate"), ["hs_createdate"]), []),
-    optional("Meetings held", warnings, () => searchAll("meetings", MEETING_PROPERTIES, ownerFilters("hubspot_owner_id", yearStart, "hs_meeting_start_time"), ["hs_meeting_start_time"]), []),
-    optional("Completed tasks", warnings, () => searchAll("tasks", TASK_PROPERTIES, ownerFilters("hubspot_owner_id", yearStart, "hs_task_completion_date"), ["hs_task_completion_date"]), []),
-    optional("Deals", warnings, () => searchAll("deals", DEAL_PROPERTIES, ownerFilters("hubspot_owner_id"), ["createdate"]), []),
+    optional("Contacts", warnings, () => searchOwnedRecords("contacts", CONTACT_PROPERTIES, undefined, undefined, ["createdate"]), []),
+    optional("Calls", warnings, () => searchOwnedRecords("calls", CALL_PROPERTIES, yearStart, "hs_timestamp", ["hs_timestamp"]), []),
+    optional("Meetings", warnings, () => searchOwnedRecords("meetings", MEETING_PROPERTIES, undefined, undefined, ["hs_createdate"]), []),
+    optional("Completed tasks", warnings, () => searchOwnedRecords("tasks", TASK_PROPERTIES, yearStart, "hs_task_completion_date", ["hs_task_completion_date"]), []),
+    optional("Deals", warnings, () => searchOwnedRecords("deals", DEAL_PROPERTIES, undefined, undefined, ["createdate"]), []),
     optional("Owners", warnings, () => listOwners(), [] as HubSpotOwner[]),
     optional("Deal stages", warnings, () => listDealStages(), new Map<string, string>()),
     optional("Contact labels", warnings, () => getPropertyDefinitions("contacts", [
@@ -201,8 +227,8 @@ export async function buildAcquisitionDashboard(): Promise<AcquisitionData> {
     ]), [] as HubSpotPropertyDefinition[]),
   ]);
 
-  const meetings = dedupe([...meetingsCreated, ...meetingsHeld]);
-  const ownerMap = new Map(owners.map((owner) => [owner.id, owner]));
+  const uniqueMeetings = dedupe(meetings);
+  const ownerMap = ownerDirectory(owners);
   const originalSourceLabels = propertyLabels(contactDefinitions, "hs_analytics_source");
   const latestSourceLabels = propertyLabels(contactDefinitions, "hs_latest_source");
   const recordSourceLabels = propertyLabels(contactDefinitions, "hs_object_source_label");
@@ -221,14 +247,14 @@ export async function buildAcquisitionDashboard(): Promise<AcquisitionData> {
   ]));
   const [callContacts, meetingContacts, taskContacts] = await Promise.all([
     optional("Call associations", warnings, () => readAssociations("calls", "contacts", calls.map((record) => record.id)), new Map<string, string[]>()),
-    optional("Meeting associations", warnings, () => readAssociations("meetings", "contacts", meetings.map((record) => record.id)), new Map<string, string[]>()),
+    optional("Meeting associations", warnings, () => readAssociations("meetings", "contacts", uniqueMeetings.map((record) => record.id)), new Map<string, string[]>()),
     optional("Task associations", warnings, () => readAssociations("tasks", "contacts", tasksCompleted.map((record) => record.id)), new Map<string, string[]>()),
   ]);
 
   const connectedContactIds = new Set(calls
     .filter((call) => value(call, "hs_call_disposition") === CONNECTED_CALL_DISPOSITION)
     .flatMap((call) => callContacts.get(call.id) ?? []));
-  const meetingContactIds = new Set(meetings.flatMap((meeting) => meetingContacts.get(meeting.id) ?? []));
+  const meetingContactIds = new Set(uniqueMeetings.flatMap((meeting) => meetingContacts.get(meeting.id) ?? []));
 
   const contactRows: ContactRow[] = contacts.map((contact) => {
     const ownerId = value(contact, "hubspot_owner_id");
@@ -325,7 +351,7 @@ export async function buildAcquisitionDashboard(): Promise<AcquisitionData> {
         ...activityContact(callContacts.get(call.id) ?? [], contactNames, "call"),
       };
     }),
-    ...meetings.map((meeting): ActivityRow => {
+    ...uniqueMeetings.map((meeting): ActivityRow => {
       const ownerId = value(meeting, "hubspot_owner_id");
       const occurredAt = value(meeting, "hs_meeting_start_time") || value(meeting, "hs_timestamp") || value(meeting, "hs_createdate");
       const outcome = pretty(value(meeting, "hs_meeting_outcome") || "Scheduled");
@@ -355,8 +381,8 @@ export async function buildAcquisitionDashboard(): Promise<AcquisitionData> {
     const periodContacts = contacts.filter((record) => ownerMatches(record, ownerId) && inPeriod(value(record, "createdate"), from, to));
     const periodCalls = calls.filter((record) => ownerMatches(record, ownerId) && inPeriod(value(record, "hs_timestamp"), from, to));
     const connectedCalls = periodCalls.filter((record) => value(record, "hs_call_disposition") === CONNECTED_CALL_DISPOSITION);
-    const bookedMeetings = meetings.filter((record) => ownerMatches(record, ownerId) && inPeriod(value(record, "hs_createdate"), from, to));
-    const completedMeetings = meetings.filter((record) => ownerMatches(record, ownerId)
+    const bookedMeetings = uniqueMeetings.filter((record) => ownerMatches(record, ownerId) && inPeriod(value(record, "hs_createdate"), from, to));
+    const completedMeetings = uniqueMeetings.filter((record) => ownerMatches(record, ownerId)
       && value(record, "hs_meeting_outcome") === "COMPLETED"
       && inPeriod(value(record, "hs_meeting_start_time") || value(record, "hs_timestamp"), from, to));
     const completedTasks = tasksCompleted.filter((record) => ownerMatches(record, ownerId)
@@ -400,7 +426,7 @@ export async function buildAcquisitionDashboard(): Promise<AcquisitionData> {
 
   const makeSummary = (ownerId?: string, index = 0): AcquisitionRepSummary => {
     const owner = ownerId ? ownerMap.get(ownerId) : undefined;
-    const name = owner?.name ?? (ownerId ? `Owner ${ownerId}` : "Team Overview");
+    const name = owner?.name ?? (ownerId ? ACQUISITION_OWNER_FALLBACKS[ownerId]?.name ?? `Owner ${ownerId}` : "Team Overview");
     return {
       ownerId: ownerId ?? "all",
       name,
