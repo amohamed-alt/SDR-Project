@@ -91,7 +91,13 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
   );
   const dueToday = tasks.filter((row) => row.dueBucket === "Due today");
   const highPriorityTasks = tasks.filter((row) => row.isHighPriority);
-  const untouchedLeads = data.priorityContacts.filter((row) => !row.lastContacted);
+  const onlineLeads = useMemo(
+    () => data.priorityContacts
+      .filter((row) => row.originalSource !== "Offline Sources" && row.originalSource !== "Unknown")
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
+    [data.priorityContacts],
+  );
+  const untouchedOnlineLeads = onlineLeads.filter((row) => !row.lastContacted);
   const meetings = data.recentActivities
     .filter((row) => row.type === "Meeting" && row.isOpen)
     .sort((a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime());
@@ -211,36 +217,36 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
 
   return <div className="marita-workspace">
     <section className="workspace-hero">
-      <div><span className="workspace-eyebrow"><Sparkles size={13}/>MARITA WORKSPACE</span><h2>Good morning, Marita</h2><p>Your live execution queue, lead shortcuts, and meeting preparation in one place.</p></div>
+      <div><span className="workspace-eyebrow"><Sparkles size={13}/>MARITA WORKSPACE</span><h2>Good morning, Marita</h2><p>Your online lead follow-up queue, live tasks, and meeting preparation in one place.</p></div>
       <div className={"calendar-connection" + (calendarStatus?.connected ? " connected" : "")}><span><i/>MARITA · GOOGLE CALENDAR</span><strong>{calendarStatus?.connected ? "Connected" : calendarStatus ? calendarStatus.configured ? "Ready to connect" : "Server setup missing" : "Checking connection…"}</strong><small>{calendarStatus?.connected ? calendarStatus.email : calendarError || "Marita organizes · Sales rep + selected contacts receive the invite"}</small><div className="calendar-connection-actions">{calendarStatus?.configured && !calendarStatus.connected && <a href="/api/google/connect">Connect calendar</a>}{calendarStatus?.connected && <button type="button" onClick={() => void disconnectCalendar()}>Disconnect</button>}</div></div>
     </section>
 
     <div className="workspace-stat-grid">
       <WorkspaceStat icon={CalendarDays} label="Tasks due today" value={dueToday.length} helper="Open execution queue" tone="green" onClick={() => openActivities("Tasks due today", "Open tasks due today for Marita.", dueToday, data.meta.hubspotUrls.tasks)}/>
       <WorkspaceStat icon={AlertTriangle} label="High-priority tasks" value={highPriorityTasks.length} helper="Needs attention" tone="purple" onClick={() => openActivities("High-priority tasks", "Open tasks marked High priority.", highPriorityTasks, data.meta.hubspotUrls.tasks)}/>
-      <WorkspaceStat icon={Target} label="Untouched leads" value={untouchedLeads.length} helper="Ready for first touch" tone="amber" onClick={() => openContacts("Untouched leads", "Contacts with no logged Last Contacted value.", untouchedLeads)}/>
+      <WorkspaceStat icon={Target} label="Online leads" value={onlineLeads.length} helper={`${untouchedOnlineLeads.length} not contacted`} tone="amber" onClick={() => openContacts("Online leads", "Only Marita contacts whose Original Traffic Source is online. Offline Sources and unknown sources are excluded.", onlineLeads)}/>
       <WorkspaceStat icon={Video} label="Meetings today" value={meetingsToday.length} helper={upcomingMeetings.length + " upcoming"} tone="blue" onClick={() => openActivities("Meetings today", "Scheduled meetings starting today.", meetingsToday, data.meta.hubspotUrls.meetings)}/>
     </div>
 
     <div className="workspace-main-grid">
       <section className="workspace-card queue-card">
-        <div className="workspace-card-heading"><div><span>MY DAY</span><h3>Execution queue</h3><p>Work the next best item without leaving the dashboard.</p></div><Clock3 size={20}/></div>
+        <div className="workspace-card-heading"><div><span>MY DAY</span><h3>Execution queue</h3><p>Work today’s tasks and newest online leads without leaving the dashboard.</p></div><Clock3 size={20}/></div>
         <div className="queue-tabs">
           <button className={queueMode === "tasks" ? "active" : ""} onClick={() => setQueueMode("tasks")}>Tasks <b>{dueToday.length}</b></button>
-          <button className={queueMode === "leads" ? "active" : ""} onClick={() => setQueueMode("leads")}>Leads <b>{Math.min(untouchedLeads.length, 99)}</b></button>
+          <button className={queueMode === "leads" ? "active" : ""} onClick={() => setQueueMode("leads")}>Online Leads <b>{Math.min(onlineLeads.length, 99)}</b></button>
           <button className={queueMode === "meetings" ? "active" : ""} onClick={() => setQueueMode("meetings")}>Meetings <b>{upcomingMeetings.length}</b></button>
         </div>
         <div className="workspace-queue-list">
-          {queueMode === "tasks" && dueToday.slice(0, 7).map((row) => <TaskQueueItem key={row.id} row={row} timezone={data.meta.timezone}/>)}
-          {queueMode === "leads" && untouchedLeads.slice(0, 7).map((row) => <LeadQueueItem key={row.id} row={row}/>)}
-          {queueMode === "meetings" && upcomingMeetings.slice(0, 7).map((row) => <MeetingQueueItem key={row.id} row={row} timezone={data.meta.timezone}/>)}
+          {queueMode === "tasks" && dueToday.slice(0, 7).map((row) => <TaskQueueItem key={row.id} row={row} timezone={data.meta.timezone}/>) }
+          {queueMode === "leads" && onlineLeads.slice(0, 7).map((row) => <LeadQueueItem key={row.id} row={row} timezone={data.meta.timezone}/>) }
+          {queueMode === "meetings" && upcomingMeetings.slice(0, 7).map((row) => <MeetingQueueItem key={row.id} row={row} timezone={data.meta.timezone}/>) }
           {queueMode === "tasks" && !dueToday.length && <QueueEmpty label="No tasks due today" helper="You are clear for today’s task queue."/>}
-          {queueMode === "leads" && !untouchedLeads.length && <QueueEmpty label="No untouched leads" helper="Every lead has a logged touch."/>}
+          {queueMode === "leads" && !onlineLeads.length && <QueueEmpty label="No online leads" helper="No contacts with an online Original Traffic Source are assigned to Marita."/>}
           {queueMode === "meetings" && !upcomingMeetings.length && <QueueEmpty label="No upcoming meetings" helper="Use the composer to prepare a new meeting."/>}
         </div>
         <button className="queue-view-all" onClick={() => {
           if (queueMode === "tasks") openActivities("Tasks due today", "All open tasks due today.", dueToday, data.meta.hubspotUrls.tasks);
-          if (queueMode === "leads") openContacts("Untouched leads", "All contacts without Last Contacted.", untouchedLeads);
+          if (queueMode === "leads") openContacts("Online leads", "Only Marita contacts whose Original Traffic Source is online, newest first.", onlineLeads);
           if (queueMode === "meetings") openActivities("Upcoming meetings", "All upcoming scheduled meetings.", upcomingMeetings, data.meta.hubspotUrls.meetings);
         }}>View full list<ChevronRight size={14}/></button>
       </section>
@@ -290,8 +296,8 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
     </div>
 
     <section className="workspace-card priority-workspace">
-      <div className="workspace-card-heading"><div><span>PRIORITY LEADS</span><h3>Best next conversations</h3><p>High-scoring contacts with direct call, email, and HubSpot shortcuts.</p></div><UserRound size={20}/></div>
-      <div className="priority-workspace-grid">{data.priorityContacts.slice(0, 8).map((row) => <PriorityLeadCard key={row.id} row={row}/>)}</div>
+      <div className="workspace-card-heading"><div><span>ONLINE LEADS</span><h3>Newest online follow-up leads</h3><p>Only online-source contacts, ordered by when they reached Marita.</p></div><UserRound size={20}/></div>
+      <div className="priority-workspace-grid">{onlineLeads.slice(0, 8).map((row) => <PriorityLeadCard key={row.id} row={row}/>)}</div>
     </section>
   </div>;
 }
@@ -304,8 +310,8 @@ function TaskQueueItem({ row, timezone }: { row: ActivityRow; timezone: string }
   return <article className="queue-item"><div className={"queue-icon " + (row.isHighPriority ? "urgent" : "")}><CheckCircle2 size={16}/></div><div className="queue-item-main"><strong>{row.subject}</strong><span>{row.relatedContactName ? row.relatedContactName + " · " : ""}{row.detail} · Due {shortTime(row.dueAt, timezone)}</span></div><span className={"queue-status " + (row.isHighPriority ? "high" : "")}>{row.isHighPriority ? "High" : row.status}</span><HubSpotButton href={row.url} label={row.relatedContactUrl ? "Timeline" : "Tasks"}/></article>;
 }
 
-function LeadQueueItem({ row }: { row: ContactRow }) {
-  return <article className="queue-item"><div className="queue-avatar">{row.name.split(" ").map((part) => part[0]).join("").slice(0,2).toUpperCase()}</div><div className="queue-item-main"><strong>{row.name}</strong><span>{row.title || "No title"} · {row.company || "No company"}</span></div><span className="queue-status score-pill">{row.priorityScore}</span><div className="queue-quick-actions">{row.phone && <a href={"tel:" + row.phone} aria-label="Call"><Phone size={13}/></a>}{row.email && <a href={"mailto:" + row.email} aria-label="Email"><Mail size={13}/></a>}<HubSpotButton href={row.url} label="Lead"/></div></article>;
+function LeadQueueItem({ row, timezone }: { row: ContactRow; timezone: string }) {
+  return <article className="queue-item"><div className="queue-avatar">{row.name.split(" ").map((part) => part[0]).join("").slice(0,2).toUpperCase()}</div><div className="queue-item-main"><strong>{row.name}</strong><span>{row.company || "No company"} · {row.originalSource} · Added {shortDate(row.createdAt, timezone)}</span></div><span className="queue-status score-pill">{row.lastContacted ? "Follow up" : "New"}</span><div className="queue-quick-actions">{row.phone && <a href={"tel:" + row.phone} aria-label="Call"><Phone size={13}/></a>}{row.email && <a href={"mailto:" + row.email} aria-label="Email"><Mail size={13}/></a>}<HubSpotButton href={row.url} label="Lead"/></div></article>;
 }
 
 function MeetingQueueItem({ row, timezone }: { row: ActivityRow; timezone: string }) {
@@ -317,5 +323,5 @@ function QueueEmpty({ label, helper }: { label: string; helper: string }) {
 }
 
 function PriorityLeadCard({ row }: { row: ContactRow }) {
-  return <article className="priority-lead-card"><div className="priority-lead-top"><div className="queue-avatar">{row.name.split(" ").map((part) => part[0]).join("").slice(0,2).toUpperCase()}</div><span className={"score " + (row.priorityScore >= 85 ? "high" : row.priorityScore >= 65 ? "medium" : "low")}>{row.priorityScore}</span></div><strong>{row.name}</strong><p>{row.title || "No job title"}</p><div className="priority-lead-meta"><span><Target size={12}/>{row.company || "No company"}</span><span><MapPin size={12}/>{row.country || "No country"}</span></div><div className="priority-lead-tags"><i>{row.tier}</i><i>{row.contactPriority}</i></div><div className="priority-lead-actions">{row.phone && <a href={"tel:" + row.phone}><Phone size={13}/>Call</a>}{row.email && <a href={"mailto:" + row.email}><Mail size={13}/>Email</a>}<a href={row.url} target="_blank" rel="noreferrer"><ExternalLink size={13}/>HubSpot</a></div></article>;
+  return <article className="priority-lead-card"><div className="priority-lead-top"><div className="queue-avatar">{row.name.split(" ").map((part) => part[0]).join("").slice(0,2).toUpperCase()}</div><span className={"score " + (row.priorityScore >= 85 ? "high" : row.priorityScore >= 65 ? "medium" : "low")}>{row.priorityScore}</span></div><strong>{row.name}</strong><p>{row.title || "No job title"}</p><div className="priority-lead-meta"><span><Target size={12}/>{row.company || "No company"}</span><span><MapPin size={12}/>{row.country || "No country"}</span></div><div className="priority-lead-tags"><i>{row.originalSource}</i><i>{row.leadStatus}</i></div><div className="priority-lead-actions">{row.phone && <a href={"tel:" + row.phone}><Phone size={13}/>Call</a>}{row.email && <a href={"mailto:" + row.email}><Mail size={13}/>Email</a>}<a href={row.url} target="_blank" rel="noreferrer"><ExternalLink size={13}/>HubSpot</a></div></article>;
 }
