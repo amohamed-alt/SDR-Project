@@ -7,7 +7,7 @@ export const maxDuration = 120;
 
 const cachedAcquisition = unstable_cache(
   buildAcquisitionDashboard,
-  ["talentera-acquisition-dashboard-v1"],
+  ["talentera-acquisition-dashboard-v2"],
   { revalidate: 900, tags: ["acquisition-dashboard"] },
 );
 
