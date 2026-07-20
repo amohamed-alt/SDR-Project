@@ -11,6 +11,8 @@ import type { ActivityRow, ContactRow, DashboardData } from "@/lib/types";
 
 type QueueMode = "tasks" | "leads" | "meetings";
 type CalendarStatus = { configured: boolean; connected: boolean; email?: string; connectedAt?: string; error?: string };
+type MeetingContact = { id: string; name: string; email: string; company: string; url: string };
+type ContactLookupResponse = { contact?: MeetingContact; error?: string };
 type BookingResult = {
   calendarUrl: string;
   meetLink?: string;
@@ -67,8 +69,10 @@ function HubSpotButton({ href, label = "Open" }: { href: string; label?: string 
 
 export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen: (drilldown: Drilldown) => void }) {
   const [queueMode, setQueueMode] = useState<QueueMode>("tasks");
-  const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
-  const [contactCandidateId, setContactCandidateId] = useState("");
+  const [selectedContacts, setSelectedContacts] = useState<MeetingContact[]>([]);
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactLookupLoading, setContactLookupLoading] = useState(false);
+  const [contactLookupError, setContactLookupError] = useState("");
   const [selectedSalesOwnerId, setSelectedSalesOwnerId] = useState("");
   const [includeOrganizerAsAttendee, setIncludeOrganizerAsAttendee] = useState(false);
   const [subject, setSubject] = useState("Talentera discovery call");
@@ -104,10 +108,6 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
   const meetingsToday = meetings.filter((row) => localDay(row.occurredAt, data.meta.timezone) === today);
   const generatedAt = new Date(data.meta.generatedAt).getTime();
   const upcomingMeetings = meetings.filter((row) => new Date(row.occurredAt).getTime() >= generatedAt);
-  const selectedContacts = selectedContactIds
-    .map((id) => data.priorityContacts.find((row) => row.id === id))
-    .filter((row): row is ContactRow => Boolean(row));
-  const availableContacts = data.priorityContacts.filter((row) => Boolean(row.email) && !selectedContactIds.includes(row.id));
   const salesOwners = data.filterOptions.owners
     .filter((owner) => SALES_REP_ORDER.has(owner.id))
     .sort((left, right) => (SALES_REP_ORDER.get(left.id) ?? 999) - (SALES_REP_ORDER.get(right.id) ?? 999));
@@ -148,15 +148,42 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
     onOpen({ kind: "contacts", title, description, rows, hubspotUrl: data.meta.hubspotUrls.contacts });
   }
 
-  function addContact() {
-    if (!contactCandidateId || selectedContactIds.includes(contactCandidateId)) return;
-    setSelectedContactIds((current) => [...current, contactCandidateId]);
-    setContactCandidateId("");
-    setPreview(false);
+  async function addContact() {
+    const email = contactEmail.trim().toLowerCase();
+    setContactLookupError("");
+
+    if (!email) {
+      setContactLookupError("Enter the contact email first.");
+      return;
+    }
+    if (selectedContacts.some((contact) => contact.email.toLowerCase() === email)) {
+      setContactLookupError("This contact is already added.");
+      return;
+    }
+
+    setContactLookupLoading(true);
+    try {
+      const response = await fetch("/api/hubspot/contact-by-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const payload = await response.json() as ContactLookupResponse;
+      if (!response.ok || !payload.contact) throw new Error(payload.error || "Contact not found in HubSpot");
+
+      const contact = payload.contact;
+      setSelectedContacts((current) => current.some((item) => item.id === contact.id) ? current : [...current, contact]);
+      setContactEmail("");
+      setPreview(false);
+    } catch (error) {
+      setContactLookupError(error instanceof Error ? error.message : "Unable to find the contact in HubSpot");
+    } finally {
+      setContactLookupLoading(false);
+    }
   }
 
   function removeContact(contactId: string) {
-    setSelectedContactIds((current) => current.filter((id) => id !== contactId));
+    setSelectedContacts((current) => current.filter((contact) => contact.id !== contactId));
     setPreview(false);
   }
 
@@ -252,21 +279,22 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
       </section>
 
       <section className="workspace-card meeting-composer">
-        <div className="workspace-card-heading"><div><span>MEETING COMPOSER</span><h3>Book a Google Meet for Sales</h3><p>Marita chooses the Sales Rep and one or more contacts. Nothing is selected automatically.</p></div><Video size={20}/></div>
+        <div className="workspace-card-heading"><div><span>MEETING COMPOSER</span><h3>Book a Google Meet for Sales</h3><p>Choose the Sales Rep, then add one or more HubSpot contacts by email.</p></div><Video size={20}/></div>
         <form onSubmit={submitPreview}>
           <label><span>Sales Rep · Meeting owner</span><select value={selectedSalesOwnerId} onChange={(event) => { setSelectedSalesOwnerId(event.target.value); setPreview(false); }} required disabled={!salesOwners.length}><option value="">Select Sales Rep</option>{salesOwners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}{owner.email ? " · " + owner.email : ""}</option>)}</select></label>
           <div className="meeting-host"><div className="meeting-avatar host"><UserRound size={15}/></div><div><strong>{selectedSalesOwner?.name ?? "Select Faizan, Fadi, Jehad, Bassam, Ursula, Zein, or Abdullah"}</strong><span>{selectedSalesOwner?.email || "No Sales Rep selected"}</span></div><em>Host · HubSpot owner</em></div>
 
           <div className={styles.contactPickerRow}>
-            <label><span>Add contact attendee</span><select value={contactCandidateId} onChange={(event) => setContactCandidateId(event.target.value)} disabled={!availableContacts.length}><option value="">{availableContacts.length ? "Select a HubSpot contact" : "No more contacts available"}</option>{availableContacts.map((row) => <option key={row.id} value={row.id}>{row.name}{row.company ? " · " + row.company : ""}</option>)}</select></label>
-            <button className={styles.addContactButton} type="button" onClick={addContact} disabled={!contactCandidateId}><Plus size={14}/>Add</button>
+            <label><span>Add contact by email</span><input type="email" value={contactEmail} placeholder="contact@company.com" autoComplete="off" onChange={(event) => { setContactEmail(event.target.value); setContactLookupError(""); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addContact(); } }}/></label>
+            <button className={styles.addContactButton} type="button" onClick={() => void addContact()} disabled={contactLookupLoading || !contactEmail.trim()}><Plus size={14}/>{contactLookupLoading ? "Finding…" : "Add"}</button>
           </div>
+          {contactLookupError && <div className={styles.contactLookupError} role="alert"><AlertTriangle size={13}/>{contactLookupError}</div>}
 
           <div className={styles.selectedContacts}>
-            {!selectedContacts.length && <div className={styles.contactEmpty}><Users size={17}/><span>Add at least one contact. The first added contact is the Primary Contact.</span></div>}
+            {!selectedContacts.length && <div className={styles.contactEmpty}><Users size={17}/><span>Enter a HubSpot contact email. The first added contact is the Primary Contact.</span></div>}
             {selectedContacts.map((contact, index) => <div className={`meeting-guest ${styles.selectedContactCard}`} key={contact.id}>
               <div className="meeting-avatar">{contact.name.split(" ").map((part) => part[0]).join("").slice(0,2).toUpperCase() || "?"}</div>
-              <div><strong>{contact.name}</strong><span>{contact.email || "No email address in HubSpot"}</span></div>
+              <div><strong>{contact.name}</strong><span>{contact.email}{contact.company ? " · " + contact.company : ""}</span></div>
               <i className={styles.contactRole}>{index === 0 ? "Primary" : "Additional"}</i>
               <HubSpotButton href={contact.url} label="Profile"/>
               <button className={styles.removeContactButton} type="button" onClick={() => removeContact(contact.id)} aria-label={`Remove ${contact.name}`}><X size={13}/></button>
