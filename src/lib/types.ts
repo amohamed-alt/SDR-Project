@@ -91,6 +91,8 @@ export interface AlertItem {
 
 export interface ContactRow {
   id: string;
+  ownerId?: string;
+  ownerName?: string;
   name: string;
   email: string;
   phone: string;
@@ -129,6 +131,7 @@ export interface ContactRow {
 
 export interface ActivityRow {
   id: string;
+  ownerId?: string;
   type: "Call" | "Meeting" | "Task" | "Email";
   subject: string;
   status: string;
@@ -166,6 +169,7 @@ export interface CompanyRow {
 
 export interface DealRow {
   id: string;
+  ownerId?: string;
   name: string;
   stage: string;
   owner: string;
@@ -173,6 +177,8 @@ export interface DealRow {
   createdAt: string;
   closeDate: string;
   isOpen: boolean;
+  isWon?: boolean;
+  nextActivity?: string;
   url: string;
 }
 
@@ -250,4 +256,70 @@ export interface DashboardFilters {
   latestSource?: string;
   tier?: string;
   persona?: string;
+}
+
+export interface AcquisitionPeriodMetrics {
+  from: string;
+  to: string;
+  contacts: number;
+  calls: number;
+  connectedCalls: number;
+  connectionRate: number;
+  meetingsBooked: number;
+  meetingsCompleted: number;
+  tasksCompleted: number;
+  dealsCreated: number;
+  dealsWon: number;
+  dealsLost: number;
+  pipelineCreated: number;
+}
+
+export interface AcquisitionFocus {
+  leadsNeedContact: number;
+  rankABUntouched: number;
+  dealsAtRisk: number;
+  contactedLeads: number;
+  eligibleLeads: number;
+  contactRate: number;
+  openDeals: number;
+  openPipeline: number;
+}
+
+export interface AcquisitionRepSummary {
+  ownerId: string;
+  name: string;
+  email: string;
+  initials: string;
+  color: string;
+  focus: AcquisitionFocus;
+  yesterday: AcquisitionPeriodMetrics;
+  mtd: AcquisitionPeriodMetrics;
+  ytd: AcquisitionPeriodMetrics;
+}
+
+export interface AcquisitionData {
+  meta: {
+    generatedAt: string;
+    timezone: string;
+    yesterday: string;
+    monthStart: string;
+    yearStart: string;
+    today: string;
+    isDemo: boolean;
+    warnings: string[];
+    hubspotUrls: {
+      contacts: string;
+      calls: string;
+      meetings: string;
+      tasks: string;
+      deals: string;
+    };
+  };
+  team: AcquisitionRepSummary;
+  reps: AcquisitionRepSummary[];
+  contacts: ContactRow[];
+  activities: ActivityRow[];
+  deals: DealRow[];
+  leadSources: ChartDatum[];
+  dealStages: ChartDatum[];
 }
