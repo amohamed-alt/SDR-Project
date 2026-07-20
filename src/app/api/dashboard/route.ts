@@ -22,8 +22,8 @@ const querySchema = z.object({
 });
 
 const cachedDashboard = unstable_cache(
-  async (serializedFilters: string) => buildDashboard(JSON.parse(serializedFilters) as DashboardFilters),
-  ["sdr-dashboard-live-v3-execution-focus"],
+  async (filters: DashboardFilters) => buildDashboard(filters),
+  ["sdr-dashboard-live-v4-filter-object"],
   { revalidate: 900, tags: ["sdr-dashboard"] },
 );
 
@@ -53,14 +53,24 @@ export async function GET(request: NextRequest) {
   if (parsed.data.from > parsed.data.to) return NextResponse.json({ error: "The start date must be before the end date" }, { status: 400 });
 
   try {
+    const filters: DashboardFilters = parsed.data;
     const data = process.env.DEMO_MODE === "true"
-      ? createMockDashboard(parsed.data.from, parsed.data.to, parsed.data.ownerId)
+      ? createMockDashboard(filters.from, filters.to, filters.ownerId)
       : params.get("refresh") === "1"
-        ? await buildDashboard(parsed.data)
-        : await cachedDashboard(JSON.stringify(parsed.data));
-    return NextResponse.json(data, { headers: { "Cache-Control": "private, max-age=0, must-revalidate" } });
+        ? await buildDashboard(filters)
+        : await cachedDashboard(filters);
+
+    return NextResponse.json(data, {
+      headers: {
+        "Cache-Control": "private, max-age=0, must-revalidate",
+        "X-Dashboard-Cache-Version": "v4-filter-object",
+      },
+    });
   } catch (error) {
     console.error("Dashboard load failed", error);
-    return NextResponse.json({ error: "Unable to load HubSpot dashboard data", details: error instanceof Error ? error.message : "Unknown error" }, { status: 500 });
+    return NextResponse.json({
+      error: "Unable to load HubSpot dashboard data",
+      details: error instanceof Error ? error.message : "Unknown error",
+    }, { status: 500 });
   }
 }
