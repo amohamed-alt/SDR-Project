@@ -99,6 +99,10 @@ export interface ContactRow {
   linkedinUrl: string;
   title: string;
   company: string;
+  companyId?: string;
+  companyOwnerId?: string;
+  companyRank?: string;
+  companyTouched?: boolean;
   country: string;
   originalSource: string;
   originalSourceDetail: string;
@@ -291,6 +295,7 @@ export interface AcquisitionRepSummary {
   email: string;
   initials: string;
   color: string;
+  mode?: "full" | "deal_only";
   focus: AcquisitionFocus;
   yesterday: AcquisitionPeriodMetrics;
   mtd: AcquisitionPeriodMetrics;
@@ -299,6 +304,7 @@ export interface AcquisitionRepSummary {
 
 export interface AcquisitionData {
   meta: {
+    schemaVersion?: number;
     generatedAt: string;
     timezone: string;
     yesterday: string;
@@ -307,6 +313,7 @@ export interface AcquisitionData {
     today: string;
     isDemo: boolean;
     warnings: string[];
+    rankProperty?: string;
     hubspotUrls: {
       contacts: string;
       calls: string;
