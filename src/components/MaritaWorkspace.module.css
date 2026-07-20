@@ -32,6 +32,24 @@
   cursor: not-allowed;
 }
 
+.contactLookupError {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: -2px;
+  padding: 7px 9px;
+  border: 1px solid #efc2bb;
+  border-radius: 8px;
+  background: #fff5f3;
+  color: #a53f34;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.contactLookupError svg {
+  flex: 0 0 auto;
+}
+
 .selectedContacts {
   display: flex;
   flex-direction: column;
