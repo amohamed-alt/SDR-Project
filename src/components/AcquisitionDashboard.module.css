@@ -1,0 +1,511 @@
+.toolbar {
+  display: grid;
+  grid-template-columns: minmax(250px, 1.2fr) repeat(4, minmax(120px, .8fr)) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.periodSwitch {
+  display: flex;
+  gap: 5px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.periodSwitch button {
+  flex: 1;
+  min-width: 72px;
+  height: 31px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.periodSwitch button.active {
+  background: var(--green);
+  color: #fff;
+  box-shadow: 0 5px 14px rgba(8, 122, 80, .18);
+}
+
+.filterField {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.filterField span {
+  color: var(--muted);
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.filterField select {
+  width: 100%;
+  height: 39px;
+  min-width: 0;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  outline: none;
+  background: #fbfcfb;
+  color: var(--text);
+  font-size: 9px;
+}
+
+.filterField select:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(8, 122, 80, .1);
+}
+
+.filterField select:disabled {
+  opacity: .48;
+  cursor: not-allowed;
+}
+
+.filterActions {
+  display: flex;
+  gap: 6px;
+}
+
+.filterActions button {
+  height: 39px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  font-size: 8px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.reset {
+  background: #fff;
+  color: var(--muted);
+}
+
+.apply {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--green);
+  border-color: var(--green) !important;
+  color: #fff;
+}
+
+.performance {
+  padding: 17px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(105px, 1fr));
+  gap: 8px;
+}
+
+.metricButton {
+  min-height: 76px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: #fbfcfb;
+  cursor: pointer;
+  transition: .16s ease;
+}
+
+.metricButton:hover {
+  border-color: #afd0c0;
+  background: #f2f9f5;
+  transform: translateY(-1px);
+}
+
+.metricButton strong {
+  font: 800 16px/1 "Manrope", sans-serif;
+  color: var(--text);
+}
+
+.metricButton span {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 7px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.scoreboard,
+.rankPanel,
+.dealsPanel {
+  padding: 17px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+}
+
+.table {
+  width: 100%;
+  min-width: 1120px;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  padding: 10px 9px;
+  border-bottom: 1px solid var(--border-soft);
+  text-align: right;
+  white-space: nowrap;
+  font-size: 8px;
+}
+
+.table th {
+  background: #f5f8f6;
+  color: #7a8d84;
+  font-size: 6px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.table th:first-child,
+.table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  min-width: 170px;
+  text-align: left;
+  background: #fff;
+}
+
+.table th:first-child {
+  background: #f5f8f6;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.table tbody tr:hover td {
+  background: #f7faf8;
+}
+
+.ownerButton {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ownerButton div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ownerButton strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 8px;
+  text-overflow: ellipsis;
+}
+
+.ownerButton small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 6px;
+}
+
+.rate {
+  color: var(--green);
+  font-weight: 800;
+}
+
+.danger {
+  color: var(--red);
+  font-weight: 800;
+}
+
+.money {
+  color: var(--green);
+  font-weight: 800;
+}
+
+.twoColumn {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(330px, .8fr);
+  gap: 15px;
+}
+
+.rankTotals {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(110px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.rankStat {
+  padding: 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: #fbfcfb;
+}
+
+.rankStat strong {
+  display: block;
+  font: 800 17px/1 "Manrope", sans-serif;
+}
+
+.rankStat span {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.rankTable {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+}
+
+.rankTable th,
+.rankTable td {
+  padding: 9px;
+  border-bottom: 1px solid var(--border-soft);
+  text-align: right;
+  font-size: 7px;
+}
+
+.rankTable th:first-child,
+.rankTable td:first-child {
+  text-align: left;
+}
+
+.rankTable th {
+  color: var(--muted);
+  font-size: 6px;
+  text-transform: uppercase;
+}
+
+.rankTable button {
+  border: 0;
+  background: transparent;
+  color: var(--green);
+  font-size: 7px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.dealBuckets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 8px;
+  margin-bottom: 13px;
+}
+
+.dealBucket {
+  min-height: 88px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: #fbfcfb;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dealBucket:hover {
+  border-color: #afd0c0;
+  background: #f2f9f5;
+}
+
+.dealBucket strong {
+  display: block;
+  font: 800 18px/1 "Manrope", sans-serif;
+}
+
+.dealBucket span {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.dealBucket small {
+  display: block;
+  margin-top: 8px;
+  color: var(--green);
+  font-size: 7px;
+  font-weight: 800;
+}
+
+.stageList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stageButton {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(80px, 1.2fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 7px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stageButton:hover {
+  background: #f4f9f6;
+}
+
+.stageButton i {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e6eee9;
+}
+
+.stageButton i b {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--green);
+}
+
+.stageButton em {
+  color: var(--green);
+  font-size: 7px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.sourceList {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.sourceRow {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) minmax(90px, 1.5fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+
+.sourceRow span {
+  overflow: hidden;
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceRow i {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e6eee9;
+}
+
+.sourceRow i b {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--blue);
+}
+
+.sourceRow strong {
+  font-size: 8px;
+}
+
+.loadingOverlay {
+  position: fixed;
+  inset: auto 22px 22px auto;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 13px;
+  border: 1px solid #cbe1d6;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .96);
+  box-shadow: var(--shadow);
+  color: var(--green);
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid #cee5da;
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.empty {
+  min-height: 150px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+@media (max-width: 1250px) {
+  .toolbar { grid-template-columns: repeat(3, minmax(150px, 1fr)); }
+  .metricGrid { grid-template-columns: repeat(3, minmax(110px, 1fr)); }
+  .twoColumn { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 850px) {
+  .toolbar { grid-template-columns: 1fr 1fr; }
+  .metricGrid { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
+  .rankTotals { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .toolbar { grid-template-columns: 1fr; }
+  .periodSwitch { width: 100%; }
+  .filterActions button { flex: 1; }
+  .metricGrid { grid-template-columns: 1fr 1fr; }
+  .dealBuckets { grid-template-columns: 1fr 1fr; }
+}
