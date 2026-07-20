@@ -94,17 +94,23 @@ async function loadSnapshotFromDisk() {
 
 async function persistSnapshot(data: AcquisitionData) {
   const serialized = JSON.stringify(data);
-  const directory = dirname(SNAPSHOT_PATH);
-  const temporaryPath = `${SNAPSHOT_PATH}.${process.pid}.${Date.now()}.tmp`;
-
-  await mkdir(directory, { recursive: true });
-  await writeFile(temporaryPath, serialized, "utf8");
-  await rename(temporaryPath, SNAPSHOT_PATH);
 
   state.data = data;
   state.serialized = serialized;
   state.source = "memory";
   state.lastError = undefined;
+
+  const directory = dirname(SNAPSHOT_PATH);
+  const temporaryPath = `${SNAPSHOT_PATH}.${process.pid}.${Date.now()}.tmp`;
+
+  try {
+    await mkdir(directory, { recursive: true });
+    await writeFile(temporaryPath, serialized, "utf8");
+    await rename(temporaryPath, SNAPSHOT_PATH);
+  } catch (error) {
+    state.lastError = `Snapshot persistence failed: ${error instanceof Error ? error.message : "unknown error"}`;
+    console.error("Unable to persist Acquisition snapshot", error);
+  }
 
   return serialized;
 }
