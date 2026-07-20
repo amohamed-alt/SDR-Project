@@ -66,31 +66,64 @@ jobs:
           environment-variables: |
             SDR_BUILD_REF=${{ env.DEPLOY_SHA }}
 
-      - name: Wait for containers and public health
+      - name: Verify deployed commit and container health
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
         run: |
           set +e
           API_BASE="https://developers.hostinger.com/api/vps/v1/virtual-machines/${HOSTINGER_VM_ID}/docker/${HOSTINGER_PROJECT}"
+          sleep 15
 
-          for attempt in $(seq 1 45); do
+          for attempt in $(seq 1 50); do
+            CONTAINERS=$(curl --silent --show-error \
+              --connect-timeout 3 --max-time 12 \
+              -H "Authorization: Bearer ${HOSTINGER_API_KEY}" \
+              -H "Accept: application/json" \
+              "${API_BASE}/containers" 2>&1)
+            CONTAINER_STATUS=$?
+
+            PROJECT_LOGS=$(curl --silent --show-error \
+              --connect-timeout 3 --max-time 20 \
+              -H "Authorization: Bearer ${HOSTINGER_API_KEY}" \
+              -H "Accept: application/json" \
+              "${API_BASE}/logs" 2>&1)
+            LOG_STATUS=$?
+
+            HEALTHY_COUNT=0
+            if [ "$CONTAINER_STATUS" -eq 0 ]; then
+              HEALTHY_COUNT=$(printf '%s\n' "$CONTAINERS" | jq '[.[] | select(.state == "running" and .health == "healthy")] | length' 2>/dev/null)
+              HEALTHY_COUNT=${HEALTHY_COUNT:-0}
+            fi
+
+            COMMIT_DEPLOYED=0
+            if [ "$LOG_STATUS" -eq 0 ] \
+              && printf '%s\n' "$PROJECT_LOGS" | grep -Fq "Using commit: ${DEPLOY_SHA}" \
+              && printf '%s\n' "$PROJECT_LOGS" | grep -Fq "Project deployed successfully"; then
+              COMMIT_DEPLOYED=1
+            fi
+
+            PUBLIC_OK=0
             if curl --fail --silent --show-error \
               --connect-timeout 3 --max-time 6 \
               "$PUBLIC_HEALTH_URL" >/tmp/public-health.json 2>/tmp/public-health.error; then
-              echo "Public health check succeeded on attempt ${attempt}."
-              cat /tmp/public-health.json
+              PUBLIC_OK=1
+            fi
+
+            echo "Attempt ${attempt}: commit_deployed=${COMMIT_DEPLOYED} healthy_containers=${HEALTHY_COUNT} public_health=${PUBLIC_OK}"
+
+            if [ "$COMMIT_DEPLOYED" -eq 1 ] && [ "$HEALTHY_COUNT" -ge 1 ]; then
+              echo "Validated commit ${DEPLOY_SHA} is deployed and the Hostinger container is healthy."
+              if [ "$PUBLIC_OK" -eq 1 ]; then
+                cat /tmp/public-health.json
+              else
+                echo "::warning::The GitHub runner could not reach the public health URL, but Hostinger reports the validated container as healthy."
+              fi
               exit 0
             fi
 
-            if [ "$attempt" -eq 1 ] || [ $((attempt % 3)) -eq 0 ]; then
-              echo "::group::Hostinger container status · attempt ${attempt}"
-              CONTAINERS=$(curl --silent --show-error \
-                --connect-timeout 3 --max-time 10 \
-                -H "Authorization: Bearer ${HOSTINGER_API_KEY}" \
-                -H "Accept: application/json" \
-                "${API_BASE}/containers" 2>&1)
-              STATUS=$?
-              if [ "$STATUS" -eq 0 ]; then
+            if [ "$attempt" -eq 1 ] || [ $((attempt % 5)) -eq 0 ]; then
+              echo "::group::Hostinger deployment diagnostics · attempt ${attempt}"
+              if [ "$CONTAINER_STATUS" -eq 0 ]; then
                 printf '%s\n' "$CONTAINERS" | jq . 2>/dev/null || printf '%s\n' "$CONTAINERS"
               else
                 printf 'Unable to read container status: %s\n' "$CONTAINERS"
@@ -103,21 +136,10 @@ jobs:
             sleep 8
           done
 
-          echo "::group::Hostinger project logs"
-          PROJECT_LOGS=$(curl --silent --show-error \
-            --connect-timeout 3 --max-time 20 \
-            -H "Authorization: Bearer ${HOSTINGER_API_KEY}" \
-            -H "Accept: application/json" \
-            "${API_BASE}/logs" 2>&1)
-          LOG_STATUS=$?
-          if [ "$LOG_STATUS" -eq 0 ]; then
-            printf '%s\n' "$PROJECT_LOGS" | jq . 2>/dev/null || printf '%s\n' "$PROJECT_LOGS"
-          else
-            printf 'Unable to read project logs: %s\n' "$PROJECT_LOGS"
-          fi
+          echo "::group::Final Hostinger project logs"
+          printf '%s\n' "$PROJECT_LOGS" | jq . 2>/dev/null || printf '%s\n' "$PROJECT_LOGS"
           echo "::endgroup::"
-
-          echo "::error::Docker deployment was initiated, but the public health endpoint did not become ready."
+          echo "::error::The validated commit did not reach a healthy running container."
           exit 1
 
       - name: Mark deployment successful
@@ -131,7 +153,7 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'success',
               context: 'hostinger/deploy',
-              description: 'Hostinger deployment and public health check succeeded',
+              description: 'Validated commit is running in a healthy Hostinger container',
               target_url: process.env.DEPLOY_URL,
             });
 
