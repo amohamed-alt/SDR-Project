@@ -3,7 +3,11 @@ import type { HubSpotOwner, HubSpotRecord } from "@/lib/types";
 const API_BASE = "https://api.hubapi.com";
 const MAX_RETRIES = 3;
 const SEARCH_PAGE_SIZE = 200;
+const SEARCH_INTERVAL_MS = 275;
 const BATCH_SIZE = 100;
+
+let searchQueue: Promise<void> = Promise.resolve();
+let nextSearchAt = 0;
 
 export interface SearchFilter {
   propertyName: string;
@@ -78,6 +82,22 @@ function chunks<T>(items: T[], size = BATCH_SIZE) {
   return result;
 }
 
+function scheduleSearch<T>(action: () => Promise<T>): Promise<T> {
+  const run = searchQueue.then(async () => {
+    const delay = Math.max(0, nextSearchAt - Date.now());
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+    nextSearchAt = Date.now() + SEARCH_INTERVAL_MS;
+    return action();
+  });
+
+  searchQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+
+  return run;
+}
+
 async function hubspotRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   let lastError: unknown;
 
@@ -127,16 +147,18 @@ export async function searchAll(
   let after: string | undefined;
 
   do {
-    const response = await hubspotRequest<SearchResponse>(`/crm/v3/objects/${objectType}/search`, {
-      method: "POST",
-      body: JSON.stringify({
-        filterGroups: filters.length ? [{ filters }] : [],
-        properties,
-        sorts,
-        limit: SEARCH_PAGE_SIZE,
-        ...(after ? { after } : {}),
+    const response = await scheduleSearch(() =>
+      hubspotRequest<SearchResponse>(`/crm/v3/objects/${objectType}/search`, {
+        method: "POST",
+        body: JSON.stringify({
+          filterGroups: filters.length ? [{ filters }] : [],
+          properties,
+          sorts,
+          limit: SEARCH_PAGE_SIZE,
+          ...(after ? { after } : {}),
+        }),
       }),
-    });
+    );
 
     records.push(...response.results);
     after = response.paging?.next?.after;
