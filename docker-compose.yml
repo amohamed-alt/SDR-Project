@@ -13,6 +13,7 @@ services:
       - /root/SDR-Project/.env
     environment:
       NODE_ENV: production
+      HOSTNAME: 0.0.0.0
       ACQUISITION_SNAPSHOT_PATH: /app/data/acquisition-dashboard.json
       GOOGLE_TOKEN_STORE_PATH: /app/data/google-calendar.json
     ports:
