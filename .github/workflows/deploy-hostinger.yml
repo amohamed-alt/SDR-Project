@@ -63,6 +63,8 @@ jobs:
           virtual-machine: ${{ env.HOSTINGER_VM_ID }}
           project-name: ${{ env.HOSTINGER_PROJECT }}
           docker-compose-path: docker-compose.yml
+          environment-variables: |
+            SDR_BUILD_REF=${{ env.DEPLOY_SHA }}
 
       - name: Wait for containers and public health
         env:
