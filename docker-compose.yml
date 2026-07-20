@@ -3,7 +3,10 @@ name: sdr-project
 services:
   sdr-dashboard:
     build:
-      context: .
+      # Hostinger's Docker API receives the Compose file, not the checked-out
+      # repository directory. Use the public Git repository as the remote
+      # Docker build context so Dockerfile and application sources are present.
+      context: "https://github.com/amohamed-alt/SDR-Project.git#${SDR_BUILD_REF:-main}"
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file:
