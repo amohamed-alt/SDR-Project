@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   group: hostinger-sdr-production
@@ -20,12 +21,37 @@ jobs:
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    environment: production
+    env:
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      DEPLOY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
+      - name: Mark deployment pending
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.DEPLOY_SHA,
+              state: 'pending',
+              context: 'hostinger/deploy',
+              description: 'Deploying validated Docker release to Hostinger VPS',
+              target_url: process.env.DEPLOY_URL,
+            });
+
       - name: Checkout validated revision
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ env.DEPLOY_SHA }}
+
+      - name: Validate Hostinger API credentials
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          if [ -z "$HOSTINGER_API_KEY" ]; then
+            echo "::error::Add HOSTINGER_API_KEY as a GitHub Actions repository secret."
+            exit 1
+          fi
 
       - name: Deploy Docker Compose through Hostinger API
         uses: hostinger/deploy-on-vps@v2
@@ -42,3 +68,33 @@ jobs:
             --retry-delay 6 \
             --retry-all-errors \
             https://sdr.dashboardtalentera.tech/api/health
+
+      - name: Mark deployment successful
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.DEPLOY_SHA,
+              state: 'success',
+              context: 'hostinger/deploy',
+              description: 'Hostinger deployment and public health check succeeded',
+              target_url: process.env.DEPLOY_URL,
+            });
+
+      - name: Mark deployment failed
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.DEPLOY_SHA,
+              state: 'failure',
+              context: 'hostinger/deploy',
+              description: 'Hostinger deploy failed; verify API key and action logs',
+              target_url: process.env.DEPLOY_URL,
+            });
