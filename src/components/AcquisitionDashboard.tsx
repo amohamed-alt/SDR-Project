@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowRight, BriefcaseBusiness, CheckCircle2,
   Clock3, ExternalLink, ListFilter, Target,
@@ -13,6 +13,7 @@ import type {
 
 type PeriodKey = "yesterday" | "mtd" | "ytd";
 
+const DEAL_ONLY_OWNER_IDS = new Set(["76369998", "76369995"]);
 const PERIODS: Array<{ key: PeriodKey; label: string; helper: string; tone: string }> = [
   { key: "yesterday", label: "Yesterday", helper: "Latest completed business day", tone: "blue" },
   { key: "mtd", label: "Month to Date", helper: "Current month", tone: "green" },
@@ -60,39 +61,74 @@ function stageData(rows: DealRow[]) {
   return [...counts.entries()].map(([name, totals]) => ({ name, ...totals })).sort((a, b) => b.amount - a.amount);
 }
 
+function uniqueRankABUntouched(rows: ContactRow[]) {
+  const companies = new Map<string, ContactRow>();
+  for (const row of rows) {
+    if (!row.companyId || row.companyOwnerId !== row.ownerId) continue;
+    if (row.companyRank !== "A" && row.companyRank !== "B") continue;
+    if (row.companyTouched) continue;
+    if (!companies.has(row.companyId)) companies.set(row.companyId, row);
+  }
+  return [...companies.values()];
+}
+
 export function AcquisitionDashboard({ refreshKey, onOpen }: { refreshKey: number; onOpen: (drilldown: Drilldown) => void }) {
   const [data, setData] = useState<AcquisitionData | null>(null);
   const [selectedOwnerId, setSelectedOwnerId] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const response = await fetch(`/api/acquisition${refreshKey ? "?refresh=1" : ""}`, { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.details || payload.error || "Acquisition request failed");
-      setData(payload as AcquisitionData);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to load Acquisition dashboard");
-    } finally {
-      setLoading(false);
-    }
-  }, [refreshKey]);
+  const [pollKey, setPollKey] = useState(0);
+  const lastRefreshKey = useRef(0);
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    let cancelled = false;
+    const forceRefresh = refreshKey > lastRefreshKey.current;
+    if (forceRefresh) lastRefreshKey.current = refreshKey;
+
+    async function load() {
+      setLoading(true);
+      setError("");
+      try {
+        const response = await fetch(`/api/acquisition${forceRefresh ? "?refresh=1" : ""}`, { cache: "no-store" });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.details || payload.error || "Acquisition request failed");
+        if (cancelled) return;
+        setData(payload as AcquisitionData);
+
+        const refreshState = response.headers.get("x-acquisition-refresh");
+        if (refreshState === "started" || refreshState === "running") {
+          pollTimer.current = setTimeout(() => setPollKey((current) => current + 1), 8_000);
+        }
+      } catch (requestError) {
+        if (!cancelled) setError(requestError instanceof Error ? requestError.message : "Unable to load Acquisition dashboard");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
     void load();
-  }, [load]);
+    return () => {
+      cancelled = true;
+      if (pollTimer.current) clearTimeout(pollTimer.current);
+    };
+  }, [refreshKey, pollKey]);
 
   const summary = data
     ? selectedOwnerId === "all" ? data.team : data.reps.find((rep) => rep.ownerId === selectedOwnerId) ?? data.team
     : null;
-  const contacts = useMemo(() => data?.contacts.filter((row) => recordOwner(row, selectedOwnerId)) ?? [], [data, selectedOwnerId]);
-  const activities = useMemo(() => data?.activities.filter((row) => recordOwner(row, selectedOwnerId)) ?? [], [data, selectedOwnerId]);
+  const isDealOnly = selectedOwnerId !== "all"
+    && (summary?.mode === "deal_only" || DEAL_ONLY_OWNER_IDS.has(selectedOwnerId));
+  const contacts = useMemo(
+    () => isDealOnly ? [] : data?.contacts.filter((row) => recordOwner(row, selectedOwnerId)) ?? [],
+    [data, selectedOwnerId, isDealOnly],
+  );
+  const activities = useMemo(
+    () => isDealOnly ? [] : data?.activities.filter((row) => recordOwner(row, selectedOwnerId)) ?? [],
+    [data, selectedOwnerId, isDealOnly],
+  );
   const deals = useMemo(() => data?.deals.filter((row) => recordOwner(row, selectedOwnerId)) ?? [], [data, selectedOwnerId]);
-  const ytdSources = data && summary ? sourceData(contacts, summary.ytd, data.meta.timezone) : [];
+  const ytdSources = data && summary && !isDealOnly ? sourceData(contacts, summary.ytd, data.meta.timezone) : [];
   const stages = stageData(deals);
 
   function openContacts(title: string, description: string, rows: ContactRow[]) {
@@ -119,13 +155,14 @@ export function AcquisitionDashboard({ refreshKey, onOpen }: { refreshKey: numbe
     return deals.filter((row) => inPeriod(row[dateField], period, data.meta.timezone));
   }
 
-  if (error) return <div className="acquisition-error"><AlertTriangle size={22}/><div><strong>Acquisition dashboard failed to load</strong><span>{error}</span></div><button onClick={() => void load()}>Try again</button></div>;
+  if (error) return <div className="acquisition-error"><AlertTriangle size={22}/><div><strong>Acquisition dashboard failed to load</strong><span>{error}</span></div><button onClick={() => setPollKey((current) => current + 1)}>Try again</button></div>;
   if (!data || !summary) return <div className="acquisition-loading"><div className="loader"/><strong>Building Acquisition intelligence…</strong><span>Loading team owners, activities, leads, and pipeline</span></div>;
 
   const needContact = contacts.filter((row) => !row.lastContacted);
-  const rankABUntouched = needContact.filter((row) => /(tier 1|tier 2|tier a|tier b|rank a|rank b)/i.test(row.tier));
+  const rankABUntouched = uniqueRankABUntouched(contacts);
   const atRiskDeals = deals.filter((row) => row.isOpen && ((!row.nextActivity) || (row.closeDate && zonedDay(row.closeDate, data.meta.timezone) < data.meta.today)));
   const openDealRows = deals.filter((row) => row.isOpen);
+  const ytdWonRows = deals.filter((row) => row.isWon && inPeriod(row.closeDate, summary.ytd, data.meta.timezone));
 
   return <div className="acquisition-dashboard">
     <section className="acquisition-owner-strip">
@@ -136,22 +173,30 @@ export function AcquisitionDashboard({ refreshKey, onOpen }: { refreshKey: numbe
     {data.meta.warnings.length > 0 && <div className="warning-banner"><AlertTriangle size={17}/><div><strong>Some HubSpot data was unavailable</strong><span>{data.meta.warnings.join(" · ")}</span></div></div>}
 
     <section className="acquisition-focus">
-      <div className="acquisition-section-heading"><div><span>TODAY&apos;S EXECUTIVE FOCUS</span><h2>{summary.name}</h2></div><small><ListFilter size={12}/>Every number opens its records</small></div>
+      <div className="acquisition-section-heading"><div><span>{isDealOnly ? "DEALS-ONLY VIEW" : "TODAY'S EXECUTIVE FOCUS"}</span><h2>{summary.name}</h2></div><small><ListFilter size={12}/>Every number opens its records</small></div>
       <div className="acquisition-focus-grid">
-        <FocusCard tone="red" icon={Clock3} label="Leads need contact" value={summary.focus.leadsNeedContact} helper={`${summary.focus.eligibleLeads} eligible total`} onClick={() => openContacts("Leads needing contact", `${summary.name} contacts with no logged Last Contacted value.`, needContact)}/>
-        <FocusCard tone="amber" icon={Target} label="Rank A/B untouched" value={summary.focus.rankABUntouched} helper="High-priority outreach" onClick={() => openContacts("Rank A/B untouched", "Rank A/B contacts with no logged outreach.", rankABUntouched)}/>
-        <FocusCard tone="purple" icon={BriefcaseBusiness} label="Deals at risk" value={summary.focus.dealsAtRisk} helper="Overdue close or no next step" onClick={() => openDeals("Deals at risk", "Open deals with an overdue close date or no next activity.", atRiskDeals)}/>
-        <FocusCard tone="green" icon={CheckCircle2} label="Contact rate" value={`${summary.focus.contactRate}%`} helper={`${summary.focus.contactedLeads}/${summary.focus.eligibleLeads} contacted`} onClick={() => openContacts("Contact coverage", "All contacts used to calculate the displayed contact rate.", contacts)}/>
+        {isDealOnly ? <>
+          <FocusCard tone="blue" icon={BriefcaseBusiness} label="Open deals" value={summary.focus.openDeals} helper="Current acquisition portfolio" onClick={() => openDeals("Open deals", `${summary.name} open Acquisition deals.`, openDealRows)}/>
+          <FocusCard tone="red" icon={Clock3} label="Deals at risk" value={summary.focus.dealsAtRisk} helper="Overdue close or no next step" onClick={() => openDeals("Deals at risk", "Open deals with an overdue close date or no next activity.", atRiskDeals)}/>
+          <FocusCard tone="green" icon={CheckCircle2} label="Open pipeline" value={formatCurrency(summary.focus.openPipeline)} helper={`${summary.focus.openDeals} open deals`} onClick={() => openDeals("Open pipeline", `${summary.name} open Acquisition pipeline.`, openDealRows)}/>
+          <FocusCard tone="purple" icon={Target} label="Won YTD" value={summary.ytd.dealsWon} helper="Closed-won Acquisition deals" onClick={() => openDeals("Won YTD", `${summary.name} deals closed won this year.`, ytdWonRows)}/>
+        </> : <>
+          <FocusCard tone="red" icon={Clock3} label="Leads need contact" value={summary.focus.leadsNeedContact} helper={`${summary.focus.eligibleLeads} eligible total`} onClick={() => openContacts("Leads needing contact", `${summary.name} contacts with no logged Last Contacted value.`, needContact)}/>
+          <FocusCard tone="amber" icon={Target} label="Rank A/B untouched" value={summary.focus.rankABUntouched} helper={`Company Rank A/B · ${data.meta.rankProperty || "rank"}`} onClick={() => openContacts("Rank A/B untouched companies", "One representative contact per Company Rank A/B with no same-owner connected call or completed meeting.", rankABUntouched)}/>
+          <FocusCard tone="purple" icon={BriefcaseBusiness} label="Deals at risk" value={summary.focus.dealsAtRisk} helper="Overdue close or no next step" onClick={() => openDeals("Deals at risk", "Open deals with an overdue close date or no next activity.", atRiskDeals)}/>
+          <FocusCard tone="green" icon={CheckCircle2} label="Contact rate" value={`${summary.focus.contactRate}%`} helper={`${summary.focus.contactedLeads}/${summary.focus.eligibleLeads} contacted`} onClick={() => openContacts("Contact coverage", "All contacts used to calculate the displayed contact rate.", contacts)}/>
+        </>}
       </div>
     </section>
 
     <section className="acquisition-performance">
-      <div className="acquisition-section-heading"><div><span>TEAM PERFORMANCE</span><h2>Execution and sales outcomes</h2></div><small>Yesterday · MTD · YTD</small></div>
+      <div className="acquisition-section-heading"><div><span>{isDealOnly ? "DEAL PERFORMANCE" : "TEAM PERFORMANCE"}</span><h2>{isDealOnly ? "Pipeline and closed outcomes" : "Execution and sales outcomes"}</h2></div><small>Yesterday · MTD · YTD</small></div>
       <div className="period-grid">
         {PERIODS.map((periodDefinition) => <PeriodCard
           key={periodDefinition.key}
           definition={periodDefinition}
           period={summary[periodDefinition.key]}
+          dealOnly={isDealOnly}
           onMetric={(metric) => {
             const period = summary[periodDefinition.key];
             const label = `${periodDefinition.label} · ${summary.name}`;
@@ -174,16 +219,16 @@ export function AcquisitionDashboard({ refreshKey, onOpen }: { refreshKey: numbe
     </section>}
 
     <div className="acquisition-insight-grid">
-      <RankedList title="Original Traffic Sources" helper="YTD lead acquisition" rows={ytdSources} valueLabel="leads" onSelect={(item) => openContacts(`Original Traffic Source · ${item.name}`, "YTD contacts acquired from this source.", contacts.filter((row) => row.originalSource === item.name && inPeriod(row.createdAt, summary.ytd, data.meta.timezone)))}/>
+      {!isDealOnly && <RankedList title="Original Traffic Sources" helper="YTD lead acquisition" rows={ytdSources} valueLabel="leads" onSelect={(item) => openContacts(`Original Traffic Source · ${item.name}`, "YTD contacts acquired from this source.", contacts.filter((row) => row.originalSource === item.name && inPeriod(row.createdAt, summary.ytd, data.meta.timezone)))}/>} 
       <RankedList title="Open Pipeline by Stage" helper={`${openDealRows.length} open deals · ${formatCurrency(summary.focus.openPipeline)}`} rows={stages} amount valueLabel="deals" onSelect={(item) => openDeals(`Open pipeline · ${item.name}`, "Open deals currently in this HubSpot stage.", openDealRows.filter((row) => row.stage === item.name))}/>
     </div>
 
-    <section className="acquisition-priority-list">
+    {!isDealOnly && <section className="acquisition-priority-list">
       <div className="acquisition-section-heading"><div><span>PRIORITY LEADS</span><h2>Highest-priority records to action</h2></div><button onClick={() => openContacts("Priority leads", `${summary.name} leads ordered by execution priority.`, contacts)}>{contacts.length} records<ArrowRight size={13}/></button></div>
-      <div className="acquisition-lead-table"><div className="acquisition-lead-head"><span>Lead</span><span>Owner</span><span>Country</span><span>ICP</span><span>Status</span><span>Next activity</span><span/></div>{contacts.slice(0, 12).map((row) => <div className="acquisition-lead-row" key={row.id}><span><strong>{row.name}</strong><small>{row.company || row.title || "No company"}</small></span><span>{row.ownerName || "—"}</span><span>{row.country || "—"}</span><span><i>{row.tier}</i></span><span>{row.leadStatus}</span><span>{row.nextActivity ? zonedDay(row.nextActivity, data.meta.timezone) : "No next step"}</span><a href={row.url} target="_blank" rel="noreferrer" aria-label={`Open ${row.name} in HubSpot`}><ExternalLink size={14}/></a></div>)}</div>
-    </section>
+      <div className="acquisition-lead-table"><div className="acquisition-lead-head"><span>Lead</span><span>Owner</span><span>Country</span><span>Rank / ICP</span><span>Status</span><span>Next activity</span><span/></div>{contacts.slice(0, 12).map((row) => <div className="acquisition-lead-row" key={row.id}><span><strong>{row.name}</strong><small>{row.company || row.title || "No company"}</small></span><span>{row.ownerName || "—"}</span><span>{row.country || "—"}</span><span><i>{row.companyRank ? `Rank ${row.companyRank}` : row.tier}</i></span><span>{row.leadStatus}</span><span>{row.nextActivity ? zonedDay(row.nextActivity, data.meta.timezone) : "No next step"}</span><a href={row.url} target="_blank" rel="noreferrer" aria-label={`Open ${row.name} in HubSpot`}><ExternalLink size={14}/></a></div>)}</div>
+    </section>}
 
-    {loading && <div className="acquisition-refreshing"><div className="loader"/><span>Refreshing Acquisition data…</span></div>}
+    {loading && data && <div className="acquisition-refreshing"><div className="loader"/><span>Refreshing Acquisition data in the background…</span></div>}
   </div>;
 }
 
@@ -193,8 +238,8 @@ function FocusCard({ tone, icon: Icon, label, value, helper, onClick }: { tone: 
 
 type MetricName = "calls" | "connected" | "meetingsBooked" | "meetingsCompleted" | "contacts" | "tasks" | "dealsCreated" | "won" | "lost" | "pipeline";
 
-function PeriodCard({ definition, period, onMetric }: { definition: typeof PERIODS[number]; period: AcquisitionPeriodMetrics; onMetric: (metric: MetricName) => void }) {
-  const metrics: Array<{ key: MetricName; label: string; value: string }> = [
+function PeriodCard({ definition, period, dealOnly, onMetric }: { definition: typeof PERIODS[number]; period: AcquisitionPeriodMetrics; dealOnly: boolean; onMetric: (metric: MetricName) => void }) {
+  const allMetrics: Array<{ key: MetricName; label: string; value: string }> = [
     { key: "calls", label: "Calls", value: formatNumber(period.calls) },
     { key: "connected", label: "Connected", value: formatNumber(period.connectedCalls) },
     { key: "meetingsBooked", label: "Meetings booked", value: formatNumber(period.meetingsBooked) },
@@ -206,11 +251,13 @@ function PeriodCard({ definition, period, onMetric }: { definition: typeof PERIO
     { key: "lost", label: "Lost", value: formatNumber(period.dealsLost) },
     { key: "pipeline", label: "Pipeline created", value: formatCurrency(period.pipelineCreated) },
   ];
-  return <article className={`period-card period-${definition.tone}`}><div className="period-card-heading"><div><strong>{definition.label}</strong><span>{definition.helper}</span></div><b>{period.connectionRate}%</b></div><div className="period-card-metrics">{metrics.map((metric) => <button key={metric.key} onClick={() => onMetric(metric.key)}><strong>{metric.value}</strong><span>{metric.label}</span></button>)}</div></article>;
+  const metrics = dealOnly ? allMetrics.filter((metric) => ["dealsCreated", "won", "lost", "pipeline"].includes(metric.key)) : allMetrics;
+  return <article className={`period-card period-${definition.tone}`}><div className="period-card-heading"><div><strong>{definition.label}</strong><span>{definition.helper}</span></div><b>{dealOnly ? "DEALS" : `${period.connectionRate}%`}</b></div><div className="period-card-metrics">{metrics.map((metric) => <button key={metric.key} onClick={() => onMetric(metric.key)}><strong>{metric.value}</strong><span>{metric.label}</span></button>)}</div></article>;
 }
 
 function RepCard({ rep, onClick }: { rep: AcquisitionRepSummary; onClick: () => void }) {
-  return <button className="acquisition-rep-card" onClick={onClick}><div><span className="rep-dot" style={{ background: rep.color }}>{rep.initials}</span><div><strong>{rep.name}</strong><span>{rep.email || "HubSpot owner"}</span></div><ArrowRight size={14}/></div><dl><div><dt>MTD Calls</dt><dd>{formatNumber(rep.mtd.calls)}</dd></div><div><dt>Connected</dt><dd>{rep.mtd.connectionRate}%</dd></div><div><dt>Meetings</dt><dd>{formatNumber(rep.mtd.meetingsCompleted)}</dd></div><div><dt>Open Pipeline</dt><dd>{formatCurrency(rep.focus.openPipeline)}</dd></div></dl></button>;
+  const dealOnly = rep.mode === "deal_only" || DEAL_ONLY_OWNER_IDS.has(rep.ownerId);
+  return <button className="acquisition-rep-card" onClick={onClick}><div><span className="rep-dot" style={{ background: rep.color }}>{rep.initials}</span><div><strong>{rep.name}</strong><span>{dealOnly ? "Deals-only Acquisition view" : rep.email || "HubSpot owner"}</span></div><ArrowRight size={14}/></div><dl>{dealOnly ? <><div><dt>Open Deals</dt><dd>{formatNumber(rep.focus.openDeals)}</dd></div><div><dt>At Risk</dt><dd>{formatNumber(rep.focus.dealsAtRisk)}</dd></div><div><dt>Won YTD</dt><dd>{formatNumber(rep.ytd.dealsWon)}</dd></div><div><dt>Open Pipeline</dt><dd>{formatCurrency(rep.focus.openPipeline)}</dd></div></> : <><div><dt>MTD Calls</dt><dd>{formatNumber(rep.mtd.calls)}</dd></div><div><dt>Connected</dt><dd>{rep.mtd.connectionRate}%</dd></div><div><dt>Meetings</dt><dd>{formatNumber(rep.mtd.meetingsCompleted)}</dd></div><div><dt>Open Pipeline</dt><dd>{formatCurrency(rep.focus.openPipeline)}</dd></div></>}</dl></button>;
 }
 
 function RankedList({ title, helper, rows, amount = false, valueLabel, onSelect }: { title: string; helper: string; rows: ChartDatum[]; amount?: boolean; valueLabel: string; onSelect: (item: ChartDatum) => void }) {
