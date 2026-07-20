@@ -1,0 +1,44 @@
+name: Deploy SDR Dashboard to Hostinger
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-sdr-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+    steps:
+      - name: Checkout validated revision
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Deploy Docker Compose through Hostinger API
+        uses: hostinger/deploy-on-vps@v2
+        with:
+          api-key: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+          virtual-machine: "1604210"
+          project-name: sdr-project
+          docker-compose-path: docker-compose.yml
+
+      - name: Verify public health endpoint
+        run: |
+          curl --fail --silent --show-error \
+            --retry 20 \
+            --retry-delay 6 \
+            --retry-all-errors \
+            https://sdr.dashboardtalentera.tech/api/health
