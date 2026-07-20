@@ -1,0 +1,28 @@
+name: sdr-project
+
+services:
+  sdr-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - /root/SDR-Project/.env
+    environment:
+      NODE_ENV: production
+      ACQUISITION_SNAPSHOT_PATH: /app/data/acquisition-dashboard.json
+      GOOGLE_TOKEN_STORE_PATH: /app/data/google-calendar.json
+    ports:
+      - "127.0.0.1:3010:3000"
+    volumes:
+      - /root/SDR-Project/data:/app/data
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 8s
+      start_period: 30s
+      retries: 5
