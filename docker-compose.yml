@@ -3,9 +3,6 @@ name: sdr-project
 services:
   sdr-dashboard:
     build:
-      # Hostinger's Docker API receives the Compose file, not the checked-out
-      # repository directory. Use the public Git repository as the remote
-      # Docker build context so Dockerfile and application sources are present.
       context: "https://github.com/amohamed-alt/SDR-Project.git#${SDR_BUILD_REF:-main}"
       dockerfile: Dockerfile
     restart: unless-stopped
@@ -20,6 +17,17 @@ services:
       - "127.0.0.1:3010:3000"
     volumes:
       - /root/SDR-Project/data:/app/data
+    networks:
+      - default
+      - traefik_proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=n8n_default"
+      - "traefik.http.routers.sdr-dashboard.rule=Host(`sdr.dashboardtalentera.tech`)"
+      - "traefik.http.routers.sdr-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.sdr-dashboard.tls=true"
+      - "traefik.http.routers.sdr-dashboard.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.sdr-dashboard.loadbalancer.server.port=3000"
     healthcheck:
       test:
         - CMD
@@ -30,3 +38,8 @@ services:
       timeout: 8s
       start_period: 30s
       retries: 5
+
+networks:
+  traefik_proxy:
+    external: true
+    name: n8n_default
