@@ -20,7 +20,7 @@ type BookingResult = {
   organizerIncluded: boolean;
 };
 
-const SALES_REP_OWNER_IDS = [
+const SALES_REP_OWNER_IDS: readonly string[] = [
   "76369995", // Mohammed Faizan
   "76369998", // Fadi Zanona
   "76370000", // Mohammad Jehad Al-Barqawi
@@ -28,9 +28,9 @@ const SALES_REP_OWNER_IDS = [
   "76369997", // Ursula Waked
   "31558980", // Zein Fares
   "31594536", // Abdullah Muhammed · a.mohamed@talentera.com
-] as const;
+];
 
-const SALES_REP_ORDER = new Map(
+const SALES_REP_ORDER = new Map<string, number>(
   SALES_REP_OWNER_IDS.map((ownerId, index) => [ownerId, index]),
 );
 
