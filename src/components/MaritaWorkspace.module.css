@@ -79,6 +79,33 @@
   padding-right: 34px;
 }
 
+.contactIdentity {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.externalContactNote {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  margin-top: 4px;
+  padding: 3px 6px;
+  border: 1px solid #efd7a4;
+  border-radius: 999px;
+  background: #fff9ec;
+  color: #9b6810;
+  font-size: 6px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.externalContactNote svg {
+  flex: 0 0 auto;
+}
+
 .contactRole {
   padding: 4px 7px;
   border-radius: 999px;
@@ -108,6 +135,12 @@
 
 .removeContactButton:hover {
   background: #ffeae6;
+}
+
+.attendeeToggles {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
 }
 
 .organizerToggle {
@@ -160,6 +193,11 @@
   color: #087a50;
 }
 
+.organizerToggle:disabled {
+  cursor: default;
+  opacity: 0.78;
+}
+
 @media (max-width: 640px) {
   .contactPickerRow {
     grid-template-columns: 1fr;
@@ -167,5 +205,9 @@
 
   .addContactButton {
     width: 100%;
+  }
+
+  .selectedContactCard {
+    align-items: flex-start;
   }
 }
