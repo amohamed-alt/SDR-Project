@@ -20,33 +20,47 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Enter a valid contact email." }, { status: 400 });
     }
 
+    const requestedEmail = parsed.data.email;
     const matches = await searchAll(
       "contacts",
       CONTACT_LOOKUP_PROPERTIES,
-      [{ propertyName: "email", operator: "EQ", value: parsed.data.email }],
+      [{ propertyName: "email", operator: "EQ", value: requestedEmail }],
     );
 
     const contact = matches.find(
-      (record) => String(record.properties.email ?? "").toLowerCase() === parsed.data.email,
+      (record) => String(record.properties.email ?? "").trim().toLowerCase() === requestedEmail,
     ) ?? matches[0];
 
     if (!contact) {
-      return NextResponse.json({ error: "No HubSpot contact was found with this email." }, { status: 404 });
+      return NextResponse.json({
+        contact: {
+          id: `external:${requestedEmail}`,
+          hubspotId: null,
+          name: requestedEmail,
+          email: requestedEmail,
+          company: "",
+          url: "",
+          inHubSpot: false,
+        },
+      });
     }
 
-    const email = String(contact.properties.email ?? parsed.data.email).trim();
+    const email = String(contact.properties.email ?? requestedEmail).trim().toLowerCase();
     const name = [contact.properties.firstname, contact.properties.lastname]
       .map((value) => String(value ?? "").trim())
       .filter(Boolean)
       .join(" ") || email;
+    const hubspotId = String(contact.id);
 
     return NextResponse.json({
       contact: {
-        id: String(contact.id),
+        id: hubspotId,
+        hubspotId,
         name,
         email,
         company: String(contact.properties.company ?? "").trim(),
-        url: hubspotRecordUrl("contact", String(contact.id)),
+        url: hubspotRecordUrl("contact", hubspotId),
+        inHubSpot: true,
       },
     });
   } catch (error) {
