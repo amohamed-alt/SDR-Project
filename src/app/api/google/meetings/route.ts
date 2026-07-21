@@ -7,7 +7,7 @@ import {
   deleteCalendarEvent, sendCalendarInvitations,
 } from "@/lib/google-calendar";
 import {
-  HubSpotApiError, archiveMeeting, createMeeting, listOwners, searchAll,
+  HubSpotApiError, archiveMeeting, batchRead, createMeeting, listOwners, searchAll,
 } from "@/lib/hubspot";
 
 export const runtime = "nodejs";
@@ -29,8 +29,10 @@ const ALLOWED_SALES_REP_OWNER_IDS = new Set([
 
 const bookingSchema = z.object({
   requestId: z.string().uuid(),
-  contactEmails: z.array(normalizedEmailSchema).min(1).max(20)
+  contactEmails: z.array(normalizedEmailSchema).max(20).default([])
     .refine((emails) => new Set(emails).size === emails.length, "Contact emails must be unique"),
+  contactIds: z.array(z.string().regex(/^\d+$/)).max(20).default([])
+    .refine((ids) => new Set(ids).size === ids.length, "Contact IDs must be unique"),
   salesOwnerId: z.string().regex(/^\d+$/),
   includeOrganizerAsAttendee: z.boolean().default(false),
   includeBassamAsAttendee: z.boolean().default(false),
@@ -40,6 +42,22 @@ const bookingSchema = z.object({
   durationMinutes: z.number().int().refine((value) => [15, 30, 45, 60].includes(value)),
   meetingType: z.enum(["google-meet", "no-video"]),
   agenda: z.string().trim().max(2_000),
+}).superRefine((input, context) => {
+  const attendeeCount = input.contactEmails.length + input.contactIds.length;
+  if (attendeeCount === 0) {
+    context.addIssue({
+      code: "custom",
+      path: ["contactEmails"],
+      message: "Add at least one contact email or HubSpot contact",
+    });
+  }
+  if (attendeeCount > 20) {
+    context.addIssue({
+      code: "custom",
+      path: ["contactEmails"],
+      message: "A meeting can include at most 20 selected contacts",
+    });
+  }
 });
 
 interface MeetingContactDetail {
@@ -52,6 +70,21 @@ interface MeetingContactDetail {
 
 function value(record: { properties: Record<string, string | null | undefined> }, key: string) {
   return record.properties[key]?.trim() ?? "";
+}
+
+function contactDetailFromRecord(record: { id: string | number; properties: Record<string, string | null | undefined> }): MeetingContactDetail {
+  const email = value(record, "email").toLowerCase();
+  const name = [value(record, "firstname"), value(record, "lastname")]
+    .filter(Boolean)
+    .join(" ") || email || "HubSpot contact";
+
+  return {
+    id: String(record.id),
+    name,
+    email,
+    company: value(record, "company"),
+    inHubSpot: true,
+  };
 }
 
 function validOrigin(request: NextRequest) {
@@ -96,24 +129,34 @@ async function resolveContactByEmail(email: string): Promise<MeetingContactDetai
     return { id: null, name: email, email, company: "", inHubSpot: false };
   }
 
-  const contactEmail = value(contact, "email").toLowerCase() || email;
-  const contactName = [value(contact, "firstname"), value(contact, "lastname")]
-    .filter(Boolean)
-    .join(" ") || contactEmail;
+  return contactDetailFromRecord(contact);
+}
 
-  return {
-    id: String(contact.id),
-    name: contactName,
-    email: contactEmail,
-    company: value(contact, "company"),
-    inHubSpot: true,
-  };
+function uniqueContacts(contacts: MeetingContactDetail[]) {
+  const seen = new Set<string>();
+  return contacts.filter((contact) => {
+    const key = contact.email || `hubspot:${contact.id ?? ""}`;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function validationMessage(error: z.ZodError) {
+  return error.issues
+    .map((issue) => `${issue.path.join(".") || "request"}: ${issue.message}`)
+    .join("; ");
 }
 
 export async function POST(request: NextRequest) {
   if (!validOrigin(request)) return NextResponse.json({ error: "Invalid request origin" }, { status: 403 });
   const parsed = bookingSchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ error: "Invalid meeting details", details: parsed.error.flatten() }, { status: 400 });
+  if (!parsed.success) {
+    return NextResponse.json({
+      error: `Invalid meeting details: ${validationMessage(parsed.error)}`,
+      details: parsed.error.flatten(),
+    }, { status: 400 });
+  }
 
   const input = parsed.data;
   let calendarEventId = "";
@@ -126,10 +169,36 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Connect Marita Google Calendar before sending" }, { status: 409 });
     }
 
-    const [contactDetails, owners] = await Promise.all([
+    const [emailContactDetails, legacyContactRecords, owners] = await Promise.all([
       Promise.all(input.contactEmails.map((email) => resolveContactByEmail(email))),
+      input.contactIds.length
+        ? batchRead("contacts", input.contactIds, CONTACT_LOOKUP_PROPERTIES)
+        : Promise.resolve([]),
       listOwners(),
     ]);
+
+    const legacyContactsById = new Map(legacyContactRecords.map((contact) => [String(contact.id), contact]));
+    const missingLegacyContactId = input.contactIds.find((contactId) => !legacyContactsById.has(contactId));
+    if (missingLegacyContactId) {
+      return NextResponse.json({
+        error: "A selected HubSpot contact no longer exists. Refresh the dashboard and add the contact again.",
+      }, { status: 400 });
+    }
+
+    const legacyContactDetails = input.contactIds.map((contactId) =>
+      contactDetailFromRecord(legacyContactsById.get(contactId) as (typeof legacyContactRecords)[number]),
+    );
+    const contactDetails = uniqueContacts([...emailContactDetails, ...legacyContactDetails]);
+
+    if (!contactDetails.length) {
+      return NextResponse.json({ error: "Add at least one valid contact email before sending" }, { status: 400 });
+    }
+    const missingLegacyEmail = legacyContactDetails.find((contact) => !contact.email);
+    if (missingLegacyEmail) {
+      return NextResponse.json({
+        error: `${missingLegacyEmail.name} has no email address in HubSpot. Add the attendee by email instead.`,
+      }, { status: 400 });
+    }
 
     const salesOwner = owners.find((owner) => owner.id === input.salesOwnerId);
     if (!salesOwner || !ALLOWED_SALES_REP_OWNER_IDS.has(salesOwner.id)) {
