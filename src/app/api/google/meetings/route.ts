@@ -3,11 +3,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { HUBSPOT_TIMEZONE, hubspotListUrl, hubspotRecordUrl } from "@/lib/config";
 import {
-  GoogleCalendarError, calendarConnectionStatus, createCalendarDraft,
-  deleteCalendarEvent, sendCalendarInvitations,
+  GoogleCalendarError,
+  calendarConnectionStatus,
+  createCalendarDraft,
+  deleteCalendarEvent,
+  disconnectGoogleCalendar,
+  sendCalendarInvitations,
 } from "@/lib/google-calendar";
 import {
-  HubSpotApiError, archiveMeeting, batchRead, createMeeting, listOwners, searchAll,
+  HubSpotApiError,
+  archiveMeeting,
+  batchRead,
+  createMeeting,
+  listOwners,
+  searchAll,
 } from "@/lib/hubspot";
 
 export const runtime = "nodejs";
@@ -16,6 +25,21 @@ export const maxDuration = 60;
 const BASSAM_OWNER_ID = "75863674";
 const CONTACT_LOOKUP_PROPERTIES = ["firstname", "lastname", "email", "company"] as const;
 const normalizedEmailSchema = z.string().trim().email().max(254).transform((value) => value.toLowerCase());
+
+type BookingStage =
+  | "calendar_connection"
+  | "contact_lookup"
+  | "calendar_draft"
+  | "hubspot_meeting"
+  | "calendar_invitations";
+
+const BOOKING_STAGE_LABELS: Record<BookingStage, string> = {
+  calendar_connection: "Google Calendar connection",
+  contact_lookup: "contact lookup",
+  calendar_draft: "Google Calendar event creation",
+  hubspot_meeting: "HubSpot meeting logging",
+  calendar_invitations: "calendar invitation delivery",
+};
 
 const ALLOWED_SALES_REP_OWNER_IDS = new Set([
   "76369995", // Mohammed Faizan
@@ -72,7 +96,10 @@ function value(record: { properties: Record<string, string | null | undefined> }
   return record.properties[key]?.trim() ?? "";
 }
 
-function contactDetailFromRecord(record: { id: string | number; properties: Record<string, string | null | undefined> }): MeetingContactDetail {
+function contactDetailFromRecord(record: {
+  id: string | number;
+  properties: Record<string, string | null | undefined>;
+}): MeetingContactDetail {
   const email = value(record, "email").toLowerCase();
   const name = [value(record, "firstname"), value(record, "lastname")]
     .filter(Boolean)
@@ -105,11 +132,25 @@ function localDateTimeToUtc(date: string, time: string, timeZone: string) {
   let timestamp = target;
   for (let pass = 0; pass < 2; pass += 1) {
     const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone, year: "numeric", month: "2-digit", day: "2-digit",
-      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
     }).formatToParts(new Date(timestamp));
-    const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((item) => item.type === type)?.value ?? 0);
-    const represented = Date.UTC(part("year"), part("month") - 1, part("day"), part("hour"), part("minute"), part("second"));
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+      Number(parts.find((item) => item.type === type)?.value ?? 0);
+    const represented = Date.UTC(
+      part("year"),
+      part("month") - 1,
+      part("day"),
+      part("hour"),
+      part("minute"),
+      part("second"),
+    );
     timestamp += target - represented;
   }
   return new Date(timestamp).toISOString();
@@ -148,8 +189,35 @@ function validationMessage(error: z.ZodError) {
     .join("; ");
 }
 
+function errorText(error: unknown) {
+  if (error instanceof GoogleCalendarError) return `${error.message} ${error.details}`.trim();
+  if (error instanceof HubSpotApiError) return `${error.message} ${error.details}`.trim();
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isStaleGoogleCredential(error: unknown) {
+  return /invalid_grant|refresh token|token.+revoked|token.+expired|authenticate data|bad decrypt|stored google credential|credential.+invalid|unable to authenticate/i
+    .test(errorText(error));
+}
+
+function bookingErrorMessage(stage: BookingStage, error: unknown) {
+  if (isStaleGoogleCredential(error)) {
+    return "Marita Google Calendar connection is expired or no longer decryptable. Reconnect Marita Calendar, then send the invitation again.";
+  }
+  if (error instanceof GoogleCalendarError) {
+    return `${error.message} (${BOOKING_STAGE_LABELS[stage]}).`;
+  }
+  if (error instanceof HubSpotApiError) {
+    return `HubSpot could not log the meeting during ${BOOKING_STAGE_LABELS[stage]}.`;
+  }
+  return `Meeting failed during ${BOOKING_STAGE_LABELS[stage]}. Please try again.`;
+}
+
 export async function POST(request: NextRequest) {
-  if (!validOrigin(request)) return NextResponse.json({ error: "Invalid request origin" }, { status: 403 });
+  if (!validOrigin(request)) {
+    return NextResponse.json({ error: "Invalid request origin" }, { status: 403 });
+  }
+
   const parsed = bookingSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({
@@ -159,6 +227,7 @@ export async function POST(request: NextRequest) {
   }
 
   const input = parsed.data;
+  let stage: BookingStage = "calendar_connection";
   let calendarEventId = "";
   let calendarAccessToken = "";
   let hubspotMeetingId = "";
@@ -169,6 +238,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Connect Marita Google Calendar before sending" }, { status: 409 });
     }
 
+    stage = "contact_lookup";
     const [emailContactDetails, legacyContactRecords, owners] = await Promise.all([
       Promise.all(input.contactEmails.map((email) => resolveContactByEmail(email))),
       input.contactIds.length
@@ -177,8 +247,12 @@ export async function POST(request: NextRequest) {
       listOwners(),
     ]);
 
-    const legacyContactsById = new Map(legacyContactRecords.map((contact) => [String(contact.id), contact]));
-    const missingLegacyContactId = input.contactIds.find((contactId) => !legacyContactsById.has(contactId));
+    const legacyContactsById = new Map(
+      legacyContactRecords.map((contact) => [String(contact.id), contact]),
+    );
+    const missingLegacyContactId = input.contactIds.find(
+      (contactId) => !legacyContactsById.has(contactId),
+    );
     if (missingLegacyContactId) {
       return NextResponse.json({
         error: "A selected HubSpot contact no longer exists. Refresh the dashboard and add the contact again.",
@@ -186,13 +260,16 @@ export async function POST(request: NextRequest) {
     }
 
     const legacyContactDetails = input.contactIds.map((contactId) =>
-      contactDetailFromRecord(legacyContactsById.get(contactId) as (typeof legacyContactRecords)[number]),
+      contactDetailFromRecord(
+        legacyContactsById.get(contactId) as (typeof legacyContactRecords)[number],
+      ),
     );
     const contactDetails = uniqueContacts([...emailContactDetails, ...legacyContactDetails]);
 
     if (!contactDetails.length) {
       return NextResponse.json({ error: "Add at least one valid contact email before sending" }, { status: 400 });
     }
+
     const missingLegacyEmail = legacyContactDetails.find((contact) => !contact.email);
     if (missingLegacyEmail) {
       return NextResponse.json({
@@ -202,9 +279,13 @@ export async function POST(request: NextRequest) {
 
     const salesOwner = owners.find((owner) => owner.id === input.salesOwnerId);
     if (!salesOwner || !ALLOWED_SALES_REP_OWNER_IDS.has(salesOwner.id)) {
-      return NextResponse.json({ error: "Choose Faizan, Fadi, Jehad, Bassam, Ursula, Zein, or Abdullah as the Sales Rep" }, { status: 400 });
+      return NextResponse.json({
+        error: "Choose Faizan, Fadi, Jehad, Bassam, Ursula, Zein, or Abdullah as the Sales Rep",
+      }, { status: 400 });
     }
-    if (!salesOwner.email) return NextResponse.json({ error: "The selected Sales Rep has no email address in HubSpot" }, { status: 400 });
+    if (!salesOwner.email) {
+      return NextResponse.json({ error: "The selected Sales Rep has no email address in HubSpot" }, { status: 400 });
+    }
 
     const bassamOwner = owners.find((owner) => owner.id === BASSAM_OWNER_ID);
     const includeBassam = input.includeBassamAsAttendee && salesOwner.id !== BASSAM_OWNER_ID;
@@ -216,8 +297,13 @@ export async function POST(request: NextRequest) {
     if (new Date(startUtc).getTime() < Date.now() - 300_000) {
       return NextResponse.json({ error: "Meeting time must be in the future" }, { status: 400 });
     }
+
     const localEndValue = localEnd(input.date, input.time, input.durationMinutes);
-    const endUtc = localDateTimeToUtc(localEndValue.date, localEndValue.time.slice(0, 5), HUBSPOT_TIMEZONE);
+    const endUtc = localDateTimeToUtc(
+      localEndValue.date,
+      localEndValue.time.slice(0, 5),
+      HUBSPOT_TIMEZONE,
+    );
     const startLocal = `${input.date}T${input.time}:00`;
     const endLocal = `${localEndValue.date}T${localEndValue.time}`;
     const primaryContact = contactDetails[0];
@@ -231,10 +317,13 @@ export async function POST(request: NextRequest) {
       "",
       `Booked by: Marita Chedid (${connection.email})`,
       `Sales host: ${salesOwner.name} (${salesOwner.email})`,
-      ...(includeBassam && bassamOwner?.email ? [`Additional attendee: ${bassamOwner.name} (${bassamOwner.email})`] : []),
+      ...(includeBassam && bassamOwner?.email
+        ? [`Additional attendee: ${bassamOwner.name} (${bassamOwner.email})`]
+        : []),
       ...contactLines,
     ].join("\n").trim();
 
+    stage = "calendar_draft";
     const draft = await createCalendarDraft({
       requestId: input.requestId,
       title: input.title,
@@ -252,6 +341,8 @@ export async function POST(request: NextRequest) {
     const associationSummary = contactDetails
       .map((contact) => `${contact.name} (${contact.id ? `HubSpot ${contact.id}` : "email only"})`)
       .join(", ");
+
+    stage = "hubspot_meeting";
     const hubspotMeeting = await createMeeting({
       contactIds: hubspotContactIds,
       ownerId: input.salesOwnerId,
@@ -265,6 +356,7 @@ export async function POST(request: NextRequest) {
     });
     hubspotMeetingId = hubspotMeeting.id;
 
+    stage = "calendar_invitations";
     const publishedEvent = await sendCalendarInvitations(
       draft.event.id,
       [
@@ -276,7 +368,15 @@ export async function POST(request: NextRequest) {
       draft.accessToken,
     );
 
-    revalidateTag("sdr-dashboard", "max");
+    try {
+      revalidateTag("sdr-dashboard", "max");
+    } catch (cacheError) {
+      console.error("Meeting created but dashboard cache refresh failed", {
+        requestId: input.requestId,
+        cacheError,
+      });
+    }
+
     return NextResponse.json({
       success: true,
       contacts: contactDetails.map(({ id, name, email, inHubSpot }) => ({ id, name, email, inHubSpot })),
@@ -290,8 +390,14 @@ export async function POST(request: NextRequest) {
       hubspotContactUrl: primaryHubSpotContact
         ? hubspotRecordUrl("contact", primaryHubSpotContact.id as string)
         : hubspotListUrl("meeting"),
-      hubspotLinkLabel: primaryHubSpotContact ? "Open primary HubSpot timeline" : "Open HubSpot meetings",
-      primaryContact: { name: primaryContact.name, email: primaryContact.email, inHubSpot: primaryContact.inHubSpot },
+      hubspotLinkLabel: primaryHubSpotContact
+        ? "Open primary HubSpot timeline"
+        : "Open HubSpot meetings",
+      primaryContact: {
+        name: primaryContact.name,
+        email: primaryContact.email,
+        inHubSpot: primaryContact.inHubSpot,
+      },
     });
   } catch (error) {
     if (calendarEventId) {
@@ -304,10 +410,30 @@ export async function POST(request: NextRequest) {
         console.error("HubSpot meeting rollback failed", rollbackError);
       });
     }
-    console.error("Meeting booking failed", error);
-    const status = error instanceof GoogleCalendarError || error instanceof HubSpotApiError ? error.status : 500;
+
+    const staleGoogleCredential = isStaleGoogleCredential(error);
+    if (staleGoogleCredential) {
+      await disconnectGoogleCalendar().catch((disconnectError) => {
+        console.error("Unable to clear stale Google Calendar connection", disconnectError);
+      });
+    }
+
+    console.error("Meeting booking failed", {
+      requestId: input.requestId,
+      stage,
+      error,
+    });
+
+    const status = staleGoogleCredential
+      ? 409
+      : error instanceof GoogleCalendarError || error instanceof HubSpotApiError
+        ? error.status
+        : 500;
+
     return NextResponse.json({
-      error: error instanceof GoogleCalendarError ? error.message : error instanceof HubSpotApiError ? "HubSpot could not log the meeting" : "Unable to create the meeting",
+      error: bookingErrorMessage(stage, error),
+      errorCode: `${stage}_${staleGoogleCredential ? "stale_google_connection" : "failed"}`,
+      requestId: input.requestId,
     }, { status: status >= 400 && status < 600 ? status : 500 });
   }
 }
