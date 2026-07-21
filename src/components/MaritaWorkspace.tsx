@@ -11,22 +11,33 @@ import type { ActivityRow, ContactRow, DashboardData } from "@/lib/types";
 
 type QueueMode = "tasks" | "leads" | "meetings";
 type CalendarStatus = { configured: boolean; connected: boolean; email?: string; connectedAt?: string; error?: string };
-type MeetingContact = { id: string; name: string; email: string; company: string; url: string };
+type MeetingContact = {
+  id: string;
+  hubspotId: string | null;
+  name: string;
+  email: string;
+  company: string;
+  url: string;
+  inHubSpot: boolean;
+};
 type ContactLookupResponse = { contact?: MeetingContact; error?: string };
 type BookingResult = {
   calendarUrl: string;
   meetLink?: string;
   hubspotContactUrl: string;
+  hubspotLinkLabel: string;
   salesOwner: { name: string; email: string };
-  contacts: Array<{ id: string; name: string; email: string }>;
+  contacts: Array<{ id: string | null; name: string; email: string; inHubSpot: boolean }>;
   organizerIncluded: boolean;
+  bassamIncluded: boolean;
 };
 
+const BASSAM_OWNER_ID = "75863674";
 const SALES_REP_OWNER_IDS: readonly string[] = [
   "76369995", // Mohammed Faizan
   "76369998", // Fadi Zanona
   "76370000", // Mohammad Jehad Al-Barqawi
-  "75863674", // Bassam Hamed
+  BASSAM_OWNER_ID, // Bassam Hamed
   "76369997", // Ursula Waked
   "31558980", // Zein Fares
   "31594536", // Abdullah Muhammed · a.mohamed@talentera.com
@@ -75,6 +86,7 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
   const [contactLookupError, setContactLookupError] = useState("");
   const [selectedSalesOwnerId, setSelectedSalesOwnerId] = useState("");
   const [includeOrganizerAsAttendee, setIncludeOrganizerAsAttendee] = useState(false);
+  const [includeBassamAsAttendee, setIncludeBassamAsAttendee] = useState(false);
   const [subject, setSubject] = useState("Talentera discovery call");
   const [meetingDate, setMeetingDate] = useState(tomorrowDate);
   const [meetingTime, setMeetingTime] = useState("10:00");
@@ -112,6 +124,8 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
     .filter((owner) => SALES_REP_ORDER.has(owner.id))
     .sort((left, right) => (SALES_REP_ORDER.get(left.id) ?? 999) - (SALES_REP_ORDER.get(right.id) ?? 999));
   const selectedSalesOwner = salesOwners.find((owner) => owner.id === selectedSalesOwnerId);
+  const bassamOwner = salesOwners.find((owner) => owner.id === BASSAM_OWNER_ID);
+  const bassamIsSalesHost = selectedSalesOwnerId === BASSAM_OWNER_ID;
 
   async function loadCalendarStatus() {
     try {
@@ -169,14 +183,14 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
         body: JSON.stringify({ email }),
       });
       const payload = await response.json() as ContactLookupResponse;
-      if (!response.ok || !payload.contact) throw new Error(payload.error || "Contact not found in HubSpot");
+      if (!response.ok || !payload.contact) throw new Error(payload.error || "Unable to add this email");
 
       const contact = payload.contact;
-      setSelectedContacts((current) => current.some((item) => item.id === contact.id) ? current : [...current, contact]);
+      setSelectedContacts((current) => current.some((item) => item.email === contact.email) ? current : [...current, contact]);
       setContactEmail("");
       setPreview(false);
     } catch (error) {
-      setContactLookupError(error instanceof Error ? error.message : "Unable to find the contact in HubSpot");
+      setContactLookupError(error instanceof Error ? error.message : "Unable to add this email");
     } finally {
       setContactLookupLoading(false);
     }
@@ -197,7 +211,7 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
       return;
     }
     if (!selectedContacts.length) {
-      setSendError("Add at least one HubSpot contact before previewing the invitation.");
+      setSendError("Add at least one contact email before previewing the invitation.");
       setPreview(false);
       return;
     }
@@ -207,9 +221,13 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
   async function sendMeeting() {
     if (!calendarStatus?.connected || !selectedContacts.length || !selectedSalesOwner) return;
     const attendeeNames = selectedContacts.map((contact) => contact.name).join(", ");
-    const organizerCopy = includeOrganizerAsAttendee ? " and Marita as an attendee" : "";
+    const additionalAttendees = [
+      ...(includeOrganizerAsAttendee ? ["Marita"] : []),
+      ...(includeBassamAsAttendee && !bassamIsSalesHost ? ["Bassam Hamed"] : []),
+    ];
+    const additionalCopy = additionalAttendees.length ? `, plus ${additionalAttendees.join(" and ")}` : "";
     const confirmation = window.confirm(
-      `Send a real calendar invitation to ${selectedSalesOwner.email || selectedSalesOwner.name}, ${attendeeNames}${organizerCopy}?`,
+      `Send a real calendar invitation to ${selectedSalesOwner.email || selectedSalesOwner.name}, ${attendeeNames}${additionalCopy}?`,
     );
     if (!confirmation) return;
     setSending(true);
@@ -221,9 +239,10 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           requestId: crypto.randomUUID(),
-          contactIds: selectedContacts.map((contact) => contact.id),
+          contactEmails: selectedContacts.map((contact) => contact.email),
           salesOwnerId: selectedSalesOwner.id,
           includeOrganizerAsAttendee,
+          includeBassamAsAttendee: includeBassamAsAttendee && !bassamIsSalesHost,
           title: subject,
           date: meetingDate,
           time: meetingTime,
@@ -279,32 +298,38 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
       </section>
 
       <section className="workspace-card meeting-composer">
-        <div className="workspace-card-heading"><div><span>MEETING COMPOSER</span><h3>Book a Google Meet for Sales</h3><p>Choose the Sales Rep, then add one or more HubSpot contacts by email.</p></div><Video size={20}/></div>
+        <div className="workspace-card-heading"><div><span>MEETING COMPOSER</span><h3>Book a Google Meet for Sales</h3><p>Choose the Sales Rep, then add any contact email. HubSpot contacts are linked; other emails are invited without creating a CRM record.</p></div><Video size={20}/></div>
         <form onSubmit={submitPreview}>
-          <label><span>Sales Rep · Meeting owner</span><select value={selectedSalesOwnerId} onChange={(event) => { setSelectedSalesOwnerId(event.target.value); setPreview(false); }} required disabled={!salesOwners.length}><option value="">Select Sales Rep</option>{salesOwners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}{owner.email ? " · " + owner.email : ""}</option>)}</select></label>
+          <label><span>Sales Rep · Meeting owner</span><select value={selectedSalesOwnerId} onChange={(event) => { const ownerId = event.target.value; setSelectedSalesOwnerId(ownerId); if (ownerId === BASSAM_OWNER_ID) setIncludeBassamAsAttendee(false); setPreview(false); }} required disabled={!salesOwners.length}><option value="">Select Sales Rep</option>{salesOwners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}{owner.email ? " · " + owner.email : ""}</option>)}</select></label>
           <div className="meeting-host"><div className="meeting-avatar host"><UserRound size={15}/></div><div><strong>{selectedSalesOwner?.name ?? "Select Faizan, Fadi, Jehad, Bassam, Ursula, Zein, or Abdullah"}</strong><span>{selectedSalesOwner?.email || "No Sales Rep selected"}</span></div><em>Host · HubSpot owner</em></div>
 
           <div className={styles.contactPickerRow}>
             <label><span>Add contact by email</span><input type="email" value={contactEmail} placeholder="contact@company.com" autoComplete="off" onChange={(event) => { setContactEmail(event.target.value); setContactLookupError(""); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addContact(); } }}/></label>
-            <button className={styles.addContactButton} type="button" onClick={() => void addContact()} disabled={contactLookupLoading || !contactEmail.trim()}><Plus size={14}/>{contactLookupLoading ? "Finding…" : "Add"}</button>
+            <button className={styles.addContactButton} type="button" onClick={() => void addContact()} disabled={contactLookupLoading || !contactEmail.trim()}><Plus size={14}/>{contactLookupLoading ? "Checking…" : "Add"}</button>
           </div>
           {contactLookupError && <div className={styles.contactLookupError} role="alert"><AlertTriangle size={13}/>{contactLookupError}</div>}
 
           <div className={styles.selectedContacts}>
-            {!selectedContacts.length && <div className={styles.contactEmpty}><Users size={17}/><span>Enter a HubSpot contact email. The first added contact is the Primary Contact.</span></div>}
+            {!selectedContacts.length && <div className={styles.contactEmpty}><Users size={17}/><span>Enter any valid email. Existing HubSpot contacts will be linked; other emails will still receive the invitation.</span></div>}
             {selectedContacts.map((contact, index) => <div className={`meeting-guest ${styles.selectedContactCard}`} key={contact.id}>
               <div className="meeting-avatar">{contact.name.split(" ").map((part) => part[0]).join("").slice(0,2).toUpperCase() || "?"}</div>
-              <div><strong>{contact.name}</strong><span>{contact.email}{contact.company ? " · " + contact.company : ""}</span></div>
+              <div className={styles.contactIdentity}><strong>{contact.name}</strong><span>{contact.email}{contact.company ? " · " + contact.company : ""}</span>{!contact.inHubSpot && <small className={styles.externalContactNote}><AlertTriangle size={10}/>Not found in HubSpot · email invitation only</small>}</div>
               <i className={styles.contactRole}>{index === 0 ? "Primary" : "Additional"}</i>
-              <HubSpotButton href={contact.url} label="Profile"/>
+              {contact.inHubSpot && contact.url && <HubSpotButton href={contact.url} label="Profile"/>}
               <button className={styles.removeContactButton} type="button" onClick={() => removeContact(contact.id)} aria-label={`Remove ${contact.name}`}><X size={13}/></button>
             </div>)}
           </div>
 
-          <button className={`${styles.organizerToggle} ${includeOrganizerAsAttendee ? styles.organizerToggleActive : ""}`} type="button" aria-pressed={includeOrganizerAsAttendee} onClick={() => { setIncludeOrganizerAsAttendee((current) => !current); setPreview(false); }}>
-            <span>{includeOrganizerAsAttendee ? <CheckCircle2 size={15}/> : <UserRound size={15}/>}</span>
-            <div><strong>Add Marita as an attendee</strong><small>Optional. Marita remains the Google Calendar organizer either way.</small></div>
-          </button>
+          <div className={styles.attendeeToggles}>
+            <button className={`${styles.organizerToggle} ${includeOrganizerAsAttendee ? styles.organizerToggleActive : ""}`} type="button" aria-pressed={includeOrganizerAsAttendee} onClick={() => { setIncludeOrganizerAsAttendee((current) => !current); setPreview(false); }}>
+              <span>{includeOrganizerAsAttendee ? <CheckCircle2 size={15}/> : <UserRound size={15}/>}</span>
+              <div><strong>Add Marita as an attendee</strong><small>Optional. Marita remains the Google Calendar organizer either way.</small></div>
+            </button>
+            <button className={`${styles.organizerToggle} ${includeBassamAsAttendee || bassamIsSalesHost ? styles.organizerToggleActive : ""}`} type="button" aria-pressed={includeBassamAsAttendee || bassamIsSalesHost} disabled={bassamIsSalesHost || !bassamOwner?.email} onClick={() => { setIncludeBassamAsAttendee((current) => !current); setPreview(false); }}>
+              <span>{includeBassamAsAttendee || bassamIsSalesHost ? <CheckCircle2 size={15}/> : <UserRound size={15}/>}</span>
+              <div><strong>{bassamIsSalesHost ? "Bassam is already the Sales Rep" : "Add Bassam Hamed as an attendee"}</strong><small>{bassamIsSalesHost ? "He already receives the invitation as the meeting host." : bassamOwner?.email ? `Optional · ${bassamOwner.email}` : "Bassam’s email is unavailable in HubSpot."}</small></div>
+            </button>
+          </div>
 
           <label><span>Meeting title</span><input value={subject} onChange={(event) => { setSubject(event.target.value); setPreview(false); }} required/></label>
           <div className="meeting-form-row"><label><span>Date</span><input type="date" value={meetingDate} onChange={(event) => { setMeetingDate(event.target.value); setPreview(false); }} required/></label><label><span>Time</span><input type="time" value={meetingTime} onChange={(event) => { setMeetingTime(event.target.value); setPreview(false); }} required/></label><label><span>Duration</span><select value={duration} onChange={(event) => { setDuration(event.target.value); setPreview(false); }}><option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option></select></label></div>
@@ -315,10 +340,10 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
         {sendError && !preview && <div className="meeting-send-message error"><AlertTriangle size={14}/><span><strong>Invitation is not ready</strong>{sendError}</span></div>}
         {preview && <div className="meeting-preview">
           <div className="meeting-preview-title"><CheckCircle2 size={17}/><div><strong>Invitation preview ready</strong><span>No calendar event or HubSpot meeting has been created.</span></div></div>
-          <dl><div><dt>Organizer</dt><dd>Marita Chedid · {calendarStatus?.email || "Google Calendar"}</dd></div><div><dt>Sales host</dt><dd>{selectedSalesOwner?.name || "Missing Sales Rep"} · invitation recipient · HubSpot meeting owner</dd></div><div><dt>Primary contact</dt><dd>{selectedContacts[0]?.name || "—"} · {selectedContacts[0]?.email || "Missing email"}</dd></div><div><dt>Additional contacts</dt><dd>{selectedContacts.slice(1).length ? selectedContacts.slice(1).map((contact) => contact.name).join(", ") : "None"}</dd></div><div><dt>Marita attendee</dt><dd>{includeOrganizerAsAttendee ? "Included as an attendee as well as organizer" : "Organizer only"}</dd></div><div><dt>When</dt><dd>{meetingDate} at {meetingTime} · {duration} minutes</dd></div><div><dt>Location</dt><dd>{meetingType === "google-meet" ? "A unique Google Meet link will be included in the invitations" : "Calendar invitation without a video link"}</dd></div><div><dt>After send</dt><dd>Google invites the Sales Rep and all selected contacts. HubSpot logs one meeting owned by {selectedSalesOwner?.name || "the selected Sales Rep"} and associates it with every selected contact.</dd></div></dl>
-          {calendarStatus?.connected ? <button className="meeting-send-button" type="button" onClick={() => void sendMeeting()} disabled={sending || !selectedContacts.length || !selectedSalesOwner?.email || selectedContacts.some((contact) => !contact.email)}>{sending ? "Creating meeting and sending invitations…" : <><Video size={14}/>Confirm & send invitations</>}</button> : <a className="meeting-connect-button" href="/api/google/connect"><Video size={14}/>Connect Marita Calendar first</a>}
+          <dl><div><dt>Organizer</dt><dd>Marita Chedid · {calendarStatus?.email || "Google Calendar"}</dd></div><div><dt>Sales host</dt><dd>{selectedSalesOwner?.name || "Missing Sales Rep"} · invitation recipient · HubSpot meeting owner</dd></div><div><dt>Primary contact</dt><dd>{selectedContacts[0]?.name || "—"} · {selectedContacts[0]?.email || "Missing email"} · {selectedContacts[0]?.inHubSpot ? "linked to HubSpot" : "email only"}</dd></div><div><dt>Additional contacts</dt><dd>{selectedContacts.slice(1).length ? selectedContacts.slice(1).map((contact) => `${contact.name} (${contact.inHubSpot ? "HubSpot" : "email only"})`).join(", ") : "None"}</dd></div><div><dt>Marita attendee</dt><dd>{includeOrganizerAsAttendee ? "Included as an attendee as well as organizer" : "Organizer only"}</dd></div><div><dt>Bassam attendee</dt><dd>{bassamIsSalesHost ? "Already included as the selected Sales Rep" : includeBassamAsAttendee ? `Included · ${bassamOwner?.email || "HubSpot email"}` : "Not included"}</dd></div><div><dt>When</dt><dd>{meetingDate} at {meetingTime} · {duration} minutes</dd></div><div><dt>Location</dt><dd>{meetingType === "google-meet" ? "A unique Google Meet link will be included in the invitations" : "Calendar invitation without a video link"}</dd></div><div><dt>After send</dt><dd>Google invites the Sales Rep and every selected email. HubSpot logs one meeting owned by {selectedSalesOwner?.name || "the selected Sales Rep"}, links contacts found in HubSpot, and leaves external emails as calendar-only attendees.</dd></div></dl>
+          {calendarStatus?.connected ? <button className="meeting-send-button" type="button" onClick={() => void sendMeeting()} disabled={sending || !selectedContacts.length || !selectedSalesOwner?.email}>{sending ? "Creating meeting and sending invitations…" : <><Video size={14}/>Confirm & send invitations</>}</button> : <a className="meeting-connect-button" href="/api/google/connect"><Video size={14}/>Connect Marita Calendar first</a>}
           {sendError && <div className="meeting-send-message error"><AlertTriangle size={14}/><span><strong>Meeting not created</strong>{sendError}</span></div>}
-          {bookingResult && <div className="meeting-send-message success"><CheckCircle2 size={15}/><span><strong>Meeting created and invitations sent</strong>{bookingResult.salesOwner.name} and {bookingResult.contacts.map((contact) => contact.name).join(", ")} were invited.</span><div><a href={bookingResult.meetLink || bookingResult.calendarUrl} target="_blank" rel="noreferrer">Open Google Meet<ExternalLink size={11}/></a><a href={bookingResult.hubspotContactUrl} target="_blank" rel="noreferrer">Open primary HubSpot timeline<ExternalLink size={11}/></a></div></div>}
+          {bookingResult && <div className="meeting-send-message success"><CheckCircle2 size={15}/><span><strong>Meeting created and invitations sent</strong>{bookingResult.salesOwner.name}, {bookingResult.contacts.map((contact) => contact.name).join(", ")}{bookingResult.bassamIncluded ? ", and Bassam Hamed" : ""} were invited.</span><div><a href={bookingResult.meetLink || bookingResult.calendarUrl} target="_blank" rel="noreferrer">Open Google Meet<ExternalLink size={11}/></a><a href={bookingResult.hubspotContactUrl} target="_blank" rel="noreferrer">{bookingResult.hubspotLinkLabel}<ExternalLink size={11}/></a></div></div>}
         </div>}
       </section>
     </div>

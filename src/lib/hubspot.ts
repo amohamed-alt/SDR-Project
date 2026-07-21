@@ -272,7 +272,10 @@ export interface CreateMeetingInput {
 
 export async function createMeeting(input: CreateMeetingInput): Promise<HubSpotRecord> {
   const contactIds = [...new Set(input.contactIds)];
-  if (!contactIds.length) throw new HubSpotApiError("At least one contact association is required", 400, "Missing contactIds");
+  const associations = contactIds.map((contactId) => ({
+    to: { id: contactId },
+    types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 200 }],
+  }));
 
   return hubspotRequest<HubSpotRecord>("/crm/v3/objects/meetings", {
     method: "POST",
@@ -289,10 +292,7 @@ export async function createMeeting(input: CreateMeetingInput): Promise<HubSpotR
         hs_meeting_end_time: input.endAt,
         hs_meeting_outcome: "SCHEDULED",
       },
-      associations: contactIds.map((contactId) => ({
-        to: { id: contactId },
-        types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 200 }],
-      })),
+      ...(associations.length ? { associations } : {}),
     }),
   });
 }
