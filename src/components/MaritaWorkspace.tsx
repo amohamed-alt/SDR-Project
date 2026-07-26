@@ -113,7 +113,9 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
       .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
     [data.priorityContacts],
   );
-  const untouchedOnlineLeads = onlineLeads.filter((row) => !row.lastContacted);
+  const untouchedOnlineLeads = onlineLeads.filter(
+  (row) => !row.lastContacted && row.leadStatus.trim().toLowerCase() !== "unqualified",
+);
   const meetings = data.recentActivities
     .filter((row) => row.type === "Meeting" && row.isOpen)
     .sort((a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime());
@@ -270,7 +272,15 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
     <div className="workspace-stat-grid">
       <WorkspaceStat icon={CalendarDays} label="Tasks due today" value={dueToday.length} helper="Open execution queue" tone="green" onClick={() => openActivities("Tasks due today", "Open tasks due today for Marita.", dueToday, data.meta.hubspotUrls.tasks)}/>
       <WorkspaceStat icon={AlertTriangle} label="High-priority tasks" value={highPriorityTasks.length} helper="Needs attention" tone="purple" onClick={() => openActivities("High-priority tasks", "Open tasks marked High priority.", highPriorityTasks, data.meta.hubspotUrls.tasks)}/>
-      <WorkspaceStat icon={Target} label="Online leads" value={onlineLeads.length} helper={`${untouchedOnlineLeads.length} not contacted`} tone="amber" onClick={() => openContacts("Online leads", "Only Marita contacts whose Original Traffic Source is online. Offline Sources and unknown sources are excluded.", onlineLeads)}/>
+      <WorkspaceStat
+  icon={Target}
+  label="Online leads"
+  value={onlineLeads.length}
+  helper={`${untouchedOnlineLeads.length} not contacted`}
+  tone="amber"
+  onClick={() => openContacts("Online leads", "Only Marita contacts whose Original Traffic Source is online. Offline Sources and unknown sources are excluded.", onlineLeads)}
+  helperOnClick={() => openContacts("Online leads not contacted", "Online leads with no logged Last Contacted value. Unqualified contacts are excluded.", untouchedOnlineLeads)}
+/>
       <WorkspaceStat icon={Video} label="Meetings today" value={meetingsToday.length} helper={upcomingMeetings.length + " upcoming"} tone="blue" onClick={() => openActivities("Meetings today", "Scheduled meetings starting today.", meetingsToday, data.meta.hubspotUrls.meetings)}/>
     </div>
 
@@ -355,8 +365,20 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
   </div>;
 }
 
-function WorkspaceStat({ icon: Icon, label, value, helper, tone, onClick }: { icon: typeof CalendarDays; label: string; value: number; helper: string; tone: string; onClick: () => void }) {
-  return <button className={"workspace-stat tone-" + tone} onClick={onClick}><span><Icon size={17}/>{label}</span><strong>{value}</strong><small>{helper}<ChevronRight size={12}/></small></button>;
+function WorkspaceStat({ icon: Icon, label, value, helper, tone, onClick, helperOnClick }: { icon: typeof CalendarDays; label: string; value: number; helper: string; tone: string; onClick: () => void; helperOnClick?: () => void }) {
+  return <button className={"workspace-stat tone-" + tone} onClick={onClick}><span><Icon size={17}/>{label}</span><strong>{value}</strong><small
+    role={helperOnClick ? "link" : undefined}
+    tabIndex={helperOnClick ? 0 : undefined}
+    style={helperOnClick ? { textDecoration: "underline", textUnderlineOffset: "2px" } : undefined}
+    onClick={helperOnClick ? (event) => { event.stopPropagation(); helperOnClick(); } : undefined}
+    onKeyDown={helperOnClick ? (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        event.stopPropagation();
+        helperOnClick();
+      }
+    } : undefined}
+  >{helper}<ChevronRight size={12}/></small></button>;
 }
 
 function TaskQueueItem({ row, timezone }: { row: ActivityRow; timezone: string }) {
