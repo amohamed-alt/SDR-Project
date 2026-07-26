@@ -1,0 +1,89 @@
+name: Apply online lead drilldown fix
+
+on:
+  push:
+    branches:
+      - fix/clickable-not-contacted-exclude-unqualified
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/clickable-not-contacted-exclude-unqualified
+
+      - name: Update Marita Workspace
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/components/MaritaWorkspace.tsx")
+          text = path.read_text(encoding="utf-8")
+
+          replacements = [
+              (
+                  '  const untouchedOnlineLeads = onlineLeads.filter((row) => !row.lastContacted);',
+                  '''  const untouchedOnlineLeads = onlineLeads.filter(
+            (row) => !row.lastContacted && row.leadStatus.trim().toLowerCase() !== "unqualified",
+          );''',
+              ),
+              (
+                  '      <WorkspaceStat icon={Target} label="Online leads" value={onlineLeads.length} helper={`${untouchedOnlineLeads.length} not contacted`} tone="amber" onClick={() => openContacts("Online leads", "Only Marita contacts whose Original Traffic Source is online. Offline Sources and unknown sources are excluded.", onlineLeads)}/>',
+                  '''      <WorkspaceStat
+            icon={Target}
+            label="Online leads"
+            value={onlineLeads.length}
+            helper={`${untouchedOnlineLeads.length} not contacted`}
+            tone="amber"
+            onClick={() => openContacts("Online leads", "Only Marita contacts whose Original Traffic Source is online. Offline Sources and unknown sources are excluded.", onlineLeads)}
+            helperOnClick={() => openContacts("Online leads not contacted", "Online leads with no logged Last Contacted value. Unqualified contacts are excluded.", untouchedOnlineLeads)}
+          />''',
+              ),
+              (
+                  'function WorkspaceStat({ icon: Icon, label, value, helper, tone, onClick }: { icon: typeof CalendarDays; label: string; value: number; helper: string; tone: string; onClick: () => void }) {\n  return <button className={"workspace-stat tone-" + tone} onClick={onClick}><span><Icon size={17}/>{label}</span><strong>{value}</strong><small>{helper}<ChevronRight size={12}/></small></button>;\n}',
+                  '''function WorkspaceStat({ icon: Icon, label, value, helper, tone, onClick, helperOnClick }: { icon: typeof CalendarDays; label: string; value: number; helper: string; tone: string; onClick: () => void; helperOnClick?: () => void }) {
+            return <button className={"workspace-stat tone-" + tone} onClick={onClick}><span><Icon size={17}/>{label}</span><strong>{value}</strong><small
+              role={helperOnClick ? "link" : undefined}
+              tabIndex={helperOnClick ? 0 : undefined}
+              style={helperOnClick ? { textDecoration: "underline", textUnderlineOffset: "2px" } : undefined}
+              onClick={helperOnClick ? (event) => { event.stopPropagation(); helperOnClick(); } : undefined}
+              onKeyDown={helperOnClick ? (event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  helperOnClick();
+                }
+              } : undefined}
+            >{helper}<ChevronRight size={12}/></small></button>;
+          }''',
+              ),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one match, found {count}: {old[:80]}")
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Commit changes
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/MaritaWorkspace.tsx
+          git commit -m "Make not-contacted leads clickable and exclude unqualified"
+          git push origin HEAD:fix/clickable-not-contacted-exclude-unqualified
