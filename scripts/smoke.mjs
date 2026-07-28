@@ -22,7 +22,8 @@ function waitForReady() {
 
 try {
   await waitForReady();
-  const [healthResponse, dashboardResponse, calendarStatusResponse, rejectedMeetingResponse, pageResponse] = await Promise.all([
+  const oversizedTaskIds = Array.from({ length: 501 }, (_, index) => String(index + 1));
+  const [healthResponse, dashboardResponse, calendarStatusResponse, rejectedMeetingResponse, invalidCountryBatchResponse, pageResponse] = await Promise.all([
     fetch(`http://127.0.0.1:${port}/api/health`),
     fetch(`http://127.0.0.1:${port}/api/dashboard?from=2026-07-01&to=2026-07-19&ownerId=31644369`),
     fetch(`http://127.0.0.1:${port}/api/google/status`),
@@ -31,12 +32,18 @@ try {
       headers: { "Content-Type": "application/json" },
       body: "{}",
     }),
+    fetch(`http://127.0.0.1:${port}/api/hubspot/task-countries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskIds: oversizedTaskIds }),
+    }),
     fetch(`http://127.0.0.1:${port}/`),
   ]);
   if (!healthResponse.ok || !dashboardResponse.ok || !calendarStatusResponse.ok || !pageResponse.ok) throw new Error("One or more smoke-test routes returned an error");
   const health = await healthResponse.json();
   const dashboard = await dashboardResponse.json();
   const calendarStatus = await calendarStatusResponse.json();
+  const invalidCountryBatch = await invalidCountryBatchResponse.json();
   const page = await pageResponse.text();
   if (health.status !== "ok") throw new Error("Health response is invalid");
   if (!dashboard.kpis || dashboard.meta?.isDemo !== true) throw new Error("Dashboard response is invalid");
@@ -44,8 +51,9 @@ try {
   if (!dashboard.recentActivities?.some((activity) => activity.type === "WhatsApp")) throw new Error("WhatsApp activity rows are missing");
   if (calendarStatus.configured !== false || calendarStatus.connected !== false) throw new Error("Calendar status response is invalid");
   if (rejectedMeetingResponse.status !== 403) throw new Error("Calendar booking origin protection is invalid");
+  if (invalidCountryBatchResponse.status !== 400 || typeof invalidCountryBatch.details !== "string") throw new Error("Task country batch validation is invalid");
   if (!page.includes("SDR Command Center")) throw new Error("Dashboard page markup is invalid");
-  console.log("Smoke tests passed: dashboard, health API, WhatsApp activity data, and protected meeting routes are operational.");
+  console.log("Smoke tests passed: dashboard, WhatsApp activity data, task-country batch validation, and protected routes are operational.");
 } finally {
   server.kill("SIGTERM");
 }
