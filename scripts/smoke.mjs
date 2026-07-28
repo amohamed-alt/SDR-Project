@@ -40,10 +40,12 @@ try {
   const page = await pageResponse.text();
   if (health.status !== "ok") throw new Error("Health response is invalid");
   if (!dashboard.kpis || dashboard.meta?.isDemo !== true) throw new Error("Dashboard response is invalid");
+  if (!dashboard.dailyActivities?.some((point) => typeof point.whatsAppMessages === "number")) throw new Error("Daily WhatsApp activity data is missing");
+  if (!dashboard.recentActivities?.some((activity) => activity.type === "WhatsApp")) throw new Error("WhatsApp activity rows are missing");
   if (calendarStatus.configured !== false || calendarStatus.connected !== false) throw new Error("Calendar status response is invalid");
   if (rejectedMeetingResponse.status !== 403) throw new Error("Calendar booking origin protection is invalid");
   if (!page.includes("SDR Command Center")) throw new Error("Dashboard page markup is invalid");
-  console.log("Smoke tests passed: page, health API, and dashboard API are operational.");
+  console.log("Smoke tests passed: page, health API, dashboard API, and WhatsApp activity data are operational.");
 } finally {
   server.kill("SIGTERM");
 }

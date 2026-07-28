@@ -9,7 +9,7 @@ export function createMockDashboard(from: string, to: string, ownerId: string): 
       ownerName: "Marita Chedid", portalId: "145742477", isDemo: true,
       warnings: ["Demo mode is active. Connect a HubSpot private app token to load live CRM data."],
       hubspotUrls: {
-        contacts: "#", companies: "#", calls: "#", meetings: "#", tasks: "#", emails: "#", deals: "#",
+        contacts: "#", companies: "#", calls: "#", meetings: "#", tasks: "#", emails: "#", communications: "#", deals: "#",
       },
     },
     kpis: {
@@ -23,7 +23,7 @@ export function createMockDashboard(from: string, to: string, ownerId: string): 
     dailyActivities: daily.map((calls, index) => ({
       date: `2026-07-${String(index + 1).padStart(2, "0")}`, calls, connected: Math.round(calls * 0.25),
       tasksCompleted: Math.round(calls * 0.65), tasksDue: Math.round(calls * 0.78), meetingsBooked: calls ? Math.max(1, Math.round(calls / 24)) : 0,
-      emailsSent: Math.round(calls * 0.8),
+      emailsSent: Math.round(calls * 0.8), whatsAppMessages: calls ? Math.max(1, Math.round(calls * 0.18)) : 0,
     })),
     funnel: [
       { name: "Portfolio", value: 529 }, { name: "Contacted", value: 401 }, { name: "Connected", value: 106 },
@@ -87,6 +87,7 @@ export function createMockDashboard(from: string, to: string, ownerId: string): 
       hasOpenDeal: Number(score) >= 93, qualityIssues: ["hs_time_to_first_engagement"], priorityScore: Number(score), url: "#",
     })),
     recentActivities: [
+      { id: "whatsapp-1", type: "WhatsApp", subject: "WhatsApp message", status: "Logged", detail: "Shared the meeting availability and next steps.", assignedTo: "Marita Chedid", occurredAt: "2026-07-19T11:00:00Z", metricAt: "2026-07-19T11:00:00Z", dueAt: "", dueBucket: "", isOpen: false, isHighPriority: false, opened: false, clicked: false, replied: false, url: "#" },
       { id: "call-1", type: "Call", subject: "Discovery call", status: "Connected", detail: "Connected", assignedTo: "Marita Chedid", occurredAt: "2026-07-19T10:30:00Z", metricAt: "2026-07-19T10:30:00Z", dueAt: "", dueBucket: "", isOpen: false, isHighPriority: false, opened: false, clicked: false, replied: false, url: "#" },
       { id: "meeting-1", type: "Meeting", subject: "Talentera demo", status: "Completed", detail: "Meetings Public", assignedTo: "Marita Chedid", occurredAt: "2026-07-19T09:00:00Z", metricAt: "2026-07-19T09:00:00Z", dueAt: "", dueBucket: "", isOpen: false, isHighPriority: false, opened: false, clicked: false, replied: false, url: "#" },
       { id: "task-1", type: "Task", subject: "Follow up with HR Director", status: "Not Started", detail: "High", assignedTo: "Marita Chedid", occurredAt: "2026-07-19T08:00:00Z", metricAt: "2026-07-19T08:00:00Z", dueAt: "2026-07-19T08:00:00Z", dueBucket: "Due today", isOpen: true, isHighPriority: true, opened: false, clicked: false, replied: false, url: "#" },

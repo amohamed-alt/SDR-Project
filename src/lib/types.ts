@@ -34,6 +34,7 @@ export interface DailyActivityDatum {
   tasksDue: number;
   meetingsBooked: number;
   emailsSent: number;
+  whatsAppMessages: number;
 }
 
 export interface KpiMetric {
@@ -129,7 +130,7 @@ export interface ContactRow {
 
 export interface ActivityRow {
   id: string;
-  type: "Call" | "Meeting" | "Task" | "Email";
+  type: "Call" | "Meeting" | "Task" | "Email" | "WhatsApp";
   subject: string;
   status: string;
   detail: string;
@@ -203,6 +204,7 @@ export interface DashboardData {
       meetings: string;
       tasks: string;
       emails: string;
+      communications: string;
       deals: string;
     };
   };
