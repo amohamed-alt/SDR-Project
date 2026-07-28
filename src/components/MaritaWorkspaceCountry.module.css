@@ -1,0 +1,207 @@
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.filterCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 300px) auto;
+  align-items: end;
+  gap: 14px;
+  padding: 15px 17px;
+  border: 1px solid #cfe4d9;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f3faf6, #ffffff);
+  box-shadow: 0 12px 34px rgba(23, 67, 50, 0.07);
+}
+
+.filterIntro {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.filterIcon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  background: #e2f2e9;
+  color: #087a50;
+}
+
+.filterIntro > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.filterIntro strong {
+  color: #10291f;
+  font-size: 11px;
+}
+
+.filterIntro span {
+  margin-top: 4px;
+  color: #6e8178;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.filterField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.filterField > span {
+  color: #6e8178;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.filterField select {
+  width: 100%;
+  height: 37px;
+  padding: 0 10px;
+  border: 1px solid #dbe5e0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #10291f;
+  font-size: 9px;
+  outline: none;
+}
+
+.filterField select:focus {
+  border-color: #087a50;
+  box-shadow: 0 0 0 3px rgba(8, 122, 80, 0.1);
+}
+
+.filterField select:disabled {
+  background: #f2f6f4;
+  color: #8fa098;
+  cursor: wait;
+}
+
+.filterActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.resultBadge {
+  min-width: 62px;
+  height: 37px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  border: 1px solid #cfe4d9;
+  border-radius: 9px;
+  background: #edf8f2;
+  color: #087a50;
+}
+
+.resultBadge strong {
+  font: 800 14px/1 "Manrope", sans-serif;
+}
+
+.resultBadge span {
+  margin-top: 2px;
+  font-size: 6px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.clearButton {
+  width: 37px;
+  height: 37px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #dbe5e0;
+  border-radius: 9px;
+  background: #ffffff;
+  color: #60766b;
+  cursor: pointer;
+}
+
+.clearButton:hover:not(:disabled) {
+  border-color: #087a50;
+  color: #087a50;
+}
+
+.clearButton:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.statusRow {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: -3px;
+  color: #71847a;
+  font-size: 7px;
+}
+
+.statusRow i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #9db2a8;
+}
+
+.error {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #b04438;
+  font-weight: 700;
+}
+
+.loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #087a50;
+  font-weight: 700;
+}
+
+.loading svg {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 900px) {
+  .filterCard {
+    grid-template-columns: 1fr minmax(200px, 1fr);
+  }
+
+  .filterActions {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 640px) {
+  .filterCard {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .filterActions {
+    grid-column: auto;
+    justify-content: space-between;
+  }
+}
