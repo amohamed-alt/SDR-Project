@@ -22,13 +22,38 @@ type TaskCountryResolution = {
 type TaskCountryResponse = {
   tasks?: TaskCountryResolution[];
   error?: string;
-  details?: string;
+  details?: unknown;
 };
+
+const TASK_COUNTRY_BATCH_SIZE = 250;
+const TASK_COUNTRY_CONCURRENCY = 2;
+
+function chunkTaskIds(taskIds: string[]) {
+  const batches: string[][] = [];
+  for (let index = 0; index < taskIds.length; index += TASK_COUNTRY_BATCH_SIZE) {
+    batches.push(taskIds.slice(index, index + TASK_COUNTRY_BATCH_SIZE));
+  }
+  return batches;
+}
+
+function responseError(payload: TaskCountryResponse, fallback: string) {
+  if (typeof payload.details === "string" && payload.details.trim()) return payload.details;
+  if (payload.details && typeof payload.details === "object") {
+    const details = payload.details as { fieldErrors?: Record<string, string[]>; formErrors?: string[] };
+    const messages = [
+      ...(details.formErrors ?? []),
+      ...Object.values(details.fieldErrors ?? {}).flat(),
+    ].filter(Boolean);
+    if (messages.length) return messages.join(" · ");
+  }
+  return payload.error || fallback;
+}
 
 export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen: (drilldown: Drilldown) => void }) {
   const [selectedCountry, setSelectedCountry] = useState("");
   const [resolutions, setResolutions] = useState<TaskCountryResolution[]>([]);
   const [loading, setLoading] = useState(false);
+  const [resolvedProgress, setResolvedProgress] = useState(0);
   const [lookupComplete, setLookupComplete] = useState(false);
   const [error, setError] = useState("");
 
@@ -48,6 +73,7 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
 
     async function loadTaskCountries() {
       setError("");
+      setResolvedProgress(0);
       setLookupComplete(false);
 
       if (!taskRows.length) {
@@ -60,29 +86,64 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
       if (!numericTaskIds.length) {
         setResolutions(taskRows.map((row) => ({ taskId: row.id, country: "Unknown", source: "unknown" })));
         setLoading(false);
+        setResolvedProgress(taskRows.length);
         setLookupComplete(true);
         return;
       }
 
       setLoading(true);
       try {
-        const response = await fetch("/api/hubspot/task-countries", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ taskIds: numericTaskIds }),
-          cache: "no-store",
-          signal: controller.signal,
-        });
-        const payload = await response.json() as TaskCountryResponse;
-        if (!response.ok) throw new Error(payload.details || payload.error || "Unable to load task countries");
+        const batches = chunkTaskIds(numericTaskIds);
+        const resolved: TaskCountryResolution[] = [];
+        const failures: string[] = [];
+        let nextBatchIndex = 0;
 
-        const resolved = payload.tasks ?? [];
+        async function worker() {
+          while (!controller.signal.aborted) {
+            const batchIndex = nextBatchIndex;
+            nextBatchIndex += 1;
+            if (batchIndex >= batches.length) return;
+
+            const taskIds = batches[batchIndex];
+            try {
+              const response = await fetch("/api/hubspot/task-countries", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ taskIds }),
+                cache: "no-store",
+                signal: controller.signal,
+              });
+              const payload = await response.json().catch(() => ({})) as TaskCountryResponse;
+              if (!response.ok) throw new Error(responseError(payload, "Unable to load task countries"));
+              resolved.push(...(payload.tasks ?? []));
+            } catch (requestError) {
+              if (controller.signal.aborted) return;
+              failures.push(requestError instanceof Error ? requestError.message : "Unable to load task countries");
+            } finally {
+              if (!controller.signal.aborted) {
+                setResolvedProgress((current) => Math.min(numericTaskIds.length, current + taskIds.length));
+              }
+            }
+          }
+        }
+
+        await Promise.all(
+          Array.from(
+            { length: Math.min(TASK_COUNTRY_CONCURRENCY, batches.length) },
+            () => worker(),
+          ),
+        );
+        if (controller.signal.aborted) return;
+
         const resolvedIds = new Set(resolved.map((item) => item.taskId));
         const unknownFallbacks = taskRows
           .filter((row) => !resolvedIds.has(row.id))
           .map((row): TaskCountryResolution => ({ taskId: row.id, country: "Unknown", source: "unknown" }));
 
         setResolutions([...resolved, ...unknownFallbacks]);
+        if (failures.length) {
+          setError(`${failures.length} of ${batches.length} country batches could not be resolved. Retry after refreshing the data.`);
+        }
         setLookupComplete(true);
       } catch (requestError) {
         if (controller.signal.aborted) return;
@@ -172,10 +233,10 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
       </div>
 
       <div className={styles.statusRow}>
-        {loading && <span className={styles.loading}><LoaderCircle size={12}/>Resolving task countries from HubSpot associations…</span>}
+        {loading && <span className={styles.loading}><LoaderCircle size={12}/>Resolving task countries from HubSpot associations… {resolvedProgress}/{numericTaskIds.length}</span>}
         {!loading && !error && lookupComplete && <span>{selectedCountry ? `Showing ${selectedCountry} only` : "Showing all countries"}</span>}
         {!loading && !error && lookupComplete && <><i/><span>{unknownCount} task{unknownCount === 1 ? "" : "s"} without a resolved country</span></>}
-        {error && <span className={styles.error}><AlertTriangle size={12}/>{error}. Tasks remain available under Unknown.</span>}
+        {error && <span className={styles.error}><AlertTriangle size={12}/>{error} Unresolved tasks remain available under Unknown.</span>}
       </div>
     </section>
 
