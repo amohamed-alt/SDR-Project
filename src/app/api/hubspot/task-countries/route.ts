@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const requestSchema = z.object({
-  taskIds: z.array(z.string().regex(/^\d+$/)).max(1_000),
+  taskIds: z.array(z.string().regex(/^\d+$/)).max(500),
 });
 
 const CONTACT_PROPERTIES = ["firstname", "lastname", "country", "company", "company_id"] as const;
@@ -48,8 +48,12 @@ export async function POST(request: NextRequest) {
   const parsed = requestSchema.safeParse(payload);
 
   if (!parsed.success) {
+    const details = parsed.error.issues
+      .map((issue) => issue.message)
+      .filter(Boolean)
+      .join(" · ") || "The request payload is invalid";
     return NextResponse.json(
-      { error: "Invalid task country lookup request", details: parsed.error.flatten() },
+      { error: "Invalid task country lookup request", details },
       { status: 400 },
     );
   }
