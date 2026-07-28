@@ -23,6 +23,9 @@
       }
     ],
     "paths": {
+      "@/components/MaritaWorkspace": [
+        "./src/components/MaritaWorkspaceCountry.tsx"
+      ],
       "@/*": [
         "./src/*"
       ]

@@ -45,7 +45,7 @@ try {
   if (calendarStatus.configured !== false || calendarStatus.connected !== false) throw new Error("Calendar status response is invalid");
   if (rejectedMeetingResponse.status !== 403) throw new Error("Calendar booking origin protection is invalid");
   if (!page.includes("SDR Command Center")) throw new Error("Dashboard page markup is invalid");
-  console.log("Smoke tests passed: page, health API, dashboard API, and WhatsApp activity data are operational.");
+  console.log("Smoke tests passed: dashboard, health API, WhatsApp activity data, and protected meeting routes are operational.");
 } finally {
   server.kill("SIGTERM");
 }
