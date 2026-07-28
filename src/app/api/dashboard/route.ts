@@ -23,7 +23,7 @@ const querySchema = z.object({
 
 const cachedDashboard = unstable_cache(
   async (filters: DashboardFilters) => buildDashboard(filters),
-  ["sdr-dashboard-live-v4-filter-object"],
+  ["sdr-dashboard-live-v5-whatsapp-activity"],
   { revalidate: 900, tags: ["sdr-dashboard"] },
 );
 
@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(data, {
       headers: {
         "Cache-Control": "private, max-age=0, must-revalidate",
-        "X-Dashboard-Cache-Version": "v4-filter-object",
+        "X-Dashboard-Cache-Version": "v5-whatsapp-activity",
       },
     });
   } catch (error) {
