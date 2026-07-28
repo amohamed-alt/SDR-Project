@@ -2,6 +2,7 @@ import {
   BOOKING_MEETING_SOURCES,
   CALL_DISPOSITION_LABELS,
   CALL_PROPERTIES,
+  COMMUNICATION_PROPERTIES,
   COMPANY_PROPERTIES,
   CONNECTED_CALL_DISPOSITION,
   CONTACT_PROPERTIES,
@@ -90,6 +91,12 @@ function pretty(raw: string) {
     .replace(/[_-]+/g, " ")
     .toLowerCase()
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function compactText(raw: string, maxLength = 180) {
+  const normalized = raw.replace(/\s+/g, " ").trim();
+  if (!normalized) return "No message body";
+  return normalized.length > maxLength ? normalized.slice(0, maxLength - 1) + "…" : normalized;
 }
 
 function number(raw: string) {
@@ -228,6 +235,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     tasksDueRaw,
     tasksCompletedRaw,
     emailsRaw,
+    whatsAppRaw,
     owners,
     stageLabels,
     contactDefinitions,
@@ -241,6 +249,10 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     optional("Tasks due", warnings, () => searchAll("tasks", TASK_PROPERTIES, activityFilters(filters.ownerId, "hs_timestamp", filters.from, filters.to), ["hs_timestamp"]), []),
     optional("Tasks completed", warnings, () => searchAll("tasks", TASK_PROPERTIES, activityFilters(filters.ownerId, "hs_task_completion_date", filters.from, filters.to), ["hs_task_completion_date"]), []),
     optional("Emails", warnings, () => searchAll("emails", EMAIL_PROPERTIES, activityFilters(filters.ownerId, "hs_timestamp", filters.from, filters.to), ["hs_timestamp"]), []),
+    optional("WhatsApp messages", warnings, () => searchAll("communications", COMMUNICATION_PROPERTIES, [
+      ...activityFilters(filters.ownerId, "hs_timestamp", filters.from, filters.to),
+      { propertyName: "hs_communication_channel_type", operator: "EQ", value: "WHATS_APP" },
+    ], ["hs_timestamp"]), []),
     optional("Owners", warnings, () => listOwners(), [] as HubSpotOwner[]),
     optional("Deal stages", warnings, () => listDealStages(), new Map<string, string>()),
     optional("Contact property labels", warnings, () => getPropertyDefinitions("contacts", [
@@ -286,11 +298,12 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   });
   const selectedIds = new Set(selectedContacts.map((contact) => contact.id));
 
-  const [callContacts, meetingContacts, taskContacts, emailContacts, contactDeals] = await Promise.all([
+  const [callContacts, meetingContacts, taskContacts, emailContacts, communicationContacts, contactDeals] = await Promise.all([
     optional("Call associations", warnings, () => readAssociations("calls", "contacts", callsRaw.map((record) => record.id)), new Map<string, string[]>()),
     optional("Meeting associations", warnings, () => readAssociations("meetings", "contacts", meetingsRaw.map((record) => record.id)), new Map<string, string[]>()),
     optional("Task associations", warnings, () => readAssociations("tasks", "contacts", [...tasksDueRaw, ...tasksCompletedRaw, ...openTaskGroups.flat()].map((record) => record.id)), new Map<string, string[]>()),
     optional("Email associations", warnings, () => readAssociations("emails", "contacts", emailsRaw.map((record) => record.id)), new Map<string, string[]>()),
+    optional("WhatsApp associations", warnings, () => readAssociations("communications", "contacts", whatsAppRaw.map((record) => record.id)), new Map<string, string[]>()),
     optional("Deal associations", warnings, () => readAssociations("contacts", "deals", selectedContacts.map((record) => record.id)), new Map<string, string[]>()),
   ]);
 
@@ -300,6 +313,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   const tasksCompleted = filterAssociated(tasksCompletedRaw, taskContacts, selectedIds, cohortFilterEnabled).filter((task) => value(task, "hs_task_status") === "COMPLETED");
   const openTasks = filterAssociated(openTaskGroups.flat(), taskContacts, selectedIds, cohortFilterEnabled);
   const emails = filterAssociated(emailsRaw, emailContacts, selectedIds, cohortFilterEnabled);
+  const whatsAppMessages = filterAssociated(whatsAppRaw, communicationContacts, selectedIds, cohortFilterEnabled);
 
   const companyContactCounts = new Map<string, number>();
   for (const contact of selectedContacts) {
@@ -319,7 +333,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     contact.id,
     [value(contact, "firstname"), value(contact, "lastname")].filter(Boolean).join(" ") || "Unnamed contact",
   ]));
-  const activityContact = (contactIds: string[], fallbackType: "call" | "meeting" | "task" | "email") => {
+  const activityContact = (contactIds: string[], fallbackType: "call" | "meeting" | "task" | "email" | "communication") => {
     const contactId = contactIds.find((id) => selectedIds.has(id)) ?? contactIds[0];
     if (!contactId) {
       return {
@@ -396,7 +410,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   ].filter((item) => item.value > 0);
 
   const dailyMap = new Map<string, DailyActivityDatum>(eachDay(filters.from, filters.to).map((date) => [date, {
-    date, calls: 0, connected: 0, tasksCompleted: 0, tasksDue: 0, meetingsBooked: 0, emailsSent: 0,
+    date, calls: 0, connected: 0, tasksCompleted: 0, tasksDue: 0, meetingsBooked: 0, emailsSent: 0, whatsAppMessages: 0,
   }]));
   for (const call of calls) {
     const day = localDay(value(call, "hs_timestamp"));
@@ -407,6 +421,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   for (const task of tasksCompleted) { const datum = dailyMap.get(localDay(value(task, "hs_task_completion_date"))); if (datum) datum.tasksCompleted += 1; }
   for (const meeting of meetingGroups) { const datum = dailyMap.get(localDay(meeting.createdAt)); if (datum) datum.meetingsBooked += 1; }
   for (const email of outgoingEmails) { const datum = dailyMap.get(localDay(value(email, "hs_timestamp"))); if (datum) datum.emailsSent += 1; }
+  for (const message of whatsAppMessages) { const datum = dailyMap.get(localDay(value(message, "hs_timestamp"))); if (datum) datum.whatsAppMessages += 1; }
 
   const quality: QualityMetric[] = [
     completeness("email", "Email coverage", selectedContacts),
@@ -558,6 +573,19 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       replied: number(value(email, "hs_email_reply_count")) > 0,
       ...activityContact(emailContacts.get(email.id) ?? [], "email"),
     })),
+    ...whatsAppMessages.map((message): ActivityRow => ({
+      id: message.id,
+      type: "WhatsApp",
+      subject: "WhatsApp message",
+      status: "Logged",
+      detail: compactText(value(message, "hs_communication_body")),
+      assignedTo: ownerMap.get(value(message, "hubspot_owner_id")) ?? ownerName,
+      occurredAt: value(message, "hs_timestamp") || value(message, "hs_createdate"),
+      metricAt: value(message, "hs_timestamp") || value(message, "hs_createdate"),
+      dueAt: "", dueBucket: "", isOpen: false, isHighPriority: false,
+      opened: false, clicked: false, replied: false,
+      ...activityContact(communicationContacts.get(message.id) ?? [], "communication"),
+    })),
   ].sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
 
   const highIcpUntouched = selectedContacts.filter((contact) => /^a$|tier a|tier_1|tier 1|high/i.test(value(contact, "gtm_icp_tier")) && !value(contact, "notes_last_contacted")).length;
@@ -599,7 +627,8 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       ownerId: filters.ownerId, ownerName, portalId: HUBSPOT_PORTAL_ID, isDemo: false, warnings,
       hubspotUrls: {
         contacts: hubspotListUrl("contact"), companies: hubspotListUrl("company"), calls: hubspotListUrl("call"),
-        meetings: hubspotListUrl("meeting"), tasks: hubspotListUrl("task"), emails: hubspotListUrl("email"), deals: hubspotListUrl("deal"),
+        meetings: hubspotListUrl("meeting"), tasks: hubspotListUrl("task"), emails: hubspotListUrl("email"),
+        communications: hubspotListUrl("communication"), deals: hubspotListUrl("deal"),
       },
     },
     kpis: {
