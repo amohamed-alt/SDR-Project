@@ -45,7 +45,8 @@ try {
   if (calendarStatus.configured !== false || calendarStatus.connected !== false) throw new Error("Calendar status response is invalid");
   if (rejectedMeetingResponse.status !== 403) throw new Error("Calendar booking origin protection is invalid");
   if (!page.includes("SDR Command Center")) throw new Error("Dashboard page markup is invalid");
-  console.log("Smoke tests passed: page, health API, dashboard API, and WhatsApp activity data are operational.");
+  if (!page.includes("Filter task queue by country")) throw new Error("Task country filter is missing from Marita Workspace");
+  console.log("Smoke tests passed: dashboard, WhatsApp activity data, and task country filtering are operational.");
 } finally {
   server.kill("SIGTERM");
 }
