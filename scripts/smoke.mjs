@@ -49,11 +49,12 @@ try {
   if (!dashboard.kpis || dashboard.meta?.isDemo !== true) throw new Error("Dashboard response is invalid");
   if (!dashboard.dailyActivities?.some((point) => typeof point.whatsAppMessages === "number")) throw new Error("Daily WhatsApp activity data is missing");
   if (!dashboard.recentActivities?.some((activity) => activity.type === "WhatsApp")) throw new Error("WhatsApp activity rows are missing");
+  if (!dashboard.priorityContacts?.every((contact) => typeof contact.contactSource === "string")) throw new Error("Contact Source data is missing for motion classification");
   if (calendarStatus.configured !== false || calendarStatus.connected !== false) throw new Error("Calendar status response is invalid");
   if (rejectedMeetingResponse.status !== 403) throw new Error("Calendar booking origin protection is invalid");
   if (invalidCountryBatchResponse.status !== 400 || typeof invalidCountryBatch.details !== "string") throw new Error("Task country batch validation is invalid");
-  if (!page.includes("SDR Command Center")) throw new Error("Dashboard page markup is invalid");
-  console.log("Smoke tests passed: dashboard, WhatsApp activity data, task-country batch validation, and protected routes are operational.");
+  if (!page.includes("SDR Command Center") || !page.includes("Inbound vs Outbound")) throw new Error("Dashboard motion entry is missing");
+  console.log("Smoke tests passed: dashboard, inbound/outbound entry, WhatsApp data, task-country validation, and protected routes are operational.");
 } finally {
   server.kill("SIGTERM");
 }
