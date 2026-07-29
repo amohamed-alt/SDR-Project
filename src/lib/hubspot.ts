@@ -5,9 +5,19 @@ const MAX_RETRIES = 3;
 const SEARCH_PAGE_SIZE = 200;
 const SEARCH_INTERVAL_MS = 275;
 const BATCH_SIZE = 100;
+const BATCH_CONCURRENCY = 6;
+const REFERENCE_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
 let searchQueue: Promise<void> = Promise.resolve();
 let nextSearchAt = 0;
+
+type ReferenceCacheEntry<T> = {
+  value?: T;
+  expiresAt: number;
+  inflight?: Promise<T>;
+};
+
+const referenceCache = new Map<string, ReferenceCacheEntry<unknown>>();
 
 export interface SearchFilter {
   propertyName: string;
@@ -82,20 +92,67 @@ function chunks<T>(items: T[], size = BATCH_SIZE) {
   return result;
 }
 
+async function mapConcurrent<T, R>(items: T[], concurrency: number, action: (item: T, index: number) => Promise<R>) {
+  if (!items.length) return [] as R[];
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) return;
+      results[index] = await action(items[index], index);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
+  );
+  return results;
+}
+
 function scheduleSearch<T>(action: () => Promise<T>): Promise<T> {
-  const run = searchQueue.then(async () => {
+  const scheduledStart = searchQueue.then(async () => {
     const delay = Math.max(0, nextSearchAt - Date.now());
     if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
     nextSearchAt = Date.now() + SEARCH_INTERVAL_MS;
-    return action();
   });
 
-  searchQueue = run.then(
+  searchQueue = scheduledStart.then(
     () => undefined,
     () => undefined,
   );
 
-  return run;
+  return scheduledStart.then(action);
+}
+
+async function cachedReference<T>(key: string, loader: () => Promise<T>, ttlMs = REFERENCE_CACHE_TTL_MS): Promise<T> {
+  const now = Date.now();
+  const existing = referenceCache.get(key) as ReferenceCacheEntry<T> | undefined;
+  if (existing?.value !== undefined && existing.expiresAt > now) return existing.value;
+  if (existing?.inflight) return existing.inflight;
+
+  const inflight = loader()
+    .then((value) => {
+      referenceCache.set(key, { value, expiresAt: Date.now() + ttlMs });
+      return value;
+    })
+    .catch((error) => {
+      if (existing?.value !== undefined) {
+        referenceCache.set(key, { value: existing.value, expiresAt: Date.now() + Math.min(ttlMs, 30 * 60 * 1000) });
+        return existing.value;
+      }
+      referenceCache.delete(key);
+      throw error;
+    });
+
+  referenceCache.set(key, {
+    value: existing?.value,
+    expiresAt: existing?.expiresAt ?? 0,
+    inflight,
+  });
+  return inflight;
 }
 
 async function hubspotRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -174,17 +231,17 @@ export async function batchRead(
 ): Promise<HubSpotRecord[]> {
   if (!ids.length) return [];
   const uniqueIds = [...new Set(ids)];
-  const responses = await Promise.all(
-    chunks(uniqueIds).map((batch) =>
-      hubspotRequest<BatchResponse>(`/crm/v3/objects/${objectType}/batch/read`, {
-        method: "POST",
-        body: JSON.stringify({
-          archived: false,
-          properties,
-          inputs: batch.map((id) => ({ id })),
-        }),
+  const responses = await mapConcurrent(
+    chunks(uniqueIds),
+    BATCH_CONCURRENCY,
+    (batch) => hubspotRequest<BatchResponse>(`/crm/v3/objects/${objectType}/batch/read`, {
+      method: "POST",
+      body: JSON.stringify({
+        archived: false,
+        properties,
+        inputs: batch.map((id) => ({ id })),
       }),
-    ),
+    }),
   );
   return responses.flatMap((response) => response.results);
 }
@@ -197,13 +254,13 @@ export async function readAssociations(
   const associationMap = new Map<string, string[]>();
   if (!fromIds.length) return associationMap;
 
-  const responses = await Promise.all(
-    chunks([...new Set(fromIds)]).map((batch) =>
-      hubspotRequest<AssociationResponse>(`/crm/v4/associations/${fromObjectType}/${toObjectType}/batch/read`, {
-        method: "POST",
-        body: JSON.stringify({ inputs: batch.map((id) => ({ id })) }),
-      }),
-    ),
+  const responses = await mapConcurrent(
+    chunks([...new Set(fromIds)]),
+    BATCH_CONCURRENCY,
+    (batch) => hubspotRequest<AssociationResponse>(`/crm/v4/associations/${fromObjectType}/${toObjectType}/batch/read`, {
+      method: "POST",
+      body: JSON.stringify({ inputs: batch.map((id) => ({ id })) }),
+    }),
   );
 
   for (const response of responses) {
@@ -216,42 +273,49 @@ export async function readAssociations(
 }
 
 export async function listOwners(): Promise<HubSpotOwner[]> {
-  const owners: HubSpotOwner[] = [];
-  let after: string | undefined;
+  return cachedReference("owners", async () => {
+    const owners: HubSpotOwner[] = [];
+    let after: string | undefined;
 
-  do {
-    const query = new URLSearchParams({ limit: "500", archived: "false" });
-    if (after) query.set("after", after);
-    const response = await hubspotRequest<OwnersResponse>(`/crm/v3/owners/?${query.toString()}`);
-    owners.push(
-      ...response.results.map((owner) => ({
-        id: String(owner.id),
-        name: [owner.firstName, owner.lastName].filter(Boolean).join(" ") || owner.email || String(owner.id),
-        email: owner.email,
-      })),
-    );
-    after = response.paging?.next?.after;
-  } while (after);
+    do {
+      const query = new URLSearchParams({ limit: "500", archived: "false" });
+      if (after) query.set("after", after);
+      const response = await hubspotRequest<OwnersResponse>(`/crm/v3/owners/?${query.toString()}`);
+      owners.push(
+        ...response.results.map((owner) => ({
+          id: String(owner.id),
+          name: [owner.firstName, owner.lastName].filter(Boolean).join(" ") || owner.email || String(owner.id),
+          email: owner.email,
+        })),
+      );
+      after = response.paging?.next?.after;
+    } while (after);
 
-  return owners;
+    return owners;
+  });
 }
 
 export async function listDealStages(): Promise<Map<string, string>> {
-  const response = await hubspotRequest<PipelinesResponse>("/crm/v3/pipelines/deals");
-  const stages = new Map<string, string>();
-  for (const pipeline of response.results) {
-    for (const stage of pipeline.stages) stages.set(stage.id, stage.label);
-  }
-  return stages;
+  return cachedReference("deal-stages", async () => {
+    const response = await hubspotRequest<PipelinesResponse>("/crm/v3/pipelines/deals");
+    const stages = new Map<string, string>();
+    for (const pipeline of response.results) {
+      for (const stage of pipeline.stages) stages.set(stage.id, stage.label);
+    }
+    return stages;
+  });
 }
 
 export async function getPropertyDefinitions(
   objectType: string,
   propertyNames: readonly string[],
 ): Promise<HubSpotPropertyDefinition[]> {
-  return Promise.all(
-    propertyNames.map((propertyName) =>
-      hubspotRequest<HubSpotPropertyDefinition>(
+  const names = [...new Set(propertyNames)].sort();
+  return cachedReference(`properties:${objectType}:${names.join(",")}`, () =>
+    mapConcurrent(
+      names,
+      BATCH_CONCURRENCY,
+      (propertyName) => hubspotRequest<HubSpotPropertyDefinition>(
         `/crm/v3/properties/${objectType}/${encodeURIComponent(propertyName)}`,
       ),
     ),
