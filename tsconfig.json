@@ -23,6 +23,9 @@
       }
     ],
     "paths": {
+      "@/components/Dashboard": [
+        "./src/components/DashboardMotion.tsx"
+      ],
       "@/components/MaritaWorkspace": [
         "./src/components/MaritaWorkspaceCountry.tsx"
       ],
