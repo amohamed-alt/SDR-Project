@@ -1,8 +1,7 @@
-import { unstable_cache } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { DEFAULT_SDR_OWNER_ID } from "@/lib/config";
-import { buildDashboard } from "@/lib/analytics";
+import { getDashboardSnapshot } from "@/lib/dashboard-snapshot";
 import { createMockDashboard } from "@/lib/mock-data";
 import type { DashboardFilters } from "@/lib/types";
 
@@ -20,12 +19,6 @@ const querySchema = z.object({
   tier: z.string().max(120).optional(),
   persona: z.string().max(120).optional(),
 });
-
-const cachedDashboard = unstable_cache(
-  async (filters: DashboardFilters) => buildDashboard(filters),
-  ["sdr-dashboard-live-v5-whatsapp-activity"],
-  { revalidate: 900, tags: ["sdr-dashboard"] },
-);
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -54,16 +47,23 @@ export async function GET(request: NextRequest) {
 
   try {
     const filters: DashboardFilters = parsed.data;
-    const data = process.env.DEMO_MODE === "true"
-      ? createMockDashboard(filters.from, filters.to, filters.ownerId)
-      : params.get("refresh") === "1"
-        ? await buildDashboard(filters)
-        : await cachedDashboard(filters);
+    const isDemo = process.env.DEMO_MODE === "true";
+    const snapshot = isDemo
+      ? {
+          data: createMockDashboard(filters.from, filters.to, filters.ownerId),
+          refreshing: false,
+          ageSeconds: 0,
+          cacheStatus: "memory" as const,
+        }
+      : await getDashboardSnapshot(filters, params.get("refresh") === "1");
 
-    return NextResponse.json(data, {
+    return NextResponse.json(snapshot.data, {
       headers: {
-        "Cache-Control": "private, max-age=0, must-revalidate",
-        "X-Dashboard-Cache-Version": "v5-whatsapp-activity",
+        "Cache-Control": "private, max-age=0, must-revalidate, stale-while-revalidate=60",
+        "X-Dashboard-Cache-Version": "v6-performance",
+        "X-Dashboard-Cache": snapshot.cacheStatus,
+        "X-Dashboard-Snapshot-Age": String(snapshot.ageSeconds),
+        "X-Dashboard-Refreshing": snapshot.refreshing ? "1" : "0",
       },
     });
   } catch (error) {
