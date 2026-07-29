@@ -25,13 +25,30 @@ type TaskCountryResponse = {
   details?: unknown;
 };
 
+type TaskReference = {
+  id: string;
+  version: string;
+};
+
 const TASK_COUNTRY_BATCH_SIZE = 250;
 const TASK_COUNTRY_CONCURRENCY = 2;
 
-function chunkTaskIds(taskIds: string[]) {
-  const batches: string[][] = [];
-  for (let index = 0; index < taskIds.length; index += TASK_COUNTRY_BATCH_SIZE) {
-    batches.push(taskIds.slice(index, index + TASK_COUNTRY_BATCH_SIZE));
+function taskVersion(row: DashboardData["recentActivities"][number]) {
+  return [
+    row.subject,
+    row.status,
+    row.detail,
+    row.dueAt,
+    row.relatedContactId ?? "",
+    row.relatedContactName ?? "",
+    row.isOpen ? "open" : "closed",
+  ].join("|").slice(0, 500);
+}
+
+function chunkTasks(tasks: TaskReference[]) {
+  const batches: TaskReference[][] = [];
+  for (let index = 0; index < tasks.length; index += TASK_COUNTRY_BATCH_SIZE) {
+    batches.push(tasks.slice(index, index + TASK_COUNTRY_BATCH_SIZE));
   }
   return batches;
 }
@@ -62,11 +79,14 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
     [data.recentActivities],
   );
 
-  const numericTaskIds = useMemo(
-    () => taskRows.map((row) => row.id).filter((id) => /^\d+$/.test(id)).sort(),
+  const numericTasks = useMemo(
+    () => taskRows
+      .filter((row) => /^\d+$/.test(row.id))
+      .map((row) => ({ id: row.id, version: taskVersion(row) }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
     [taskRows],
   );
-  const taskIdKey = numericTaskIds.join(",");
+  const taskIdKey = numericTasks.map((task) => `${task.id}:${task.version}`).join(",");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -83,7 +103,7 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
         return;
       }
 
-      if (!numericTaskIds.length) {
+      if (!numericTasks.length) {
         setResolutions(taskRows.map((row) => ({ taskId: row.id, country: "Unknown", source: "unknown" })));
         setLoading(false);
         setResolvedProgress(taskRows.length);
@@ -93,7 +113,7 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
 
       setLoading(true);
       try {
-        const batches = chunkTaskIds(numericTaskIds);
+        const batches = chunkTasks(numericTasks);
         const resolved: TaskCountryResolution[] = [];
         const failures: string[] = [];
         let nextBatchIndex = 0;
@@ -104,12 +124,12 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
             nextBatchIndex += 1;
             if (batchIndex >= batches.length) return;
 
-            const taskIds = batches[batchIndex];
+            const tasks = batches[batchIndex];
             try {
               const response = await fetch("/api/hubspot/task-countries", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ taskIds }),
+                body: JSON.stringify({ tasks }),
                 cache: "no-store",
                 signal: controller.signal,
               });
@@ -121,7 +141,7 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
               failures.push(requestError instanceof Error ? requestError.message : "Unable to load task countries");
             } finally {
               if (!controller.signal.aborted) {
-                setResolvedProgress((current) => Math.min(numericTaskIds.length, current + taskIds.length));
+                setResolvedProgress((current) => Math.min(numericTasks.length, current + tasks.length));
               }
             }
           }
@@ -157,7 +177,7 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
 
     void loadTaskCountries();
     return () => controller.abort();
-  }, [taskIdKey, taskRows, numericTaskIds]);
+  }, [taskIdKey, taskRows, numericTasks]);
 
   const resolutionMap = useMemo(
     () => new Map(resolutions.map((resolution) => [resolution.taskId, resolution])),
@@ -233,7 +253,7 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
       </div>
 
       <div className={styles.statusRow}>
-        {loading && <span className={styles.loading}><LoaderCircle size={12}/>Resolving task countries from HubSpot associations… {resolvedProgress}/{numericTaskIds.length}</span>}
+        {loading && <span className={styles.loading}><LoaderCircle size={12}/>Resolving task countries from cache and HubSpot… {resolvedProgress}/{numericTasks.length}</span>}
         {!loading && !error && lookupComplete && <span>{selectedCountry ? `Showing ${selectedCountry} only` : "Showing all countries"}</span>}
         {!loading && !error && lookupComplete && <><i/><span>{unknownCount} task{unknownCount === 1 ? "" : "s"} without a resolved country</span></>}
         {error && <span className={styles.error}><AlertTriangle size={12}/>{error} Unresolved tasks remain available under Unknown.</span>}
