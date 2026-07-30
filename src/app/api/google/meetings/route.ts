@@ -17,6 +17,10 @@ import {
   sendCalendarInvitations,
 } from "@/lib/google-calendar";
 import {
+  CALENDAR_ORGANIZER_IDS,
+  calendarOrganizer,
+} from "@/lib/calendar-organizers";
+import {
   HubSpotApiError,
   archiveMeeting,
   batchRead,
@@ -56,6 +60,7 @@ const BOOKING_STAGE_LABELS: Record<BookingStage, string> = {
 
 const bookingSchema = z.object({
   requestId: z.string().uuid(),
+  organizerId: z.enum(CALENDAR_ORGANIZER_IDS).default("marita"),
   contactEmails: z.array(normalizedEmailSchema).max(20).default([])
     .refine((emails) => new Set(emails).size === emails.length, "Contact emails must be unique"),
   contactIds: z.array(z.string().regex(/^\d+$/)).max(20).default([])
@@ -169,12 +174,16 @@ function isFreeBusyAuthorizationError(error: unknown) {
   return isFreeBusyAuthorizationErrorText(errorText(error));
 }
 
-function bookingErrorMessage(stage: BookingStage, error: unknown) {
+function bookingErrorMessage(
+  stage: BookingStage,
+  error: unknown,
+  organizerName: string,
+) {
   if (isStaleGoogleCredential(error)) {
-    return "Marita Google Calendar connection is expired or no longer decryptable. Reconnect Marita Calendar, then send the invitation again.";
+    return `${organizerName} Google Calendar connection is expired or no longer decryptable. Reconnect ${organizerName} Calendar, then send the invitation again.`;
   }
   if (stage === "calendar_availability" && isFreeBusyAuthorizationError(error)) {
-    return "Reconnect Marita Calendar once to approve the Free/Busy permission, then check the Sales Rep again.";
+    return `Reconnect ${organizerName} Calendar once to approve the Free/Busy permission, then check the Sales Rep again.`;
   }
   if (error instanceof GoogleCalendarError) {
     return `${error.message} (${BOOKING_STAGE_LABELS[stage]}).`;
@@ -199,15 +208,18 @@ export async function POST(request: NextRequest) {
   }
 
   const input = parsed.data;
+  const organizer = calendarOrganizer(input.organizerId);
   let stage: BookingStage = "calendar_connection";
   let calendarEventId = "";
   let calendarAccessToken = "";
   let hubspotMeetingId = "";
 
   try {
-    const connection = await calendarConnectionStatus();
+    const connection = await calendarConnectionStatus(input.organizerId);
     if (!connection.connected || !connection.email) {
-      return NextResponse.json({ error: "Connect Marita Google Calendar before sending" }, { status: 409 });
+      return NextResponse.json({
+        error: `Connect ${organizer.shortName} Google Calendar before sending`,
+      }, { status: 409 });
     }
 
     stage = "contact_lookup";
@@ -281,7 +293,7 @@ export async function POST(request: NextRequest) {
       timeMin: interval.startUtc,
       timeMax: interval.endUtc,
       timeZone: HUBSPOT_TIMEZONE,
-    });
+    }, input.organizerId);
     const availabilityIssue = bookingAvailabilityIssue(availability, salesOwner.name);
     if (availabilityIssue) {
       return NextResponse.json({
@@ -299,7 +311,7 @@ export async function POST(request: NextRequest) {
     const description = [
       input.agenda,
       "",
-      `Booked by: Marita Chedid (${connection.email})`,
+      `Booked by: ${organizer.name} (${connection.email})`,
       `Sales host: ${salesOwner.name} (${salesOwner.email})`,
       ...(includeBassam && bassamOwner?.email
         ? [`Additional attendee: ${bassamOwner.name} (${bassamOwner.email})`]
@@ -318,7 +330,7 @@ export async function POST(request: NextRequest) {
       hubspotContactId: primaryHubSpotContact?.id ?? "",
       hubspotOwnerId: input.salesOwnerId,
       createGoogleMeet: input.meetingType === "google-meet",
-    });
+    }, input.organizerId);
     calendarEventId = draft.event.id;
     calendarAccessToken = draft.accessToken;
 
@@ -332,7 +344,7 @@ export async function POST(request: NextRequest) {
       ownerId: input.salesOwnerId,
       title: input.title,
       body: input.agenda,
-      internalNotes: `Booked by Marita Chedid through SDR Command Center. Google organizer: ${connection.email}. Attendees: ${associationSummary}.${includeBassam && bassamOwner?.email ? ` Bassam Hamed added as attendee (${bassamOwner.email}).` : ""}`,
+      internalNotes: `Booked by ${organizer.name} through SDR Command Center. Google organizer: ${connection.email}. Attendees: ${associationSummary}.${includeBassam && bassamOwner?.email ? ` Bassam Hamed added as attendee (${bassamOwner.email}).` : ""}`,
       startAt: interval.startUtc,
       endAt: interval.endUtc,
       externalUrl: draft.event.htmlLink,
@@ -398,7 +410,7 @@ export async function POST(request: NextRequest) {
     const staleGoogleCredential = isStaleGoogleCredential(error);
     const freeBusyAuthorizationError = isFreeBusyAuthorizationError(error);
     if (staleGoogleCredential) {
-      await disconnectGoogleCalendar().catch((disconnectError) => {
+      await disconnectGoogleCalendar(input.organizerId).catch((disconnectError) => {
         console.error("Unable to clear stale Google Calendar connection", disconnectError);
       });
     }
@@ -417,7 +429,7 @@ export async function POST(request: NextRequest) {
         : 500;
 
     return NextResponse.json({
-      error: bookingErrorMessage(stage, error),
+      error: bookingErrorMessage(stage, error, organizer.shortName),
       errorCode: `${stage}_${
         staleGoogleCredential
           ? "stale_google_connection"
