@@ -4,6 +4,10 @@ import {
   isFreeBusyAuthorizationErrorText,
   isStaleGoogleCredentialText,
 } from "@/lib/calendar-availability";
+import {
+  CALENDAR_ORGANIZER_IDS,
+  calendarOrganizer,
+} from "@/lib/calendar-organizers";
 import { HUBSPOT_TIMEZONE } from "@/lib/config";
 import {
   GoogleCalendarError,
@@ -21,6 +25,7 @@ import {
 export const runtime = "nodejs";
 
 const availabilitySchema = z.object({
+  organizerId: z.enum(CALENDAR_ORGANIZER_IDS).default("marita"),
   salesOwnerId: z.string().regex(/^\d+$/),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
@@ -53,14 +58,15 @@ export async function POST(request: NextRequest) {
   }
 
   const input = parsed.data;
+  const organizer = calendarOrganizer(input.organizerId);
   try {
-    const connection = await calendarConnectionStatus();
+    const connection = await calendarConnectionStatus(input.organizerId);
     if (!connection.connected) {
       return NextResponse.json({
         status: "unavailable",
         busy: [],
         checkedAt: new Date().toISOString(),
-        message: "Connect Marita Google Calendar before checking Sales availability.",
+        message: `Connect ${organizer.shortName} Google Calendar before checking Sales availability.`,
         reconnectRequired: true,
       });
     }
@@ -93,7 +99,7 @@ export async function POST(request: NextRequest) {
       timeMin: interval.startUtc,
       timeMax: interval.endUtc,
       timeZone: HUBSPOT_TIMEZONE,
-    });
+    }, input.organizerId);
 
     return NextResponse.json({
       ...availability,
@@ -109,7 +115,7 @@ export async function POST(request: NextRequest) {
         ? `${salesOwner.name} is available at this time.`
         : availability.status === "busy"
           ? `${salesOwner.name} is busy during this time.`
-          : `Free/Busy access is unavailable for ${salesOwner.email}. Ask the Google Workspace admin to share availability with Marita.`,
+          : `Free/Busy access is unavailable for ${salesOwner.email}. Ask the Google Workspace admin to share availability with ${organizer.shortName}.`,
       reconnectRequired: false,
     });
   } catch (error) {
@@ -118,7 +124,7 @@ export async function POST(request: NextRequest) {
     const missingScope = isFreeBusyAuthorizationErrorText(details);
 
     if (staleCredential) {
-      await disconnectGoogleCalendar().catch((disconnectError) => {
+      await disconnectGoogleCalendar(input.organizerId).catch((disconnectError) => {
         console.error("Unable to clear stale Google Calendar connection", disconnectError);
       });
     }
@@ -135,9 +141,9 @@ export async function POST(request: NextRequest) {
       busy: [],
       checkedAt: new Date().toISOString(),
       message: staleCredential
-        ? "Marita Calendar connection expired. Reconnect it before booking."
+        ? `${organizer.shortName} Calendar connection expired. Reconnect it before booking.`
         : missingScope
-          ? "Reconnect Marita Calendar once to approve the new Free/Busy permission."
+          ? `Reconnect ${organizer.shortName} Calendar once to approve the new Free/Busy permission.`
           : "Sales Rep availability could not be verified. Booking remains blocked.",
       reconnectRequired: staleCredential || missingScope,
     });

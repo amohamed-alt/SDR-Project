@@ -5,6 +5,7 @@ import { AlertTriangle, LoaderCircle, MapPin, RotateCcw } from "lucide-react";
 import { MaritaWorkspace as OriginalMaritaWorkspace } from "./MaritaWorkspace";
 import type { Drilldown } from "@/components/DrilldownDrawer";
 import styles from "@/components/MaritaWorkspaceCountry.module.css";
+import type { CalendarOrganizerId } from "@/lib/calendar-organizers";
 import type { DashboardData } from "@/lib/types";
 
 type CountrySource = "contact" | "contact_company" | "task_company" | "unknown";
@@ -66,7 +67,15 @@ function responseError(payload: TaskCountryResponse, fallback: string) {
   return payload.error || fallback;
 }
 
-export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen: (drilldown: Drilldown) => void }) {
+export function MaritaWorkspace({
+  data,
+  onOpen,
+  organizerId,
+}: {
+  data: DashboardData;
+  onOpen: (drilldown: Drilldown) => void;
+  organizerId?: CalendarOrganizerId;
+}) {
   const [selectedCountry, setSelectedCountry] = useState("");
   const [resolutions, setResolutions] = useState<TaskCountryResolution[]>([]);
   const [loading, setLoading] = useState(false);
@@ -260,6 +269,6 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
       </div>
     </section>
 
-    <OriginalMaritaWorkspace data={filteredData} onOpen={onOpen}/>
+    <OriginalMaritaWorkspace data={filteredData} onOpen={onOpen} organizerId={organizerId}/>
   </div>;
 }

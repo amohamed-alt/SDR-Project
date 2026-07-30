@@ -10,8 +10,8 @@ flowchart TD
     HS --> ASSOC["CRM associations"]
     API --> AGG["Attribution, quality, funnel, alerts"]
     AGG --> UI
-    UI --> OAUTH["Marita Google OAuth"]
-    OAUTH --> TOKENS["AES-256-GCM encrypted refresh token"]
+    UI --> OAUTH["Marita + Abdullah Google OAuth"]
+    OAUTH --> TOKENS["Separate AES-256-GCM refresh tokens"]
     UI --> BOOK["Confirmed meeting booking"]
     BOOK --> FB["Sales Rep Free/Busy recheck"]
     FB --> BOOK
@@ -27,9 +27,9 @@ flowchart TD
 4. Meetings are deduplicated before performance metrics are calculated.
 5. Optional sources fail visibly with warnings instead of being treated as zero without explanation.
 6. Synthetic demo mode supports UI development and CI without CRM access.
-7. Google Calendar only accepts the configured Marita email and uses OAuth state validation.
+7. Google Calendar only accepts the configured email for the selected organizer and binds that organizer to the validated OAuth state cookie.
 8. Calendar events are created without guests first; after HubSpot logging succeeds, Sales and Lead are added with notifications enabled.
-9. The encrypted refresh token is stored in a dedicated Docker volume so container rebuilds do not disconnect Calendar.
+9. Each organizer has a separate encrypted refresh token in the dedicated Docker volume. The legacy single-token store maps to Marita automatically, so upgrading does not disconnect her Calendar.
 10. Sales Rep Free/Busy is checked during invitation preview and rechecked on the server immediately before any Calendar or HubSpot record is created.
 11. A busy calendar, missing cross-domain sharing, missing OAuth scope, or expired token blocks booking explicitly; unavailable never falls back to free.
 

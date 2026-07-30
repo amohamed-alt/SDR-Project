@@ -1,14 +1,23 @@
 import { randomBytes } from "node:crypto";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { calendarOrganizerId } from "@/lib/calendar-organizers";
 import { googleAuthorizationUrl } from "@/lib/google-calendar";
 
 export const runtime = "nodejs";
 
-export function GET() {
+export function GET(request: NextRequest) {
   try {
+    const organizerId = calendarOrganizerId(request.nextUrl.searchParams.get("organizer"));
     const state = randomBytes(32).toString("hex");
-    const response = NextResponse.redirect(googleAuthorizationUrl(state));
+    const response = NextResponse.redirect(googleAuthorizationUrl(state, organizerId));
     response.cookies.set("sdr_google_oauth_state", state, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 600,
+      path: "/api/google/callback",
+    });
+    response.cookies.set("sdr_google_oauth_organizer", organizerId, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
@@ -21,4 +30,3 @@ export function GET() {
     return NextResponse.json({ error: "Google Calendar OAuth is not configured correctly" }, { status: 503 });
   }
 }
-

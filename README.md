@@ -17,7 +17,7 @@ The project is configured for Talentera's EU1 HubSpot portal and defaults to Mar
 - Deals associated with SDR-owned contacts, stage conversion, open pipeline, and meeting-to-deal conversion
 - In-dashboard searchable drill-down drawers for KPI cards, alerts, funnel stages, chart slices, bars, and daily activity points
 - Safe HubSpot links inside every drill-down result: CRM records open directly, while activities open their associated contact timeline instead of unsupported standalone activity URLs
-- A separate Marita Workspace top tab with My Day queues, direct call/email shortcuts, priority leads, Google Calendar OAuth, Sales Rep Free/Busy checks, Google Meet invitations, and HubSpot meeting logging
+- A separate Marita Workspace top tab with My Day queues, direct call/email shortcuts, priority leads, separate Marita and Abdullah Google Calendar OAuth connections, Sales Rep Free/Busy checks, Google Meet invitations, and HubSpot meeting logging
 
 See [docs/METRICS.md](docs/METRICS.md) for exact property definitions and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the data flow.
 
@@ -26,7 +26,7 @@ For a detailed Arabic walkthrough of every dashboard tab, KPI, filter, HubSpot f
 ## Security model
 
 - `HUBSPOT_PRIVATE_APP_TOKEN` is server-only and is never sent to the browser.
-- Google refresh tokens are encrypted with AES-256-GCM and persisted only in the Docker data volume.
+- Google refresh tokens are encrypted with AES-256-GCM, stored separately per organizer, and persisted only in the Docker data volume.
 - A booking requires an explicit preview and browser confirmation before invitations are sent.
 - The selected Sales Rep must return an explicit Google Free/Busy result. Busy or inaccessible calendars are never treated as available, and availability is checked again immediately before event creation.
 - Production requests require HTTP Basic Auth unless platform-level authentication is used and `DISABLE_AUTH=true` is deliberately set.
@@ -70,7 +70,7 @@ Marita Workspace also needs **write access for Meetings** so a confirmed Google 
 
 HubSpot scope names differ slightly between private-app screens and API versions. Enable the corresponding `crm.objects.*.read` scopes for every object above. The dashboard handles an optional data source being unavailable and surfaces a warning instead of silently replacing it with fake data.
 
-Google OAuth requests the least-privilege Calendar scopes needed to create events and read Free/Busy availability. After deploying the Free/Busy feature, reconnect Marita Calendar once so Google can grant the new permission. The `bayt.net` and `talentera.com` Google Workspace domains must share Free/Busy availability with Marita's account; event titles and details are not requested.
+Google OAuth requests the least-privilege Calendar scopes needed to create events and read Free/Busy availability. Marita remains the default organizer and uses the unchanged Workspace URL. Abdullah uses `/?workspace=1&organizer=abdullah`; his Calendar connection is stored independently and cannot replace Marita's connection. The existing version-1 token store is migrated in memory to Marita automatically when version 2 is first written. The `bayt.net` and `talentera.com` Google Workspace domains must share Free/Busy availability with each organizer account; event titles and details are not requested.
 
 ## Environment variables
 
@@ -88,8 +88,9 @@ Google OAuth requests the least-privilege Calendar scopes needed to create event
 | `GOOGLE_CLIENT_ID` | Server-only Google OAuth web client ID |
 | `GOOGLE_CLIENT_SECRET` | Server-only Google OAuth client secret |
 | `GOOGLE_REDIRECT_URI` | Exact OAuth callback URL |
-| `GOOGLE_TOKEN_ENCRYPTION_KEY` | 32-byte key used to encrypt the stored refresh token |
-| `MARITA_GOOGLE_EMAIL` | Only Google account accepted by the OAuth callback |
+| `GOOGLE_TOKEN_ENCRYPTION_KEY` | 32-byte key used to encrypt stored refresh tokens |
+| `MARITA_GOOGLE_EMAIL` | Google account accepted for the default Marita organizer |
+| `ABDULLAH_GOOGLE_EMAIL` | Google account accepted for the Abdullah organizer link |
 | `GOOGLE_TOKEN_STORE_PATH` | Encrypted credential path; defaults to `/app/data/google-calendar.json` |
 | `DEMO_MODE` | Use safe synthetic data without calling HubSpot |
 
@@ -115,7 +116,7 @@ curl http://127.0.0.1:3010/api/health
 ```
 
 Put the service behind the existing reverse proxy and TLS. Do not expose port `3010` publicly.
-Keep the `sdr-google-data:/app/data` named volume from `docker-compose.example.yml`; it preserves the encrypted Calendar connection across image rebuilds.
+Keep the `sdr-google-data:/app/data` named volume from `docker-compose.example.yml`; it preserves both encrypted Calendar connections across image rebuilds.
 
 ## Scaling path
 
