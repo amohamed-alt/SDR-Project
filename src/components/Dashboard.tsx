@@ -13,6 +13,10 @@ import {
 } from "recharts";
 import { DrilldownDrawer, type Drilldown } from "@/components/DrilldownDrawer";
 import { MaritaWorkspace } from "@/components/MaritaWorkspace";
+import {
+  calendarOrganizerId,
+  type CalendarOrganizerId,
+} from "@/lib/calendar-organizers";
 import type {
   ActivityRow, ChartDatum, CompanyRow, ContactRow, DailyActivityDatum, DashboardData,
   DashboardFilters, DealRow, LabelOption,
@@ -130,6 +134,7 @@ export function Dashboard() {
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [pageMode, setPageMode] = useState<PageMode>("analytics");
+  const [organizerId, setOrganizerId] = useState<CalendarOrganizerId>("marita");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [drilldown, setDrilldown] = useState<Drilldown | null>(null);
@@ -141,6 +146,7 @@ export function Dashboard() {
     const query = new URLSearchParams(window.location.search);
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (query.get("workspace") === "1") setPageMode("workspace");
+    setOrganizerId(calendarOrganizerId(query.get("organizer")));
   }, []);
 
   const loadDashboard = useCallback(async () => {
@@ -279,7 +285,7 @@ export function Dashboard() {
         {data?.meta.warnings.length ? <div className="warning-banner"><AlertTriangle size={17}/><div><strong>{data.meta.isDemo ? "Demo mode" : "Some HubSpot data sources were unavailable"}</strong><span>{data.meta.warnings.join(" · ")}</span></div></div> : null}
         {error && <div className="error-banner"><AlertTriangle size={20}/><div><strong>Dashboard failed to load</strong><span>{error}</span></div><button onClick={() => void loadDashboard()}>Try again</button></div>}
 
-        {data && pageMode === "workspace" && <MaritaWorkspace data={data} onOpen={setDrilldown}/>} 
+        {data && pageMode === "workspace" && <MaritaWorkspace data={data} onOpen={setDrilldown} organizerId={organizerId}/>}
         {data && pageMode === "analytics" && <>
           {activeTab === "overview" && <>
             <div className="kpi-grid">{kpis.map((card) => <KpiCard key={card.label} {...card}/>)}</div>
