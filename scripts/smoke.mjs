@@ -27,6 +27,7 @@ try {
     healthResponse,
     dashboardResponse,
     calendarStatusResponse,
+    abdullahCalendarStatusResponse,
     rejectedAvailabilityResponse,
     rejectedMeetingResponse,
     invalidCountryBatchResponse,
@@ -36,6 +37,7 @@ try {
     fetch(`http://127.0.0.1:${port}/api/health`),
     fetch(`http://127.0.0.1:${port}/api/dashboard?from=2026-07-01&to=2026-07-19&ownerId=31644369`),
     fetch(`http://127.0.0.1:${port}/api/google/status`),
+    fetch(`http://127.0.0.1:${port}/api/google/status?organizer=abdullah`),
     fetch(`http://127.0.0.1:${port}/api/google/availability`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -58,10 +60,11 @@ try {
     }),
     fetch(`http://127.0.0.1:${port}/`),
   ]);
-  if (!healthResponse.ok || !dashboardResponse.ok || !calendarStatusResponse.ok || !emptyCountryBatchResponse.ok || !pageResponse.ok) throw new Error("One or more smoke-test routes returned an error");
+  if (!healthResponse.ok || !dashboardResponse.ok || !calendarStatusResponse.ok || !abdullahCalendarStatusResponse.ok || !emptyCountryBatchResponse.ok || !pageResponse.ok) throw new Error("One or more smoke-test routes returned an error");
   const health = await healthResponse.json();
   const dashboard = await dashboardResponse.json();
   const calendarStatus = await calendarStatusResponse.json();
+  const abdullahCalendarStatus = await abdullahCalendarStatusResponse.json();
   const invalidCountryBatch = await invalidCountryBatchResponse.json();
   const emptyCountryBatch = await emptyCountryBatchResponse.json();
   const page = await pageResponse.text();
@@ -72,12 +75,13 @@ try {
   if (!dashboard.recentActivities?.some((activity) => activity.type === "WhatsApp")) throw new Error("WhatsApp activity rows are missing");
   if (!dashboard.priorityContacts?.every((contact) => typeof contact.contactSource === "string")) throw new Error("Contact Source data is missing for motion classification");
   if (calendarStatus.configured !== false || calendarStatus.connected !== false) throw new Error("Calendar status response is invalid");
+  if (abdullahCalendarStatus.configured !== false || abdullahCalendarStatus.connected !== false) throw new Error("Abdullah Calendar status response is invalid");
   if (rejectedAvailabilityResponse.status !== 403) throw new Error("Calendar availability origin protection is invalid");
   if (rejectedMeetingResponse.status !== 403) throw new Error("Calendar booking origin protection is invalid");
   if (invalidCountryBatchResponse.status !== 400 || typeof invalidCountryBatch.details !== "string") throw new Error("Task country batch validation is invalid");
   if (!Array.isArray(emptyCountryBatch.tasks) || emptyCountryBatch.tasks.length !== 0) throw new Error("Incremental task country payload is invalid");
   if (!page.includes("SDR Command Center") || !page.includes("Inbound vs Outbound")) throw new Error("Dashboard motion entry is missing");
-  console.log("Smoke tests passed: dashboard snapshots, inbound/outbound entry, task-country caching, WhatsApp data, and protected routes are operational.");
+  console.log("Smoke tests passed: dashboard snapshots, separate organizer status, inbound/outbound entry, task-country caching, WhatsApp data, and protected routes are operational.");
 } finally {
   server.kill("SIGTERM");
 }
