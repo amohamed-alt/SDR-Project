@@ -3,10 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle, CalendarDays, CheckCircle2, ChevronRight, Clock3, ExternalLink,
-  Mail, MapPin, Phone, Plus, Sparkles, Target, UserRound, Users, Video, X,
+  LoaderCircle, Mail, MapPin, Phone, Plus, Sparkles, Target, UserRound, Users, Video, X,
 } from "lucide-react";
 import type { Drilldown } from "@/components/DrilldownDrawer";
 import styles from "@/components/MaritaWorkspace.module.css";
+import {
+  BASSAM_OWNER_ID,
+  SALES_REP_OWNER_IDS,
+  SALES_REP_SELECTION_LABEL,
+} from "@/lib/sales-reps";
 import type { ActivityRow, ContactRow, DashboardData } from "@/lib/types";
 
 type QueueMode = "tasks" | "leads" | "meetings";
@@ -31,21 +36,47 @@ type BookingResult = {
   organizerIncluded: boolean;
   bassamIncluded: boolean;
 };
-
-const BASSAM_OWNER_ID = "75863674";
-const SALES_REP_OWNER_IDS: readonly string[] = [
-  "76369995", // Mohammed Faizan
-  "76369998", // Fadi Zanona
-  "76370000", // Mohammad Jehad Al-Barqawi
-  BASSAM_OWNER_ID, // Bassam Hamed
-  "76369997", // Ursula Waked
-  "31558980", // Zein Fares
-  "31594536", // Abdullah Muhammed · a.mohamed@talentera.com
-];
+type AvailabilityResult = {
+  status: "available" | "busy" | "unavailable";
+  busy: Array<{ start: string; end: string }>;
+  checkedAt: string;
+  message: string;
+  reconnectRequired?: boolean;
+  salesOwner?: { id: string; name: string; email: string };
+  timeZone?: string;
+  startUtc?: string;
+  endUtc?: string;
+  reason?: string;
+};
+type AvailabilityState = AvailabilityResult | { status: "checking" } | null;
+type AvailabilityRequest = {
+  salesOwnerId: string;
+  date: string;
+  time: string;
+  durationMinutes: number;
+};
 
 const SALES_REP_ORDER = new Map<string, number>(
   SALES_REP_OWNER_IDS.map((ownerId, index) => [ownerId, index]),
 );
+
+async function requestSalesRepAvailability(
+  input: AvailabilityRequest,
+  signal?: AbortSignal,
+) {
+  const response = await fetch("/api/google/availability", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+    cache: "no-store",
+    signal,
+  });
+  const payload = await response.json().catch(() => ({})) as Partial<AvailabilityResult> & { error?: string };
+  if (!response.ok || !payload.status) {
+    throw new Error(payload.error || "Unable to check Sales Rep availability");
+  }
+  return payload as AvailabilityResult;
+}
 
 function localDay(value: string, timezone: string) {
   if (!value) return "";
@@ -99,6 +130,7 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
   const [bookingResult, setBookingResult] = useState<BookingResult | null>(null);
+  const [availability, setAvailability] = useState<AvailabilityState>(null);
 
   const today = localDay(new Date().toISOString(), data.meta.timezone);
   const tasks = useMemo(
@@ -143,6 +175,51 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void loadCalendarStatus(); }, []);
 
+  useEffect(() => {
+    if (
+      !calendarStatus?.connected
+      || !selectedSalesOwnerId
+      || !meetingDate
+      || !meetingTime
+      || !duration
+    ) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setAvailability({ status: "checking" });
+      try {
+        const result = await requestSalesRepAvailability({
+          salesOwnerId: selectedSalesOwnerId,
+          date: meetingDate,
+          time: meetingTime,
+          durationMinutes: Number(duration),
+        }, controller.signal);
+        if (!controller.signal.aborted) setAvailability(result);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setAvailability({
+          status: "unavailable",
+          busy: [],
+          checkedAt: new Date().toISOString(),
+          message: error instanceof Error ? error.message : "Unable to check Sales Rep availability",
+        });
+      }
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [
+    calendarStatus?.connected,
+    duration,
+    meetingDate,
+    meetingTime,
+    selectedSalesOwnerId,
+  ]);
+
   async function disconnectCalendar() {
     if (!window.confirm("Disconnect Marita's Google Calendar from this dashboard?")) return;
     setCalendarError("");
@@ -153,7 +230,15 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
       return;
     }
     setCalendarStatus({ configured: true, connected: false });
+    setAvailability(null);
     setPreview(false);
+  }
+
+  function invalidateSchedule() {
+    setAvailability(null);
+    setPreview(false);
+    setBookingResult(null);
+    setSendError("");
   }
 
   function openActivities(title: string, description: string, rows: ActivityRow[], url: string) {
@@ -203,7 +288,7 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
     setPreview(false);
   }
 
-  function submitPreview(event: React.FormEvent<HTMLFormElement>) {
+  async function submitPreview(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSendError("");
     setBookingResult(null);
@@ -217,7 +302,38 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
       setPreview(false);
       return;
     }
-    setPreview(true);
+    if (!calendarStatus?.connected) {
+      setSendError("Connect Marita Google Calendar before checking Sales Rep availability.");
+      setPreview(false);
+      return;
+    }
+
+    setAvailability({ status: "checking" });
+    try {
+      const result = await requestSalesRepAvailability({
+        salesOwnerId: selectedSalesOwner.id,
+        date: meetingDate,
+        time: meetingTime,
+        durationMinutes: Number(duration),
+      });
+      setAvailability(result);
+      if (result.status !== "available") {
+        setSendError(result.message);
+        setPreview(false);
+        return;
+      }
+      setPreview(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to check Sales Rep availability";
+      setAvailability({
+        status: "unavailable",
+        busy: [],
+        checkedAt: new Date().toISOString(),
+        message,
+      });
+      setSendError(message);
+      setPreview(false);
+    }
   }
 
   async function sendMeeting() {
@@ -254,7 +370,28 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
         }),
       });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to create the meeting");
+      if (!response.ok) {
+        if (payload.availability) {
+          setAvailability({
+            ...payload.availability,
+            message: payload.error || "The Sales Rep is no longer available.",
+            salesOwner: {
+              id: selectedSalesOwner.id,
+              name: selectedSalesOwner.name,
+              email: selectedSalesOwner.email,
+            },
+          });
+        } else if (String(payload.errorCode || "").includes("free_busy_reconnect_required")) {
+          setAvailability({
+            status: "unavailable",
+            busy: [],
+            checkedAt: new Date().toISOString(),
+            message: payload.error || "Reconnect Marita Calendar to approve Free/Busy access.",
+            reconnectRequired: true,
+          });
+        }
+        throw new Error(payload.error || "Unable to create the meeting");
+      }
       setBookingResult(payload as BookingResult);
     } catch (error) {
       setSendError(error instanceof Error ? error.message : "Unable to create the meeting");
@@ -308,10 +445,10 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
       </section>
 
       <section className="workspace-card meeting-composer">
-        <div className="workspace-card-heading"><div><span>MEETING COMPOSER</span><h3>Book a Google Meet for Sales</h3><p>Choose the Sales Rep, then add any contact email. HubSpot contacts are linked; other emails are invited without creating a CRM record.</p></div><Video size={20}/></div>
+        <div className="workspace-card-heading"><div><span>MEETING COMPOSER</span><h3>Book a Google Meet for Sales</h3><p>Choose the Sales Rep and time. Their Google Free/Busy status is verified before preview and again before booking.</p></div><Video size={20}/></div>
         <form onSubmit={submitPreview}>
-          <label><span>Sales Rep · Meeting owner</span><select value={selectedSalesOwnerId} onChange={(event) => { const ownerId = event.target.value; setSelectedSalesOwnerId(ownerId); if (ownerId === BASSAM_OWNER_ID) setIncludeBassamAsAttendee(false); setPreview(false); }} required disabled={!salesOwners.length}><option value="">Select Sales Rep</option>{salesOwners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}{owner.email ? " · " + owner.email : ""}</option>)}</select></label>
-          <div className="meeting-host"><div className="meeting-avatar host"><UserRound size={15}/></div><div><strong>{selectedSalesOwner?.name ?? "Select Faizan, Fadi, Jehad, Bassam, Ursula, Zein, or Abdullah"}</strong><span>{selectedSalesOwner?.email || "No Sales Rep selected"}</span></div><em>Host · HubSpot owner</em></div>
+          <label><span>Sales Rep · Meeting owner</span><select value={selectedSalesOwnerId} onChange={(event) => { const ownerId = event.target.value; invalidateSchedule(); setSelectedSalesOwnerId(ownerId); if (ownerId === BASSAM_OWNER_ID) setIncludeBassamAsAttendee(false); }} required disabled={!salesOwners.length}><option value="">Select Sales Rep</option>{salesOwners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}{owner.email ? " · " + owner.email : ""}</option>)}</select></label>
+          <div className="meeting-host"><div className="meeting-avatar host"><UserRound size={15}/></div><div><strong>{selectedSalesOwner?.name ?? `Select ${SALES_REP_SELECTION_LABEL}`}</strong><span>{selectedSalesOwner?.email || "No Sales Rep selected"}</span></div><em>Host · HubSpot owner</em></div>
 
           <div className={styles.contactPickerRow}>
             <label><span>Add contact by email</span><input type="email" value={contactEmail} placeholder="contact@company.com" autoComplete="off" onChange={(event) => { setContactEmail(event.target.value); setContactLookupError(""); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addContact(); } }}/></label>
@@ -342,16 +479,21 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
           </div>
 
           <label><span>Meeting title</span><input value={subject} onChange={(event) => { setSubject(event.target.value); setPreview(false); }} required/></label>
-          <div className="meeting-form-row"><label><span>Date</span><input type="date" value={meetingDate} onChange={(event) => { setMeetingDate(event.target.value); setPreview(false); }} required/></label><label><span>Time</span><input type="time" value={meetingTime} onChange={(event) => { setMeetingTime(event.target.value); setPreview(false); }} required/></label><label><span>Duration</span><select value={duration} onChange={(event) => { setDuration(event.target.value); setPreview(false); }}><option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option></select></label></div>
+          <div className="meeting-form-row"><label><span>Date</span><input type="date" value={meetingDate} onChange={(event) => { invalidateSchedule(); setMeetingDate(event.target.value); }} required/></label><label><span>Time</span><input type="time" value={meetingTime} onChange={(event) => { invalidateSchedule(); setMeetingTime(event.target.value); }} required/></label><label><span>Duration</span><select value={duration} onChange={(event) => { invalidateSchedule(); setDuration(event.target.value); }}><option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option></select></label></div>
+          <AvailabilityNotice
+            availability={availability}
+            salesOwnerName={selectedSalesOwner?.name}
+            timezone={data.meta.timezone}
+          />
           <label><span>Location</span><select value={meetingType} onChange={(event) => { setMeetingType(event.target.value); setPreview(false); }}><option value="google-meet">Google Meet</option><option value="no-video">Calendar invitation without video</option></select></label>
           <label><span>Agenda</span><textarea rows={3} value={agenda} onChange={(event) => { setAgenda(event.target.value); setPreview(false); }}/></label>
-          <button className="meeting-preview-button" type="submit" disabled={!selectedSalesOwner || !selectedContacts.length}><Sparkles size={15}/>Preview invitation</button>
+          <button className="meeting-preview-button" type="submit" disabled={!selectedSalesOwner || !selectedContacts.length || availability?.status === "checking"}>{availability?.status === "checking" ? <><LoaderCircle size={15}/>Checking Sales availability…</> : <><Sparkles size={15}/>Check availability & preview</>}</button>
         </form>
         {sendError && !preview && <div className="meeting-send-message error"><AlertTriangle size={14}/><span><strong>Invitation is not ready</strong>{sendError}</span></div>}
         {preview && <div className="meeting-preview">
           <div className="meeting-preview-title"><CheckCircle2 size={17}/><div><strong>Invitation preview ready</strong><span>No calendar event or HubSpot meeting has been created.</span></div></div>
-          <dl><div><dt>Organizer</dt><dd>Marita Chedid · {calendarStatus?.email || "Google Calendar"}</dd></div><div><dt>Sales host</dt><dd>{selectedSalesOwner?.name || "Missing Sales Rep"} · invitation recipient · HubSpot meeting owner</dd></div><div><dt>Primary contact</dt><dd>{selectedContacts[0]?.name || "—"} · {selectedContacts[0]?.email || "Missing email"} · {selectedContacts[0]?.inHubSpot ? "linked to HubSpot" : "email only"}</dd></div><div><dt>Additional contacts</dt><dd>{selectedContacts.slice(1).length ? selectedContacts.slice(1).map((contact) => `${contact.name} (${contact.inHubSpot ? "HubSpot" : "email only"})`).join(", ") : "None"}</dd></div><div><dt>Marita attendee</dt><dd>{includeOrganizerAsAttendee ? "Included as an attendee as well as organizer" : "Organizer only"}</dd></div><div><dt>Bassam attendee</dt><dd>{bassamIsSalesHost ? "Already included as the selected Sales Rep" : includeBassamAsAttendee ? `Included · ${bassamOwner?.email || "HubSpot email"}` : "Not included"}</dd></div><div><dt>When</dt><dd>{meetingDate} at {meetingTime} · {duration} minutes</dd></div><div><dt>Location</dt><dd>{meetingType === "google-meet" ? "A unique Google Meet link will be included in the invitations" : "Calendar invitation without a video link"}</dd></div><div><dt>After send</dt><dd>Google invites the Sales Rep and every selected email. HubSpot logs one meeting owned by {selectedSalesOwner?.name || "the selected Sales Rep"}, links contacts found in HubSpot, and leaves external emails as calendar-only attendees.</dd></div></dl>
-          {calendarStatus?.connected ? <button className="meeting-send-button" type="button" onClick={() => void sendMeeting()} disabled={sending || !selectedContacts.length || !selectedSalesOwner?.email}>{sending ? "Creating meeting and sending invitations…" : <><Video size={14}/>Confirm & send invitations</>}</button> : <a className="meeting-connect-button" href="/api/google/connect"><Video size={14}/>Connect Marita Calendar first</a>}
+          <dl><div><dt>Organizer</dt><dd>Marita Chedid · {calendarStatus?.email || "Google Calendar"}</dd></div><div><dt>Sales host</dt><dd>{selectedSalesOwner?.name || "Missing Sales Rep"} · invitation recipient · HubSpot meeting owner</dd></div><div><dt>Availability</dt><dd>Available when checked · the server will verify Free/Busy again before creating anything</dd></div><div><dt>Primary contact</dt><dd>{selectedContacts[0]?.name || "—"} · {selectedContacts[0]?.email || "Missing email"} · {selectedContacts[0]?.inHubSpot ? "linked to HubSpot" : "email only"}</dd></div><div><dt>Additional contacts</dt><dd>{selectedContacts.slice(1).length ? selectedContacts.slice(1).map((contact) => `${contact.name} (${contact.inHubSpot ? "HubSpot" : "email only"})`).join(", ") : "None"}</dd></div><div><dt>Marita attendee</dt><dd>{includeOrganizerAsAttendee ? "Included as an attendee as well as organizer" : "Organizer only"}</dd></div><div><dt>Bassam attendee</dt><dd>{bassamIsSalesHost ? "Already included as the selected Sales Rep" : includeBassamAsAttendee ? `Included · ${bassamOwner?.email || "HubSpot email"}` : "Not included"}</dd></div><div><dt>When</dt><dd>{meetingDate} at {meetingTime} · {duration} minutes</dd></div><div><dt>Location</dt><dd>{meetingType === "google-meet" ? "A unique Google Meet link will be included in the invitations" : "Calendar invitation without a video link"}</dd></div><div><dt>After send</dt><dd>Google invites the Sales Rep and every selected email. HubSpot logs one meeting owned by {selectedSalesOwner?.name || "the selected Sales Rep"}, links contacts found in HubSpot, and leaves external emails as calendar-only attendees.</dd></div></dl>
+          {calendarStatus?.connected ? <button className="meeting-send-button" type="button" onClick={() => void sendMeeting()} disabled={sending || !selectedContacts.length || !selectedSalesOwner?.email || availability?.status !== "available"}>{sending ? "Rechecking availability and creating meeting…" : <><Video size={14}/>Confirm, recheck & send</>}</button> : <a className="meeting-connect-button" href="/api/google/connect"><Video size={14}/>Connect Marita Calendar first</a>}
           {sendError && <div className="meeting-send-message error"><AlertTriangle size={14}/><span><strong>Meeting not created</strong>{sendError}</span></div>}
           {bookingResult && <div className="meeting-send-message success"><CheckCircle2 size={15}/><span><strong>Meeting created and invitations sent</strong>{bookingResult.salesOwner.name}, {bookingResult.contacts.map((contact) => contact.name).join(", ")}{bookingResult.bassamIncluded ? ", and Bassam Hamed" : ""} were invited.</span><div><a href={bookingResult.meetLink || bookingResult.calendarUrl} target="_blank" rel="noreferrer">Open Google Meet<ExternalLink size={11}/></a><a href={bookingResult.hubspotContactUrl} target="_blank" rel="noreferrer">{bookingResult.hubspotLinkLabel}<ExternalLink size={11}/></a></div></div>}
         </div>}
@@ -362,6 +504,56 @@ export function MaritaWorkspace({ data, onOpen }: { data: DashboardData; onOpen:
       <div className="workspace-card-heading"><div><span>ONLINE LEADS</span><h3>Newest online follow-up leads</h3><p>Only online-source contacts, ordered by when they reached Marita.</p></div><UserRound size={20}/></div>
       <div className="priority-workspace-grid">{onlineLeads.slice(0, 8).map((row) => <PriorityLeadCard key={row.id} row={row}/>)}</div>
     </section>
+  </div>;
+}
+
+function AvailabilityNotice({
+  availability,
+  salesOwnerName,
+  timezone,
+}: {
+  availability: AvailabilityState;
+  salesOwnerName?: string;
+  timezone: string;
+}) {
+  if (!availability) return null;
+
+  if (availability.status === "checking") {
+    return <div className={`${styles.availabilityCard} ${styles.availabilityChecking}`} role="status">
+      <LoaderCircle size={16}/>
+      <div><strong>Checking Google Free/Busy…</strong><span>Verifying the selected Sales Rep and time.</span></div>
+    </div>;
+  }
+
+  if (availability.status === "available") {
+    return <div className={`${styles.availabilityCard} ${styles.availabilityAvailable}`} role="status">
+      <CheckCircle2 size={16}/>
+      <div><strong>Available</strong><span>{availability.message || `${salesOwnerName || "The Sales Rep"} is free at this time.`}</span></div>
+    </div>;
+  }
+
+  if (availability.status === "busy") {
+    return <div className={`${styles.availabilityCard} ${styles.availabilityBusy}`} role="alert">
+      <AlertTriangle size={16}/>
+      <div>
+        <strong>Busy — choose another time</strong>
+        <span>{availability.message || `${salesOwnerName || "The Sales Rep"} has a calendar conflict.`}</span>
+        {availability.busy.length > 0 && <ul>
+          {availability.busy.map((period) => <li key={`${period.start}-${period.end}`}>
+            {shortDate(period.start, timezone)} · {shortTime(period.start, timezone)}–{shortTime(period.end, timezone)}
+          </li>)}
+        </ul>}
+      </div>
+    </div>;
+  }
+
+  return <div className={`${styles.availabilityCard} ${styles.availabilityUnavailable}`} role="alert">
+    <AlertTriangle size={16}/>
+    <div>
+      <strong>Availability unavailable — booking blocked</strong>
+      <span>{availability.message}</span>
+      {availability.reconnectRequired && <a href="/api/google/connect">Reconnect Marita Calendar</a>}
+    </div>
   </div>;
 }
 

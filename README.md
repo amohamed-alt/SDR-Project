@@ -17,7 +17,7 @@ The project is configured for Talentera's EU1 HubSpot portal and defaults to Mar
 - Deals associated with SDR-owned contacts, stage conversion, open pipeline, and meeting-to-deal conversion
 - In-dashboard searchable drill-down drawers for KPI cards, alerts, funnel stages, chart slices, bars, and daily activity points
 - Safe HubSpot links inside every drill-down result: CRM records open directly, while activities open their associated contact timeline instead of unsupported standalone activity URLs
-- A separate Marita Workspace top tab with My Day queues, direct call/email shortcuts, priority leads, Google Calendar OAuth, Sales Rep meeting ownership, Google Meet invitations, and HubSpot meeting logging
+- A separate Marita Workspace top tab with My Day queues, direct call/email shortcuts, priority leads, Google Calendar OAuth, Sales Rep Free/Busy checks, Google Meet invitations, and HubSpot meeting logging
 
 See [docs/METRICS.md](docs/METRICS.md) for exact property definitions and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the data flow.
 
@@ -28,6 +28,7 @@ For a detailed Arabic walkthrough of every dashboard tab, KPI, filter, HubSpot f
 - `HUBSPOT_PRIVATE_APP_TOKEN` is server-only and is never sent to the browser.
 - Google refresh tokens are encrypted with AES-256-GCM and persisted only in the Docker data volume.
 - A booking requires an explicit preview and browser confirmation before invitations are sent.
+- The selected Sales Rep must return an explicit Google Free/Busy result. Busy or inaccessible calendars are never treated as available, and availability is checked again immediately before event creation.
 - Production requests require HTTP Basic Auth unless platform-level authentication is used and `DISABLE_AUTH=true` is deliberately set.
 - No CRM data, API token, or generated HubSpot snapshot is committed to Git.
 - The repository may remain public only while it contains code and synthetic demo data. Make it private before adding exports, logs, screenshots, or CRM snapshots.
@@ -69,6 +70,8 @@ Marita Workspace also needs **write access for Meetings** so a confirmed Google 
 
 HubSpot scope names differ slightly between private-app screens and API versions. Enable the corresponding `crm.objects.*.read` scopes for every object above. The dashboard handles an optional data source being unavailable and surfaces a warning instead of silently replacing it with fake data.
 
+Google OAuth requests the least-privilege Calendar scopes needed to create events and read Free/Busy availability. After deploying the Free/Busy feature, reconnect Marita Calendar once so Google can grant the new permission. The `bayt.net` and `talentera.com` Google Workspace domains must share Free/Busy availability with Marita's account; event titles and details are not requested.
+
 ## Environment variables
 
 | Variable | Purpose |
@@ -95,6 +98,7 @@ HubSpot scope names differ slightly between private-app screens and API versions
 ```bash
 npm run lint
 npm run typecheck
+npm test
 npm run build
 ```
 

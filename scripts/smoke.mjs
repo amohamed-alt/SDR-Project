@@ -27,6 +27,7 @@ try {
     healthResponse,
     dashboardResponse,
     calendarStatusResponse,
+    rejectedAvailabilityResponse,
     rejectedMeetingResponse,
     invalidCountryBatchResponse,
     emptyCountryBatchResponse,
@@ -35,6 +36,11 @@ try {
     fetch(`http://127.0.0.1:${port}/api/health`),
     fetch(`http://127.0.0.1:${port}/api/dashboard?from=2026-07-01&to=2026-07-19&ownerId=31644369`),
     fetch(`http://127.0.0.1:${port}/api/google/status`),
+    fetch(`http://127.0.0.1:${port}/api/google/availability`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    }),
     fetch(`http://127.0.0.1:${port}/api/google/meetings`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -66,6 +72,7 @@ try {
   if (!dashboard.recentActivities?.some((activity) => activity.type === "WhatsApp")) throw new Error("WhatsApp activity rows are missing");
   if (!dashboard.priorityContacts?.every((contact) => typeof contact.contactSource === "string")) throw new Error("Contact Source data is missing for motion classification");
   if (calendarStatus.configured !== false || calendarStatus.connected !== false) throw new Error("Calendar status response is invalid");
+  if (rejectedAvailabilityResponse.status !== 403) throw new Error("Calendar availability origin protection is invalid");
   if (rejectedMeetingResponse.status !== 403) throw new Error("Calendar booking origin protection is invalid");
   if (invalidCountryBatchResponse.status !== 400 || typeof invalidCountryBatch.details !== "string") throw new Error("Task country batch validation is invalid");
   if (!Array.isArray(emptyCountryBatch.tasks) || emptyCountryBatch.tasks.length !== 0) throw new Error("Incremental task country payload is invalid");
