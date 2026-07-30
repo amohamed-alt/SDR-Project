@@ -1,12 +1,20 @@
 import "server-only";
 
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
   classifyFreeBusyResponse,
   type GoogleFreeBusyResponse,
 } from "@/lib/calendar-availability";
+import {
+  calendarOrganizer,
+  type CalendarOrganizerId,
+} from "@/lib/calendar-organizers";
+import {
+  normalizeCalendarTokenStore,
+  type CalendarTokenStore,
+} from "@/lib/calendar-token-store";
 
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -38,18 +46,6 @@ interface GoogleTokenResponse {
 interface GoogleUserInfo {
   email: string;
   verified_email?: boolean;
-}
-
-interface StoredConnection {
-  email: string;
-  encryptedRefreshToken: string;
-  connectedAt: string;
-  updatedAt: string;
-}
-
-interface TokenStore {
-  version: 1;
-  connection?: StoredConnection;
 }
 
 export interface CalendarConnectionStatus {
@@ -101,12 +97,14 @@ function required(name: string) {
   return value;
 }
 
-function config(): GoogleConfig {
+function config(organizerId: CalendarOrganizerId): GoogleConfig {
+  const organizer = calendarOrganizer(organizerId);
   return {
     clientId: required("GOOGLE_CLIENT_ID"),
     clientSecret: required("GOOGLE_CLIENT_SECRET"),
     redirectUri: required("GOOGLE_REDIRECT_URI"),
-    expectedEmail: process.env.MARITA_GOOGLE_EMAIL?.trim().toLowerCase() ?? "",
+    expectedEmail: process.env[organizer.emailEnvironmentVariable]?.trim().toLowerCase()
+      || organizer.email,
   };
 }
 
@@ -136,20 +134,26 @@ function decrypt(value: string) {
   ]).toString("utf8");
 }
 
-async function readStore(): Promise<TokenStore> {
+async function readStore(): Promise<CalendarTokenStore> {
   try {
-    const parsed = JSON.parse(await readFile(/* turbopackIgnore: true */ TOKEN_STORE_PATH, "utf8")) as Partial<TokenStore>;
-    if (parsed.version !== 1) throw new Error("Unsupported credential store version");
-    return parsed as TokenStore;
+    const parsed = normalizeCalendarTokenStore(JSON.parse(
+      await readFile(/* turbopackIgnore: true */ TOKEN_STORE_PATH, "utf8"),
+    ));
+    if (!parsed) {
+      throw new Error("Unsupported credential store version");
+    }
+    return parsed;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { version: 1 };
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { version: 2, connections: {} };
+    }
     throw new GoogleCalendarError("Unable to read the encrypted Google credential store", 503, error instanceof Error ? error.message : "Unknown error");
   }
 }
 
 let writeQueue = Promise.resolve();
 
-function writeStore(store: TokenStore) {
+function writeStore(store: CalendarTokenStore) {
   const action = async () => {
     await mkdir(/* turbopackIgnore: true */ dirname(TOKEN_STORE_PATH), { recursive: true });
     const temporaryPath = `${TOKEN_STORE_PATH}.${process.pid}.${Date.now()}.tmp`;
@@ -160,9 +164,9 @@ function writeStore(store: TokenStore) {
   return writeQueue;
 }
 
-export function isGoogleCalendarConfigured() {
+export function isGoogleCalendarConfigured(organizerId: CalendarOrganizerId) {
   try {
-    config();
+    config(organizerId);
     encryptionKey();
     return true;
   } catch {
@@ -170,16 +174,21 @@ export function isGoogleCalendarConfigured() {
   }
 }
 
-export async function calendarConnectionStatus(): Promise<CalendarConnectionStatus> {
-  if (!isGoogleCalendarConfigured()) return { configured: false, connected: false };
+export async function calendarConnectionStatus(
+  organizerId: CalendarOrganizerId,
+): Promise<CalendarConnectionStatus> {
+  if (!isGoogleCalendarConfigured(organizerId)) {
+    return { configured: false, connected: false };
+  }
   const store = await readStore();
-  return store.connection
-    ? { configured: true, connected: true, email: store.connection.email, connectedAt: store.connection.connectedAt }
+  const connection = store.connections[organizerId];
+  return connection
+    ? { configured: true, connected: true, email: connection.email, connectedAt: connection.connectedAt }
     : { configured: true, connected: false };
 }
 
-export function googleAuthorizationUrl(state: string) {
-  const settings = config();
+export function googleAuthorizationUrl(state: string, organizerId: CalendarOrganizerId) {
+  const settings = config(organizerId);
   const query = new URLSearchParams({
     client_id: settings.clientId,
     redirect_uri: settings.redirectUri,
@@ -208,8 +217,9 @@ async function tokenRequest(body: URLSearchParams) {
   return payload;
 }
 
-export async function connectGoogleCalendar(code: string) {
-  const settings = config();
+export async function connectGoogleCalendar(code: string, organizerId: CalendarOrganizerId) {
+  const settings = config(organizerId);
+  const organizer = calendarOrganizer(organizerId);
   const tokens = await tokenRequest(new URLSearchParams({
     code,
     client_id: settings.clientId,
@@ -227,43 +237,56 @@ export async function connectGoogleCalendar(code: string) {
   }
   const email = user.email.toLowerCase();
   if (settings.expectedEmail && email !== settings.expectedEmail) {
-    throw new GoogleCalendarError(`Connect the configured Marita account (${settings.expectedEmail})`, 403);
+    throw new GoogleCalendarError(
+      `Connect the configured ${organizer.shortName} account (${settings.expectedEmail})`,
+      403,
+    );
   }
   const current = await readStore();
-  const refreshToken = tokens.refresh_token ?? (current.connection ? decrypt(current.connection.encryptedRefreshToken) : "");
+  const existingConnection = current.connections[organizerId];
+  const refreshToken = tokens.refresh_token
+    ?? (existingConnection ? decrypt(existingConnection.encryptedRefreshToken) : "");
   if (!refreshToken) {
     throw new GoogleCalendarError("Google did not return offline access. Revoke the app permission, then connect again.", 409);
   }
   const now = new Date().toISOString();
   await writeStore({
-    version: 1,
-    connection: {
-      email,
-      encryptedRefreshToken: encrypt(refreshToken),
-      connectedAt: current.connection?.connectedAt ?? now,
-      updatedAt: now,
+    version: 2,
+    connections: {
+      ...current.connections,
+      [organizerId]: {
+        email,
+        encryptedRefreshToken: encrypt(refreshToken),
+        connectedAt: existingConnection?.connectedAt ?? now,
+        updatedAt: now,
+      },
     },
   });
   return { email };
 }
 
-export async function disconnectGoogleCalendar() {
-  await writeQueue;
-  try {
-    await unlink(/* turbopackIgnore: true */ TOKEN_STORE_PATH);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
+export async function disconnectGoogleCalendar(organizerId: CalendarOrganizerId) {
+  const current = await readStore();
+  const connections = { ...current.connections };
+  delete connections[organizerId];
+  await writeStore({ version: 2, connections });
 }
 
-async function accessToken() {
-  const settings = config();
+async function accessToken(organizerId: CalendarOrganizerId) {
+  const settings = config(organizerId);
+  const organizer = calendarOrganizer(organizerId);
   const store = await readStore();
-  if (!store.connection) throw new GoogleCalendarError("Marita Google Calendar is not connected", 409);
+  const connection = store.connections[organizerId];
+  if (!connection) {
+    throw new GoogleCalendarError(
+      `${organizer.shortName} Google Calendar is not connected`,
+      409,
+    );
+  }
   const tokens = await tokenRequest(new URLSearchParams({
     client_id: settings.clientId,
     client_secret: settings.clientSecret,
-    refresh_token: decrypt(store.connection.encryptedRefreshToken),
+    refresh_token: decrypt(connection.encryptedRefreshToken),
     grant_type: "refresh_token",
   }));
   return tokens.access_token;
@@ -294,8 +317,11 @@ function videoLink(event: GoogleCalendarEvent) {
     ?? event.conferenceData?.entryPoints?.find((entry) => entry.entryPointType === "video")?.uri;
 }
 
-export async function checkCalendarAvailability(input: CalendarAvailabilityInput) {
-  const token = await accessToken();
+export async function checkCalendarAvailability(
+  input: CalendarAvailabilityInput,
+  organizerId: CalendarOrganizerId,
+) {
+  const token = await accessToken(organizerId);
   const payload = await calendarRequest<GoogleFreeBusyResponse>(
     "/freeBusy",
     token,
@@ -312,8 +338,11 @@ export async function checkCalendarAvailability(input: CalendarAvailabilityInput
   return classifyFreeBusyResponse(input.calendarId, payload);
 }
 
-export async function createCalendarDraft(input: CalendarDraftInput) {
-  const token = await accessToken();
+export async function createCalendarDraft(
+  input: CalendarDraftInput,
+  organizerId: CalendarOrganizerId,
+) {
+  const token = await accessToken(organizerId);
   const eventId = `sdr${input.requestId.replace(/-/g, "").toLowerCase()}`;
   const resource = {
     id: eventId,
@@ -368,8 +397,12 @@ export async function sendCalendarInvitations(eventId: string, attendees: string
   );
 }
 
-export async function deleteCalendarEvent(eventId: string, token?: string) {
-  const activeToken = token ?? await accessToken();
+export async function deleteCalendarEvent(
+  eventId: string,
+  token?: string,
+  organizerId?: CalendarOrganizerId,
+) {
+  const activeToken = token ?? await accessToken(organizerId ?? "marita");
   return calendarRequest<void>(
     `/calendars/primary/events/${encodeURIComponent(eventId)}?sendUpdates=all`,
     activeToken,
