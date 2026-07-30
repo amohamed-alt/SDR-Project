@@ -198,6 +198,90 @@
   opacity: 0.78;
 }
 
+.availabilityCard {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid;
+  border-radius: 9px;
+  font-size: 7px;
+}
+
+.availabilityCard > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.availabilityCard strong {
+  font-size: 8px;
+}
+
+.availabilityCard span {
+  line-height: 1.4;
+}
+
+.availabilityCard ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 3px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.availabilityCard li {
+  padding: 3px 6px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 6px;
+  font-weight: 800;
+}
+
+.availabilityCard a {
+  width: fit-content;
+  margin-top: 3px;
+  padding: 4px 7px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  font-weight: 800;
+}
+
+.availabilityChecking {
+  border-color: #cbdcd4;
+  background: #f4f8f6;
+  color: #567066;
+}
+
+.availabilityChecking > svg {
+  animation: availabilitySpin 0.8s linear infinite;
+}
+
+.availabilityAvailable {
+  border-color: #b9decc;
+  background: #edf9f3;
+  color: #087a50;
+}
+
+.availabilityBusy {
+  border-color: #efbdb5;
+  background: #fff2f0;
+  color: #a43e34;
+}
+
+.availabilityUnavailable {
+  border-color: #edd29b;
+  background: #fff9ec;
+  color: #91610e;
+}
+
+@keyframes availabilitySpin {
+  to { transform: rotate(360deg); }
+}
+
 @media (max-width: 640px) {
   .contactPickerRow {
     grid-template-columns: 1fr;

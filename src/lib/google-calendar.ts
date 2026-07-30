@@ -3,13 +3,22 @@ import "server-only";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import {
+  classifyFreeBusyResponse,
+  type GoogleFreeBusyResponse,
+} from "@/lib/calendar-availability";
 
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo";
 const GOOGLE_CALENDAR_API = "https://www.googleapis.com/calendar/v3";
 const TOKEN_STORE_PATH = process.env.GOOGLE_TOKEN_STORE_PATH ?? "/app/data/google-calendar.json";
-const SCOPES = ["openid", "email", "https://www.googleapis.com/auth/calendar.events"];
+const SCOPES = [
+  "openid",
+  "email",
+  "https://www.googleapis.com/auth/calendar.events",
+  "https://www.googleapis.com/auth/calendar.events.freebusy",
+];
 
 interface GoogleConfig {
   clientId: string;
@@ -70,6 +79,13 @@ export interface CalendarDraftInput {
   hubspotContactId: string;
   hubspotOwnerId: string;
   createGoogleMeet: boolean;
+}
+
+export interface CalendarAvailabilityInput {
+  calendarId: string;
+  timeMin: string;
+  timeMax: string;
+  timeZone: string;
 }
 
 export class GoogleCalendarError extends Error {
@@ -276,6 +292,24 @@ async function calendarRequest<T>(path: string, token: string, init: RequestInit
 function videoLink(event: GoogleCalendarEvent) {
   return event.hangoutLink
     ?? event.conferenceData?.entryPoints?.find((entry) => entry.entryPointType === "video")?.uri;
+}
+
+export async function checkCalendarAvailability(input: CalendarAvailabilityInput) {
+  const token = await accessToken();
+  const payload = await calendarRequest<GoogleFreeBusyResponse>(
+    "/freeBusy",
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        timeMin: input.timeMin,
+        timeMax: input.timeMax,
+        timeZone: input.timeZone,
+        items: [{ id: input.calendarId }],
+      }),
+    },
+  );
+  return classifyFreeBusyResponse(input.calendarId, payload);
 }
 
 export async function createCalendarDraft(input: CalendarDraftInput) {

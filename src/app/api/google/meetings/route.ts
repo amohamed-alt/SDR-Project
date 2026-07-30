@@ -1,10 +1,16 @@
 import { revalidateTag } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import {
+  bookingAvailabilityIssue,
+  isFreeBusyAuthorizationErrorText,
+  isStaleGoogleCredentialText,
+} from "@/lib/calendar-availability";
 import { HUBSPOT_TIMEZONE, hubspotListUrl, hubspotRecordUrl } from "@/lib/config";
 import {
   GoogleCalendarError,
   calendarConnectionStatus,
+  checkCalendarAvailability,
   createCalendarDraft,
   deleteCalendarEvent,
   disconnectGoogleCalendar,
@@ -18,17 +24,23 @@ import {
   listOwners,
   searchAll,
 } from "@/lib/hubspot";
+import { meetingInterval } from "@/lib/meeting-time";
+import {
+  BASSAM_OWNER_ID,
+  SALES_REP_OWNER_ID_SET,
+  SALES_REP_SELECTION_LABEL,
+} from "@/lib/sales-reps";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const BASSAM_OWNER_ID = "75863674";
 const CONTACT_LOOKUP_PROPERTIES = ["firstname", "lastname", "email", "company"] as const;
 const normalizedEmailSchema = z.string().trim().email().max(254).transform((value) => value.toLowerCase());
 
 type BookingStage =
   | "calendar_connection"
   | "contact_lookup"
+  | "calendar_availability"
   | "calendar_draft"
   | "hubspot_meeting"
   | "calendar_invitations";
@@ -36,20 +48,11 @@ type BookingStage =
 const BOOKING_STAGE_LABELS: Record<BookingStage, string> = {
   calendar_connection: "Google Calendar connection",
   contact_lookup: "contact lookup",
+  calendar_availability: "Sales Rep availability recheck",
   calendar_draft: "Google Calendar event creation",
   hubspot_meeting: "HubSpot meeting logging",
   calendar_invitations: "calendar invitation delivery",
 };
-
-const ALLOWED_SALES_REP_OWNER_IDS = new Set([
-  "76369995", // Mohammed Faizan
-  "76369998", // Fadi Zanona
-  "76370000", // Mohammad Jehad Al-Barqawi
-  BASSAM_OWNER_ID, // Bassam Hamed
-  "76369997", // Ursula Waked
-  "31558980", // Zein Fares
-  "31594536", // Abdullah Muhammed · a.mohamed@talentera.com
-]);
 
 const bookingSchema = z.object({
   requestId: z.string().uuid(),
@@ -119,43 +122,6 @@ function validOrigin(request: NextRequest) {
   return Boolean(expected && request.headers.get("origin") === expected);
 }
 
-function localEnd(date: string, time: string, durationMinutes: number) {
-  const timestamp = new Date(`${date}T${time}:00Z`).getTime() + durationMinutes * 60_000;
-  const result = new Date(timestamp).toISOString();
-  return { date: result.slice(0, 10), time: result.slice(11, 19) };
-}
-
-function localDateTimeToUtc(date: string, time: string, timeZone: string) {
-  const [year, month, day] = date.split("-").map(Number);
-  const [hour, minute] = time.split(":").map(Number);
-  const target = Date.UTC(year, month - 1, day, hour, minute, 0);
-  let timestamp = target;
-  for (let pass = 0; pass < 2; pass += 1) {
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hourCycle: "h23",
-    }).formatToParts(new Date(timestamp));
-    const part = (type: Intl.DateTimeFormatPartTypes) =>
-      Number(parts.find((item) => item.type === type)?.value ?? 0);
-    const represented = Date.UTC(
-      part("year"),
-      part("month") - 1,
-      part("day"),
-      part("hour"),
-      part("minute"),
-      part("second"),
-    );
-    timestamp += target - represented;
-  }
-  return new Date(timestamp).toISOString();
-}
-
 async function resolveContactByEmail(email: string): Promise<MeetingContactDetail> {
   const matches = await searchAll(
     "contacts",
@@ -196,13 +162,19 @@ function errorText(error: unknown) {
 }
 
 function isStaleGoogleCredential(error: unknown) {
-  return /invalid_grant|refresh token|token.+revoked|token.+expired|authenticate data|bad decrypt|stored google credential|credential.+invalid|unable to authenticate/i
-    .test(errorText(error));
+  return isStaleGoogleCredentialText(errorText(error));
+}
+
+function isFreeBusyAuthorizationError(error: unknown) {
+  return isFreeBusyAuthorizationErrorText(errorText(error));
 }
 
 function bookingErrorMessage(stage: BookingStage, error: unknown) {
   if (isStaleGoogleCredential(error)) {
     return "Marita Google Calendar connection is expired or no longer decryptable. Reconnect Marita Calendar, then send the invitation again.";
+  }
+  if (stage === "calendar_availability" && isFreeBusyAuthorizationError(error)) {
+    return "Reconnect Marita Calendar once to approve the Free/Busy permission, then check the Sales Rep again.";
   }
   if (error instanceof GoogleCalendarError) {
     return `${error.message} (${BOOKING_STAGE_LABELS[stage]}).`;
@@ -278,9 +250,9 @@ export async function POST(request: NextRequest) {
     }
 
     const salesOwner = owners.find((owner) => owner.id === input.salesOwnerId);
-    if (!salesOwner || !ALLOWED_SALES_REP_OWNER_IDS.has(salesOwner.id)) {
+    if (!salesOwner || !SALES_REP_OWNER_ID_SET.has(salesOwner.id)) {
       return NextResponse.json({
-        error: "Choose Faizan, Fadi, Jehad, Bassam, Ursula, Zein, or Abdullah as the Sales Rep",
+        error: `Choose ${SALES_REP_SELECTION_LABEL} as the Sales Rep`,
       }, { status: 400 });
     }
     if (!salesOwner.email) {
@@ -293,19 +265,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Bassam Hamed has no email address in HubSpot" }, { status: 400 });
     }
 
-    const startUtc = localDateTimeToUtc(input.date, input.time, HUBSPOT_TIMEZONE);
-    if (new Date(startUtc).getTime() < Date.now() - 300_000) {
+    const interval = meetingInterval(
+      input.date,
+      input.time,
+      input.durationMinutes,
+      HUBSPOT_TIMEZONE,
+    );
+    if (new Date(interval.startUtc).getTime() < Date.now() - 300_000) {
       return NextResponse.json({ error: "Meeting time must be in the future" }, { status: 400 });
     }
 
-    const localEndValue = localEnd(input.date, input.time, input.durationMinutes);
-    const endUtc = localDateTimeToUtc(
-      localEndValue.date,
-      localEndValue.time.slice(0, 5),
-      HUBSPOT_TIMEZONE,
-    );
-    const startLocal = `${input.date}T${input.time}:00`;
-    const endLocal = `${localEndValue.date}T${localEndValue.time}`;
+    stage = "calendar_availability";
+    const availability = await checkCalendarAvailability({
+      calendarId: salesOwner.email,
+      timeMin: interval.startUtc,
+      timeMax: interval.endUtc,
+      timeZone: HUBSPOT_TIMEZONE,
+    });
+    const availabilityIssue = bookingAvailabilityIssue(availability, salesOwner.name);
+    if (availabilityIssue) {
+      return NextResponse.json({
+        ...availabilityIssue,
+        availability,
+      }, { status: availabilityIssue.status });
+    }
+
     const primaryContact = contactDetails[0];
     const hubspotContactIds = contactDetails.flatMap((contact) => contact.id ? [contact.id] : []);
     const primaryHubSpotContact = contactDetails.find((contact) => Boolean(contact.id));
@@ -328,8 +312,8 @@ export async function POST(request: NextRequest) {
       requestId: input.requestId,
       title: input.title,
       description,
-      startDateTime: startLocal,
-      endDateTime: endLocal,
+      startDateTime: interval.startLocal,
+      endDateTime: interval.endLocal,
       timeZone: HUBSPOT_TIMEZONE,
       hubspotContactId: primaryHubSpotContact?.id ?? "",
       hubspotOwnerId: input.salesOwnerId,
@@ -349,8 +333,8 @@ export async function POST(request: NextRequest) {
       title: input.title,
       body: input.agenda,
       internalNotes: `Booked by Marita Chedid through SDR Command Center. Google organizer: ${connection.email}. Attendees: ${associationSummary}.${includeBassam && bassamOwner?.email ? ` Bassam Hamed added as attendee (${bassamOwner.email}).` : ""}`,
-      startAt: startUtc,
-      endAt: endUtc,
+      startAt: interval.startUtc,
+      endAt: interval.endUtc,
       externalUrl: draft.event.htmlLink,
       location: draft.meetLink || "Google Calendar",
     });
@@ -412,6 +396,7 @@ export async function POST(request: NextRequest) {
     }
 
     const staleGoogleCredential = isStaleGoogleCredential(error);
+    const freeBusyAuthorizationError = isFreeBusyAuthorizationError(error);
     if (staleGoogleCredential) {
       await disconnectGoogleCalendar().catch((disconnectError) => {
         console.error("Unable to clear stale Google Calendar connection", disconnectError);
@@ -421,10 +406,11 @@ export async function POST(request: NextRequest) {
     console.error("Meeting booking failed", {
       requestId: input.requestId,
       stage,
+      freeBusyAuthorizationError,
       error,
     });
 
-    const status = staleGoogleCredential
+    const status = staleGoogleCredential || freeBusyAuthorizationError
       ? 409
       : error instanceof GoogleCalendarError || error instanceof HubSpotApiError
         ? error.status
@@ -432,7 +418,13 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       error: bookingErrorMessage(stage, error),
-      errorCode: `${stage}_${staleGoogleCredential ? "stale_google_connection" : "failed"}`,
+      errorCode: `${stage}_${
+        staleGoogleCredential
+          ? "stale_google_connection"
+          : freeBusyAuthorizationError
+            ? "free_busy_reconnect_required"
+            : "failed"
+      }`,
       requestId: input.requestId,
     }, { status: status >= 400 && status < 600 ? status : 500 });
   }
