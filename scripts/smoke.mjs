@@ -26,6 +26,8 @@ try {
   const [
     healthResponse,
     dashboardResponse,
+    maqsamCallsResponse,
+    rejectedMaqsamIngestResponse,
     calendarStatusResponse,
     abdullahCalendarStatusResponse,
     rejectedAvailabilityResponse,
@@ -36,6 +38,12 @@ try {
   ] = await Promise.all([
     fetch(`http://127.0.0.1:${port}/api/health`),
     fetch(`http://127.0.0.1:${port}/api/dashboard?from=2026-07-01&to=2026-07-19&ownerId=31644369`),
+    fetch(`http://127.0.0.1:${port}/api/maqsam/calls?from=2026-07-01&to=2026-07-19`),
+    fetch(`http://127.0.0.1:${port}/api/maqsam/calls`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ callKey: "smoke-test" }),
+    }),
     fetch(`http://127.0.0.1:${port}/api/google/status`),
     fetch(`http://127.0.0.1:${port}/api/google/status?organizer=abdullah`),
     fetch(`http://127.0.0.1:${port}/api/google/availability`, {
@@ -60,9 +68,10 @@ try {
     }),
     fetch(`http://127.0.0.1:${port}/`),
   ]);
-  if (!healthResponse.ok || !dashboardResponse.ok || !calendarStatusResponse.ok || !abdullahCalendarStatusResponse.ok || !emptyCountryBatchResponse.ok || !pageResponse.ok) throw new Error("One or more smoke-test routes returned an error");
+  if (!healthResponse.ok || !dashboardResponse.ok || !maqsamCallsResponse.ok || !calendarStatusResponse.ok || !abdullahCalendarStatusResponse.ok || !emptyCountryBatchResponse.ok || !pageResponse.ok) throw new Error("One or more smoke-test routes returned an error");
   const health = await healthResponse.json();
   const dashboard = await dashboardResponse.json();
+  const maqsamCalls = await maqsamCallsResponse.json();
   const calendarStatus = await calendarStatusResponse.json();
   const abdullahCalendarStatus = await abdullahCalendarStatusResponse.json();
   const invalidCountryBatch = await invalidCountryBatchResponse.json();
@@ -71,6 +80,8 @@ try {
   if (health.status !== "ok") throw new Error("Health response is invalid");
   if (!dashboard.kpis || dashboard.meta?.isDemo !== true) throw new Error("Dashboard response is invalid");
   if (dashboardResponse.headers.get("x-dashboard-cache-version") !== "v6-performance") throw new Error("Dashboard snapshot cache headers are missing");
+  if (!Array.isArray(maqsamCalls.calls) || typeof maqsamCalls.meta?.totalStored !== "number") throw new Error("Maqsam calls response is invalid");
+  if (rejectedMaqsamIngestResponse.status !== 401) throw new Error("Maqsam ingest secret protection is invalid");
   if (!dashboard.dailyActivities?.some((point) => typeof point.whatsAppMessages === "number")) throw new Error("Daily WhatsApp activity data is missing");
   if (!dashboard.recentActivities?.some((activity) => activity.type === "WhatsApp")) throw new Error("WhatsApp activity rows are missing");
   if (!dashboard.priorityContacts?.every((contact) => typeof contact.contactSource === "string")) throw new Error("Contact Source data is missing for motion classification");
@@ -80,8 +91,8 @@ try {
   if (rejectedMeetingResponse.status !== 403) throw new Error("Calendar booking origin protection is invalid");
   if (invalidCountryBatchResponse.status !== 400 || typeof invalidCountryBatch.details !== "string") throw new Error("Task country batch validation is invalid");
   if (!Array.isArray(emptyCountryBatch.tasks) || emptyCountryBatch.tasks.length !== 0) throw new Error("Incremental task country payload is invalid");
-  if (!page.includes("SDR Command Center") || !page.includes("Inbound vs Outbound")) throw new Error("Dashboard motion entry is missing");
-  console.log("Smoke tests passed: dashboard snapshots, separate organizer status, inbound/outbound entry, task-country caching, WhatsApp data, and protected routes are operational.");
+  if (!page.includes("SDR Command Center") || !page.includes("Inbound vs Outbound") || !page.includes("Maqsam Calls")) throw new Error("Dashboard analytics entries are missing");
+  console.log("Smoke tests passed: dashboard snapshots, Maqsam calls, separate organizer status, inbound/outbound entry, task-country caching, WhatsApp data, and protected routes are operational.");
 } finally {
   server.kill("SIGTERM");
 }
