@@ -18,7 +18,7 @@ function emptyStore(): MaqsamStore {
   return { version: 1, updatedAt: new Date(0).toISOString(), calls: {} };
 }
 
-function cleanOptionalFields<T extends Record<string, unknown>>(value: T) {
+function cleanOptionalFields<T extends object>(value: T): Partial<T> {
   return Object.fromEntries(Object.entries(value).filter(([, fieldValue]) => fieldValue !== undefined)) as Partial<T>;
 }
 
