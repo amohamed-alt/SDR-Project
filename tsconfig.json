@@ -24,7 +24,7 @@
     ],
     "paths": {
       "@/components/Dashboard": [
-        "./src/components/DashboardMotion.tsx"
+        "./src/components/DashboardShell.tsx"
       ],
       "@/components/MaritaWorkspace": [
         "./src/components/MaritaWorkspaceCountry.tsx"
