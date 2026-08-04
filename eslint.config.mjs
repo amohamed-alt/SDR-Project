@@ -6,10 +6,14 @@ export default defineConfig([
   ...nextVitals,
   ...nextTs,
   {
-    files: ["src/components/DashboardMotion.tsx"],
+    files: [
+      "src/components/DashboardMotion.tsx",
+      "src/components/DashboardShell.tsx",
+      "src/components/MaqsamCallsDashboard.tsx",
+    ],
     rules: {
-      // This client-only dashboard intentionally initializes the URL-selected view
-      // and starts its API load from effects, matching the existing dashboard flow.
+      // These client-only dashboards intentionally initialize URL-selected views
+      // and start their API loads from effects, matching the existing dashboard flow.
       "react-hooks/set-state-in-effect": "off",
     },
   },
