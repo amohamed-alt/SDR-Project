@@ -33,21 +33,26 @@ MAQSAM_CALL_MAX_RECORDS=5000
 
 The existing Docker volume mounted at `/app/data` persists Maqsam calls and Google Calendar credentials across rebuilds.
 
-## n8n environment
+## n8n setup
+
+Create an **HTTP Basic Auth** credential named `Maqsam Basic Auth`:
+
+- Username: rotated Maqsam Access Key
+- Password: rotated Maqsam Access Secret
+
+Configure these n8n environment variables:
 
 ```env
-MAQSAM_ACCESS_KEY=<rotated-maqsam-access-key>
-MAQSAM_ACCESS_SECRET=<rotated-maqsam-access-secret>
 SDR_DASHBOARD_BASE_URL=https://sdr.dashboardtalentera.tech
 MAQSAM_INGEST_SECRET=<same-value-as-dashboard>
 ```
 
-Never commit the live values. The Maqsam key and secret must be rotated if they appeared in a workflow export or chat message.
+Never commit live values. The Maqsam key and secret must be rotated if they appeared in a workflow export or chat message.
 
 ## Deployment and verification
 
 1. Redeploy the SDR dashboard after setting the dashboard environment variables.
-2. Import the updated n8n workflow and confirm the existing HubSpot Bearer credential.
+2. Import the updated n8n workflow and select the `Maqsam Basic Auth` credential plus the existing HubSpot Bearer credential.
 3. Run the workflow manually.
 4. Verify that a matched call appears in the `Maqsam Calls` view and creates a HubSpot Note.
 5. Verify that an unmatched number appears in the dashboard without creating a Contact or Note.
