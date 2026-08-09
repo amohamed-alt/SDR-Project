@@ -3,7 +3,7 @@ name: sdr-project
 services:
   sdr-dashboard:
     build:
-      context: "https://github.com/amohamed-alt/SDR-Project.git#${SDR_BUILD_REF:-main}"
+      context: .
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file:
