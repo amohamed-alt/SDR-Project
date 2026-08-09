@@ -19,6 +19,7 @@
   box-shadow: 0 14px 34px rgba(116, 75, 196, 0.28);
   font-size: 11px;
   font-weight: 800;
+  text-decoration: none;
   cursor: pointer;
   transition: transform 0.18s ease, background 0.18s ease;
 }
