@@ -5,9 +5,9 @@
 .maqsamLauncher {
   position: fixed;
   right: 24px;
-  bottom: 78px;
-  z-index: 121;
-  min-height: 44px;
+  bottom: 136px;
+  z-index: 122;
+  min-height: 48px;
   display: inline-flex;
   align-items: center;
   gap: 9px;
@@ -23,6 +23,21 @@
   transition: transform 0.18s ease, background 0.18s ease;
 }
 
+.maqsamLauncher span {
+  line-height: 1;
+}
+
+.maqsamLauncher small {
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .maqsamLauncher:hover {
   transform: translateY(-2px);
   background: #6339b3;
@@ -31,6 +46,6 @@
 @media (max-width: 720px) {
   .maqsamLauncher {
     right: 14px;
-    bottom: 72px;
+    bottom: 130px;
   }
 }
