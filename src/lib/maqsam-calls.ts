@@ -78,11 +78,12 @@ export async function upsertMaqsamCall(incoming: Partial<MaqsamCallRecord> & Pic
     const store = await readStoreUnsafe();
     const now = new Date().toISOString();
     const existing = store.calls[incoming.callKey];
+    const cleanedIncoming = cleanOptionalFields(incoming);
     const merged: MaqsamCallRecord = {
-      callKey: incoming.callKey,
-      firstReceivedAt: existing?.firstReceivedAt ?? now,
       ...existing,
-      ...cleanOptionalFields(incoming),
+      ...cleanedIncoming,
+      callKey: incoming.callKey,
+      firstReceivedAt: existing?.firstReceivedAt ?? incoming.firstReceivedAt ?? now,
       updatedAt: now,
     };
 
