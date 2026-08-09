@@ -29,7 +29,7 @@ export function Dashboard() {
   return <div className={styles.shell}>
     <ExistingDashboard/>
     <button type="button" className={styles.maqsamLauncher} onClick={() => changeView("maqsam")}>
-      <PhoneCall size={17}/>Maqsam Calls
+      <PhoneCall size={17}/><span>Marita Calls</span><small>Maqsam</small>
     </button>
   </div>;
 }
