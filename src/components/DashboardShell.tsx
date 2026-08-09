@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { PhoneCall } from "lucide-react";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardMotion";
@@ -28,8 +29,8 @@ export function Dashboard() {
 
   return <div className={styles.shell}>
     <ExistingDashboard/>
-    <a className={styles.maqsamLauncher} href="/marita-calls">
+    <Link className={styles.maqsamLauncher} href="/marita-calls">
       <PhoneCall size={17}/><span>Marita Calls</span><small>Maqsam</small>
-    </a>
+    </Link>
   </div>;
 }
