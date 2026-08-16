@@ -50,19 +50,15 @@ The `Push to HubSpot` action:
 3. Fills `detected_ats` and ATS evidence fields only when those fields are empty.
 4. Writes `career_portal_type` only when it is empty.
 
-There is intentionally no automatic HubSpot write on scan completion.
+There is intentionally no automatic HubSpot write on scan completion. Autonomous processing only researches and stores results in Career Intelligence.
+
+## False-positive guard
+
+A normal company homepage is never accepted as the Career Page merely because its footer or marketing copy mentions `Careers`, `Jobs`, or hiring. Same-domain pages must use a dedicated career/job path or subdomain, while external portals must carry employer-brand proof plus recruitment signals. Arabic career paths such as `/وظائف` and `/التوظيف` are supported.
 
 ## Dashboard security
 
-Production uses Basic Auth from `DASHBOARD_USERNAME` / `DASHBOARD_PASSWORD`. HubSpot-backed pages and APIs fail closed if production authentication is enabled but those credentials are missing.
-
-The only intentional auth exceptions are:
-
-- `/api/health` for deployment health checks.
-- `/api/google/callback`, which validates the OAuth state cookie.
-- `POST /api/maqsam/calls`, which performs its own timing-safe `MAQSAM_INGEST_SECRET` validation.
-
-Internal Docker workers send the configured Basic Authorization header when calling dashboard APIs.
+Production uses Basic Auth from `DASHBOARD_USERNAME` / `DASHBOARD_PASSWORD`. HubSpot-backed pages and APIs remain protected. The health route is public for deployment verification; internal Docker workers can call only their exact POST endpoints over the private service hostname.
 
 ## Environment
 
@@ -78,31 +74,22 @@ CAREER_ENGINE_TIMEOUT_MS=90000
 CAREER_SCAN_LIMIT=25
 CAREER_SCAN_CONCURRENCY=6
 CAREER_PORTFOLIO_CACHE_MS=60000
-```
-
-Optional autonomous processing:
-
-```env
-CAREER_AUTO_SCAN_ENABLED=false
+CAREER_AUTO_SCAN_ENABLED=true
 CAREER_AUTO_SCAN_INTERVAL_SECONDS=45
 ```
 
-## Production validation
+Set `CAREER_AUTO_SCAN_ENABLED=false` explicitly if autonomous research needs to be paused. This does not control HubSpot writes; HubSpot writes are always a separate verified action.
 
-On the first deployment of this rollout, the `career-validation` one-shot service runs a batch of 25 companies after both the dashboard and Career Browser are healthy. It stores results in `/app/data/career-intelligence.json`, writes `/app/data/career-validation-v1.done`, and exits. Future deployments see the marker and do not repeat the validation batch.
-
-The one-shot validation does **not** push any results to HubSpot.
-
-## Recommended rollout
+## Production rollout
 
 1. Deploy the SDR Dashboard and internal `gtm-career-browser` together.
-2. Automatically scan the first 25 through the one-shot validation service.
-3. Keep `CAREER_AUTO_SCAN_ENABLED=false` while reviewing that sample in Career Intelligence.
-4. Review false positives and `needs_manual_review` cases.
-5. Run 100 from the UI and confirm browser usage remains acceptably low.
-6. Enable the autonomous worker to finish the remaining `needs_research` portfolio.
-7. Review `needs_manual_review` in the drawer.
-8. Push verified results to HubSpot only after review.
+2. Run the one-time 25-company validation after both services are healthy.
+3. Store the validation marker and expose the results immediately in Career Intelligence.
+4. Start the autonomous `career-refresh` worker after validation.
+5. Process only `needs_research` records in bounded batches, preserving progress after every company.
+6. Keep blocked/ambiguous records in `needs_manual_review` instead of guessing.
+7. Review results from the dashboard and use manual approve/reject where required.
+8. Push only `found_verified` results to HubSpot; re-read HubSpot immediately before every write and never overwrite a conflicting Career Page.
 
 ## Cost controls
 
@@ -113,4 +100,4 @@ The dashboard reports static, browser, and cache resolution rates. The intended 
 3. Browser only for unresolved sites
 4. Manual review for blocked or ambiguous results
 
-Search/LLM fallback is intentionally kept outside the default path so the backfill does not spend search or model calls on easy cases.
+Search/LLM fallback is intentionally kept outside the default path so the backfill does not spend search or model calls on easy cases. It can be added later only for the remaining manual-review tail if measured coverage justifies it.
