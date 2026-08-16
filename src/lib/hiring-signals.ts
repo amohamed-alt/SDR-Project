@@ -13,6 +13,7 @@ import {
   normalizeTargetCountry,
   parseJobLinks,
   parseJobPostingJsonLd,
+  shouldExcludeHiringCompany,
   type DiscoveredJob,
   type HiringSignalStatus,
   type HiringSource,
@@ -28,6 +29,7 @@ const MAX_HTML_BYTES = 2_500_000;
 const MAX_JOB_HISTORY = 400;
 const MAX_SNAPSHOTS = 60;
 const MAX_PROGRESS_CHUNK = 30;
+const MAX_DIRECT_JOBS = 500;
 const TARGET_COUNTRY_VALUES = [
   "Saudi Arabia",
   "United Arab Emirates",
@@ -41,6 +43,7 @@ const HIRING_COMPANY_PROPERTIES = [
   ...COMPANY_PROPERTIES,
   "ats_evidence_url",
   "gtm_hiring_signal",
+  "account_type",
 ] as const;
 
 export interface HiringSnapshotPoint {
@@ -145,6 +148,66 @@ interface SmartRecruitersResponse {
   }>;
 }
 
+interface AshbyResponse {
+  jobs?: Array<{
+    id?: string;
+    title?: string;
+    location?: string;
+    department?: string;
+    team?: string;
+    publishedAt?: string;
+    jobUrl?: string;
+    applyUrl?: string;
+    isListed?: boolean;
+  }>;
+}
+
+interface RecruiteeOffer {
+  id?: number | string;
+  title?: string;
+  slug?: string;
+  careers_url?: string;
+  url?: string;
+  location?: unknown;
+  department?: unknown;
+  published_at?: string;
+  created_at?: string;
+}
+
+interface RecruiteeResponse {
+  offers?: RecruiteeOffer[];
+  jobs?: RecruiteeOffer[];
+}
+
+interface WorkableJob {
+  id?: string;
+  shortcode?: string;
+  title?: string;
+  state?: string;
+  department?: unknown;
+  url?: string;
+  shortlink?: string;
+  location?: unknown;
+  created_at?: string;
+}
+
+interface WorkableResponse {
+  jobs?: WorkableJob[];
+}
+
+interface WorkdayJob {
+  title?: string;
+  externalPath?: string;
+  locationsText?: string;
+  postedOn?: string;
+  bulletFields?: string[];
+}
+
+interface WorkdayResponse {
+  total?: number;
+  jobPostings?: WorkdayJob[];
+}
+
 let refreshInFlight: Promise<HiringStore> | null = null;
 
 function value(record: HubSpotRecord, key: string) {
@@ -214,12 +277,13 @@ async function fetchText(url: string) {
   return { text: text.slice(0, MAX_HTML_BYTES), finalUrl: response.url || url };
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
+async function fetchJson<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  if (!headers.has("Accept")) headers.set("Accept", "application/json");
+  if (!headers.has("User-Agent")) headers.set("User-Agent", "Talentera-Hiring-Intelligence/1.0 (+public-career-page-monitor)");
   const response = await fetch(url, {
-    headers: {
-      Accept: "application/json",
-      "User-Agent": "Talentera-Hiring-Intelligence/1.0 (+public-career-page-monitor)",
-    },
+    ...init,
+    headers,
     redirect: "follow",
     cache: "no-store",
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -231,6 +295,29 @@ async function fetchJson<T>(url: string): Promise<T> {
 function isoFromMillis(value: number | undefined) {
   if (!value || !Number.isFinite(value)) return "";
   return new Date(value).toISOString();
+}
+
+function isoIfDate(value: string | undefined) {
+  if (!value) return "";
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : "";
+}
+
+function textFromUnknown(input: unknown): string {
+  if (typeof input === "string") return input.trim();
+  if (typeof input === "number") return String(input);
+  if (Array.isArray(input)) return input.map(textFromUnknown).filter(Boolean).join(" · ");
+  if (!input || typeof input !== "object") return "";
+  const object = input as Record<string, unknown>;
+  const direct = ["name", "label", "title", "location_str", "locationStr", "value"]
+    .map((key) => textFromUnknown(object[key]))
+    .find(Boolean);
+  if (direct) return direct;
+  return ["city", "region", "state", "country", "countryCode", "country_code"]
+    .map((key) => textFromUnknown(object[key]))
+    .filter(Boolean)
+    .filter((item, index, values) => values.indexOf(item) === index)
+    .join(", ");
 }
 
 async function scanGreenhouse(source: HiringSource): Promise<ScanResponse> {
@@ -281,6 +368,102 @@ async function scanSmartRecruiters(source: HiringSource): Promise<ScanResponse> 
   return { jobs, sourceUrl: endpoint, confidence: "high", reliableEmpty: true };
 }
 
+async function scanAshby(source: HiringSource): Promise<ScanResponse> {
+  const key = source.key.replace(/^ashby:/, "");
+  if (!key) throw new Error("Ashby job-board key could not be determined");
+  const endpoint = `https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(key)}`;
+  const payload = await fetchJson<AshbyResponse>(endpoint);
+  const jobs: DiscoveredJob[] = (payload.jobs ?? [])
+    .filter((job) => job.isListed !== false)
+    .map((job) => ({
+      externalId: job.id || job.jobUrl || job.applyUrl || job.title || "",
+      title: job.title || "",
+      location: job.location || "",
+      department: job.department || job.team || "",
+      url: job.jobUrl || job.applyUrl || source.url,
+      postedAt: isoIfDate(job.publishedAt),
+    }));
+  return { jobs, sourceUrl: endpoint, confidence: "high", reliableEmpty: true };
+}
+
+async function scanRecruitee(source: HiringSource): Promise<ScanResponse> {
+  const key = source.key.replace(/^recruitee:/, "");
+  if (!key) throw new Error("Recruitee company key could not be determined");
+  const endpoint = `https://${encodeURIComponent(key)}.recruitee.com/api/offers/`;
+  const payload = await fetchJson<RecruiteeResponse | RecruiteeOffer[]>(endpoint);
+  const offers = Array.isArray(payload) ? payload : payload.offers ?? payload.jobs ?? [];
+  const jobs: DiscoveredJob[] = offers.map((job) => ({
+    externalId: String(job.id ?? job.slug ?? job.careers_url ?? job.url ?? job.title ?? ""),
+    title: job.title || "",
+    location: textFromUnknown(job.location),
+    department: textFromUnknown(job.department),
+    url: job.careers_url || job.url || (job.slug ? `https://${key}.recruitee.com/o/${job.slug}` : source.url),
+    postedAt: isoIfDate(job.published_at || job.created_at),
+  }));
+  return { jobs, sourceUrl: endpoint, confidence: "high", reliableEmpty: true };
+}
+
+async function scanWorkable(source: HiringSource): Promise<ScanResponse> {
+  const key = source.key.replace(/^workable:/, "");
+  if (!key) throw new Error("Workable account key could not be determined");
+  const endpoint = `https://www.workable.com/api/accounts/${encodeURIComponent(key)}?details=true`;
+  const payload = await fetchJson<WorkableResponse | WorkableJob[]>(endpoint);
+  const records = Array.isArray(payload) ? payload : payload.jobs ?? [];
+  const jobs: DiscoveredJob[] = records
+    .filter((job) => !job.state || /published|active|open/i.test(job.state))
+    .map((job) => ({
+      externalId: job.id || job.shortcode || job.url || job.shortlink || job.title || "",
+      title: job.title || "",
+      location: textFromUnknown(job.location),
+      department: textFromUnknown(job.department),
+      url: job.url || job.shortlink || source.url,
+      postedAt: isoIfDate(job.created_at),
+    }));
+  return { jobs, sourceUrl: endpoint, confidence: "high", reliableEmpty: true };
+}
+
+function workdayParts(source: HiringSource) {
+  const raw = source.key.replace(/^workday:/, "");
+  const [keyTenant, keySite] = raw.split("|", 2);
+  const parsed = new URL(source.url);
+  const tenant = keyTenant || parsed.hostname.split(".")[0];
+  const cxs = parsed.pathname.match(/\/wday\/cxs\/([^/]+)\/([^/]+)\/jobs/i);
+  const pathSegments = parsed.pathname.split("/").filter(Boolean).filter((segment) => !/^[a-z]{2}[-_][a-z]{2}$/i.test(segment));
+  const site = keySite || cxs?.[2] || pathSegments[0] || "";
+  if (!tenant || !site) throw new Error("Workday tenant or career-site key could not be determined");
+  return { origin: parsed.origin, tenant: cxs?.[1] || tenant, site };
+}
+
+async function scanWorkday(source: HiringSource): Promise<ScanResponse> {
+  const { origin, tenant, site } = workdayParts(source);
+  const endpoint = `${origin}/wday/cxs/${encodeURIComponent(tenant)}/${encodeURIComponent(site)}/jobs`;
+  const jobs: DiscoveredJob[] = [];
+  const pageSize = 20;
+
+  for (let offset = 0; offset < MAX_DIRECT_JOBS; offset += pageSize) {
+    const payload = await fetchJson<WorkdayResponse>(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ appliedFacets: {}, limit: pageSize, offset, searchText: "" }),
+    });
+    const postings = payload.jobPostings ?? [];
+    for (const job of postings) {
+      const url = job.externalPath ? new URL(job.externalPath, origin).toString() : source.url;
+      jobs.push({
+        externalId: job.externalPath || `${job.title || "job"}|${job.locationsText || ""}`,
+        title: job.title || "",
+        location: job.locationsText || "",
+        department: "",
+        url,
+        postedAt: isoIfDate(job.postedOn),
+      });
+    }
+    if (!postings.length || postings.length < pageSize || (payload.total !== undefined && offset + postings.length >= payload.total)) break;
+  }
+
+  return { jobs, sourceUrl: endpoint, confidence: "high", reliableEmpty: true };
+}
+
 async function scanGeneric(source: HiringSource): Promise<ScanResponse> {
   if (!source.url) throw new Error("No career page URL available");
   const page = await fetchText(source.url);
@@ -294,10 +477,28 @@ async function scanGeneric(source: HiringSource): Promise<ScanResponse> {
   return { jobs: [], sourceUrl: page.finalUrl, confidence: "low", reliableEmpty: explicitEmpty };
 }
 
+async function scanVendor(source: HiringSource): Promise<ScanResponse> {
+  const result = await scanGeneric(source);
+  return { ...result, confidence: result.confidence === "low" ? "medium" : result.confidence };
+}
+
+async function directWithGenericFallback(source: HiringSource, direct: () => Promise<ScanResponse>) {
+  try {
+    return await direct();
+  } catch {
+    return scanGeneric(source);
+  }
+}
+
 async function scanSource(source: HiringSource) {
   if (source.kind === "greenhouse") return scanGreenhouse(source);
   if (source.kind === "lever") return scanLever(source);
   if (source.kind === "smartrecruiters") return scanSmartRecruiters(source);
+  if (source.key.startsWith("ashby:")) return directWithGenericFallback(source, () => scanAshby(source));
+  if (source.key.startsWith("recruitee:")) return directWithGenericFallback(source, () => scanRecruitee(source));
+  if (source.key.startsWith("workable:")) return directWithGenericFallback(source, () => scanWorkable(source));
+  if (source.key.startsWith("workday:")) return directWithGenericFallback(source, () => scanWorkday(source));
+  if (source.key.startsWith("vendor:")) return scanVendor(source);
   return scanGeneric(source);
 }
 
@@ -358,6 +559,7 @@ function companyIdentity(record: HubSpotRecord) {
     country,
     careerPageUrl,
     evidenceUrl,
+    accountType: value(record, "account_type"),
     ats: value(record, "detected_ats") || value(record, "ats_status"),
     hubspotHiringSignal: value(record, "gtm_hiring_signal"),
   };
@@ -365,6 +567,7 @@ function companyIdentity(record: HubSpotRecord) {
 
 function pendingSignal(record: HubSpotRecord): HiringCompanySignal | null {
   const identity = companyIdentity(record);
+  if (shouldExcludeHiringCompany({ name: identity.name, domain: identity.domain, accountType: identity.accountType })) return null;
   if (!identity.country || (!identity.careerPageUrl && !identity.evidenceUrl)) return null;
   const source = detectHiringSource(identity.careerPageUrl, identity.ats, identity.evidenceUrl);
   return {
@@ -400,7 +603,7 @@ function pendingSignal(record: HubSpotRecord): HiringCompanySignal | null {
 
 async function scanCompany(record: HubSpotRecord, previous: HiringCompanySignal | undefined, checkedAt: string): Promise<HiringCompanySignal> {
   const base = pendingSignal(record);
-  if (!base) throw new Error("Company is outside the KSA/UAE hiring scope");
+  if (!base) throw new Error("Company is outside the KSA/UAE acquisition hiring scope");
   const source = detectHiringSource(base.careerPageUrl, base.ats, value(record, "ats_evidence_url"));
   const previousActiveJobs = previous?.activeJobs ?? 0;
 
@@ -416,7 +619,7 @@ async function scanCompany(record: HubSpotRecord, previous: HiringCompanySignal 
         sourceUrl: result.sourceUrl,
         lastCheckedAt: checkedAt,
         scanStatus: "inconclusive",
-        error: "Career page loaded, but no reliable structured job list was detected.",
+        error: "Career source loaded, but no reliable structured job list was detected.",
       };
     }
 
