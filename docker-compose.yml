@@ -111,9 +111,7 @@ services:
 
   career-validation:
     image: alpine:3.21
-    restart: "no"
-    env_file:
-      - ${SDR_ENV_FILE:-/root/SDR-Project/.env}
+    restart: on-failure
     depends_on:
       sdr-dashboard:
         condition: service_healthy
@@ -125,20 +123,27 @@ services:
       - |
         set -e
         MARKER=/data/career-validation-v1.done
+        STATE=/data/career-validation-v1.state
         if [ -f "$$MARKER" ]; then
+          printf 'completed:%s\n' "$$(cat "$$MARKER" 2>/dev/null || true)" > "$$STATE"
           echo "Career validation batch v1 already completed."
           exit 0
         fi
-        AUTH="$$(printf '%s:%s' "$${DASHBOARD_USERNAME:-}" "$${DASHBOARD_PASSWORD:-}" | base64 | tr -d '\n')"
+        printf 'started:%s\n' "$$(date -u +%FT%TZ)" > "$$STATE"
         echo "Running one-time Career Intelligence validation batch (25 companies)..."
-        wget -qO /tmp/career-validation.json --timeout=900 \
+        if wget -qO /tmp/career-validation.json --timeout=900 \
           --header='Content-Type: application/json' \
-          --header="Authorization: Basic $$AUTH" \
           --post-data='{"limit":25}' \
-          http://sdr-dashboard:3000/api/career-intelligence/run
-        cat /tmp/career-validation.json
-        date -u +%FT%TZ > "$$MARKER"
-        echo "Career validation batch v1 completed."
+          http://sdr-dashboard:3000/api/career-intelligence/run; then
+          date -u +%FT%TZ > "$$MARKER"
+          printf 'completed:%s\n' "$$(cat "$$MARKER")" > "$$STATE"
+          echo "Career validation batch v1 completed."
+        else
+          CODE=$$?
+          printf 'failed:%s:%s\n' "$$CODE" "$$(date -u +%FT%TZ)" > "$$STATE"
+          echo "Career validation batch failed with exit $$CODE; Docker will retry."
+          exit "$$CODE"
+        fi
     volumes:
       - /root/SDR-Project/data:/data
     networks:
