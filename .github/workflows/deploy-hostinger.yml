@@ -62,27 +62,40 @@ jobs:
           environment-variables: |
             SDR_BUILD_REF=${{ env.DEPLOY_SHA }}
 
-      - name: Verify deep Career Intelligence health
+      - name: Verify exact deployed build and Career V2 health
         run: |
           set -euo pipefail
           READY=false
-          # The one-time 25-company validation can legitimately take several minutes
-          # when multiple sites require the Playwright fallback. Keep the deploy gate
-          # bounded, but give the worker enough time to finish before declaring failure.
-          for ATTEMPT in $(seq 1 90); do
+          # Hostinger's deploy action acknowledges the platform job before the new
+          # containers are necessarily live. Never accept health from the previous
+          # deployment: wait for the exact commit SHA and V2 engine generation.
+          for ATTEMPT in $(seq 1 120); do
             BODY=$(curl --silent --show-error \
               --connect-timeout 5 \
               --max-time 15 \
-              https://sdr.dashboardtalentera.tech/api/health?deep=1 || true)
-            echo "Deep health attempt ${ATTEMPT}: ${BODY}"
-            if printf '%s' "$BODY" | grep -q '"ready":true'; then
+              'https://sdr.dashboardtalentera.tech/api/health?deep=1' || true)
+
+            BUILD_REF=$(printf '%s' "$BODY" | jq -r '.buildRef // ""' 2>/dev/null || true)
+            GENERATION=$(printf '%s' "$BODY" | jq -r '.careerGeneration // ""' 2>/dev/null || true)
+            ENGINE_VERSION=$(printf '%s' "$BODY" | jq -r '.careerEngineVersion // ""' 2>/dev/null || true)
+            IS_READY=$(printf '%s' "$BODY" | jq -r '.ready // false' 2>/dev/null || true)
+            VALIDATION_STATE=$(printf '%s' "$BODY" | jq -r '.careerValidationState // "unknown"' 2>/dev/null || true)
+            STORED=$(printf '%s' "$BODY" | jq -r '.careerValidationProgress.stored // 0' 2>/dev/null || true)
+
+            echo "Production gate ${ATTEMPT}/120: build=${BUILD_REF:-none} generation=${GENERATION:-none} engine=${ENGINE_VERSION:-none} ready=${IS_READY:-false} validation=${VALIDATION_STATE:-unknown} stored=${STORED:-0}"
+
+            if [ "$BUILD_REF" = "$DEPLOY_SHA" ] \
+              && [ "$GENERATION" = "v2" ] \
+              && [[ "$ENGINE_VERSION" == 2.* ]] \
+              && [ "$IS_READY" = "true" ]; then
               READY=true
               break
             fi
-            sleep 8
+            sleep 10
           done
+
           if [ "$READY" != "true" ]; then
-            echo "::error::Career Intelligence deep health never became ready."
+            echo "::error::Production never exposed the exact commit $DEPLOY_SHA with ready Career Intelligence V2 within the bounded deployment window."
             exit 1
           fi
 
@@ -97,7 +110,7 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'success',
               context: 'hostinger/deploy',
-              description: 'SDR dashboard and Career validation deployed successfully',
+              description: 'Exact SDR build and Career V2 validation are live',
               target_url: process.env.DEPLOY_URL,
             });
 
@@ -112,6 +125,6 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'failure',
               context: 'hostinger/deploy',
-              description: 'SDR dashboard deployment failed',
+              description: 'SDR production build/version gate failed',
               target_url: process.env.DEPLOY_URL,
             });
