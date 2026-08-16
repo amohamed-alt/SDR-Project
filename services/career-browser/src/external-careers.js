@@ -14,6 +14,26 @@ function cleanToken(value) {
   return String(value || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }
 
+function visibleCareerText(value) {
+  return String(value || '')
+    .replace(/<!--[^]*?-->/g, ' ')
+    .replace(/<script\b[^>]*>[^]*?<\/script>/gi, ' ')
+    .replace(/<style\b[^>]*>[^]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/https?:\/\/[^\s"'<>]+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function hasMeaningfulCareerContent(value) {
+  const text = visibleCareerText(value);
+  if (!text) return false;
+  const compactLength = text.replace(/[^\p{L}\p{N}]/gu, '').length;
+  const strongSignal = /careers? at|search jobs?|view jobs?|job opportunities|job openings|open (?:positions|roles|vacancies)|current (?:openings|vacancies)|join our team|work with us|apply (?:now|for)|submit (?:your )?(?:cv|resume)|upload (?:your )?(?:cv|resume)|وظائف شاغرة|فرص وظيفية|فرص عمل|انضم (?:إلينا|الينا|لفريقنا)|اعمل معنا|أرسل سيرتك|ارسل سيرتك|رفع السيرة/iu.test(text);
+  return strongSignal || (compactLength >= 32 && CAREER_RE.test(text));
+}
+
 function brandTokens(request = {}) {
   const out = [];
   const add = value => {
@@ -84,10 +104,12 @@ function pageLooksLikeBrandCareer(html, url, request = {}) {
   try { page = new URL(url); } catch { return false; }
   const hostname = page.hostname.toLowerCase();
   const compactHost = hostname.replace(/[^a-z0-9]/g, '');
-  const text = String(html || '').toLowerCase().replace(/\s+/g, ' ').slice(0, 2000000);
-  const combined = `${hostname} ${page.pathname} ${text}`;
-  const hasCareerSignal = CAREER_RE.test(combined) || /search and apply|post your cv|upload cv|submit (?:your )?(?:cv|resume)|open roles|job openings/i.test(combined);
-  if (!hasCareerSignal) return false;
+  const visibleText = visibleCareerText(html).slice(0, 2000000);
+
+  // A URL such as /careers is only a candidate. It is not proof by itself.
+  // Require visible career/job content so empty SPA shells, parked pages and
+  // broken white pages are not promoted to Found & Verified.
+  if (!hasMeaningfulCareerContent(visibleText)) return false;
 
   const official = officialHost(request);
   if (official) {
@@ -102,7 +124,7 @@ function pageLooksLikeBrandCareer(html, url, request = {}) {
 
   const tokens = brandTokens(request);
   if (!tokens.length) return false;
-  return tokens.some(token => compactHost.includes(token.replace(/[^a-z0-9]/g, '')) || text.includes(token));
+  return tokens.some(token => compactHost.includes(token.replace(/[^a-z0-9]/g, '')) || visibleText.includes(token));
 }
 
 module.exports = { brandTokens, externalCareerRoots, pageLooksLikeBrandCareer, sameDomainCareerLocation };
