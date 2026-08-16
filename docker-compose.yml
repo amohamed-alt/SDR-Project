@@ -149,6 +149,10 @@ services:
     restart: unless-stopped
     env_file:
       - ${SDR_ENV_FILE:-/root/SDR-Project/.env}
+    environment:
+      CAREER_AUTO_SCAN_ENABLED: ${CAREER_AUTO_SCAN_ENABLED:-true}
+      CAREER_SCAN_LIMIT: ${CAREER_SCAN_LIMIT:-25}
+      CAREER_AUTO_SCAN_INTERVAL_SECONDS: ${CAREER_AUTO_SCAN_INTERVAL_SECONDS:-45}
     depends_on:
       sdr-dashboard:
         condition: service_healthy
@@ -160,8 +164,8 @@ services:
       - /bin/sh
       - -c
       - |
-        if [ "$${CAREER_AUTO_SCAN_ENABLED:-false}" != "true" ]; then
-          echo "Career auto scan disabled; first validation batch is stored for dashboard review."
+        if [ "$${CAREER_AUTO_SCAN_ENABLED:-true}" != "true" ]; then
+          echo "Career auto scan disabled by explicit production configuration."
           while true; do sleep 3600; done
         fi
         AUTH="$$(printf '%s:%s' "$${DASHBOARD_USERNAME:-}" "$${DASHBOARD_PASSWORD:-}" | base64 | tr -d '\n')"
