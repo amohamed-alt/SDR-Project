@@ -91,6 +91,8 @@ Set `CAREER_AUTO_SCAN_ENABLED=false` explicitly if autonomous research needs to 
 7. Review results from the dashboard and use manual approve/reject where required.
 8. Push only `found_verified` results to HubSpot; re-read HubSpot immediately before every write and never overwrite a conflicting Career Page.
 
+The Hostinger deployment health gate allows a bounded extended warmup for the first validation batch because several sites can legitimately require Playwright. A slow validation is not treated as an engine failure prematurely.
+
 ## Cost controls
 
 The dashboard reports static, browser, and cache resolution rates. The intended waterfall is:
