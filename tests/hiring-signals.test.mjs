@@ -8,6 +8,7 @@ import {
   normalizeTargetCountry,
   parseJobLinks,
   parseJobPostingJsonLd,
+  shouldExcludeHiringCompany,
 } from "../src/lib/hiring-signals-core.ts";
 
 test("normalizes KSA and UAE company country values", () => {
@@ -18,7 +19,7 @@ test("normalizes KSA and UAE company country values", () => {
   assert.equal(normalizeTargetCountry("Egypt"), "");
 });
 
-test("detects supported public ATS sources", () => {
+test("detects direct public ATS sources", () => {
   assert.deepEqual(detectHiringSource("https://job-boards.greenhouse.io/acme", "Greenhouse"), {
     kind: "greenhouse",
     key: "acme",
@@ -27,6 +28,29 @@ test("detects supported public ATS sources", () => {
   });
   assert.equal(detectHiringSource("https://jobs.lever.co/example", "Lever").kind, "lever");
   assert.equal(detectHiringSource("https://careers.smartrecruiters.com/ExampleCo", "SmartRecruiters").kind, "smartrecruiters");
+  assert.equal(detectHiringSource("https://jobs.ashbyhq.com/example", "Ashby").key, "ashby:example");
+  assert.equal(detectHiringSource("https://example.recruitee.com/", "Recruitee").key, "recruitee:example");
+  assert.equal(detectHiringSource("https://apply.workable.com/example/", "Workable").key, "workable:example");
+  assert.equal(detectHiringSource("https://acme.wd5.myworkdayjobs.com/en-US/External", "Workday").key, "workday:acme|External");
+});
+
+test("recognizes ATS families present in HubSpot even when the career URL is custom", () => {
+  assert.equal(detectHiringSource("https://example.com/careers", "SAP SuccessFactors").key, "vendor:successfactors");
+  assert.equal(detectHiringSource("https://example.com/careers", "Oracle HCM Cloud").key, "vendor:oracle");
+  assert.equal(detectHiringSource("https://example.com/careers", "Teamtailor").key, "vendor:teamtailor");
+  assert.equal(detectHiringSource("https://example.com/careers", "iCIMS (Jibe)").key, "vendor:icims");
+  assert.equal(detectHiringSource("https://example.com/careers", "Zoho Recruit").key, "vendor:zoho-recruit");
+  assert.equal(detectHiringSource("https://example.com/careers", "Unknown").key, "");
+});
+
+test("excludes retention and internal Talentera/Bayt companies without broad substring false positives", () => {
+  assert.equal(shouldExcludeHiringCompany({ name: "Customer", domain: "customer.com", accountType: "Retention" }), true);
+  assert.equal(shouldExcludeHiringCompany({ name: "Test Company", domain: "talentera.com", accountType: "Acquisition" }), true);
+  assert.equal(shouldExcludeHiringCompany({ name: "Internal", domain: "jobs.talentera.com", accountType: "Acquisition" }), true);
+  assert.equal(shouldExcludeHiringCompany({ name: "bayt", domain: "bayt.com", accountType: "" }), true);
+  assert.equal(shouldExcludeHiringCompany({ name: "bayt.com", domain: "bayt.net", accountType: "" }), true);
+  assert.equal(shouldExcludeHiringCompany({ name: "SA BAYTUR CONSTRUCTION CO", domain: "baytur.com.sa", accountType: "Acquisition" }), false);
+  assert.equal(shouldExcludeHiringCompany({ name: "بيت الاباء", domain: "baytalebaa.com", accountType: "Acquisition" }), false);
 });
 
 test("extracts schema.org JobPosting JSON-LD", () => {
