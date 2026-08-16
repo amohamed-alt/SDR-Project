@@ -29,7 +29,4 @@ jobs:
           npm install --omit=dev --no-audit --no-fund
           npm run check
       - name: Validate production Docker Compose
-        run: |
-          sudo mkdir -p /root/SDR-Project
-          sudo cp .env.example /root/SDR-Project/.env
-          docker compose -f docker-compose.yml config >/dev/null
+        run: SDR_ENV_FILE=.env.example docker compose -f docker-compose.yml config >/dev/null
