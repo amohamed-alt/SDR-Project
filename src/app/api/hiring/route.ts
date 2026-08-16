@@ -1,11 +1,33 @@
 import { NextResponse } from "next/server";
-import { getHiringStore } from "@/lib/hiring-signals";
+import { getHiringStore, refreshHiringSignals } from "@/lib/hiring-signals";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function shouldRefresh(generatedAt: string) {
+  if (!generatedAt) return true;
+  const timestamp = new Date(generatedAt).getTime();
+  if (!Number.isFinite(timestamp)) return true;
+  return Date.now() - timestamp >= 15 * 60_000;
+}
+
 export async function GET() {
-  const store = await getHiringStore();
+  let store = await getHiringStore();
+  const refreshTriggered = shouldRefresh(store.generatedAt);
+
+  if (refreshTriggered) {
+    void refreshHiringSignals().catch((error) => {
+      console.error("Background hiring intelligence refresh failed", error);
+    });
+
+    // The refresh seeds monitored companies before scanning job sources. Give a
+    // brand-new installation a short opportunity to expose that seed immediately.
+    if (!store.generatedAt) {
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      store = await getHiringStore();
+    }
+  }
+
   const companies = store.companies.map((company) => ({
     ...company,
     jobs: company.jobs.filter((job) => job.status === "active").slice(0, 8),
@@ -23,6 +45,7 @@ export async function GET() {
       run: store.run,
       countries: ["Saudi Arabia", "United Arab Emirates"],
       refreshCadenceHours: 6,
+      refreshTriggered,
     },
     summary: {
       monitoredCompanies: companies.length,
@@ -37,7 +60,8 @@ export async function GET() {
   }, {
     headers: {
       "Cache-Control": "private, no-store, max-age=0",
-      "X-Hiring-Intelligence-Version": "v1",
+      "X-Hiring-Intelligence-Version": "v2-self-start",
+      "X-Hiring-Refresh-Triggered": refreshTriggered ? "1" : "0",
     },
   });
 }
