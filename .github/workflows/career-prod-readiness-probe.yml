@@ -12,9 +12,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Read deep health
+      - name: Read dashboard and deep health state
         run: |
           set -u
+          ROOT_CODE=$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
+            -o /dev/null -w '%{http_code}' \
+            https://sdr.dashboardtalentera.tech/ || true)
+          echo "DASHBOARD_ROOT_HTTP=$ROOT_CODE"
           BODY=$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
             https://sdr.dashboardtalentera.tech/api/health?deep=1 || true)
           echo "CAREER_DEEP_HEALTH=$BODY"
