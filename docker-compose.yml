@@ -153,6 +153,7 @@ services:
       CAREER_AUTO_SCAN_ENABLED: ${CAREER_AUTO_SCAN_ENABLED:-true}
       CAREER_SCAN_LIMIT: ${CAREER_SCAN_LIMIT:-25}
       CAREER_AUTO_SCAN_INTERVAL_SECONDS: ${CAREER_AUTO_SCAN_INTERVAL_SECONDS:-45}
+      CAREER_AUTO_SCAN_IDLE_SECONDS: ${CAREER_AUTO_SCAN_IDLE_SECONDS:-3600}
     depends_on:
       sdr-dashboard:
         condition: service_healthy
@@ -171,12 +172,18 @@ services:
         AUTH="$$(printf '%s:%s' "$${DASHBOARD_USERNAME:-}" "$${DASHBOARD_PASSWORD:-}" | base64 | tr -d '\n')"
         sleep 8
         while true; do
-          wget -qO- --timeout=900 \
+          RESULT="$$(wget -qO- --timeout=900 \
             --header='Content-Type: application/json' \
             --header="Authorization: Basic $$AUTH" \
             --post-data="{\"limit\":$${CAREER_SCAN_LIMIT:-25}}" \
-            http://sdr-dashboard:3000/api/career-intelligence/run || true
-          sleep "$${CAREER_AUTO_SCAN_INTERVAL_SECONDS:-45}"
+            http://sdr-dashboard:3000/api/career-intelligence/run || true)"
+          printf '%s\n' "$$RESULT"
+          if printf '%s' "$$RESULT" | grep -q '"remainingEligible":0'; then
+            echo "Career backfill complete; entering low-frequency idle mode."
+            sleep "$${CAREER_AUTO_SCAN_IDLE_SECONDS:-3600}"
+          else
+            sleep "$${CAREER_AUTO_SCAN_INTERVAL_SECONDS:-45}"
+          fi
         done
     networks:
       - default
