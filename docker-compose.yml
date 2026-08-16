@@ -14,8 +14,8 @@ services:
       ACQUISITION_SNAPSHOT_PATH: /app/data/acquisition-dashboard.json
       GOOGLE_TOKEN_STORE_PATH: /app/data/google-calendar.json
       HIRING_SNAPSHOT_PATH: /app/data/hiring-signals.json
-      HIRING_SCAN_LIMIT: ${HIRING_SCAN_LIMIT:-400}
-      HIRING_SCAN_CONCURRENCY: ${HIRING_SCAN_CONCURRENCY:-8}
+      HIRING_SCAN_LIMIT: ${HIRING_SCAN_LIMIT:-160}
+      HIRING_SCAN_CONCURRENCY: ${HIRING_SCAN_CONCURRENCY:-10}
     ports:
       - "127.0.0.1:3010:3000"
     volumes:
@@ -52,10 +52,10 @@ services:
       - /bin/sh
       - -c
       - |
-        sleep 20
+        sleep 5
         while true; do
           wget -qO- --timeout=300 --post-data='' http://sdr-dashboard:3000/api/hiring/refresh || true
-          sleep 21600
+          sleep 900
         done
     networks:
       - default
