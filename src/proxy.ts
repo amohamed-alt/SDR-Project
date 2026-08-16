@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PUBLIC_PATHS = new Set(["/api/health"]);
+const PUBLIC_PATHS = new Set(["/api/health", "/api/google/callback"]);
 
 function unauthorized(message = "Authentication required") {
   return new NextResponse(message, {
@@ -13,7 +13,11 @@ function unauthorized(message = "Authentication required") {
 }
 
 export function proxy(request: NextRequest) {
-  if (PUBLIC_PATHS.has(request.nextUrl.pathname)) return NextResponse.next();
+  const pathname = request.nextUrl.pathname;
+  // Health is public for deploy verification. Google callback is protected by
+  // its state cookie, and Maqsam POST has its own timing-safe ingest secret.
+  if (PUBLIC_PATHS.has(pathname)) return NextResponse.next();
+  if (pathname === "/api/maqsam/calls" && request.method === "POST") return NextResponse.next();
   if (process.env.DISABLE_AUTH === "true") return NextResponse.next();
 
   const expectedUsername = String(process.env.DASHBOARD_USERNAME || "").trim();
