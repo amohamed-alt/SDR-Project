@@ -48,6 +48,10 @@ function deterministicEvidenceScore(request, result) {
   if (result.playwright_used) score += 8;
   if (/career_(?:ats_)?verified|career_found/i.test(String(result.detection_method || ''))) score += 7;
   if (/verified|career|jobs?|vacanc|opening|recruit/i.test(String(result.ats_evidence_reason || ''))) score += 5;
+  const visibleLength = Number(result.career_visible_text_length || String(result.career_evidence_text || '').length || 0);
+  if (visibleLength >= 80) score += 10;
+  else if (visibleLength > 0 && visibleLength < 20) score -= 60;
+  if (/search jobs?|view jobs?|open (?:roles|positions|vacancies)|current openings|join our team|وظائف|فرص عمل/i.test(String(result.career_evidence_text || ''))) score += 5;
   if (result.detection_error) score -= 20;
   return Math.max(0, Math.min(100, score));
 }
@@ -68,6 +72,7 @@ function compactTrace(trace = []) {
     requested_url: clean(item.requested_url || item.url, 500),
     final_url: clean(item.final_url, 500),
     status: Number(item.status || 0) || null,
+    visible_chars: Number(item.visible_chars || 0) || null,
     error: clean(item.error, 180),
   }));
 }
@@ -78,6 +83,8 @@ function evidencePayload(request, result) {
     company_domain: clean(request.company_domain, 300),
     official_website: clean(request.official_website, 500),
     candidate_career_url: clean(result.career_url, 700),
+    visible_text_excerpt: clean(result.career_evidence_text, 6000),
+    visible_text_length: Number(result.career_visible_text_length || String(result.career_evidence_text || '').length || 0),
     detected_ats: clean(result.detected_ats, 120),
     ats_status: clean(result.ats_status, 80),
     ats_confidence: clean(result.ats_confidence, 80),
@@ -143,7 +150,7 @@ async function runTwoPassJudge(evidence) {
   const verifier = await ollamaJson([
     {
       role: 'system',
-      content: `You are a strict employer career-page verifier. The candidate URL is fixed: never invent or substitute another URL. Judge only the supplied evidence. A valid result must be a recruiting/careers destination for the same employer, not a customer, seller, supplier, university admissions, generic contact, news, social network, job aggregator, or unrelated brand page. Empty/white/error/login-only pages are not verified. If evidence is insufficient, choose manual_review. Return JSON matching this schema exactly: ${schemaText}`,
+      content: `You are a strict employer career-page verifier. The candidate URL is fixed: never invent or substitute another URL. Judge only the supplied evidence, especially the visible rendered page text. A valid result must be a recruiting/careers destination for the same employer, not a customer, seller, supplier, university admissions, generic contact, news, social network, job aggregator, or unrelated brand page. Empty/white/error/login-only pages are not verified. If evidence is insufficient, choose manual_review. Return JSON matching this schema exactly: ${schemaText}`,
     },
     { role: 'user', content: JSON.stringify(evidence) },
   ]);
@@ -151,7 +158,7 @@ async function runTwoPassJudge(evidence) {
   const critic = await ollamaJson([
     {
       role: 'system',
-      content: `Act as an adversarial second reviewer. Try to falsify the first review. Look for brand mismatch, misleading /careers URLs, generic marketing text, third-party aggregators, single unrelated job pages, redirects, blank/blocked pages, and weak evidence. Only return verified if the supplied evidence independently proves this is the same employer's public recruiting destination. Otherwise choose manual_review or reject. Return JSON matching this schema exactly: ${schemaText}`,
+      content: `Act as an adversarial second reviewer. Try to falsify the first review. Re-read the visible rendered text and trace. Look for brand mismatch, misleading /careers URLs, generic marketing text, third-party aggregators, single unrelated job pages, redirects, blank/blocked pages, and weak evidence. Only return verified if the supplied evidence independently proves this is the same employer's public recruiting destination. Otherwise choose manual_review or reject. Return JSON matching this schema exactly: ${schemaText}`,
     },
     { role: 'user', content: JSON.stringify({ evidence, first_review: verifier }) },
   ]);
