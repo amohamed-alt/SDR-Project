@@ -51,17 +51,58 @@ function externalCareerRoots(request = {}) {
   return [...new Set(urls)].slice(0, 16);
 }
 
+function officialHost(request = {}) {
+  const raw = String(request.official_website || request.company_domain || '').trim();
+  if (!raw) return '';
+  try { return new URL(raw.includes('://') ? raw : `https://${raw}`).hostname.toLowerCase(); }
+  catch { return raw.replace(/^https?:\/\//i, '').split('/')[0].toLowerCase(); }
+}
+
+function sameDomainCareerLocation(url, request = {}) {
+  try {
+    const page = new URL(url);
+    const official = officialHost(request);
+    if (!official) return false;
+    const pageDomain = getDomain(page.hostname) || page.hostname.replace(/^www\./i, '');
+    const officialDomain = getDomain(official) || official.replace(/^www\./i, '');
+    if (pageDomain !== officialDomain) return false;
+
+    const host = page.hostname.toLowerCase();
+    const base = officialDomain.toLowerCase();
+    const subdomain = host === base || host === `www.${base}` ? '' : host.endsWith(`.${base}`) ? host.slice(0, -(base.length + 1)) : '';
+    const careerSubdomain = subdomain.split('.').some(label => /^(?:careers?|jobs?|talents?|recruit(?:ment|ing)?|vacancies|employment|hiring|hire|apply)$/i.test(label));
+    const path = decodeURIComponent(page.pathname || '/').toLowerCase().replace(/\/+$/, '') || '/';
+    const careerPath = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?(?:careers?|jobs?|vacancies|join-us|join-our-team|work-with-us|talents?|recruitment|recruiting|employment|hiring|hire|apply|وظائف|التوظيف|فرص-العمل|انضم-إلينا)(?:\/|$)/iu.test(path);
+    return careerSubdomain || careerPath;
+  } catch {
+    return false;
+  }
+}
+
 function pageLooksLikeBrandCareer(html, url, request = {}) {
-  let hostname = '';
-  try { hostname = new URL(url).hostname.toLowerCase(); } catch { return false; }
+  let page;
+  try { page = new URL(url); } catch { return false; }
+  const hostname = page.hostname.toLowerCase();
   const compactHost = hostname.replace(/[^a-z0-9]/g, '');
   const text = String(html || '').toLowerCase().replace(/\s+/g, ' ').slice(0, 2000000);
-  const combined = `${hostname} ${text}`;
+  const combined = `${hostname} ${page.pathname} ${text}`;
   const hasCareerSignal = CAREER_RE.test(combined) || /search and apply|post your cv|upload cv|submit (?:your )?(?:cv|resume)|open roles|job openings/i.test(combined);
   if (!hasCareerSignal) return false;
+
+  const official = officialHost(request);
+  if (official) {
+    const pageDomain = getDomain(hostname) || hostname.replace(/^www\./i, '');
+    const officialDomain = getDomain(official) || official.replace(/^www\./i, '');
+    // A normal company homepage can mention jobs/careers in marketing copy or the footer.
+    // Treat same-domain pages as career destinations only when the URL itself is a
+    // career/job path or a dedicated career subdomain. External portals still use
+    // brand-token proof below.
+    if (pageDomain === officialDomain && !sameDomainCareerLocation(url, request)) return false;
+  }
+
   const tokens = brandTokens(request);
   if (!tokens.length) return false;
   return tokens.some(token => compactHost.includes(token.replace(/[^a-z0-9]/g, '')) || text.includes(token));
 }
 
-module.exports = { brandTokens, externalCareerRoots, pageLooksLikeBrandCareer };
+module.exports = { brandTokens, externalCareerRoots, pageLooksLikeBrandCareer, sameDomainCareerLocation };
