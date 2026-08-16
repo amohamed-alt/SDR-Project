@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file:
-      - /root/SDR-Project/.env
+      - ${SDR_ENV_FILE:-/root/SDR-Project/.env}
     environment:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
@@ -107,7 +107,7 @@ services:
     image: alpine:3.21
     restart: unless-stopped
     env_file:
-      - /root/SDR-Project/.env
+      - ${SDR_ENV_FILE:-/root/SDR-Project/.env}
     depends_on:
       sdr-dashboard:
         condition: service_healthy
