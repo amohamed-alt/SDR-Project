@@ -162,16 +162,12 @@ export function CareerIntelligence({ onBack }: { onBack: () => void }) {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to load Career Intelligence");
       setData(payload as CareerPayload);
-      if (selected) {
-        const fresh = (payload as CareerPayload).companies.find((company) => company.companyId === selected.companyId);
-        if (fresh) setSelected(fresh);
-      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to load Career Intelligence");
     } finally {
       setLoading(false);
     }
-  }, [page, search, selected, status]);
+  }, [page, search, status]);
 
   useEffect(() => {
     setLoading(true);
@@ -250,7 +246,8 @@ export function CareerIntelligence({ onBack }: { onBack: () => void }) {
     setRunning("single");
     setError("");
     try {
-      await runWave(1, [company.companyId], true);
+      const result = await runWave(1, [company.companyId], true);
+      if (result.processed[0]) setSelected(result.processed[0]);
       await load(true);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Recheck failed");
