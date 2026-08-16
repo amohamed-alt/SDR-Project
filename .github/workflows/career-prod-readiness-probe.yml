@@ -1,0 +1,25 @@
+name: Probe Career Production Readiness
+
+on:
+  push:
+    branches: [agent/career-prod-readiness-probe]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Read deep health
+        run: |
+          set -u
+          BODY=$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
+            https://sdr.dashboardtalentera.tech/api/health?deep=1 || true)
+          echo "CAREER_DEEP_HEALTH=$BODY"
+          if printf '%s' "$BODY" | grep -q '"ready":true'; then
+            echo "CAREER_READY=true"
+          else
+            echo "CAREER_READY=false"
+          fi
