@@ -61,12 +61,14 @@ services:
       HIRING_SNAPSHOT_PATH: /app/data/hiring-signals.json
       HIRING_SCAN_LIMIT: 160
       HIRING_SCAN_CONCURRENCY: 10
-      CAREER_INTELLIGENCE_STORE_PATH: /app/data/career-intelligence.json
+      CAREER_INTELLIGENCE_STORE_PATH: /app/data/career-intelligence-v2.json
+      CAREER_VALIDATION_MARKER_PATH: /app/data/career-validation-v2.done
+      CAREER_VALIDATION_STATE_PATH: /app/data/career-validation-v2.state
       CAREER_ENGINE_URL: http://gtm-career-browser:3000/career-detect
-      CAREER_ENGINE_TIMEOUT_MS: 90000
-      CAREER_SCAN_LIMIT: 25
-      CAREER_SCAN_CONCURRENCY: 6
-      CAREER_PORTFOLIO_CACHE_MS: 60000
+      CAREER_ENGINE_TIMEOUT_MS: 150000
+      CAREER_SCAN_LIMIT: 20
+      CAREER_SCAN_CONCURRENCY: 4
+      CAREER_PORTFOLIO_CACHE_MS: 30000
     ports:
       - "127.0.0.1:3010:3000"
     volumes:
@@ -94,6 +96,39 @@ services:
       start_period: 30s
       retries: 5
 
+  career-judge-ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    mem_limit: "2600m"
+    cpus: 1.5
+    pids_limit: 256
+    environment:
+      OLLAMA_KEEP_ALIVE: 30s
+      OLLAMA_NUM_PARALLEL: 1
+      OLLAMA_MAX_LOADED_MODELS: 1
+    volumes:
+      - career_judge_models:/root/.ollama
+    networks:
+      - traefik_proxy
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 20s
+      timeout: 8s
+      start_period: 20s
+      retries: 10
+
+  career-judge-model-init:
+    image: ollama/ollama:latest
+    restart: "no"
+    depends_on:
+      career-judge-ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://career-judge-ollama:11434
+    command: ["pull", "qwen3:1.7b"]
+    networks:
+      - traefik_proxy
+
   gtm-career-browser:
     build:
       context: ./services/career-browser
@@ -109,13 +144,19 @@ services:
       - seccomp:unconfined
     environment:
       PORT: 3000
-      CACHE_FILE: /data/cache.json
+      CACHE_FILE: /data/cache-v2.json
       CACHE_TTL_DAYS: 30
       MAX_STATIC_PAGES: 30
       MAX_BROWSER_STEPS: 8
       MAX_BROWSER_CONTEXTS: 2
       REQUEST_TIMEOUT_MS: 10000
       BROWSER_TIMEOUT_MS: 50000
+      AI_JUDGE_ENABLED: "true"
+      OLLAMA_URL: http://career-judge-ollama:11434/api/chat
+      OLLAMA_MODEL: qwen3:1.7b
+      AI_JUDGE_TIMEOUT_MS: 45000
+      AI_JUDGE_AUDIT_PERCENT: 10
+      AI_JUDGE_MIN_RULE_SCORE: 90
     volumes:
       - career_browser_cache:/data
     networks:
@@ -125,7 +166,7 @@ services:
         - CMD
         - node
         - -e
-        - "fetch('http://127.0.0.1:3000/health').then(async r=>{const j=await r.json();if(!r.ok||!j.capabilities?.includes('career-detect'))process.exit(1)}).catch(()=>process.exit(1))"
+        - "fetch('http://127.0.0.1:3000/health').then(async r=>{const j=await r.json();if(!r.ok||!j.capabilities?.includes('career-v2'))process.exit(1)}).catch(()=>process.exit(1))"
       interval: 30s
       timeout: 8s
       start_period: 35s
@@ -161,41 +202,43 @@ services:
         condition: service_healthy
       gtm-career-browser:
         condition: service_healthy
+      career-judge-model-init:
+        condition: service_completed_successfully
     command:
       - /bin/sh
       - -c
       - |
         set -eu
-        MARKER=/data/career-validation-v1.done
-        STATE=/data/career-validation-v1.state
+        MARKER=/data/career-validation-v2.done
+        STATE=/data/career-validation-v2.state
         MAX_ATTEMPTS=3
         ATTEMPT=1
 
         if [ -f "$$MARKER" ]; then
           printf 'completed:%s\n' "$$(cat "$$MARKER" 2>/dev/null || true)" > "$$STATE"
-          echo "Career validation batch v1 already completed."
+          echo "Career validation batch v2 already completed."
           exit 0
         fi
 
         while [ "$$ATTEMPT" -le "$$MAX_ATTEMPTS" ]; do
           printf 'started:attempt-%s:%s\n' "$$ATTEMPT" "$$(date -u +%FT%TZ)" > "$$STATE"
-          echo "Running Career Intelligence validation batch (25 companies), attempt $$ATTEMPT/$$MAX_ATTEMPTS..."
+          echo "Running Career Intelligence V2 validation batch (10 companies), attempt $$ATTEMPT/$$MAX_ATTEMPTS..."
 
-          if wget -qO /tmp/career-validation.json --timeout=900 \
+          if wget -qO /tmp/career-validation.json --timeout=1800 \
             --header='Content-Type: application/json' \
-            --post-data='{"limit":25}' \
+            --post-data='{"limit":10,"forceRefresh":true}' \
             http://sdr-dashboard:3000/api/career-intelligence/run; then
             cat /tmp/career-validation.json
             date -u +%FT%TZ > "$$MARKER"
             printf 'completed:%s\n' "$$(cat "$$MARKER")" > "$$STATE"
-            echo "Career validation batch v1 completed."
+            echo "Career validation batch v2 completed."
             exit 0
           else
             CODE=$$?
             printf 'failed:attempt-%s:code-%s:%s\n' "$$ATTEMPT" "$$CODE" "$$(date -u +%FT%TZ)" > "$$STATE"
 
             if [ "$$ATTEMPT" -ge "$$MAX_ATTEMPTS" ]; then
-              echo "Career validation stopped after $$MAX_ATTEMPTS failed attempts; manual review is required."
+              echo "Career validation V2 stopped after $$MAX_ATTEMPTS failed attempts; manual review is required."
               exit "$$CODE"
             fi
 
@@ -234,28 +277,28 @@ services:
         . /run/sdr-env/.env
         set +a
         CAREER_AUTO_SCAN_ENABLED="$${CAREER_AUTO_SCAN_ENABLED:-true}"
-        CAREER_SCAN_LIMIT="$${CAREER_SCAN_LIMIT:-25}"
-        CAREER_AUTO_SCAN_INTERVAL_SECONDS="$${CAREER_AUTO_SCAN_INTERVAL_SECONDS:-45}"
-        CAREER_AUTO_SCAN_IDLE_SECONDS="$${CAREER_AUTO_SCAN_IDLE_SECONDS:-3600}"
-        CAREER_AUTO_SCAN_ERROR_INTERVAL_SECONDS="$${CAREER_AUTO_SCAN_ERROR_INTERVAL_SECONDS:-300}"
-        CAREER_AUTO_SCAN_MAX_ERROR_INTERVAL_SECONDS="$${CAREER_AUTO_SCAN_MAX_ERROR_INTERVAL_SECONDS:-1800}"
+        CAREER_SCAN_LIMIT="$${CAREER_V2_SCAN_LIMIT:-20}"
+        CAREER_AUTO_SCAN_INTERVAL_SECONDS="$${CAREER_V2_SCAN_INTERVAL_SECONDS:-60}"
+        CAREER_AUTO_SCAN_IDLE_SECONDS="$${CAREER_V2_IDLE_SECONDS:-3600}"
+        CAREER_AUTO_SCAN_ERROR_INTERVAL_SECONDS="$${CAREER_V2_ERROR_INTERVAL_SECONDS:-300}"
+        CAREER_AUTO_SCAN_MAX_ERROR_INTERVAL_SECONDS="$${CAREER_V2_MAX_ERROR_INTERVAL_SECONDS:-1800}"
         ERROR_SLEEP="$$CAREER_AUTO_SCAN_ERROR_INTERVAL_SECONDS"
 
         if [ "$$CAREER_AUTO_SCAN_ENABLED" != "true" ]; then
-          echo "Career auto scan disabled by runtime configuration."
+          echo "Career V2 auto scan disabled by runtime configuration."
           while true; do sleep 3600; done
         fi
 
         sleep 8
         while true; do
-          RESULT="$$(wget -qO- --timeout=900 \
+          RESULT="$$(wget -qO- --timeout=1800 \
             --header='Content-Type: application/json' \
-            --post-data="{\"limit\":$${CAREER_SCAN_LIMIT}}" \
+            --post-data="{\"limit\":$${CAREER_SCAN_LIMIT},\"forceRefresh\":true}" \
             http://sdr-dashboard:3000/api/career-intelligence/run 2>&1)"
           CODE=$$?
 
           if [ "$$CODE" -ne 0 ]; then
-            echo "Career scan request failed with exit $$CODE; backing off for $$ERROR_SLEEP seconds."
+            echo "Career V2 scan request failed with exit $$CODE; backing off for $$ERROR_SLEEP seconds."
             printf '%s\n' "$$RESULT"
             sleep "$$ERROR_SLEEP"
             NEXT_ERROR_SLEEP=$$((ERROR_SLEEP * 2))
@@ -269,7 +312,7 @@ services:
           ERROR_SLEEP="$$CAREER_AUTO_SCAN_ERROR_INTERVAL_SECONDS"
           printf '%s\n' "$$RESULT"
           if printf '%s' "$$RESULT" | grep -q '"remainingEligible":0'; then
-            echo "Career backfill complete; entering low-frequency idle mode."
+            echo "Career Intelligence V2 backfill complete; entering low-frequency idle mode."
             sleep "$$CAREER_AUTO_SCAN_IDLE_SECONDS"
           else
             sleep "$$CAREER_AUTO_SCAN_INTERVAL_SECONDS"
@@ -287,6 +330,8 @@ volumes:
     name: sdr_app_data
   career_browser_cache:
     name: sdr_career_browser_cache
+  career_judge_models:
+    name: sdr_career_judge_models
 
 networks:
   traefik_proxy:

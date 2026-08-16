@@ -127,4 +127,11 @@ function pageLooksLikeBrandCareer(html, url, request = {}) {
   return tokens.some(token => compactHost.includes(token.replace(/[^a-z0-9]/g, '')) || visibleText.includes(token));
 }
 
-module.exports = { brandTokens, externalCareerRoots, pageLooksLikeBrandCareer, sameDomainCareerLocation };
+module.exports = {
+  brandTokens,
+  externalCareerRoots,
+  pageLooksLikeBrandCareer,
+  sameDomainCareerLocation,
+  visibleCareerText,
+  hasMeaningfulCareerContent,
+};

@@ -4,12 +4,13 @@ const express = require('express');
 const { clean, unique, now, normalizeUrl, rootUrl, domain, assertPublic, fingerprint, isJobDetailUrl, scoreCareer, baseResult, readCache, writeCache } = require('./common');
 const { staticDetect } = require('./static');
 const { browserDetect } = require('./browser');
+const { applyAiJudge } = require('./judge');
 
 const PORT = Number(process.env.PORT || 3000);
 const CACHE_TTL_DAYS = Number(process.env.CACHE_TTL_DAYS || 30);
 const MAX_STATIC_PAGES = Number(process.env.MAX_STATIC_PAGES || 30);
 const MAX_BROWSER_STEPS = Number(process.env.MAX_BROWSER_STEPS || 8);
-const VERSION = '1.6.0';
+const VERSION = '2.0.0';
 let cacheWriteQueue = Promise.resolve();
 
 function terminalCareerStatus(status) { return ['found_verified','no_public_career_page','website_domain_invalid','insufficient_company_data'].includes(String(status || '')); }
@@ -18,11 +19,29 @@ function finalizeCareer(result) {
   const statuses = (result.trace || []).map(item => Number(item.status || 0));
   const traceErrors = (result.trace || []).map(item => String(item.error || '')).filter(Boolean);
   const blocked = statuses.some(status => [401,403,429].includes(status)) || traceErrors.some(error => /captcha|cloudflare|forbidden|blocked|timeout|aborted/i.test(error));
-  if (result.career_url) { result.career_status = 'found_verified'; result.career_confidence_score = result.ats_status === 'detected' ? 98 : 92; result.career_evidence_url = result.career_url; result.career_evidence_reason = result.ats_evidence_reason || 'Verified employer career destination discovered from the official website journey.'; return result; }
+
+  if (result.ai_requires_manual_review) {
+    result.career_status = 'needs_manual_review';
+    result.career_confidence_score = Math.max(35, Math.min(79, Number(result.ai_judge?.deterministic_score || 55)));
+    result.career_evidence_url = result.rejected_career_url || result.ats_evidence_url || '';
+    result.career_evidence_reason = result.detection_error || 'Candidate requires manual review after AI cross-verification.';
+    return result;
+  }
+  if (result.career_url) {
+    result.career_status = 'found_verified';
+    const aiVerified = result.ai_judge?.status === 'cross_verified';
+    result.career_confidence_score = aiVerified ? 99 : result.ats_status === 'detected' ? 98 : 92;
+    result.career_evidence_url = result.career_url;
+    result.career_evidence_reason = result.ats_evidence_reason || 'Verified employer career destination discovered from the official website journey.';
+    return result;
+  }
   if (result.detection_method === 'input_missing_website') { result.career_status = 'insufficient_company_data'; result.career_confidence_score = 99; result.career_evidence_reason = 'No usable company website or domain was supplied.'; return result; }
   if (result.detection_method === 'website_validation_failed') { result.career_status = 'website_domain_invalid'; result.career_confidence_score = 98; result.career_evidence_reason = result.detection_error || 'The supplied website could not be resolved as a public HTTP(S) destination.'; return result; }
   if (blocked || result.pages_checked === 0) { result.career_status = 'needs_manual_review'; result.career_confidence_score = Math.max(35,Math.min(70,45 + Number(result.pages_checked || 0))); result.career_evidence_reason = blocked ? 'Automated verification was blocked or timed out before the site could be ruled out.' : 'The automated crawler could not collect enough public evidence to reach a safe conclusion.'; return result; }
-  result.career_status = 'no_public_career_page'; result.career_confidence_score = result.browser_pages_checked > 0 ? 90 : Math.min(88,72 + Math.min(16,Number(result.static_pages_checked || 0))); result.career_evidence_reason = `Checked ${result.pages_checked} public page${result.pages_checked === 1 ? '' : 's'} without verifying an employer-owned career destination.`; return result;
+  result.career_status = 'no_public_career_page';
+  result.career_confidence_score = result.browser_pages_checked > 0 ? 90 : Math.min(88,72 + Math.min(16,Number(result.static_pages_checked || 0)));
+  result.career_evidence_reason = `Checked ${result.pages_checked} public page${result.pages_checked === 1 ? '' : 's'} without verifying an employer-owned career destination.`;
+  return result;
 }
 function cacheEntryFresh(entry, fallbackTtlDays = CACHE_TTL_DAYS) { if (!entry?.cached_at) return false; const ttlDays = Number(entry.ttl_days || fallbackTtlDays); return Date.now() - Date.parse(entry.cached_at) <= ttlDays * 86400000; }
 async function persistCacheEntry(key, result, ttlDays = CACHE_TTL_DAYS) {
@@ -58,6 +77,12 @@ async function detect(input, mode = 'career') {
   result.job_detail_found = isJobDetailUrl(result.job_url || '');
   result.candidate_urls = unique(result.candidate_urls).filter(url => isJobDetailUrl(url) || fingerprint(url) || scoreCareer({ href: url, text: '' },website) >= 70).slice(0,120);
   result.trace = result.trace.slice(0,120);
+
+  // The local model is a bounded second opinion, never the discovery source.
+  // It can only confirm the fixed candidate URL or downgrade it to manual review.
+  result = await applyAiJudge(request, result);
+  result.trace = result.trace.slice(0,120);
+
   result = finalizeCareer(result);
   await persistCacheEntry(key,result,ttlForCareerStatus(result.career_status));
   return { request, result };
@@ -66,7 +91,17 @@ async function detect(input, mode = 'career') {
 const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '128kb' }));
-app.get('/health', (_req,res) => res.json({ ok: true, service: 'gtm-career-browser', version: VERSION, capabilities: ['career-detect','negative-cache','arabic-career-signals','browser-pool'], time: now() }));
+app.get('/health', (_req,res) => res.json({
+  ok: true,
+  service: 'gtm-career-browser',
+  version: VERSION,
+  capabilities: ['career-detect','negative-cache','arabic-career-signals','browser-pool','blank-page-rejection','adversarial-ai-judge','career-v2'],
+  aiJudge: {
+    enabled: String(process.env.AI_JUDGE_ENABLED || 'true').toLowerCase() === 'true',
+    model: process.env.OLLAMA_MODEL || 'qwen3:1.7b',
+  },
+  time: now(),
+}));
 app.post('/career-detect', async (req,res) => {
   const started = Date.now();
   try { const payload = await detect(req.body || {},'career'); res.json({ ok: true, service: 'gtm-career-browser', version: VERSION, duration_ms: Date.now() - started, ...payload }); }

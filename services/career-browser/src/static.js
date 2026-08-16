@@ -2,7 +2,7 @@
 
 const cheerio = require('cheerio');
 const { clean, unique, rootUrl, domain, assertPublic, fingerprint, isJobDetailUrl, isJobListingUrl, evidenceRank, isOfficialCareerUrl, careerUrlScore, detected, resolveLink, scoreCareer, CAREER_RE } = require('./common');
-const { externalCareerRoots, pageLooksLikeBrandCareer } = require('./external-careers');
+const { externalCareerRoots, pageLooksLikeBrandCareer, visibleCareerText } = require('./external-careers');
 const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 10000);
 
 function linksFrom(html, base) {
@@ -77,6 +77,9 @@ async function staticDetect(request, result) {
       const officialCareer = validPage && isOfficialCareerUrl(page.final_url, root) && pageHasCareerProof(page.html, page.final_url, request);
       const pageCareer = officialCareer || brandedCareer ? page.final_url : '';
       if (pageCareer) {
+        const visible = visibleCareerText(page.html);
+        result.career_evidence_text = clean(visible, 6000);
+        result.career_visible_text_length = visible.length;
         result.career_url = preferCareer(result.career_url, pageCareer, root);
         if (request.stop_on_career) { result.detection_method = fingerprint(pageMarkerText(page.html, page.final_url)) ? 'static_career_ats_verified' : 'static_career_verified'; result.ats_evidence_reason ||= `Verified public career destination discovered at ${page.final_url}.`; return result; }
       }
