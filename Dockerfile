@@ -15,11 +15,13 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
+ENV SDR_RUNTIME_ENV_FILE=/run/sdr-env/.env
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs \
-  && mkdir -p /app/data && chown nextjs:nodejs /app/data
+  && mkdir -p /app/data /run/sdr-env && chown -R nextjs:nodejs /app/data /run/sdr-env
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --chown=nextjs:nodejs --chmod=755 docker/sdr-entrypoint.sh /usr/local/bin/sdr-entrypoint
 USER nextjs
 EXPOSE 3000
-CMD ["node", "server.js"]
+CMD ["/usr/local/bin/sdr-entrypoint"]

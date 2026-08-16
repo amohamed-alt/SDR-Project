@@ -1,31 +1,77 @@
 name: sdr-project
 
 services:
+  runtime-bootstrap:
+    image: alpine:3.21
+    restart: "no"
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+
+        ENV_TARGET=/runtime-env/.env
+        DATA_MARKER=/runtime-data/.sdr-runtime-data-v1
+
+        if [ ! -s "$$ENV_TARGET" ]; then
+          if [ ! -s /legacy/.env ]; then
+            echo "FATAL: /root/SDR-Project/.env is missing; cannot bootstrap persistent runtime env." >&2
+            exit 78
+          fi
+          umask 077
+          cp /legacy/.env "$$ENV_TARGET.tmp"
+          chown 1001:1001 "$$ENV_TARGET.tmp"
+          chmod 0400 "$$ENV_TARGET.tmp"
+          mv "$$ENV_TARGET.tmp" "$$ENV_TARGET"
+          echo "Persistent SDR runtime env initialized."
+        else
+          echo "Persistent SDR runtime env already initialized; preserving existing secrets."
+        fi
+
+        if [ ! -e "$$DATA_MARKER" ]; then
+          if [ -d /legacy/data ]; then
+            cp -a /legacy/data/. /runtime-data/ 2>/dev/null || true
+          fi
+          chown -R 1001:1001 /runtime-data
+          touch "$$DATA_MARKER"
+          chown 1001:1001 "$$DATA_MARKER"
+          echo "Persistent SDR data volume initialized."
+        else
+          echo "Persistent SDR data volume already initialized."
+        fi
+    volumes:
+      - /root/SDR-Project:/legacy:ro
+      - sdr_runtime_env:/runtime-env
+      - sdr_app_data:/runtime-data
+
   sdr-dashboard:
     build:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
-    env_file:
-      - ${SDR_ENV_FILE:-/root/SDR-Project/.env}
+    depends_on:
+      runtime-bootstrap:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
+      SDR_RUNTIME_ENV_FILE: /run/sdr-env/.env
       ACQUISITION_SNAPSHOT_PATH: /app/data/acquisition-dashboard.json
       GOOGLE_TOKEN_STORE_PATH: /app/data/google-calendar.json
       HIRING_SNAPSHOT_PATH: /app/data/hiring-signals.json
-      HIRING_SCAN_LIMIT: ${HIRING_SCAN_LIMIT:-160}
-      HIRING_SCAN_CONCURRENCY: ${HIRING_SCAN_CONCURRENCY:-10}
+      HIRING_SCAN_LIMIT: 160
+      HIRING_SCAN_CONCURRENCY: 10
       CAREER_INTELLIGENCE_STORE_PATH: /app/data/career-intelligence.json
-      CAREER_ENGINE_URL: ${CAREER_ENGINE_URL:-http://gtm-career-browser:3000/career-detect}
-      CAREER_ENGINE_TIMEOUT_MS: ${CAREER_ENGINE_TIMEOUT_MS:-90000}
-      CAREER_SCAN_LIMIT: ${CAREER_SCAN_LIMIT:-25}
-      CAREER_SCAN_CONCURRENCY: ${CAREER_SCAN_CONCURRENCY:-6}
-      CAREER_PORTFOLIO_CACHE_MS: ${CAREER_PORTFOLIO_CACHE_MS:-60000}
+      CAREER_ENGINE_URL: http://gtm-career-browser:3000/career-detect
+      CAREER_ENGINE_TIMEOUT_MS: 90000
+      CAREER_SCAN_LIMIT: 25
+      CAREER_SCAN_CONCURRENCY: 6
+      CAREER_PORTFOLIO_CACHE_MS: 60000
     ports:
       - "127.0.0.1:3010:3000"
     volumes:
-      - /root/SDR-Project/data:/app/data
+      - sdr_runtime_env:/run/sdr-env:ro
+      - sdr_app_data:/app/data
     networks:
       - default
       - traefik_proxy
@@ -88,22 +134,18 @@ services:
   hiring-refresh:
     image: alpine:3.21
     restart: unless-stopped
-    env_file:
-      - ${SDR_ENV_FILE:-/root/SDR-Project/.env}
     depends_on:
+      runtime-bootstrap:
+        condition: service_completed_successfully
       sdr-dashboard:
         condition: service_healthy
     command:
       - /bin/sh
       - -c
       - |
-        AUTH="$$(printf '%s:%s' "$${DASHBOARD_USERNAME:-}" "$${DASHBOARD_PASSWORD:-}" | base64 | tr -d '\n')"
         sleep 5
         while true; do
-          wget -qO- --timeout=300 \
-            --header="Authorization: Basic $$AUTH" \
-            --post-data='' \
-            http://sdr-dashboard:3000/api/hiring/refresh || true
+          wget -qO- --timeout=300 --post-data='' http://sdr-dashboard:3000/api/hiring/refresh || true
           sleep 900
         done
     networks:
@@ -113,6 +155,8 @@ services:
     image: alpine:3.21
     restart: on-failure
     depends_on:
+      runtime-bootstrap:
+        condition: service_completed_successfully
       sdr-dashboard:
         condition: service_healthy
       gtm-career-browser:
@@ -145,21 +189,16 @@ services:
           exit "$$CODE"
         fi
     volumes:
-      - /root/SDR-Project/data:/data
+      - sdr_app_data:/data
     networks:
       - default
 
   career-refresh:
     image: alpine:3.21
     restart: unless-stopped
-    env_file:
-      - ${SDR_ENV_FILE:-/root/SDR-Project/.env}
-    environment:
-      CAREER_AUTO_SCAN_ENABLED: ${CAREER_AUTO_SCAN_ENABLED:-true}
-      CAREER_SCAN_LIMIT: ${CAREER_SCAN_LIMIT:-25}
-      CAREER_AUTO_SCAN_INTERVAL_SECONDS: ${CAREER_AUTO_SCAN_INTERVAL_SECONDS:-45}
-      CAREER_AUTO_SCAN_IDLE_SECONDS: ${CAREER_AUTO_SCAN_IDLE_SECONDS:-3600}
     depends_on:
+      runtime-bootstrap:
+        condition: service_completed_successfully
       sdr-dashboard:
         condition: service_healthy
       gtm-career-browser:
@@ -170,31 +209,45 @@ services:
       - /bin/sh
       - -c
       - |
-        if [ "$${CAREER_AUTO_SCAN_ENABLED:-true}" != "true" ]; then
-          echo "Career auto scan disabled by explicit production configuration."
+        set -a
+        . /run/sdr-env/.env
+        set +a
+        CAREER_AUTO_SCAN_ENABLED="$${CAREER_AUTO_SCAN_ENABLED:-true}"
+        CAREER_SCAN_LIMIT="$${CAREER_SCAN_LIMIT:-25}"
+        CAREER_AUTO_SCAN_INTERVAL_SECONDS="$${CAREER_AUTO_SCAN_INTERVAL_SECONDS:-45}"
+        CAREER_AUTO_SCAN_IDLE_SECONDS="$${CAREER_AUTO_SCAN_IDLE_SECONDS:-3600}"
+
+        if [ "$$CAREER_AUTO_SCAN_ENABLED" != "true" ]; then
+          echo "Career auto scan disabled by runtime configuration."
           while true; do sleep 3600; done
         fi
-        AUTH="$$(printf '%s:%s' "$${DASHBOARD_USERNAME:-}" "$${DASHBOARD_PASSWORD:-}" | base64 | tr -d '\n')"
+
         sleep 8
         while true; do
           RESULT="$$(wget -qO- --timeout=900 \
             --header='Content-Type: application/json' \
-            --header="Authorization: Basic $$AUTH" \
-            --post-data="{\"limit\":$${CAREER_SCAN_LIMIT:-25}}" \
+            --post-data="{\"limit\":$${CAREER_SCAN_LIMIT}}" \
             http://sdr-dashboard:3000/api/career-intelligence/run || true)"
           printf '%s\n' "$$RESULT"
           if printf '%s' "$$RESULT" | grep -q '"remainingEligible":0'; then
             echo "Career backfill complete; entering low-frequency idle mode."
-            sleep "$${CAREER_AUTO_SCAN_IDLE_SECONDS:-3600}"
+            sleep "$$CAREER_AUTO_SCAN_IDLE_SECONDS"
           else
-            sleep "$${CAREER_AUTO_SCAN_INTERVAL_SECONDS:-45}"
+            sleep "$$CAREER_AUTO_SCAN_INTERVAL_SECONDS"
           fi
         done
+    volumes:
+      - sdr_runtime_env:/run/sdr-env:ro
     networks:
       - default
 
 volumes:
+  sdr_runtime_env:
+    name: sdr_runtime_env
+  sdr_app_data:
+    name: sdr_app_data
   career_browser_cache:
+    name: sdr_career_browser_cache
 
 networks:
   traefik_proxy:
