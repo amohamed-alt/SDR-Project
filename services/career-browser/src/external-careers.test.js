@@ -15,6 +15,17 @@ test('does not treat a normal homepage career mention as the career page', () =>
   assert.equal(pageLooksLikeBrandCareer(html, 'https://example.com/', request), false);
 });
 
+test('rejects a blank same-domain careers page even when the URL looks correct', () => {
+  const html = '<html><head><title>Careers</title></head><body><div id="root"></div></body></html>';
+  assert.equal(sameDomainCareerLocation('https://example.com/careers', request), true);
+  assert.equal(pageLooksLikeBrandCareer(html, 'https://example.com/careers', request), false);
+});
+
+test('rejects rendered evidence that contains only the careers URL', () => {
+  const rendered = 'https://example.com/careers\n\n\n\nhttps://cdn.example.com/app.js';
+  assert.equal(pageLooksLikeBrandCareer(rendered, 'https://example.com/careers', request), false);
+});
+
 test('accepts an employer-branded same-domain careers path', () => {
   const html = '<html><body><h1>Careers at Example Holdings</h1><p>View jobs and join our team.</p></body></html>';
   assert.equal(sameDomainCareerLocation('https://example.com/careers', request), true);
