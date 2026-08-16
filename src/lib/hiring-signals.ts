@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { COMPANY_PROPERTIES, hubspotRecordUrl } from "@/lib/config";
-import { searchAll } from "@/lib/hubspot";
+import { searchAll, type SearchFilter } from "@/lib/hubspot";
 import type { HubSpotRecord } from "@/lib/types";
 import {
   calculateHiringScore,
@@ -21,12 +21,21 @@ import {
 } from "@/lib/hiring-signals-core";
 
 const STORE_VERSION = 1;
-const DEFAULT_SCAN_LIMIT = 600;
-const DEFAULT_CONCURRENCY = 6;
+const DEFAULT_SCAN_LIMIT = 160;
+const DEFAULT_CONCURRENCY = 10;
 const FETCH_TIMEOUT_MS = 15_000;
 const MAX_HTML_BYTES = 2_500_000;
 const MAX_JOB_HISTORY = 400;
 const MAX_SNAPSHOTS = 60;
+const MAX_PROGRESS_CHUNK = 30;
+const TARGET_COUNTRY_VALUES = [
+  "Saudi Arabia",
+  "United Arab Emirates",
+  "KSA",
+  "UAE",
+  "SA",
+  "AE",
+];
 
 const HIRING_COMPANY_PROPERTIES = [
   ...COMPANY_PROPERTIES,
@@ -469,51 +478,119 @@ function selectCycle<T>(items: T[], cursor: number, limit: number) {
   return { selected, nextCursor: (normalizedCursor + count) % items.length };
 }
 
+function targetCountryFilters(propertyName: "country" | "gtm_country"): SearchFilter[] {
+  return [{ propertyName, operator: "IN", values: TARGET_COUNTRY_VALUES }];
+}
+
+async function loadTargetCompanies() {
+  const [countryRecords, gtmCountryRecords] = await Promise.all([
+    searchAll("companies", HIRING_COMPANY_PROPERTIES, targetCountryFilters("country")),
+    searchAll("companies", HIRING_COMPANY_PROPERTIES, targetCountryFilters("gtm_country")),
+  ]);
+  const recordsById = new Map<string, HubSpotRecord>();
+  for (const record of [...countryRecords, ...gtmCountryRecords]) recordsById.set(record.id, record);
+  return [...recordsById.values()];
+}
+
+function companiesFromMap(nextById: Map<string, HiringCompanySignal>, eligibleIds: Set<string>) {
+  return [...nextById.values()]
+    .filter((company) => eligibleIds.has(company.companyId))
+    .sort((a, b) => b.hiringScore - a.hiringScore || b.newJobs7d - a.newJobs7d || b.activeJobs - a.activeJobs || a.name.localeCompare(b.name));
+}
+
+function buildStore(args: {
+  nextById: Map<string, HiringCompanySignal>;
+  eligibleIds: Set<string>;
+  startedAt: string;
+  completedAt: string;
+  cursor: number;
+  scanLimit: number;
+  eligibleCompanies: number;
+  scanned: HiringCompanySignal[];
+}): HiringStore {
+  return {
+    version: STORE_VERSION,
+    generatedAt: new Date().toISOString(),
+    cursor: args.cursor,
+    run: {
+      startedAt: args.startedAt,
+      completedAt: args.completedAt,
+      scanned: args.scanned.length,
+      succeeded: args.scanned.filter((company) => company.scanStatus === "success").length,
+      inconclusive: args.scanned.filter((company) => company.scanStatus === "inconclusive").length,
+      failed: args.scanned.filter((company) => company.scanStatus === "error").length,
+      eligibleCompanies: args.eligibleCompanies,
+      scanLimit: args.scanLimit,
+    },
+    companies: companiesFromMap(args.nextById, args.eligibleIds),
+  };
+}
+
 async function runRefresh() {
   const previousStore = await getHiringStore();
   const previousById = new Map(previousStore.companies.map((company) => [company.companyId, company]));
   const startedAt = new Date().toISOString();
   const scanLimit = positiveInteger(process.env.HIRING_SCAN_LIMIT, DEFAULT_SCAN_LIMIT, 5_000);
   const concurrency = positiveInteger(process.env.HIRING_SCAN_CONCURRENCY, DEFAULT_CONCURRENCY, 20);
+  const chunkSize = Math.min(MAX_PROGRESS_CHUNK, Math.max(concurrency * 2, 10));
 
-  const records = await searchAll("companies", HIRING_COMPANY_PROPERTIES, []);
+  const records = await loadTargetCompanies();
   const eligible = records
     .filter((record) => pendingSignal(record))
     .sort((a, b) => Number(a.id) - Number(b.id));
   const cycle = selectCycle(eligible, previousStore.cursor, scanLimit);
-  const checkedAt = new Date().toISOString();
-  const scanned = await mapConcurrent(cycle.selected, concurrency, (record) => scanCompany(record, previousById.get(record.id), checkedAt));
-
+  const eligibleIds = new Set(eligible.map((record) => record.id));
   const nextById = new Map(previousStore.companies.map((company) => [company.companyId, company]));
+
   for (const record of eligible) {
     if (!nextById.has(record.id)) {
       const pending = pendingSignal(record);
       if (pending) nextById.set(record.id, pending);
     }
   }
-  for (const result of scanned) nextById.set(result.companyId, result);
 
-  const eligibleIds = new Set(eligible.map((record) => record.id));
-  const companies = [...nextById.values()]
-    .filter((company) => eligibleIds.has(company.companyId))
-    .sort((a, b) => b.hiringScore - a.hiringScore || b.newJobs7d - a.newJobs7d || b.activeJobs - a.activeJobs || a.name.localeCompare(b.name));
+  const scanned: HiringCompanySignal[] = [];
 
-  const store: HiringStore = {
-    version: STORE_VERSION,
-    generatedAt: new Date().toISOString(),
-    cursor: cycle.nextCursor,
-    run: {
+  await persistStore(buildStore({
+    nextById,
+    eligibleIds,
+    startedAt,
+    completedAt: "",
+    cursor: previousStore.cursor,
+    scanLimit,
+    eligibleCompanies: eligible.length,
+    scanned,
+  }));
+
+  for (let offset = 0; offset < cycle.selected.length; offset += chunkSize) {
+    const chunk = cycle.selected.slice(offset, offset + chunkSize);
+    const checkedAt = new Date().toISOString();
+    const results = await mapConcurrent(chunk, concurrency, (record) => scanCompany(record, previousById.get(record.id), checkedAt));
+    for (const result of results) nextById.set(result.companyId, result);
+    scanned.push(...results);
+
+    await persistStore(buildStore({
+      nextById,
+      eligibleIds,
       startedAt,
-      completedAt: new Date().toISOString(),
-      scanned: scanned.length,
-      succeeded: scanned.filter((company) => company.scanStatus === "success").length,
-      inconclusive: scanned.filter((company) => company.scanStatus === "inconclusive").length,
-      failed: scanned.filter((company) => company.scanStatus === "error").length,
-      eligibleCompanies: eligible.length,
+      completedAt: "",
+      cursor: previousStore.cursor,
       scanLimit,
-    },
-    companies,
-  };
+      eligibleCompanies: eligible.length,
+      scanned,
+    }));
+  }
+
+  const store = buildStore({
+    nextById,
+    eligibleIds,
+    startedAt,
+    completedAt: new Date().toISOString(),
+    cursor: cycle.nextCursor,
+    scanLimit,
+    eligibleCompanies: eligible.length,
+    scanned,
+  });
   await persistStore(store);
   return store;
 }

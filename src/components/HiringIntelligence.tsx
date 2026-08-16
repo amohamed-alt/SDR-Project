@@ -179,7 +179,7 @@ export function HiringIntelligence({ onBack }: { onBack: () => void }) {
       }
     }
     void load();
-    const interval = window.setInterval(() => void load(), 5 * 60_000);
+    const interval = window.setInterval(() => void load(), 30_000);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
@@ -204,11 +204,13 @@ export function HiringIntelligence({ onBack }: { onBack: () => void }) {
   }, [ats, country, data, search, status]);
 
   const initialized = Boolean(data?.meta.generatedAt);
+  const activeScanTarget = Math.min(data?.meta.run.scanLimit ?? 0, data?.meta.run.eligibleCompanies ?? 0);
+  const scanning = initialized && !data?.meta.run.completedAt;
 
   return <main className={styles.page}>
     <div className={styles.topbar}>
       <button className={styles.backButton} type="button" onClick={onBack}><ArrowLeft size={17}/>SDR Dashboard</button>
-      <div className={styles.scopePills}><span>🇸🇦 KSA</span><span>🇦🇪 UAE</span><span><RefreshCw size={12}/>Every {data?.meta.refreshCadenceHours ?? 6}h</span></div>
+      <div className={styles.scopePills}><span>🇸🇦 KSA</span><span>🇦🇪 UAE</span><span><RefreshCw size={12}/>Rolling ≤{data?.meta.refreshCadenceHours ?? 6}h</span></div>
     </div>
 
     <section className={styles.hero}>
@@ -217,7 +219,7 @@ export function HiringIntelligence({ onBack }: { onBack: () => void }) {
         <h1>Hiring Intelligence</h1>
         <p>Live hiring signals from public ATS feeds and company career pages, scored for SDR outreach priority.</p>
         <div className={styles.heroMeta}>
-          <span><Clock3 size={14}/>{initialized ? `Updated ${ageLabel(data?.meta.generatedAt ?? "")}` : "Waiting for first scan"}</span>
+          <span><Clock3 size={14}/>{scanning ? `Scanning now · ${data?.meta.run.scanned ?? 0}/${activeScanTarget}` : initialized ? `Updated ${ageLabel(data?.meta.generatedAt ?? "")}` : "Waiting for first scan"}</span>
           <span><ShieldCheck size={14}/>Public hiring data only</span>
           <span><Gauge size={14}/>{data?.summary.coverageRate ?? 0}% scan coverage</span>
         </div>
@@ -239,7 +241,7 @@ export function HiringIntelligence({ onBack }: { onBack: () => void }) {
       <div className={styles.panelHeader}>
         <div><h2>Companies to contact</h2><p>Highest-intent KSA and UAE accounts first. Open a company to see the actual job evidence.</p></div>
         <div className={styles.runMeta}>
-          {data?.meta.run.completedAt ? <><CheckCircle2 size={14}/><span>Last run: {data.meta.run.succeeded}/{data.meta.run.scanned} successful</span></> : <><Clock3 size={14}/><span>Initial scan pending</span></>}
+          {data?.meta.run.completedAt ? <><CheckCircle2 size={14}/><span>Last batch: {data.meta.run.succeeded}/{data.meta.run.scanned} successful</span></> : initialized ? <><RefreshCw size={14}/><span>Scanning now: {data?.meta.run.scanned ?? 0}/{activeScanTarget}</span></> : <><Clock3 size={14}/><span>Initial scan starting</span></>}
         </div>
       </div>
 
