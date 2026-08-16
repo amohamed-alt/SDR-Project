@@ -77,7 +77,7 @@ function runtimeConfigState() {
   return {
     ready: Object.values(checks).every(Boolean),
     checks,
-    authMode: process.env.DISABLE_AUTH === "false" ? "basic" : "open",
+    authMode: "open",
     demoMode: process.env.DEMO_MODE === "true",
   };
 }
