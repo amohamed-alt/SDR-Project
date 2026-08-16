@@ -7,7 +7,7 @@ const INTERNAL_POST_PATHS = new Set(["/api/hiring/refresh", "/api/career-intelli
 // were never provisioned. Only the SHA-256 digest is committed; the plaintext
 // fallback password is intentionally not stored in the repository.
 const FALLBACK_USERNAME = "abdullah";
-const FALLBACK_PASSWORD_SHA256 = "f64fae95abb6983c041133f9950950b4f69d74e64d8e0c361c73bea01eb43859";
+const FALLBACK_PASSWORD_SHA256 = "fa99d79ddb7dc55d21a7eac32d7fd8ebd27750656c96d5b32b3dc00f705efe5e";
 
 function unauthorized(message = "Authentication required") {
   return new NextResponse(message, {
