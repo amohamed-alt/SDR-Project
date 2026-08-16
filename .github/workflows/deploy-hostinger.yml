@@ -67,7 +67,10 @@ jobs:
         run: |
           set -euo pipefail
           READY=false
-          for ATTEMPT in $(seq 1 45); do
+          # A 25-company sample runs six companies concurrently and each unresolved
+          # company may use the 90-second engine timeout. Allow enough time for the
+          # full bounded batch plus service warm-up instead of reporting a false deploy failure.
+          for ATTEMPT in $(seq 1 100); do
             BODY=$(curl --silent --show-error \
               --connect-timeout 5 \
               --max-time 15 \
