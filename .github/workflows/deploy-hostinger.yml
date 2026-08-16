@@ -61,6 +61,7 @@ jobs:
           docker-compose-path: docker-compose.yml
           environment-variables: |
             SDR_BUILD_REF=${{ env.DEPLOY_SHA }}
+            SDR_ENV_FILE=/root/sdr-production.env
 
       - name: Verify deep Career Intelligence health
         run: |
