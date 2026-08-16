@@ -10,15 +10,14 @@ permissions:
   contents: read
   statuses: write
 
-concurrency:
-  group: hostinger-sdr-production
-  cancel-in-progress: true
-
 jobs:
   deploy:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    concurrency:
+      group: hostinger-sdr-production
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
