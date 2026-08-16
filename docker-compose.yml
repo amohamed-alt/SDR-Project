@@ -55,6 +55,12 @@ services:
     restart: unless-stopped
     init: true
     shm_size: "1gb"
+    mem_limit: "1800m"
+    cpus: 2.0
+    pids_limit: 512
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:unconfined
     environment:
       PORT: 3000
       CACHE_FILE: /data/cache.json
