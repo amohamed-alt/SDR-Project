@@ -63,13 +63,26 @@ jobs:
           environment-variables: |
             SDR_BUILD_REF=${{ env.DEPLOY_SHA }}
 
-      - name: Verify public health
+      - name: Verify deep Career Intelligence health
         run: |
-          curl --fail --silent --show-error \
-            --retry 45 \
-            --retry-delay 8 \
-            --retry-all-errors \
-            https://sdr.dashboardtalentera.tech/api/health
+          set -euo pipefail
+          READY=false
+          for ATTEMPT in $(seq 1 45); do
+            BODY=$(curl --silent --show-error \
+              --connect-timeout 5 \
+              --max-time 15 \
+              https://sdr.dashboardtalentera.tech/api/health?deep=1 || true)
+            echo "Deep health attempt ${ATTEMPT}: ${BODY}"
+            if printf '%s' "$BODY" | grep -q '"ready":true'; then
+              READY=true
+              break
+            fi
+            sleep 8
+          done
+          if [ "$READY" != "true" ]; then
+            echo "::error::Career Intelligence deep health never became ready."
+            exit 1
+          fi
 
       - name: Mark deployment successful
         if: success()
@@ -82,7 +95,7 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'success',
               context: 'hostinger/deploy',
-              description: 'SDR dashboard deployed successfully',
+              description: 'SDR dashboard and Career validation deployed successfully',
               target_url: process.env.DEPLOY_URL,
             });
 
