@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -10,9 +11,17 @@ const VALIDATION_STATE = process.env.CAREER_VALIDATION_STATE_PATH || `${DATA_DIR
 const CAREER_STORE = process.env.CAREER_INTELLIGENCE_STORE_PATH || `${DATA_DIR}/career-intelligence.json`;
 const GOOGLE_TOKEN_STORE = process.env.GOOGLE_TOKEN_STORE_PATH || `${DATA_DIR}/google-calendar.json`;
 
-async function fileExists(path: string) {
+function careerGeneration() {
+  const explicit = String(process.env.CAREER_GENERATION || "").trim();
+  if (explicit) return explicit;
+  const basename = path.basename(CAREER_STORE).toLowerCase();
+  const match = basename.match(/career-intelligence-(v\d+)\.json$/i);
+  return match?.[1]?.toLowerCase() || "v1";
+}
+
+async function fileExists(filePath: string) {
   try {
-    await fs.access(path);
+    await fs.access(filePath);
     return true;
   } catch {
     return false;
@@ -48,7 +57,7 @@ async function readValidationProgress() {
   }
 }
 
-async function careerEngineHealthy() {
+async function careerEngineState() {
   try {
     const configured = process.env.CAREER_ENGINE_URL || "http://gtm-career-browser:3000/career-detect";
     const url = new URL(configured);
@@ -58,11 +67,16 @@ async function careerEngineHealthy() {
       cache: "no-store",
       signal: AbortSignal.timeout(5_000),
     });
-    if (!response.ok) return false;
-    const payload = await response.json().catch(() => ({})) as { ok?: boolean; capabilities?: string[] };
-    return payload.ok === true && Array.isArray(payload.capabilities) && payload.capabilities.includes("career-detect");
+    if (!response.ok) return { healthy: false, version: "", capabilities: [] as string[] };
+    const payload = await response.json().catch(() => ({})) as { ok?: boolean; version?: string; capabilities?: string[] };
+    const capabilities = Array.isArray(payload.capabilities) ? payload.capabilities : [];
+    return {
+      healthy: payload.ok === true && capabilities.includes("career-detect"),
+      version: String(payload.version || ""),
+      capabilities,
+    };
   } catch {
-    return false;
+    return { healthy: false, version: "", capabilities: [] as string[] };
   }
 }
 
@@ -84,30 +98,36 @@ function runtimeConfigState() {
 
 export async function GET(request: NextRequest) {
   const timestamp = new Date().toISOString();
+  const buildRef = String(process.env.SDR_BUILD_REF || "unknown").trim() || "unknown";
+  const generation = careerGeneration();
   const deep = request.nextUrl.searchParams.get("deep") === "1";
 
   if (!deep) {
-    return NextResponse.json({ status: "ok", service: "sdr-project", timestamp });
+    return NextResponse.json({ status: "ok", service: "sdr-project", buildRef, careerGeneration: generation, timestamp });
   }
 
   const runtimeConfig = runtimeConfigState();
   const [careerEngine, careerValidationComplete, careerValidationState, careerValidationProgress, googleTokenStorePresent] = await Promise.all([
-    careerEngineHealthy(),
+    careerEngineState(),
     fileExists(VALIDATION_MARKER),
     readValidationState(),
     readValidationProgress(),
     fileExists(GOOGLE_TOKEN_STORE),
   ]);
-  const ready = runtimeConfig.ready && careerEngine && careerValidationComplete;
+  const ready = runtimeConfig.ready && careerEngine.healthy && careerValidationComplete;
 
   return NextResponse.json(
     {
       status: ready ? "ok" : "warming",
       service: "sdr-project",
+      buildRef,
+      careerGeneration: generation,
       ready,
       runtimeConfig,
       googleTokenStorePresent,
-      careerEngine,
+      careerEngine: careerEngine.healthy,
+      careerEngineVersion: careerEngine.version,
+      careerEngineCapabilities: careerEngine.capabilities,
       careerValidationComplete,
       careerValidationState,
       careerValidationProgress,
