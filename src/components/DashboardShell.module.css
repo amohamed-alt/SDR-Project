@@ -2,6 +2,7 @@
   min-height: 100vh;
 }
 
+.careerLauncher,
 .hiringLauncher,
 .maqsamLauncher {
   position: fixed;
@@ -22,6 +23,12 @@
   transition: transform 0.18s ease, filter 0.18s ease;
 }
 
+.careerLauncher {
+  bottom: 194px;
+  background: #116f67;
+  box-shadow: 0 14px 34px rgba(17, 111, 103, 0.28);
+}
+
 .hiringLauncher {
   bottom: 78px;
   background: #087a50;
@@ -34,11 +41,13 @@
   box-shadow: 0 14px 34px rgba(116, 75, 196, 0.28);
 }
 
+.careerLauncher span,
 .hiringLauncher span,
 .maqsamLauncher span {
   line-height: 1;
 }
 
+.careerLauncher small,
 .hiringLauncher small,
 .maqsamLauncher small {
   padding: 3px 6px;
@@ -51,6 +60,7 @@
   text-transform: uppercase;
 }
 
+.careerLauncher:hover,
 .hiringLauncher:hover,
 .maqsamLauncher:hover {
   transform: translateY(-2px);
@@ -58,9 +68,14 @@
 }
 
 @media (max-width: 720px) {
+  .careerLauncher,
   .hiringLauncher,
   .maqsamLauncher {
     right: 14px;
+  }
+
+  .careerLauncher {
+    bottom: 188px;
   }
 
   .hiringLauncher {

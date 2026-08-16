@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file:
-      - /root/SDR-Project/.env
+      - ${SDR_ENV_FILE:-/root/SDR-Project/.env}
     environment:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
@@ -16,6 +16,12 @@ services:
       HIRING_SNAPSHOT_PATH: /app/data/hiring-signals.json
       HIRING_SCAN_LIMIT: ${HIRING_SCAN_LIMIT:-160}
       HIRING_SCAN_CONCURRENCY: ${HIRING_SCAN_CONCURRENCY:-10}
+      CAREER_INTELLIGENCE_STORE_PATH: /app/data/career-intelligence.json
+      CAREER_ENGINE_URL: ${CAREER_ENGINE_URL:-http://gtm-career-browser:3000/career-detect}
+      CAREER_ENGINE_TIMEOUT_MS: ${CAREER_ENGINE_TIMEOUT_MS:-90000}
+      CAREER_SCAN_LIMIT: ${CAREER_SCAN_LIMIT:-25}
+      CAREER_SCAN_CONCURRENCY: ${CAREER_SCAN_CONCURRENCY:-6}
+      CAREER_PORTFOLIO_CACHE_MS: ${CAREER_PORTFOLIO_CACHE_MS:-60000}
     ports:
       - "127.0.0.1:3010:3000"
     volumes:
@@ -42,6 +48,43 @@ services:
       start_period: 30s
       retries: 5
 
+  gtm-career-browser:
+    build:
+      context: ./services/career-browser
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    shm_size: "1gb"
+    mem_limit: "1800m"
+    cpus: 2.0
+    pids_limit: 512
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:unconfined
+    environment:
+      PORT: 3000
+      CACHE_FILE: /data/cache.json
+      CACHE_TTL_DAYS: 30
+      MAX_STATIC_PAGES: 30
+      MAX_BROWSER_STEPS: 8
+      MAX_BROWSER_CONTEXTS: 2
+      REQUEST_TIMEOUT_MS: 10000
+      BROWSER_TIMEOUT_MS: 50000
+    volumes:
+      - career_browser_cache:/data
+    networks:
+      - traefik_proxy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/health').then(async r=>{const j=await r.json();if(!r.ok||!j.capabilities?.includes('career-detect'))process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 8s
+      start_period: 35s
+      retries: 5
+
   hiring-refresh:
     image: alpine:3.21
     restart: unless-stopped
@@ -59,6 +102,38 @@ services:
         done
     networks:
       - default
+
+  career-refresh:
+    image: alpine:3.21
+    restart: unless-stopped
+    env_file:
+      - ${SDR_ENV_FILE:-/root/SDR-Project/.env}
+    depends_on:
+      sdr-dashboard:
+        condition: service_healthy
+      gtm-career-browser:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -c
+      - |
+        if [ "$${CAREER_AUTO_SCAN_ENABLED:-false}" != "true" ]; then
+          echo "Career auto scan disabled; enable CAREER_AUTO_SCAN_ENABLED=true after validating the first production batch."
+          while true; do sleep 3600; done
+        fi
+        sleep 8
+        while true; do
+          wget -qO- --timeout=900 \
+            --header='Content-Type: application/json' \
+            --post-data="{\"limit\":$${CAREER_SCAN_LIMIT:-25}}" \
+            http://sdr-dashboard:3000/api/career-intelligence/run || true
+          sleep "$${CAREER_AUTO_SCAN_INTERVAL_SECONDS:-45}"
+        done
+    networks:
+      - default
+
+volumes:
+  career_browser_cache:
 
 networks:
   traefik_proxy:

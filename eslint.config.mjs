@@ -17,5 +17,7 @@ export default defineConfig([
       "react-hooks/set-state-in-effect": "off",
     },
   },
-  globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts"]),
+  // The Career browser is an isolated CommonJS Node service with its own syntax
+  // validation in CI; Next/TypeScript lint rules do not apply to that runtime.
+  globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts", "services/career-browser/**"]),
 ]);
