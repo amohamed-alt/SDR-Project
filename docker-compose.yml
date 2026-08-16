@@ -153,7 +153,7 @@ services:
 
   career-validation:
     image: alpine:3.21
-    restart: on-failure
+    restart: "no"
     depends_on:
       runtime-bootstrap:
         condition: service_completed_successfully
@@ -165,29 +165,50 @@ services:
       - /bin/sh
       - -c
       - |
-        set -e
+        set -eu
         MARKER=/data/career-validation-v1.done
         STATE=/data/career-validation-v1.state
+        MAX_ATTEMPTS=3
+        ATTEMPT=1
+
         if [ -f "$$MARKER" ]; then
           printf 'completed:%s\n' "$$(cat "$$MARKER" 2>/dev/null || true)" > "$$STATE"
           echo "Career validation batch v1 already completed."
           exit 0
         fi
-        printf 'started:%s\n' "$$(date -u +%FT%TZ)" > "$$STATE"
-        echo "Running one-time Career Intelligence validation batch (25 companies)..."
-        if wget -qO /tmp/career-validation.json --timeout=900 \
-          --header='Content-Type: application/json' \
-          --post-data='{"limit":25}' \
-          http://sdr-dashboard:3000/api/career-intelligence/run; then
-          date -u +%FT%TZ > "$$MARKER"
-          printf 'completed:%s\n' "$$(cat "$$MARKER")" > "$$STATE"
-          echo "Career validation batch v1 completed."
-        else
-          CODE=$$?
-          printf 'failed:%s:%s\n' "$$CODE" "$$(date -u +%FT%TZ)" > "$$STATE"
-          echo "Career validation batch failed with exit $$CODE; Docker will retry."
-          exit "$$CODE"
-        fi
+
+        while [ "$$ATTEMPT" -le "$$MAX_ATTEMPTS" ]; do
+          printf 'started:attempt-%s:%s\n' "$$ATTEMPT" "$$(date -u +%FT%TZ)" > "$$STATE"
+          echo "Running Career Intelligence validation batch (25 companies), attempt $$ATTEMPT/$$MAX_ATTEMPTS..."
+
+          if wget -qO /tmp/career-validation.json --timeout=900 \
+            --header='Content-Type: application/json' \
+            --post-data='{"limit":25}' \
+            http://sdr-dashboard:3000/api/career-intelligence/run; then
+            cat /tmp/career-validation.json
+            date -u +%FT%TZ > "$$MARKER"
+            printf 'completed:%s\n' "$$(cat "$$MARKER")" > "$$STATE"
+            echo "Career validation batch v1 completed."
+            exit 0
+          else
+            CODE=$$?
+            printf 'failed:attempt-%s:code-%s:%s\n' "$$ATTEMPT" "$$CODE" "$$(date -u +%FT%TZ)" > "$$STATE"
+
+            if [ "$$ATTEMPT" -ge "$$MAX_ATTEMPTS" ]; then
+              echo "Career validation stopped after $$MAX_ATTEMPTS failed attempts; manual review is required."
+              exit "$$CODE"
+            fi
+
+            if [ "$$ATTEMPT" -eq 1 ]; then
+              WAIT_SECONDS=30
+            else
+              WAIT_SECONDS=120
+            fi
+            echo "Validation attempt failed with exit $$CODE; waiting $$WAIT_SECONDS seconds before the next bounded retry."
+            sleep "$$WAIT_SECONDS"
+            ATTEMPT=$$((ATTEMPT + 1))
+          fi
+        done
     volumes:
       - sdr_app_data:/data
     networks:
@@ -216,6 +237,9 @@ services:
         CAREER_SCAN_LIMIT="$${CAREER_SCAN_LIMIT:-25}"
         CAREER_AUTO_SCAN_INTERVAL_SECONDS="$${CAREER_AUTO_SCAN_INTERVAL_SECONDS:-45}"
         CAREER_AUTO_SCAN_IDLE_SECONDS="$${CAREER_AUTO_SCAN_IDLE_SECONDS:-3600}"
+        CAREER_AUTO_SCAN_ERROR_INTERVAL_SECONDS="$${CAREER_AUTO_SCAN_ERROR_INTERVAL_SECONDS:-300}"
+        CAREER_AUTO_SCAN_MAX_ERROR_INTERVAL_SECONDS="$${CAREER_AUTO_SCAN_MAX_ERROR_INTERVAL_SECONDS:-1800}"
+        ERROR_SLEEP="$$CAREER_AUTO_SCAN_ERROR_INTERVAL_SECONDS"
 
         if [ "$$CAREER_AUTO_SCAN_ENABLED" != "true" ]; then
           echo "Career auto scan disabled by runtime configuration."
@@ -227,7 +251,22 @@ services:
           RESULT="$$(wget -qO- --timeout=900 \
             --header='Content-Type: application/json' \
             --post-data="{\"limit\":$${CAREER_SCAN_LIMIT}}" \
-            http://sdr-dashboard:3000/api/career-intelligence/run || true)"
+            http://sdr-dashboard:3000/api/career-intelligence/run 2>&1)"
+          CODE=$$?
+
+          if [ "$$CODE" -ne 0 ]; then
+            echo "Career scan request failed with exit $$CODE; backing off for $$ERROR_SLEEP seconds."
+            printf '%s\n' "$$RESULT"
+            sleep "$$ERROR_SLEEP"
+            NEXT_ERROR_SLEEP=$$((ERROR_SLEEP * 2))
+            if [ "$$NEXT_ERROR_SLEEP" -gt "$$CAREER_AUTO_SCAN_MAX_ERROR_INTERVAL_SECONDS" ]; then
+              NEXT_ERROR_SLEEP="$$CAREER_AUTO_SCAN_MAX_ERROR_INTERVAL_SECONDS"
+            fi
+            ERROR_SLEEP="$$NEXT_ERROR_SLEEP"
+            continue
+          fi
+
+          ERROR_SLEEP="$$CAREER_AUTO_SCAN_ERROR_INTERVAL_SECONDS"
           printf '%s\n' "$$RESULT"
           if printf '%s' "$$RESULT" | grep -q '"remainingEligible":0'; then
             echo "Career backfill complete; entering low-frequency idle mode."
