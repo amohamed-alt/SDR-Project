@@ -2,33 +2,47 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { PhoneCall } from "lucide-react";
+import { Flame, PhoneCall } from "lucide-react";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardMotion";
+import { HiringIntelligence } from "@/components/HiringIntelligence";
 import { MaqsamCallsDashboard } from "@/components/MaqsamCallsDashboard";
 import styles from "@/components/DashboardShell.module.css";
 
+type ShellView = "core" | "maqsam" | "hiring";
+
+function viewFromUrl(): ShellView {
+  const view = new URLSearchParams(window.location.search).get("view");
+  if (view === "maqsam") return "maqsam";
+  if (view === "hiring") return "hiring";
+  return "core";
+}
+
 export function Dashboard() {
-  const [showMaqsam, setShowMaqsam] = useState(false);
+  const [view, setView] = useState<ShellView>("core");
 
   useEffect(() => {
-    const syncFromUrl = () => setShowMaqsam(new URLSearchParams(window.location.search).get("view") === "maqsam");
+    const syncFromUrl = () => setView(viewFromUrl());
     syncFromUrl();
     window.addEventListener("popstate", syncFromUrl);
     return () => window.removeEventListener("popstate", syncFromUrl);
   }, []);
 
-  function changeView(next: "core" | "maqsam") {
+  function changeView(next: ShellView) {
     const url = new URL(window.location.href);
-    if (next === "maqsam") url.searchParams.set("view", "maqsam");
-    else url.searchParams.delete("view");
+    if (next === "core") url.searchParams.delete("view");
+    else url.searchParams.set("view", next);
     window.history.pushState({}, "", url);
-    setShowMaqsam(next === "maqsam");
+    setView(next);
   }
 
-  if (showMaqsam) return <MaqsamCallsDashboard onBack={() => changeView("core")}/>;
+  if (view === "maqsam") return <MaqsamCallsDashboard onBack={() => changeView("core")}/>;
+  if (view === "hiring") return <HiringIntelligence onBack={() => changeView("core")}/>;
 
   return <div className={styles.shell}>
     <ExistingDashboard/>
+    <button className={styles.hiringLauncher} type="button" onClick={() => changeView("hiring")}>
+      <Flame size={17}/><span>Hiring Signals</span><small>KSA + UAE</small>
+    </button>
     <Link className={styles.maqsamLauncher} href="/marita-calls">
       <PhoneCall size={17}/><span>Marita Calls</span><small>Maqsam</small>
     </Link>

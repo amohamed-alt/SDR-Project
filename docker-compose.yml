@@ -13,6 +13,9 @@ services:
       HOSTNAME: 0.0.0.0
       ACQUISITION_SNAPSHOT_PATH: /app/data/acquisition-dashboard.json
       GOOGLE_TOKEN_STORE_PATH: /app/data/google-calendar.json
+      HIRING_SNAPSHOT_PATH: /app/data/hiring-signals.json
+      HIRING_SCAN_LIMIT: ${HIRING_SCAN_LIMIT:-400}
+      HIRING_SCAN_CONCURRENCY: ${HIRING_SCAN_CONCURRENCY:-8}
     ports:
       - "127.0.0.1:3010:3000"
     volumes:
@@ -38,6 +41,24 @@ services:
       timeout: 8s
       start_period: 30s
       retries: 5
+
+  hiring-refresh:
+    image: alpine:3.21
+    restart: unless-stopped
+    depends_on:
+      sdr-dashboard:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -c
+      - |
+        sleep 20
+        while true; do
+          wget -qO- --timeout=300 --post-data='' http://sdr-dashboard:3000/api/hiring/refresh || true
+          sleep 21600
+        done
+    networks:
+      - default
 
 networks:
   traefik_proxy:
