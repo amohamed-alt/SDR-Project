@@ -55,6 +55,8 @@ services:
     environment:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
+      SDR_BUILD_REF: ${SDR_BUILD_REF:-unknown}
+      CAREER_GENERATION: v2
       SDR_RUNTIME_ENV_FILE: /run/sdr-env/.env
       ACQUISITION_SNAPSHOT_PATH: /app/data/acquisition-dashboard.json
       GOOGLE_TOKEN_STORE_PATH: /app/data/google-calendar.json
