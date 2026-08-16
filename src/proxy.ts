@@ -3,11 +3,11 @@ import { NextRequest, NextResponse } from "next/server";
 const PUBLIC_PATHS = new Set(["/api/health", "/api/google/callback"]);
 const INTERNAL_POST_PATHS = new Set(["/api/hiring/refresh", "/api/career-intelligence/run"]);
 
-// Emergency production fallback for environments where the documented Basic Auth
-// variables were never provisioned. Only the SHA-256 digest is committed; the
-// corresponding high-entropy password is not stored in the repository.
+// Production fallback for environments where DASHBOARD_USERNAME / DASHBOARD_PASSWORD
+// were never provisioned. Only the SHA-256 digest is committed; the plaintext
+// fallback password is intentionally not stored in the repository.
 const FALLBACK_USERNAME = "abdullah";
-const FALLBACK_PASSWORD_SHA256 = "0b6aa9ed6c71f6f72140df72b4c1a4a20b738ce68b19f2d6eb33de6e3c035148";
+const FALLBACK_PASSWORD_SHA256 = "f64fae95abb6983c041133f9950950b4f69d74e64d8e0c361c73bea01eb43859";
 
 function unauthorized(message = "Authentication required") {
   return new NextResponse(message, {
