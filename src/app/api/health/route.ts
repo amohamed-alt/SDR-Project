@@ -4,7 +4,10 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VALIDATION_MARKER = process.env.CAREER_VALIDATION_MARKER_PATH || "/app/data/career-validation-v1.done";
+const DATA_DIR = process.env.CAREER_DATA_DIR || "/app/data";
+const VALIDATION_MARKER = process.env.CAREER_VALIDATION_MARKER_PATH || `${DATA_DIR}/career-validation-v1.done`;
+const VALIDATION_STATE = process.env.CAREER_VALIDATION_STATE_PATH || `${DATA_DIR}/career-validation-v1.state`;
+const CAREER_STORE = process.env.CAREER_INTELLIGENCE_STORE_PATH || `${DATA_DIR}/career-intelligence.json`;
 
 async function markerExists() {
   try {
@@ -12,6 +15,35 @@ async function markerExists() {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function readValidationState() {
+  try {
+    return (await fs.readFile(VALIDATION_STATE, "utf8")).trim().slice(0, 120);
+  } catch {
+    return "not_started";
+  }
+}
+
+async function readValidationProgress() {
+  try {
+    const parsed = JSON.parse(await fs.readFile(CAREER_STORE, "utf8")) as {
+      records?: Record<string, { status?: string; lastCheckedAt?: string }>;
+    };
+    const records = Object.values(parsed.records || {});
+    const checked = records.filter((record) => Boolean(record.lastCheckedAt)).length;
+    const processing = records.filter((record) => record.status === "processing").length;
+    const terminal = records.filter((record) => [
+      "found_verified",
+      "no_public_career_page",
+      "website_domain_invalid",
+      "insufficient_company_data",
+      "needs_manual_review",
+    ].includes(String(record.status || ""))).length;
+    return { stored: records.length, checked, processing, terminal };
+  } catch {
+    return { stored: 0, checked: 0, processing: 0, terminal: 0 };
   }
 }
 
@@ -41,9 +73,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ status: "ok", service: "sdr-project", timestamp });
   }
 
-  const [careerEngine, careerValidationComplete] = await Promise.all([
+  const [careerEngine, careerValidationComplete, careerValidationState, careerValidationProgress] = await Promise.all([
     careerEngineHealthy(),
     markerExists(),
+    readValidationState(),
+    readValidationProgress(),
   ]);
   const ready = careerEngine && careerValidationComplete;
 
@@ -54,6 +88,8 @@ export async function GET(request: NextRequest) {
       ready,
       careerEngine,
       careerValidationComplete,
+      careerValidationState,
+      careerValidationProgress,
       timestamp,
     },
     {
