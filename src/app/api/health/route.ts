@@ -8,10 +8,11 @@ const DATA_DIR = process.env.CAREER_DATA_DIR || "/app/data";
 const VALIDATION_MARKER = process.env.CAREER_VALIDATION_MARKER_PATH || `${DATA_DIR}/career-validation-v1.done`;
 const VALIDATION_STATE = process.env.CAREER_VALIDATION_STATE_PATH || `${DATA_DIR}/career-validation-v1.state`;
 const CAREER_STORE = process.env.CAREER_INTELLIGENCE_STORE_PATH || `${DATA_DIR}/career-intelligence.json`;
+const GOOGLE_TOKEN_STORE = process.env.GOOGLE_TOKEN_STORE_PATH || `${DATA_DIR}/google-calendar.json`;
 
-async function markerExists() {
+async function fileExists(path: string) {
   try {
-    await fs.access(VALIDATION_MARKER);
+    await fs.access(path);
     return true;
   } catch {
     return false;
@@ -65,6 +66,22 @@ async function careerEngineHealthy() {
   }
 }
 
+function runtimeConfigState() {
+  const checks = {
+    hubspot: Boolean(process.env.HUBSPOT_PRIVATE_APP_TOKEN),
+    googleClientId: Boolean(process.env.GOOGLE_CLIENT_ID),
+    googleClientSecret: Boolean(process.env.GOOGLE_CLIENT_SECRET),
+    googleEncryptionKey: Boolean(process.env.GOOGLE_TOKEN_ENCRYPTION_KEY),
+    googleRedirectUri: Boolean(process.env.GOOGLE_REDIRECT_URI),
+  };
+  return {
+    ready: Object.values(checks).every(Boolean),
+    checks,
+    authMode: process.env.DISABLE_AUTH === "false" ? "basic" : "open",
+    demoMode: process.env.DEMO_MODE === "true",
+  };
+}
+
 export async function GET(request: NextRequest) {
   const timestamp = new Date().toISOString();
   const deep = request.nextUrl.searchParams.get("deep") === "1";
@@ -73,19 +90,23 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ status: "ok", service: "sdr-project", timestamp });
   }
 
-  const [careerEngine, careerValidationComplete, careerValidationState, careerValidationProgress] = await Promise.all([
+  const runtimeConfig = runtimeConfigState();
+  const [careerEngine, careerValidationComplete, careerValidationState, careerValidationProgress, googleTokenStorePresent] = await Promise.all([
     careerEngineHealthy(),
-    markerExists(),
+    fileExists(VALIDATION_MARKER),
     readValidationState(),
     readValidationProgress(),
+    fileExists(GOOGLE_TOKEN_STORE),
   ]);
-  const ready = careerEngine && careerValidationComplete;
+  const ready = runtimeConfig.ready && careerEngine && careerValidationComplete;
 
   return NextResponse.json(
     {
       status: ready ? "ok" : "warming",
       service: "sdr-project",
       ready,
+      runtimeConfig,
+      googleTokenStorePresent,
       careerEngine,
       careerValidationComplete,
       careerValidationState,
