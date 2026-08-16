@@ -2,10 +2,10 @@
   min-height: 100vh;
 }
 
+.hiringLauncher,
 .maqsamLauncher {
   position: fixed;
   right: 24px;
-  bottom: 136px;
   z-index: 122;
   min-height: 48px;
   display: inline-flex;
@@ -14,20 +14,32 @@
   padding: 0 17px;
   border: 1px solid rgba(255, 255, 255, 0.28);
   border-radius: 999px;
-  background: #744bc4;
   color: #fff;
-  box-shadow: 0 14px 34px rgba(116, 75, 196, 0.28);
   font-size: 11px;
   font-weight: 800;
   text-decoration: none;
   cursor: pointer;
-  transition: transform 0.18s ease, background 0.18s ease;
+  transition: transform 0.18s ease, filter 0.18s ease;
 }
 
+.hiringLauncher {
+  bottom: 78px;
+  background: #087a50;
+  box-shadow: 0 14px 34px rgba(8, 122, 80, 0.28);
+}
+
+.maqsamLauncher {
+  bottom: 136px;
+  background: #744bc4;
+  box-shadow: 0 14px 34px rgba(116, 75, 196, 0.28);
+}
+
+.hiringLauncher span,
 .maqsamLauncher span {
   line-height: 1;
 }
 
+.hiringLauncher small,
 .maqsamLauncher small {
   padding: 3px 6px;
   border-radius: 999px;
@@ -39,14 +51,23 @@
   text-transform: uppercase;
 }
 
+.hiringLauncher:hover,
 .maqsamLauncher:hover {
   transform: translateY(-2px);
-  background: #6339b3;
+  filter: brightness(0.94);
 }
 
 @media (max-width: 720px) {
+  .hiringLauncher,
   .maqsamLauncher {
     right: 14px;
+  }
+
+  .hiringLauncher {
+    bottom: 72px;
+  }
+
+  .maqsamLauncher {
     bottom: 130px;
   }
 }
