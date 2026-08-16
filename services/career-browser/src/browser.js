@@ -2,10 +2,11 @@
 
 const { chromium } = require('playwright');
 const { USER_AGENT, clean, unique, rootUrl, assertPublic, fingerprint, isJobDetailUrl, isJobListingUrl, evidenceRank, careerUrlScore, detected, scoreCareer, scoreJob } = require('./common');
-const { pageLooksLikeBrandCareer } = require('./external-careers');
+const { pageLooksLikeBrandCareer, hasMeaningfulCareerContent } = require('./external-careers');
 const { candidatesFromTakafoJson } = require('./takafo');
 
 const BROWSER_TIMEOUT_MS = Number(process.env.BROWSER_TIMEOUT_MS || 50000);
+const RENDER_SETTLE_MS = Math.max(1000, Math.min(10000, Number(process.env.RENDER_SETTLE_MS || 6000)));
 const MAX_BROWSER_CONTEXTS = Math.max(1, Math.min(6, Number(process.env.MAX_BROWSER_CONTEXTS || 2)));
 let sharedBrowserPromise = null;
 let activeBrowserContexts = 0;
@@ -32,6 +33,9 @@ function releaseBrowserContextSlot() { activeBrowserContexts = Math.max(0, activ
 async function renderedLinks(page) {
   return page.evaluate(() => [...document.querySelectorAll('a[href],iframe[src],form[action]')].map(e => ({ href: e.href || e.src || e.action || '', text: String(e.innerText || e.textContent || e.getAttribute('aria-label') || e.getAttribute('title') || '').replace(/\s+/g, ' ').trim().slice(0,400) })).filter(x => /^https?:\/\//i.test(x.href)));
 }
+async function renderedVisibleText(page) {
+  return page.evaluate(() => String(document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0,80000));
+}
 async function renderedFingerprintText(page) {
   return page.evaluate(() => {
     const title = document.title || ''; const generator = document.querySelector('meta[name="generator"]')?.getAttribute('content') || ''; const body = (document.body?.innerText || '').slice(0,80000);
@@ -39,13 +43,25 @@ async function renderedFingerprintText(page) {
     return `${location.href}\n${title}\n${generator}\n${body}\n${assets}`.slice(0,14000);
   });
 }
+async function settleRenderedPage(page) {
+  await page.waitForLoadState('networkidle', { timeout: Math.min(4500, BROWSER_TIMEOUT_MS) }).catch(() => {});
+  const started = Date.now();
+  let text = await renderedVisibleText(page).catch(() => '');
+  while (Date.now() - started < RENDER_SETTLE_MS) {
+    const compact = text.replace(/[^\p{L}\p{N}]/gu, '').length;
+    if (hasMeaningfulCareerContent(text) || compact >= 120) break;
+    await page.waitForTimeout(500);
+    text = await renderedVisibleText(page).catch(() => text);
+  }
+  return text;
+}
 async function clickCareerButton(page) {
   const loc = page.locator('button,[role="button"]').filter({ hasText: /career|jobs?|vacanc|opportunit|talent|recruit|hiring|apply|join us|work with us|current openings|view jobs|search jobs|وظائف|التوظيف|انضم إلينا|انضم الينا|فرص عمل|فرص وظيفية|اعمل معنا/i }).first();
   if (!await loc.count()) return null;
   const before = page.url(); const popupWait = page.context().waitForEvent('page', { timeout: 3000 }).catch(() => null);
   await loc.click({ timeout: 5000 }); const popup = await popupWait;
-  if (popup) { await popup.waitForLoadState('domcontentloaded', { timeout: BROWSER_TIMEOUT_MS }).catch(() => {}); return popup; }
-  await page.waitForTimeout(1200); return page.url() !== before ? page : null;
+  if (popup) { await popup.waitForLoadState('domcontentloaded', { timeout: BROWSER_TIMEOUT_MS }).catch(() => {}); await settleRenderedPage(popup).catch(() => {}); return popup; }
+  await settleRenderedPage(page).catch(() => {}); return page.url() !== before ? page : null;
 }
 function preferCareer(current, candidate, official) { if (!candidate) return current; if (!current) return candidate; return careerUrlScore(candidate, official) > careerUrlScore(current, official) ? candidate : current; }
 
@@ -76,8 +92,12 @@ async function browserDetect(request, result) {
       catch { return route.abort('blockedbyclient'); }
     });
     const visit = async (page, url, stage) => {
-      await assertPublic(url); const r = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: BROWSER_TIMEOUT_MS }); await page.waitForTimeout(1800);
-      current.pages_checked += 1; current.browser_pages_checked += 1; current.trace.push({ stage, requested_url: url, final_url: page.url(), status: r?.status() || null });
+      await assertPublic(url); const r = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: BROWSER_TIMEOUT_MS });
+      const visible = await settleRenderedPage(page).catch(() => '');
+      const compactLength = visible.replace(/[^\p{L}\p{N}]/gu, '').length;
+      current.pages_checked += 1; current.browser_pages_checked += 1;
+      current.trace.push({ stage, requested_url: url, final_url: page.url(), status: r?.status() || null, visible_chars: compactLength });
+      if (compactLength < 20) current.trace.push({ stage: `${stage}_blank_render`, final_url: page.url(), visible_chars: compactLength });
       return { final_url: page.url(), status: r?.status() || 0 };
     };
     const recordMatch = (match, evidence, method, reason, careerCandidate = '', quality = '') => {
@@ -90,8 +110,13 @@ async function browserDetect(request, result) {
     const record = (url, method, reason, careerCandidate = '') => recordMatch(fingerprint(url), url, method, reason, careerCandidate);
     const inspectPage = async (page, stage, careerCandidate = '') => {
       const final = page.url(); if (record(final, `${stage}_redirect`, `Browser navigation reached ${new URL(final).hostname}.`, careerCandidate)) return { done: true, links: [] };
-      const markerText = await renderedFingerprintText(page).catch(() => '');
+      const [markerText, visibleText] = await Promise.all([
+        renderedFingerprintText(page).catch(() => ''),
+        renderedVisibleText(page).catch(() => ''),
+      ]);
       if (pageLooksLikeBrandCareer(markerText, final, request)) {
+        current.career_evidence_text = clean(visibleText, 6000);
+        current.career_visible_text_length = visibleText.length;
         current.career_url = preferCareer(current.career_url, final, request.official_website); current.ats_evidence_reason ||= `Rendered employer-branded career destination verified at ${final}.`;
         if (request.stop_on_career) { current.detection_method = fingerprint(markerText) ? `${stage}_career_ats_verified` : `${stage}_career_verified`; return { done: true, links: [] }; }
       }
