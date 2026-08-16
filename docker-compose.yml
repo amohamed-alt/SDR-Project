@@ -4,6 +4,8 @@ services:
   runtime-bootstrap:
     image: alpine:3.21
     restart: "no"
+    security_opt:
+      - no-new-privileges:true
     command:
       - /bin/sh
       - -c
@@ -13,24 +15,56 @@ services:
         ENV_TARGET=/runtime-env/.env
         DATA_MARKER=/runtime-data/.sdr-runtime-data-v1
 
-        if [ ! -s "$$ENV_TARGET" ]; then
-          if [ ! -s /legacy/.env ]; then
-            echo "FATAL: /root/SDR-Project/.env is missing; cannot bootstrap persistent runtime env." >&2
+        env_has_required_keys() {
+          FILE="$$1"
+          [ -s "$$FILE" ] || return 1
+          for KEY in \
+            HUBSPOT_PRIVATE_APP_TOKEN \
+            GOOGLE_CLIENT_ID \
+            GOOGLE_CLIENT_SECRET \
+            GOOGLE_TOKEN_ENCRYPTION_KEY \
+            GOOGLE_REDIRECT_URI; do
+            VALUE="$$(grep "^$${KEY}=" "$$FILE" 2>/dev/null | tail -n1 | cut -d= -f2- | sed "s/^['\"]//;s/['\"]$$//" || true)"
+            [ -n "$$VALUE" ] || return 1
+          done
+          return 0
+        }
+
+        find_valid_env_source() {
+          if env_has_required_keys /host-root/SDR-Project/.env; then
+            printf '%s\n' /host-root/SDR-Project/.env
+            return 0
+          fi
+
+          for CANDIDATE in $$(ls -1t /host-root/sdr-env-before-keys-* 2>/dev/null || true); do
+            if env_has_required_keys "$$CANDIDATE"; then
+              printf '%s\n' "$$CANDIDATE"
+              return 0
+            fi
+          done
+          return 1
+        }
+
+        if ! env_has_required_keys "$$ENV_TARGET"; then
+          SOURCE="$$(find_valid_env_source || true)"
+          if [ -z "$$SOURCE" ]; then
+            echo "FATAL: no preserved VPS env contains the required HubSpot + Google runtime keys." >&2
             exit 78
           fi
+
           umask 077
-          cp /legacy/.env "$$ENV_TARGET.tmp"
+          cp "$$SOURCE" "$$ENV_TARGET.tmp"
           chown 1001:1001 "$$ENV_TARGET.tmp"
           chmod 0400 "$$ENV_TARGET.tmp"
           mv "$$ENV_TARGET.tmp" "$$ENV_TARGET"
-          echo "Persistent SDR runtime env initialized."
+          echo "Persistent SDR runtime env initialized/repaired from a preserved VPS env backup."
         else
-          echo "Persistent SDR runtime env already initialized; preserving existing secrets."
+          echo "Persistent SDR runtime env is valid; preserving existing secrets."
         fi
 
         if [ ! -e "$$DATA_MARKER" ]; then
-          if [ -d /legacy/data ]; then
-            cp -a /legacy/data/. /runtime-data/ 2>/dev/null || true
+          if [ -d /host-root/SDR-Project/data ]; then
+            cp -a /host-root/SDR-Project/data/. /runtime-data/ 2>/dev/null || true
           fi
           chown -R 1001:1001 /runtime-data
           touch "$$DATA_MARKER"
@@ -40,7 +74,7 @@ services:
           echo "Persistent SDR data volume already initialized."
         fi
     volumes:
-      - /root/SDR-Project:/legacy:ro
+      - /root:/host-root:ro
       - sdr_runtime_env:/runtime-env
       - sdr_app_data:/runtime-data
 
@@ -56,6 +90,7 @@ services:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
       SDR_RUNTIME_ENV_FILE: /run/sdr-env/.env
+      SDR_RUNTIME_ENV_SCHEMA: "2"
       ACQUISITION_SNAPSHOT_PATH: /app/data/acquisition-dashboard.json
       GOOGLE_TOKEN_STORE_PATH: /app/data/google-calendar.json
       HIRING_SNAPSHOT_PATH: /app/data/hiring-signals.json
@@ -205,6 +240,8 @@ services:
         condition: service_healthy
       career-validation:
         condition: service_completed_successfully
+    environment:
+      SDR_RUNTIME_ENV_SCHEMA: "2"
     command:
       - /bin/sh
       - -c
