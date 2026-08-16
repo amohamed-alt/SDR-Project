@@ -1,12 +1,12 @@
 {
   "name": "sdr-career-browser-service",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "private": true,
   "description": "Career-first discovery runtime synced from amohamed-alt/n8n career engine.",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/common.js && node --check src/static.js && node --check src/browser.js && node --check src/takafo.js && node --check src/external-careers.js && node --check src/patterns.js"
+    "check": "node --check src/server.js && node --check src/common.js && node --check src/static.js && node --check src/browser.js && node --check src/takafo.js && node --check src/external-careers.js && node --check src/patterns.js && node --test src/*.test.js"
   },
   "engines": { "node": ">=22" },
   "dependencies": {
