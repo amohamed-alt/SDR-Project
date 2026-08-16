@@ -88,6 +88,8 @@ services:
   hiring-refresh:
     image: alpine:3.21
     restart: unless-stopped
+    env_file:
+      - ${SDR_ENV_FILE:-/root/SDR-Project/.env}
     depends_on:
       sdr-dashboard:
         condition: service_healthy
@@ -95,11 +97,50 @@ services:
       - /bin/sh
       - -c
       - |
+        AUTH="$$(printf '%s:%s' "$${DASHBOARD_USERNAME:-}" "$${DASHBOARD_PASSWORD:-}" | base64 | tr -d '\n')"
         sleep 5
         while true; do
-          wget -qO- --timeout=300 --post-data='' http://sdr-dashboard:3000/api/hiring/refresh || true
+          wget -qO- --timeout=300 \
+            --header="Authorization: Basic $$AUTH" \
+            --post-data='' \
+            http://sdr-dashboard:3000/api/hiring/refresh || true
           sleep 900
         done
+    networks:
+      - default
+
+  career-validation:
+    image: alpine:3.21
+    restart: "no"
+    env_file:
+      - ${SDR_ENV_FILE:-/root/SDR-Project/.env}
+    depends_on:
+      sdr-dashboard:
+        condition: service_healthy
+      gtm-career-browser:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        MARKER=/data/career-validation-v1.done
+        if [ -f "$$MARKER" ]; then
+          echo "Career validation batch v1 already completed."
+          exit 0
+        fi
+        AUTH="$$(printf '%s:%s' "$${DASHBOARD_USERNAME:-}" "$${DASHBOARD_PASSWORD:-}" | base64 | tr -d '\n')"
+        echo "Running one-time Career Intelligence validation batch (25 companies)..."
+        wget -qO /tmp/career-validation.json --timeout=900 \
+          --header='Content-Type: application/json' \
+          --header="Authorization: Basic $$AUTH" \
+          --post-data='{"limit":25}' \
+          http://sdr-dashboard:3000/api/career-intelligence/run
+        cat /tmp/career-validation.json
+        date -u +%FT%TZ > "$$MARKER"
+        echo "Career validation batch v1 completed."
+    volumes:
+      - /root/SDR-Project/data:/data
     networks:
       - default
 
@@ -113,18 +154,22 @@ services:
         condition: service_healthy
       gtm-career-browser:
         condition: service_healthy
+      career-validation:
+        condition: service_completed_successfully
     command:
       - /bin/sh
       - -c
       - |
         if [ "$${CAREER_AUTO_SCAN_ENABLED:-false}" != "true" ]; then
-          echo "Career auto scan disabled; enable CAREER_AUTO_SCAN_ENABLED=true after validating the first production batch."
+          echo "Career auto scan disabled; first validation batch is stored for dashboard review."
           while true; do sleep 3600; done
         fi
+        AUTH="$$(printf '%s:%s' "$${DASHBOARD_USERNAME:-}" "$${DASHBOARD_PASSWORD:-}" | base64 | tr -d '\n')"
         sleep 8
         while true; do
           wget -qO- --timeout=900 \
             --header='Content-Type: application/json' \
+            --header="Authorization: Basic $$AUTH" \
             --post-data="{\"limit\":$${CAREER_SCAN_LIMIT:-25}}" \
             http://sdr-dashboard:3000/api/career-intelligence/run || true
           sleep "$${CAREER_AUTO_SCAN_INTERVAL_SECONDS:-45}"
