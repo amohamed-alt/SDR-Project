@@ -170,7 +170,6 @@ export function CareerIntelligence({ onBack }: { onBack: () => void }) {
   }, [page, search, status]);
 
   useEffect(() => {
-    setLoading(true);
     const timer = window.setTimeout(() => void load(), 180);
     return () => window.clearTimeout(timer);
   }, [load]);
@@ -180,14 +179,6 @@ export function CareerIntelligence({ onBack }: { onBack: () => void }) {
     const interval = window.setInterval(() => void load(), 30_000);
     return () => window.clearInterval(interval);
   }, [load, running]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [search, status]);
-
-  useEffect(() => {
-    setManualUrl(selected?.careerPageUrl || selected?.evidenceUrl || "");
-  }, [selected]);
 
   const summary = data?.summary;
   const efficiency = useMemo(() => {
@@ -247,7 +238,10 @@ export function CareerIntelligence({ onBack }: { onBack: () => void }) {
     setError("");
     try {
       const result = await runWave(1, [company.companyId], true);
-      if (result.processed[0]) setSelected(result.processed[0]);
+      if (result.processed[0]) {
+        setSelected(result.processed[0]);
+        setManualUrl(result.processed[0].careerPageUrl || result.processed[0].evidenceUrl || "");
+      }
       await load(true);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Recheck failed");
@@ -266,11 +260,18 @@ export function CareerIntelligence({ onBack }: { onBack: () => void }) {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Action failed");
-      setSelected(payload.company as CareerCompany);
+      const nextCompany = payload.company as CareerCompany;
+      setSelected(nextCompany);
+      setManualUrl(nextCompany.careerPageUrl || nextCompany.evidenceUrl || "");
       await load(true);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Action failed");
     }
+  }
+
+  function openCompany(company: CareerCompany) {
+    setSelected(company);
+    setManualUrl(company.careerPageUrl || company.evidenceUrl || "");
   }
 
   return <main className={styles.page}>
@@ -322,8 +323,8 @@ export function CareerIntelligence({ onBack }: { onBack: () => void }) {
 
     <section className={styles.workspace}>
       <div className={styles.toolbar}>
-        <label className={styles.searchBox}><Search size={16}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search company, domain, ATS or reason…"/></label>
-        <select value={status} onChange={(event) => setStatus(event.target.value as "" | CareerStatus)}>
+        <label className={styles.searchBox}><Search size={16}/><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search company, domain, ATS or reason…"/></label>
+        <select value={status} onChange={(event) => { setStatus(event.target.value as "" | CareerStatus); setPage(1); }}>
           {STATUS_OPTIONS.map((option) => <option key={option.value || "all"} value={option.value}>{option.label}</option>)}
         </select>
         <button className={styles.refreshButton} type="button" onClick={() => void load(true)} disabled={loading}><RefreshCw size={15} className={loading ? styles.spin : ""}/>Refresh</button>
@@ -333,7 +334,7 @@ export function CareerIntelligence({ onBack }: { onBack: () => void }) {
         <table>
           <thead><tr><th>Company</th><th>Career Page</th><th>ATS</th><th>Status</th><th>Confidence</th><th>Method</th><th>Checked</th><th/></tr></thead>
           <tbody>
-            {data?.companies.map((company) => <tr key={company.companyId} onClick={() => setSelected(company)}>
+            {data?.companies.map((company) => <tr key={company.companyId} onClick={() => openCompany(company)}>
               <td><strong>{company.companyName}</strong><small>{company.domain || "No domain"}</small></td>
               <td>{company.careerPageUrl ? <a href={company.careerPageUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>{company.careerPageUrl.replace(/^https?:\/\//, "").slice(0, 38)}<ExternalLink size={11}/></a> : <span className={styles.muted}>—</span>}</td>
               <td>{company.detectedAts || <span className={styles.muted}>Not detected</span>}</td>
