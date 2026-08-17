@@ -55,13 +55,23 @@ function secureEqual(left: string, right: string) {
 }
 
 function isAuthorized(request: NextRequest) {
-  const expected = process.env.MAQSAM_INGEST_SECRET?.trim();
-  if (!expected) return false;
+  const expectedSecrets = [
+    process.env.MAQSAM_INGEST_SECRET?.trim(),
+    process.env.HUBSPOT_PRIVATE_APP_TOKEN?.trim(),
+  ].filter((value): value is string => Boolean(value));
+
+  if (expectedSecrets.length === 0) return false;
+
   const direct = request.headers.get("x-maqsam-ingest-secret")?.trim();
   const authorization = request.headers.get("authorization")?.trim();
-  const bearer = authorization?.toLowerCase().startsWith("bearer ") ? authorization.slice(7).trim() : "";
+  const bearer = authorization?.toLowerCase().startsWith("bearer ")
+    ? authorization.slice(7).trim()
+    : "";
   const supplied = direct || bearer;
-  return Boolean(supplied && secureEqual(supplied, expected));
+
+  return Boolean(
+    supplied && expectedSecrets.some((expected) => secureEqual(supplied, expected)),
+  );
 }
 
 function dateOnly(value: string | undefined) {
