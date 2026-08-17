@@ -53,15 +53,15 @@ jobs:
             exit 1
           }
 
-      - name: Report GTM premium AI configuration
+      - name: Validate GTM premium AI configuration
         env:
           GTM_OPENROUTER_KEY: ${{ secrets.GTM_RESEARCH_OPENROUTER_API_KEY || secrets.OPENROUTER_API_KEY }}
         run: |
-          if [ -n "$GTM_OPENROUTER_KEY" ]; then
-            echo "GTM OpenRouter deployment secret: configured"
-          else
-            echo "::warning::GTM OpenRouter deployment secret: NOT configured. TAM, ICP and Personas cannot use GPT until GTM_RESEARCH_OPENROUTER_API_KEY or OPENROUTER_API_KEY is added as a repository secret."
-          fi
+          test -n "$GTM_OPENROUTER_KEY" || {
+            echo "::error::GTM_RESEARCH_OPENROUTER_API_KEY (or OPENROUTER_API_KEY) must be configured for TAM, ICP and Personas."
+            exit 1
+          }
+          echo "GTM OpenRouter deployment secret: configured"
 
       - name: Deploy Docker Compose
         uses: hostinger/deploy-on-vps@v2
@@ -79,9 +79,6 @@ jobs:
         run: |
           set -euo pipefail
           READY=false
-          # Hostinger's deploy action acknowledges the platform job before the new
-          # containers are necessarily live. Never accept health from the previous
-          # deployment: wait for the exact commit SHA and V2 engine generation.
           for ATTEMPT in $(seq 1 120); do
             BODY=$(curl --silent --show-error \
               --connect-timeout 5 \
@@ -132,8 +129,10 @@ jobs:
           if [ "$GTM_PAGE_CODE" != "200" ] \
             || [ "$GTM_STATUS" != "ok" ] \
             || [ "$GTM_AI_READY" != "true" ] \
+            || [ "$GTM_OPENROUTER" != "true" ] \
+            || [ "$GTM_PREMIUM_MODEL" != "openai/gpt-4.1-mini" ] \
             || ! grep -q 'GTM Strategy Workspace' /tmp/gtm-research.html; then
-            echo "::error::GTM Research workspace, API, or local AI is not production-ready."
+            echo "::error::GTM Research workspace is not fully production-ready with OpenRouter GPT-4.1 Mini."
             exit 1
           fi
 
@@ -149,7 +148,7 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'success',
               context: 'hostinger/deploy',
-              description: 'Exact SDR build, Career V2, and GTM validation are live',
+              description: 'Exact SDR build, Career V2, and GTM OpenRouter validation are live',
               target_url: process.env.DEPLOY_URL,
             });
 
@@ -165,6 +164,6 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'failure',
               context: 'hostinger/deploy',
-              description: 'SDR production build/version gate failed',
+              description: 'SDR production build/version/GTM gate failed',
               target_url: process.env.DEPLOY_URL,
             });
