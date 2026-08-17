@@ -27,6 +27,7 @@ jobs:
       - name: Mark deployment pending
         uses: actions/github-script@v7
         with:
+          retries: 3
           script: |
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
@@ -62,7 +63,7 @@ jobs:
           environment-variables: |
             SDR_BUILD_REF=${{ env.DEPLOY_SHA }}
 
-      - name: Verify exact deployed build and Career V2 health
+      - name: Verify exact deployed build, Career V2, and GTM workspace health
         run: |
           set -euo pipefail
           READY=false
@@ -99,10 +100,34 @@ jobs:
             exit 1
           fi
 
+          GTM_PAGE_CODE=$(curl --silent --show-error \
+            --connect-timeout 5 \
+            --max-time 15 \
+            --output /tmp/gtm-research.html \
+            --write-out '%{http_code}' \
+            'https://sdr.dashboardtalentera.tech/gtm-research' || true)
+          GTM_HEALTH=$(curl --silent --show-error \
+            --connect-timeout 5 \
+            --max-time 15 \
+            'https://sdr.dashboardtalentera.tech/api/gtm-research/analyze' || true)
+          GTM_STATUS=$(printf '%s' "$GTM_HEALTH" | jq -r '.status // ""' 2>/dev/null || true)
+          GTM_AI_READY=$(printf '%s' "$GTM_HEALTH" | jq -r '.aiReady // false' 2>/dev/null || true)
+
+          echo "GTM production gate: page_http=${GTM_PAGE_CODE:-none} api_status=${GTM_STATUS:-none} ai_ready=${GTM_AI_READY:-false}"
+
+          if [ "$GTM_PAGE_CODE" != "200" ] \
+            || [ "$GTM_STATUS" != "ok" ] \
+            || [ "$GTM_AI_READY" != "true" ] \
+            || ! grep -q 'GTM Strategy Workspace' /tmp/gtm-research.html; then
+            echo "::error::GTM Research workspace, API, or local AI is not production-ready."
+            exit 1
+          fi
+
       - name: Mark deployment successful
         if: success()
         uses: actions/github-script@v7
         with:
+          retries: 3
           script: |
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
@@ -110,7 +135,7 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'success',
               context: 'hostinger/deploy',
-              description: 'Exact SDR build and Career V2 validation are live',
+              description: 'Exact SDR build, Career V2, and GTM validation are live',
               target_url: process.env.DEPLOY_URL,
             });
 
@@ -118,6 +143,7 @@ jobs:
         if: failure()
         uses: actions/github-script@v7
         with:
+          retries: 3
           script: |
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
