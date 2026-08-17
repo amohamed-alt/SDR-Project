@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Flame, PhoneCall, Search } from "lucide-react";
+import { Flame, PhoneCall, Search, Sparkles } from "lucide-react";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardMotion";
 import { CareerIntelligence } from "@/components/CareerIntelligence";
 import { HiringIntelligence } from "@/components/HiringIntelligence";
@@ -43,6 +43,9 @@ export function Dashboard() {
 
   return <div className={styles.shell}>
     <ExistingDashboard/>
+    <Link className={styles.gtmLauncher} href="/gtm-research">
+      <Sparkles size={17}/><span>GTM Research</span><small>AI Wizard</small>
+    </Link>
     <button className={styles.careerLauncher} type="button" onClick={() => changeView("career")}>
       <Search size={17}/><span>Career Intelligence</span><small>Career + ATS</small>
     </button>
