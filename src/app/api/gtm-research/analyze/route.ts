@@ -6,16 +6,36 @@ import { z } from "zod";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const STAGES = ["company", "tam", "icp", "personas", "sourcing", "filters", "copy", "channels"] as const;
+
 const inputSchema = z.object({
-  stage: z.enum(["company", "tam", "icp", "personas", "sourcing", "filters", "copy", "channels"]),
+  stage: z.enum(STAGES),
   domain: z.string().trim().max(255).optional(),
   approvedContext: z.unknown().optional(),
 });
 
 const OLLAMA_URL = process.env.GTM_RESEARCH_OLLAMA_URL || process.env.OLLAMA_URL || "http://career-judge-ollama:11434/api/chat";
 const OLLAMA_MODEL = process.env.GTM_RESEARCH_OLLAMA_MODEL || process.env.OLLAMA_MODEL || "qwen3:1.7b";
+const REQUESTS_PER_WINDOW = 40;
+const RATE_WINDOW_MS = 60 * 60 * 1000;
+const MAX_CONCURRENT_RESEARCH = 2;
 
-const STAGE_PROMPTS: Record<string, string> = {
+type RateEntry = { count: number; resetAt: number };
+type ResearchRuntimeState = {
+  clients: Map<string, RateEntry>;
+  inFlight: number;
+  lastCleanup: number;
+};
+type GlobalWithResearchState = typeof globalThis & { __gtmResearchRuntime?: ResearchRuntimeState };
+
+const sharedGlobal = globalThis as GlobalWithResearchState;
+const researchRuntime = sharedGlobal.__gtmResearchRuntime ?? (sharedGlobal.__gtmResearchRuntime = {
+  clients: new Map<string, RateEntry>(),
+  inFlight: 0,
+  lastCleanup: Date.now(),
+});
+
+const STAGE_PROMPTS: Record<(typeof STAGES)[number], string> = {
   company: `Return a JSON object with exactly these top-level keys:
 company_name, domain, summary, products_services, value_proposition, pain_points_solved, competitors, primary_markets, target_customer_types, evidence_notes, confidence.
 products_services, value_proposition, pain_points_solved, primary_markets, target_customer_types, evidence_notes must be arrays of strings.
@@ -54,6 +74,58 @@ rationale must be an array of strings.
 Base the recommendation only on approved ICP, personas, sourcing choices, and messaging context.`,
 };
 
+function clientKey(request: NextRequest) {
+  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return request.headers.get("cf-connecting-ip")?.trim() || forwarded || request.headers.get("x-real-ip")?.trim() || "unknown";
+}
+
+function cleanupRateEntries(now: number) {
+  if (now - researchRuntime.lastCleanup < 5 * 60 * 1000 && researchRuntime.clients.size < 500) return;
+  for (const [key, entry] of researchRuntime.clients.entries()) {
+    if (entry.resetAt <= now) researchRuntime.clients.delete(key);
+  }
+  researchRuntime.lastCleanup = now;
+}
+
+function acquireResearchSlot(request: NextRequest) {
+  const now = Date.now();
+  cleanupRateEntries(now);
+  const key = clientKey(request);
+  const current = researchRuntime.clients.get(key);
+  const entry = !current || current.resetAt <= now ? { count: 0, resetAt: now + RATE_WINDOW_MS } : current;
+
+  if (entry.count >= REQUESTS_PER_WINDOW) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
+    return {
+      response: NextResponse.json(
+        { error: "GTM research rate limit reached. Try again after the current window resets." },
+        { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } },
+      ),
+    };
+  }
+
+  if (researchRuntime.inFlight >= MAX_CONCURRENT_RESEARCH) {
+    return {
+      response: NextResponse.json(
+        { error: "The GTM research engine is busy with other analysis. Retry this stage shortly." },
+        { status: 429, headers: { "Retry-After": "10" } },
+      ),
+    };
+  }
+
+  entry.count += 1;
+  researchRuntime.clients.set(key, entry);
+  researchRuntime.inFlight += 1;
+  let released = false;
+  return {
+    release: () => {
+      if (released) return;
+      released = true;
+      researchRuntime.inFlight = Math.max(0, researchRuntime.inFlight - 1);
+    },
+  };
+}
+
 function normalizeDomain(input: string) {
   const raw = input.trim();
   if (!raw) throw new Error("Website domain is required.");
@@ -81,6 +153,10 @@ function isPrivateIp(address: string) {
   }
   if (net.isIPv6(address)) {
     const value = address.toLowerCase();
+    if (value.startsWith("::ffff:")) {
+      const mapped = value.slice("::ffff:".length);
+      return net.isIPv4(mapped) ? isPrivateIp(mapped) : true;
+    }
     return value === "::1" || value === "::" || value.startsWith("fc") || value.startsWith("fd") || value.startsWith("fe80:");
   }
   return true;
@@ -216,7 +292,7 @@ function extractJsonObject(raw: string) {
   return JSON.parse(cleaned.slice(first, last + 1)) as Record<string, unknown>;
 }
 
-async function callOllama(stage: string, source: string) {
+async function callOllama(stage: (typeof STAGES)[number], source: string) {
   const system = `You are a senior B2B GTM research analyst. Return valid JSON only, with no markdown or commentary. Never ignore human-approved context. Never fabricate precise facts that are not supported. ${STAGE_PROMPTS[stage]}`;
   const response = await fetch(OLLAMA_URL, {
     method: "POST",
@@ -237,6 +313,24 @@ async function callOllama(stage: string, source: string) {
   const payload = await response.json() as { message?: { content?: string }; response?: string };
   const content = payload.message?.content || payload.response || "";
   return extractJsonObject(content);
+}
+
+async function ollamaReady() {
+  try {
+    const tagsUrl = new URL(OLLAMA_URL);
+    tagsUrl.pathname = "/api/tags";
+    tagsUrl.search = "";
+    const response = await fetch(tagsUrl, { cache: "no-store", signal: AbortSignal.timeout(3_000) });
+    if (!response.ok) return false;
+    const payload = await response.json() as { models?: Array<{ name?: string; model?: string }> };
+    const models = payload.models || [];
+    return models.some((item) => {
+      const name = item.name || item.model || "";
+      return name === OLLAMA_MODEL || name.startsWith(`${OLLAMA_MODEL}:`);
+    });
+  } catch {
+    return false;
+  }
 }
 
 function fallbackCompany(domain: string, evidence: Awaited<ReturnType<typeof collectWebsiteEvidence>>) {
@@ -260,7 +354,7 @@ function fallbackCompany(domain: string, evidence: Awaited<ReturnType<typeof col
   };
 }
 
-function fallbackStage(stage: string) {
+function fallbackStage(stage: (typeof STAGES)[number]) {
   const common = { status: "ai_unavailable", note: "The local AI service is unavailable. Keep the approved upstream context and retry this stage when Ollama is ready." };
   if (stage === "tam") return { ...common, recommended_markets: [], target_industries: [], employee_bands: [], exclusions: [], tam_hypothesis: "", assumptions: [], open_questions: [] };
   if (stage === "icp") return { ...common, tier_1: {}, tier_2: {}, tier_3: {} };
@@ -271,7 +365,21 @@ function fallbackStage(stage: string) {
   return { ...common, recommended_channels: [], cadence: [], rationale: [] };
 }
 
+export async function GET() {
+  const aiReady = await ollamaReady();
+  return NextResponse.json({
+    status: "ok",
+    aiReady,
+    model: OLLAMA_MODEL,
+    stages: STAGES,
+    limits: { requestsPerHour: REQUESTS_PER_WINDOW, maxConcurrent: MAX_CONCURRENT_RESEARCH },
+  });
+}
+
 export async function POST(request: NextRequest) {
+  const slot = acquireResearchSlot(request);
+  if ("response" in slot) return slot.response;
+
   try {
     const parsed = inputSchema.parse(await request.json());
     if (parsed.stage === "company") {
@@ -302,5 +410,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const message = error instanceof z.ZodError ? "Invalid GTM research request." : error instanceof Error ? error.message : "Unexpected GTM research error.";
     return NextResponse.json({ error: message }, { status: 400 });
+  } finally {
+    slot.release();
   }
 }
