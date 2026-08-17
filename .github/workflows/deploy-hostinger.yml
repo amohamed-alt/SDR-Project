@@ -25,6 +25,7 @@ jobs:
       DEPLOY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Mark deployment pending
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           retries: 3
@@ -138,6 +139,7 @@ jobs:
 
       - name: Mark deployment successful
         if: success()
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           retries: 3
@@ -154,6 +156,7 @@ jobs:
 
       - name: Mark deployment failed
         if: failure()
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           retries: 3
