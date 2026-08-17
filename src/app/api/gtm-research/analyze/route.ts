@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import dns from "node:dns/promises";
 import net from "node:net";
 import { NextRequest, NextResponse } from "next/server";
@@ -7,6 +8,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const STAGES = ["company", "tam", "icp", "personas", "sourcing", "filters", "copy", "channels"] as const;
+type Stage = (typeof STAGES)[number];
+
+const PREMIUM_STAGES = new Set<Stage>(["tam", "icp", "personas"]);
 
 const inputSchema = z.object({
   stage: z.enum(STAGES),
@@ -16,13 +20,40 @@ const inputSchema = z.object({
 
 const OLLAMA_URL = process.env.GTM_RESEARCH_OLLAMA_URL || process.env.OLLAMA_URL || "http://career-judge-ollama:11434/api/chat";
 const OLLAMA_MODEL = process.env.GTM_RESEARCH_OLLAMA_MODEL || process.env.OLLAMA_MODEL || "qwen3:1.7b";
+const OPENROUTER_API_KEY = process.env.GTM_RESEARCH_OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY || "";
+const OPENROUTER_MODEL = process.env.GTM_RESEARCH_OPENROUTER_MODEL || "anthropic/claude-sonnet-4.5";
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+
 const REQUESTS_PER_WINDOW = 40;
+const PAID_REQUESTS_PER_WINDOW = 12;
 const RATE_WINDOW_MS = 60 * 60 * 1000;
 const MAX_CONCURRENT_RESEARCH = 2;
+const PREMIUM_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const PREMIUM_CACHE_MAX = 100;
 
 type RateEntry = { count: number; resetAt: number };
+type OpenRouterUsage = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  cost?: number;
+};
+type PremiumCacheEntry = {
+  expiresAt: number;
+  result: Record<string, unknown>;
+  meta: {
+    ai: "openrouter";
+    model: string;
+    cost?: number;
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  };
+};
 type ResearchRuntimeState = {
   clients: Map<string, RateEntry>;
+  paidClients: Map<string, RateEntry>;
+  premiumCache: Map<string, PremiumCacheEntry>;
   inFlight: number;
   lastCleanup: number;
 };
@@ -31,11 +62,13 @@ type GlobalWithResearchState = typeof globalThis & { __gtmResearchRuntime?: Rese
 const sharedGlobal = globalThis as GlobalWithResearchState;
 const researchRuntime = sharedGlobal.__gtmResearchRuntime ?? (sharedGlobal.__gtmResearchRuntime = {
   clients: new Map<string, RateEntry>(),
+  paidClients: new Map<string, RateEntry>(),
+  premiumCache: new Map<string, PremiumCacheEntry>(),
   inFlight: 0,
   lastCleanup: Date.now(),
 });
 
-const STAGE_PROMPTS: Record<(typeof STAGES)[number], string> = {
+const STAGE_PROMPTS: Record<Stage, string> = {
   company: `Return a JSON object with exactly these top-level keys:
 company_name, domain, summary, products_services, value_proposition, pain_points_solved, competitors, primary_markets, target_customer_types, evidence_notes, confidence.
 products_services, value_proposition, pain_points_solved, primary_markets, target_customer_types, evidence_notes must be arrays of strings.
@@ -43,25 +76,35 @@ competitors must be an array of objects with name and reason.
 confidence must be low, medium, or high.
 Use only evidence from the supplied website content. If something is uncertain, say so in evidence_notes instead of inventing facts.`,
   tam: `Return a JSON object with exactly these top-level keys:
-recommended_markets, target_industries, employee_bands, exclusions, tam_hypothesis, assumptions, open_questions.
+market_definition, estimated_tam, estimated_tam_basis, recommended_markets, target_industries, employee_bands, revenue_bands, exclusions, assumptions, open_questions.
+market_definition must be a concise paragraph describing the overall account market/category broad enough to cover all ICP tiers.
+estimated_tam must be a rough integer estimate of total accounts, and estimated_tam_basis must be one concise sentence explaining the estimate and clearly labeling it as rough.
 recommended_markets must be an array of objects with market, priority, and why.
-All other plural fields must be arrays of strings except tam_hypothesis, which is a concise string.
-Treat the approved context as the source of truth, including any human edits that conflict with earlier AI research.`,
+target_industries, employee_bands, revenue_bands, exclusions, assumptions, open_questions must be arrays of strings.
+Treat the approved human overview and approved company context as the source of truth. Do not re-introduce a geography, segment, or positioning point that the human explicitly corrected.`,
   icp: `Return a JSON object with exactly these top-level keys: tier_1, tier_2, tier_3.
-Each tier must contain name, description, geographies, industries, employee_range, signals, exclusions.
-geographies, industries, signals, exclusions must be arrays of strings.
-Use only the approved company and TAM context. Tier 1 is best fit, Tier 2 is good fit, Tier 3 is experimental/adjacent.`,
+Each tier must contain name, description, industry, client_type, employee_range_min, employee_range_max, revenue_range_min, revenue_range_max, geography, keywords, pain_points, signals, buying_triggers, ideal_client_examples, disqualifiers, exclusion_terms.
+industry, client_type, geography, keywords, pain_points, signals, buying_triggers, ideal_client_examples, disqualifiers, exclusion_terms must be arrays of strings.
+employee_range_min, employee_range_max, revenue_range_min, revenue_range_max must be numbers.
+Tier 1 is best fit with strong alignment and buying power. Tier 2 is good fit with weaker strategic alignment or smaller footprint. Tier 3 is exploratory/possible fit.
+keywords must be short search terms useful for Apollo, Sales Navigator, Google, or lookalike discovery.
+buying_triggers must be live events that indicate an account may be in a buying window.
+disqualifiers and exclusion_terms must make it easy to remove false positives from sourcing.
+Use only approved company, human, and TAM context.`,
   personas: `Return a JSON object with exactly one top-level key: personas.
-personas must be an array of 3 to 6 objects. Each object must contain persona, likely_titles, seniority, role_in_buying, pains, goals, kpis, buying_triggers, objections, messaging_angle.
+personas must be an array of 3 to 6 objects. Each persona must contain persona, likely_titles, seniority, role_in_buying, pains, goals, kpis, buying_triggers, objections, day_in_the_life, jobs_to_be_done, messaging_angle.
 likely_titles, pains, goals, kpis, buying_triggers, objections must be arrays of strings.
-Use only approved upstream context.`,
+jobs_to_be_done must be an object containing functional_job, emotional_job, social_job as strings.
+day_in_the_life must be one or two concise sentences.
+Cover economic buyers, champions, and important influencers where relevant. Use only approved upstream context and do not invent company-specific facts.`,
   sourcing: `Return a JSON object with exactly these top-level keys: primary_tools, fallback_tools, rationale.
 primary_tools and fallback_tools must be arrays of objects with tool, best_for, and why.
 rationale must be an array of strings.
-Recommend sourcing/enrichment tools based on the approved ICP and personas. Do not assume a tool must be used just because it is popular.`,
+Recommend sourcing/enrichment tools based on the approved ICP and personas. Prefer the minimum practical stack and do not assume a paid tool must be used just because it is popular.`,
   filters: `Return a JSON object with exactly these top-level keys: sales_navigator, apollo, notes.
 sales_navigator and apollo must be objects whose values are strings or arrays of strings and should contain copy-ready filter guidance derived from the approved ICP/personas.
-notes must be an array of strings explaining exclusions, edge cases, or filters that need manual judgment.`,
+Include useful include filters and explicit exclusions/NOT logic derived from disqualifiers and exclusion_terms.
+notes must be an array of strings explaining edge cases or filters that require manual judgment.`,
   copy: `Return a JSON object with exactly these top-level keys: email, linkedin, notes.
 email must contain first_touch, second_touch, third_touch.
 linkedin must contain connection_note, first_touch, second_touch, third_touch.
@@ -80,10 +123,24 @@ function clientKey(request: NextRequest) {
 }
 
 function cleanupRateEntries(now: number) {
-  if (now - researchRuntime.lastCleanup < 5 * 60 * 1000 && researchRuntime.clients.size < 500) return;
-  for (const [key, entry] of researchRuntime.clients.entries()) {
-    if (entry.resetAt <= now) researchRuntime.clients.delete(key);
+  if (now - researchRuntime.lastCleanup < 5 * 60 * 1000 && researchRuntime.clients.size < 500 && researchRuntime.paidClients.size < 500 && researchRuntime.premiumCache.size <= PREMIUM_CACHE_MAX) return;
+
+  for (const bucket of [researchRuntime.clients, researchRuntime.paidClients]) {
+    for (const [key, entry] of bucket.entries()) {
+      if (entry.resetAt <= now) bucket.delete(key);
+    }
   }
+
+  for (const [key, entry] of researchRuntime.premiumCache.entries()) {
+    if (entry.expiresAt <= now) researchRuntime.premiumCache.delete(key);
+  }
+
+  while (researchRuntime.premiumCache.size > PREMIUM_CACHE_MAX) {
+    const firstKey = researchRuntime.premiumCache.keys().next().value as string | undefined;
+    if (!firstKey) break;
+    researchRuntime.premiumCache.delete(firstKey);
+  }
+
   researchRuntime.lastCleanup = now;
 }
 
@@ -124,6 +181,26 @@ function acquireResearchSlot(request: NextRequest) {
       researchRuntime.inFlight = Math.max(0, researchRuntime.inFlight - 1);
     },
   };
+}
+
+function consumePaidQuota(request: NextRequest) {
+  const now = Date.now();
+  cleanupRateEntries(now);
+  const key = clientKey(request);
+  const current = researchRuntime.paidClients.get(key);
+  const entry = !current || current.resetAt <= now ? { count: 0, resetAt: now + RATE_WINDOW_MS } : current;
+
+  if (entry.count >= PAID_REQUESTS_PER_WINDOW) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
+    return NextResponse.json(
+      { error: "Premium GTM AI limit reached for this hour. This guard prevents accidental OpenRouter credit burn." },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } },
+    );
+  }
+
+  entry.count += 1;
+  researchRuntime.paidClients.set(key, entry);
+  return null;
 }
 
 function normalizeDomain(input: string) {
@@ -292,8 +369,11 @@ function extractJsonObject(raw: string) {
   return JSON.parse(cleaned.slice(first, last + 1)) as Record<string, unknown>;
 }
 
-async function callOllama(stage: (typeof STAGES)[number], source: string) {
-  const system = `You are a senior B2B GTM research analyst. Return valid JSON only, with no markdown or commentary. Never ignore human-approved context. Never fabricate precise facts that are not supported. ${STAGE_PROMPTS[stage]}`;
+function systemPrompt(stage: Stage) {
+  return `You are a senior B2B GTM research strategist. Return valid JSON only, with no markdown or commentary. Human-approved context is authoritative. Never fabricate precise facts that are not supported; clearly label estimates and assumptions. ${STAGE_PROMPTS[stage]}`;
+}
+
+async function callOllama(stage: Stage, source: string) {
   const response = await fetch(OLLAMA_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -303,7 +383,7 @@ async function callOllama(stage: (typeof STAGES)[number], source: string) {
       format: "json",
       options: { temperature: 0.2 },
       messages: [
-        { role: "system", content: system },
+        { role: "system", content: systemPrompt(stage) },
         { role: "user", content: source.slice(0, 30_000) },
       ],
     }),
@@ -313,6 +393,115 @@ async function callOllama(stage: (typeof STAGES)[number], source: string) {
   const payload = await response.json() as { message?: { content?: string }; response?: string };
   const content = payload.message?.content || payload.response || "";
   return extractJsonObject(content);
+}
+
+async function callOpenRouter(stage: Stage, source: string) {
+  if (!OPENROUTER_API_KEY) throw new Error("OpenRouter is not configured.");
+
+  const response = await fetch(OPENROUTER_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://sdr.dashboardtalentera.tech/gtm-research",
+      "X-OpenRouter-Title": "Talentera GTM Research",
+    },
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      messages: [
+        { role: "system", content: systemPrompt(stage) },
+        { role: "user", content: source.slice(0, 30_000) },
+      ],
+      temperature: 0.2,
+      max_tokens: 3_500,
+      response_format: { type: "json_object" },
+      provider: {
+        sort: "price",
+        require_parameters: true,
+        data_collection: "deny",
+      },
+      stream: false,
+    }),
+    signal: AbortSignal.timeout(120_000),
+  });
+
+  const payload = await response.json() as {
+    error?: { message?: string };
+    choices?: Array<{ message?: { content?: string } }>;
+    usage?: OpenRouterUsage;
+  };
+
+  if (!response.ok) throw new Error(payload.error?.message || `OpenRouter returned HTTP ${response.status}.`);
+  const content = payload.choices?.[0]?.message?.content || "";
+  return { result: extractJsonObject(content), usage: payload.usage || {} };
+}
+
+function premiumCacheKey(stage: Stage, source: string) {
+  return createHash("sha256").update(`${stage}\n${OPENROUTER_MODEL}\n${source}`).digest("hex");
+}
+
+async function runStageModel(stage: Stage, source: string, request: NextRequest) {
+  if (!PREMIUM_STAGES.has(stage)) {
+    const result = await callOllama(stage, source);
+    return { result, meta: { ai: "ollama", model: OLLAMA_MODEL, cached: false } };
+  }
+
+  if (!OPENROUTER_API_KEY) {
+    const result = await callOllama(stage, source);
+    return {
+      result,
+      meta: {
+        ai: "ollama",
+        model: OLLAMA_MODEL,
+        cached: false,
+        warning: `OpenRouter is not configured, so ${stage} used the local model instead.`,
+      },
+    };
+  }
+
+  const cacheKey = premiumCacheKey(stage, source);
+  const cached = researchRuntime.premiumCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { result: cached.result, meta: { ...cached.meta, cached: true } };
+  }
+
+  const quotaResponse = consumePaidQuota(request);
+  if (quotaResponse) return { response: quotaResponse };
+
+  try {
+    const { result, usage } = await callOpenRouter(stage, source);
+    const meta = {
+      ai: "openrouter" as const,
+      model: OPENROUTER_MODEL,
+      cached: false,
+      cost: usage.cost,
+      promptTokens: usage.prompt_tokens,
+      completionTokens: usage.completion_tokens,
+      totalTokens: usage.total_tokens,
+    };
+    researchRuntime.premiumCache.set(cacheKey, {
+      expiresAt: Date.now() + PREMIUM_CACHE_TTL_MS,
+      result,
+      meta,
+    });
+    cleanupRateEntries(Date.now());
+    return { result, meta };
+  } catch (openRouterError) {
+    try {
+      const result = await callOllama(stage, source);
+      return {
+        result,
+        meta: {
+          ai: "ollama",
+          model: OLLAMA_MODEL,
+          cached: false,
+          warning: `OpenRouter failed and the local model was used instead: ${openRouterError instanceof Error ? openRouterError.message : "unknown OpenRouter error"}`,
+        },
+      };
+    } catch (localError) {
+      throw new Error(`OpenRouter failed (${openRouterError instanceof Error ? openRouterError.message : "unknown error"}) and local AI fallback also failed (${localError instanceof Error ? localError.message : "unknown error"}).`);
+    }
+  }
 }
 
 async function ollamaReady() {
@@ -354,9 +543,9 @@ function fallbackCompany(domain: string, evidence: Awaited<ReturnType<typeof col
   };
 }
 
-function fallbackStage(stage: (typeof STAGES)[number]) {
-  const common = { status: "ai_unavailable", note: "The local AI service is unavailable. Keep the approved upstream context and retry this stage when Ollama is ready." };
-  if (stage === "tam") return { ...common, recommended_markets: [], target_industries: [], employee_bands: [], exclusions: [], tam_hypothesis: "", assumptions: [], open_questions: [] };
+function fallbackStage(stage: Stage) {
+  const common = { status: "ai_unavailable", note: "Both the preferred model and fallback were unavailable. Keep the approved upstream context and retry this stage later." };
+  if (stage === "tam") return { ...common, market_definition: "", estimated_tam: 0, estimated_tam_basis: "", recommended_markets: [], target_industries: [], employee_bands: [], revenue_bands: [], exclusions: [], assumptions: [], open_questions: [] };
   if (stage === "icp") return { ...common, tier_1: {}, tier_2: {}, tier_3: {} };
   if (stage === "personas") return { ...common, personas: [] };
   if (stage === "sourcing") return { ...common, primary_tools: [], fallback_tools: [], rationale: [] };
@@ -366,13 +555,23 @@ function fallbackStage(stage: (typeof STAGES)[number]) {
 }
 
 export async function GET() {
-  const aiReady = await ollamaReady();
+  const localAiReady = await ollamaReady();
   return NextResponse.json({
     status: "ok",
-    aiReady,
-    model: OLLAMA_MODEL,
+    aiReady: localAiReady,
+    localAiReady,
+    openRouterConfigured: Boolean(OPENROUTER_API_KEY),
+    localModel: OLLAMA_MODEL,
+    premiumModel: OPENROUTER_MODEL,
+    premiumStages: Array.from(PREMIUM_STAGES),
+    localStages: STAGES.filter((stage) => !PREMIUM_STAGES.has(stage)),
+    limits: {
+      requestsPerHour: REQUESTS_PER_WINDOW,
+      premiumRequestsPerHour: PAID_REQUESTS_PER_WINDOW,
+      maxConcurrent: MAX_CONCURRENT_RESEARCH,
+      premiumCacheHours: PREMIUM_CACHE_TTL_MS / (60 * 60 * 1000),
+    },
     stages: STAGES,
-    limits: { requestsPerHour: REQUESTS_PER_WINDOW, maxConcurrent: MAX_CONCURRENT_RESEARCH },
   });
 }
 
@@ -386,25 +585,42 @@ export async function POST(request: NextRequest) {
       if (!parsed.domain) return NextResponse.json({ error: "Website domain is required." }, { status: 400 });
       const evidence = await collectWebsiteEvidence(parsed.domain);
       try {
-        const result = await callOllama("company", `WEBSITE DOMAIN: ${evidence.canonicalDomain}\n\nPUBLIC WEBSITE EVIDENCE:\n${evidence.combinedText}`);
-        return NextResponse.json({ result, meta: { ai: "ollama", model: OLLAMA_MODEL, sources: evidence.pages.map((page) => page.url) } });
+        const modelOutput = await runStageModel("company", `WEBSITE DOMAIN: ${evidence.canonicalDomain}\n\nPUBLIC WEBSITE EVIDENCE:\n${evidence.combinedText}`, request);
+        if ("response" in modelOutput) return modelOutput.response;
+        return NextResponse.json({
+          result: modelOutput.result,
+          meta: { ...modelOutput.meta, sources: evidence.pages.map((page) => page.url) },
+        });
       } catch (error) {
         return NextResponse.json({
           result: fallbackCompany(parsed.domain, evidence),
-          meta: { ai: "fallback", model: OLLAMA_MODEL, sources: evidence.pages.map((page) => page.url), warning: error instanceof Error ? error.message : "Local AI unavailable." },
+          meta: {
+            ai: "fallback",
+            model: OLLAMA_MODEL,
+            cached: false,
+            sources: evidence.pages.map((page) => page.url),
+            warning: error instanceof Error ? error.message : "Local AI unavailable.",
+          },
         });
       }
     }
 
     const context = JSON.stringify(parsed.approvedContext ?? {}, null, 2);
     if (context.length > 60_000) return NextResponse.json({ error: "Approved context is too large." }, { status: 413 });
+
     try {
-      const result = await callOllama(parsed.stage, `APPROVED UPSTREAM CONTEXT (source of truth):\n${context}`);
-      return NextResponse.json({ result, meta: { ai: "ollama", model: OLLAMA_MODEL } });
+      const modelOutput = await runStageModel(parsed.stage, `APPROVED UPSTREAM CONTEXT (source of truth):\n${context}`, request);
+      if ("response" in modelOutput) return modelOutput.response;
+      return NextResponse.json({ result: modelOutput.result, meta: modelOutput.meta });
     } catch (error) {
       return NextResponse.json({
         result: fallbackStage(parsed.stage),
-        meta: { ai: "fallback", model: OLLAMA_MODEL, warning: error instanceof Error ? error.message : "Local AI unavailable." },
+        meta: {
+          ai: "fallback",
+          model: PREMIUM_STAGES.has(parsed.stage) ? OPENROUTER_MODEL : OLLAMA_MODEL,
+          cached: false,
+          warning: error instanceof Error ? error.message : "AI unavailable.",
+        },
       });
     }
   } catch (error) {
