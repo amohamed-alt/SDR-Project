@@ -58,6 +58,8 @@ services:
       SDR_BUILD_REF: ${SDR_BUILD_REF:-unknown}
       CAREER_GENERATION: v2
       SDR_RUNTIME_ENV_FILE: /run/sdr-env/.env
+      GTM_RESEARCH_OPENROUTER_API_KEY: ${GTM_RESEARCH_OPENROUTER_API_KEY:-}
+      GTM_RESEARCH_OPENROUTER_MODEL: ${GTM_RESEARCH_OPENROUTER_MODEL:-openai/gpt-4.1-mini}
       ACQUISITION_SNAPSHOT_PATH: /app/data/acquisition-dashboard.json
       GOOGLE_TOKEN_STORE_PATH: /app/data/google-calendar.json
       HIRING_SNAPSHOT_PATH: /app/data/hiring-signals.json
@@ -239,7 +241,7 @@ services:
             CODE=$$?
             printf 'failed:attempt-%s:code-%s:%s\n' "$$ATTEMPT" "$$CODE" "$$(date -u +%FT%TZ)" > "$$STATE"
 
-            if [ "$$ATTEMPT" -ge "$$MAX_ATTEMPTS" ]; then
+            if [ "$$ATTEMPT" -ge "$${MAX_ATTEMPTS}" ]; then
               echo "Career validation V2 stopped after $$MAX_ATTEMPTS failed attempts; manual review is required."
               exit "$$CODE"
             fi
