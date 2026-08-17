@@ -13,4 +13,16 @@ set -a
 . "$RUNTIME_ENV_FILE"
 set +a
 
+# Keep OpenRouter isolated to the GTM research module, but default its premium
+# stages to a much cheaper/faster structured-output model than Claude Sonnet.
+# An explicit runtime value can still override this later without a redeploy.
+GTM_RESEARCH_OPENROUTER_MODEL="${GTM_RESEARCH_OPENROUTER_MODEL:-openai/gpt-4.1-mini}"
+export GTM_RESEARCH_OPENROUTER_MODEL
+
+if [ -n "${GTM_RESEARCH_OPENROUTER_API_KEY:-${OPENROUTER_API_KEY:-}}" ]; then
+  echo "GTM OpenRouter: configured; premium model=${GTM_RESEARCH_OPENROUTER_MODEL}"
+else
+  echo "GTM OpenRouter: NOT configured; premium stages will fall back to local Ollama"
+fi
+
 exec node server.js
