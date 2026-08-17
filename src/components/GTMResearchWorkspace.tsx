@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -98,26 +98,29 @@ function companyOverview(data: unknown) {
 
 export function GTMResearchWorkspace() {
   const [workspace, setWorkspace] = useState<WorkspaceState>(initialState);
-  const [hydrated, setHydrated] = useState(false);
+  const storageReady = useRef(false);
   const [loadingStage, setLoadingStage] = useState<StageKey | null>(null);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(STORAGE_KEY);
-      if (saved) setWorkspace(JSON.parse(saved) as WorkspaceState);
-    } catch {
-      // Ignore invalid browser state and start clean.
-    } finally {
-      setHydrated(true);
-    }
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = window.localStorage.getItem(STORAGE_KEY);
+        if (saved) setWorkspace(JSON.parse(saved) as WorkspaceState);
+      } catch {
+        // Ignore invalid browser state and start clean.
+      } finally {
+        storageReady.current = true;
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!storageReady.current) return;
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace));
-  }, [hydrated, workspace]);
+  }, [workspace]);
 
   const activeIndex = STAGES.findIndex((stage) => stage.key === workspace.activeStage);
   const activeDefinition = STAGES[activeIndex];
@@ -191,6 +194,7 @@ export function GTMResearchWorkspace() {
       const index = STAGES.findIndex((item) => item.key === stage);
       setWorkspace((current) => {
         const next = resetFrom(index, current);
+        next.activeStage = stage;
         next.stages[stage] = { status: "draft", text, data: payload.result, meta: payload.meta };
         return next;
       });
