@@ -53,6 +53,16 @@ jobs:
             exit 1
           }
 
+      - name: Report GTM premium AI configuration
+        env:
+          GTM_OPENROUTER_KEY: ${{ secrets.GTM_RESEARCH_OPENROUTER_API_KEY || secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -n "$GTM_OPENROUTER_KEY" ]; then
+            echo "GTM OpenRouter deployment secret: configured"
+          else
+            echo "::warning::GTM OpenRouter deployment secret: NOT configured. TAM, ICP and Personas cannot use GPT until GTM_RESEARCH_OPENROUTER_API_KEY or OPENROUTER_API_KEY is added as a repository secret."
+          fi
+
       - name: Deploy Docker Compose
         uses: hostinger/deploy-on-vps@v2
         with:
@@ -62,6 +72,8 @@ jobs:
           docker-compose-path: docker-compose.yml
           environment-variables: |
             SDR_BUILD_REF=${{ env.DEPLOY_SHA }}
+            GTM_RESEARCH_OPENROUTER_API_KEY=${{ secrets.GTM_RESEARCH_OPENROUTER_API_KEY || secrets.OPENROUTER_API_KEY }}
+            GTM_RESEARCH_OPENROUTER_MODEL=openai/gpt-4.1-mini
 
       - name: Verify exact deployed build, Career V2, and GTM workspace health
         run: |
@@ -112,8 +124,10 @@ jobs:
             'https://sdr.dashboardtalentera.tech/api/gtm-research/analyze' || true)
           GTM_STATUS=$(printf '%s' "$GTM_HEALTH" | jq -r '.status // ""' 2>/dev/null || true)
           GTM_AI_READY=$(printf '%s' "$GTM_HEALTH" | jq -r '.aiReady // false' 2>/dev/null || true)
+          GTM_OPENROUTER=$(printf '%s' "$GTM_HEALTH" | jq -r '.openRouterConfigured // false' 2>/dev/null || true)
+          GTM_PREMIUM_MODEL=$(printf '%s' "$GTM_HEALTH" | jq -r '.premiumModel // "unknown"' 2>/dev/null || true)
 
-          echo "GTM production gate: page_http=${GTM_PAGE_CODE:-none} api_status=${GTM_STATUS:-none} ai_ready=${GTM_AI_READY:-false}"
+          echo "GTM production gate: page_http=${GTM_PAGE_CODE:-none} api_status=${GTM_STATUS:-none} local_ai_ready=${GTM_AI_READY:-false} openrouter_configured=${GTM_OPENROUTER:-false} premium_model=${GTM_PREMIUM_MODEL:-unknown}"
 
           if [ "$GTM_PAGE_CODE" != "200" ] \
             || [ "$GTM_STATUS" != "ok" ] \
