@@ -138,7 +138,7 @@ function normalizeDomain(input: string) {
   return parsed;
 }
 
-function isPrivateIp(address: string) {
+function isPrivateIp(address: string): boolean {
   if (net.isIPv4(address)) {
     const [a, b] = address.split(".").map(Number);
     return (
