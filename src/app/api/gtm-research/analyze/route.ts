@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 const STAGES = ["company", "tam", "icp", "personas", "sourcing", "filters", "copy", "channels"] as const;
 type Stage = (typeof STAGES)[number];
 
-const PREMIUM_STAGES = new Set<Stage>(["tam", "icp", "personas"]);
+const PREMIUM_STAGES = new Set<Stage>(["company", "tam", "icp", "personas"]);
 
 const inputSchema = z.object({
   stage: z.enum(STAGES),
@@ -21,7 +21,7 @@ const inputSchema = z.object({
 const OLLAMA_URL = process.env.GTM_RESEARCH_OLLAMA_URL || process.env.OLLAMA_URL || "http://career-judge-ollama:11434/api/chat";
 const OLLAMA_MODEL = process.env.GTM_RESEARCH_OLLAMA_MODEL || process.env.OLLAMA_MODEL || "qwen3:1.7b";
 const OPENROUTER_API_KEY = process.env.GTM_RESEARCH_OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY || "";
-const OPENROUTER_MODEL = process.env.GTM_RESEARCH_OPENROUTER_MODEL || "anthropic/claude-sonnet-4.5";
+const OPENROUTER_MODEL = process.env.GTM_RESEARCH_OPENROUTER_MODEL || "openai/gpt-4.1-mini";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 const REQUESTS_PER_WINDOW = 40;
