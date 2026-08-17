@@ -10,7 +10,8 @@ export const dynamic = "force-dynamic";
 const STAGES = ["company", "tam", "icp", "personas", "sourcing", "filters", "copy", "channels"] as const;
 type Stage = (typeof STAGES)[number];
 
-const PREMIUM_STAGES = new Set<Stage>(["company", "tam", "icp", "personas"]);
+const CORE_REASONING_STAGES = new Set<Stage>(["company", "tam", "icp", "personas"]);
+const LIGHT_EXECUTION_STAGES = new Set<Stage>(["sourcing", "filters", "copy", "channels"]);
 
 const inputSchema = z.object({
   stage: z.enum(STAGES),
@@ -22,6 +23,7 @@ const OLLAMA_URL = process.env.GTM_RESEARCH_OLLAMA_URL || process.env.OLLAMA_URL
 const OLLAMA_MODEL = process.env.GTM_RESEARCH_OLLAMA_MODEL || process.env.OLLAMA_MODEL || "qwen3:1.7b";
 const OPENROUTER_API_KEY = process.env.GTM_RESEARCH_OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY || "";
 const OPENROUTER_MODEL = process.env.GTM_RESEARCH_OPENROUTER_MODEL || "openai/gpt-4.1-mini";
+const OPENROUTER_LIGHT_MODEL = process.env.GTM_RESEARCH_OPENROUTER_LIGHT_MODEL || "openai/gpt-4.1-nano";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 const REQUESTS_PER_WINDOW = 40;
@@ -38,17 +40,18 @@ type OpenRouterUsage = {
   total_tokens?: number;
   cost?: number;
 };
+type OpenRouterMeta = {
+  ai: "openrouter";
+  model: string;
+  cost?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+};
 type PremiumCacheEntry = {
   expiresAt: number;
   result: Record<string, unknown>;
-  meta: {
-    ai: "openrouter";
-    model: string;
-    cost?: number;
-    promptTokens?: number;
-    completionTokens?: number;
-    totalTokens?: number;
-  };
+  meta: OpenRouterMeta;
 };
 type ResearchRuntimeState = {
   clients: Map<string, RateEntry>;
@@ -117,13 +120,22 @@ rationale must be an array of strings.
 Base the recommendation only on approved ICP, personas, sourcing choices, and messaging context.`,
 };
 
+function preferredModelForStage(stage: Stage) {
+  return LIGHT_EXECUTION_STAGES.has(stage) ? OPENROUTER_LIGHT_MODEL : OPENROUTER_MODEL;
+}
+
 function clientKey(request: NextRequest) {
   const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
   return request.headers.get("cf-connecting-ip")?.trim() || forwarded || request.headers.get("x-real-ip")?.trim() || "unknown";
 }
 
-function cleanupRateEntries(now: number) {
-  if (now - researchRuntime.lastCleanup < 5 * 60 * 1000 && researchRuntime.clients.size < 500 && researchRuntime.paidClients.size < 500 && researchRuntime.premiumCache.size <= PREMIUM_CACHE_MAX) return;
+function cleanupRuntime(now: number) {
+  if (
+    now - researchRuntime.lastCleanup < 5 * 60 * 1000 &&
+    researchRuntime.clients.size < 500 &&
+    researchRuntime.paidClients.size < 500 &&
+    researchRuntime.premiumCache.size <= PREMIUM_CACHE_MAX
+  ) return;
 
   for (const bucket of [researchRuntime.clients, researchRuntime.paidClients]) {
     for (const [key, entry] of bucket.entries()) {
@@ -146,7 +158,7 @@ function cleanupRateEntries(now: number) {
 
 function acquireResearchSlot(request: NextRequest) {
   const now = Date.now();
-  cleanupRateEntries(now);
+  cleanupRuntime(now);
   const key = clientKey(request);
   const current = researchRuntime.clients.get(key);
   const entry = !current || current.resetAt <= now ? { count: 0, resetAt: now + RATE_WINDOW_MS } : current;
@@ -174,6 +186,7 @@ function acquireResearchSlot(request: NextRequest) {
   researchRuntime.clients.set(key, entry);
   researchRuntime.inFlight += 1;
   let released = false;
+
   return {
     release: () => {
       if (released) return;
@@ -185,7 +198,7 @@ function acquireResearchSlot(request: NextRequest) {
 
 function consumePaidQuota(request: NextRequest) {
   const now = Date.now();
-  cleanupRateEntries(now);
+  cleanupRuntime(now);
   const key = clientKey(request);
   const current = researchRuntime.paidClients.get(key);
   const entry = !current || current.resetAt <= now ? { count: 0, resetAt: now + RATE_WINDOW_MS } : current;
@@ -228,6 +241,7 @@ function isPrivateIp(address: string): boolean {
       (a === 100 && b >= 64 && b <= 127)
     );
   }
+
   if (net.isIPv6(address)) {
     const value = address.toLowerCase();
     if (value.startsWith("::ffff:")) {
@@ -236,6 +250,7 @@ function isPrivateIp(address: string): boolean {
     }
     return value === "::1" || value === "::" || value.startsWith("fc") || value.startsWith("fd") || value.startsWith("fe80:");
   }
+
   return true;
 }
 
@@ -244,10 +259,12 @@ async function assertPublicHostname(hostname: string) {
   if (lower === "localhost" || lower.endsWith(".localhost") || lower.endsWith(".local")) {
     throw new Error("Local/private hosts are not allowed.");
   }
+
   if (net.isIP(lower)) {
     if (isPrivateIp(lower)) throw new Error("Private IP addresses are not allowed.");
     return;
   }
+
   const resolved = await dns.lookup(hostname, { all: true, verbatim: true });
   if (!resolved.length || resolved.some((entry) => isPrivateIp(entry.address))) {
     throw new Error("The website resolved to a private or unavailable address.");
@@ -256,6 +273,7 @@ async function assertPublicHostname(hostname: string) {
 
 async function safeFetchText(input: URL) {
   let current = new URL(input.toString());
+
   for (let redirectCount = 0; redirectCount < 5; redirectCount += 1) {
     await assertPublicHostname(current.hostname);
     const response = await fetch(current, {
@@ -267,6 +285,7 @@ async function safeFetchText(input: URL) {
       },
       signal: AbortSignal.timeout(12_000),
     });
+
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get("location");
       if (!location) throw new Error(`Website returned redirect ${response.status} without a location.`);
@@ -274,13 +293,16 @@ async function safeFetchText(input: URL) {
       if (!/^https?:$/.test(current.protocol)) throw new Error("Website redirected to an unsupported protocol.");
       continue;
     }
+
     if (!response.ok) throw new Error(`Website returned HTTP ${response.status}.`);
     const type = response.headers.get("content-type") || "";
     if (!type.includes("text/html") && !type.includes("application/xhtml+xml")) {
       throw new Error("The supplied URL did not return an HTML page.");
     }
+
     return { html: await response.text(), finalUrl: current };
   }
+
   throw new Error("Too many website redirects.");
 }
 
@@ -320,6 +342,7 @@ function discoverUsefulLinks(html: string, base: URL) {
   const matches = Array.from(html.matchAll(/href\s*=\s*["']([^"'#]+)["']/gi));
   const scored: Array<{ url: URL; score: number }> = [];
   const keywords = ["about", "product", "platform", "solution", "customer", "industry", "company", "why", "services"];
+
   for (const match of matches) {
     try {
       const url = new URL(match[1], base);
@@ -331,7 +354,10 @@ function discoverUsefulLinks(html: string, base: URL) {
       // Ignore malformed links.
     }
   }
-  return Array.from(new Map(scored.sort((a, b) => b.score - a.score).map((entry) => [entry.url.toString(), entry.url])).values()).slice(0, 5);
+
+  return Array.from(
+    new Map(scored.sort((a, b) => b.score - a.score).map((entry) => [entry.url.toString(), entry.url])).values(),
+  ).slice(0, 5);
 }
 
 async function collectWebsiteEvidence(domain: string) {
@@ -339,10 +365,13 @@ async function collectWebsiteEvidence(domain: string) {
   const homepage = await safeFetchText(start);
   const pages = [{ url: homepage.finalUrl.toString(), html: homepage.html }];
   const links = discoverUsefulLinks(homepage.html, homepage.finalUrl);
-  const settled = await Promise.allSettled(links.map(async (url) => {
-    const result = await safeFetchText(url);
-    return { url: result.finalUrl.toString(), html: result.html };
-  }));
+  const settled = await Promise.allSettled(
+    links.map(async (url) => {
+      const result = await safeFetchText(url);
+      return { url: result.finalUrl.toString(), html: result.html };
+    }),
+  );
+
   for (const item of settled) {
     if (item.status === "fulfilled") pages.push(item.value);
   }
@@ -357,7 +386,10 @@ async function collectWebsiteEvidence(domain: string) {
   return {
     canonicalDomain: homepage.finalUrl.hostname,
     pages: evidence,
-    combinedText: evidence.map((page) => `SOURCE: ${page.url}\nTITLE: ${page.title}\nDESCRIPTION: ${page.description}\nTEXT: ${page.text}`).join("\n\n").slice(0, 24_000),
+    combinedText: evidence
+      .map((page) => `SOURCE: ${page.url}\nTITLE: ${page.title}\nDESCRIPTION: ${page.description}\nTEXT: ${page.text}`)
+      .join("\n\n")
+      .slice(0, 24_000),
   };
 }
 
@@ -387,15 +419,16 @@ async function callOllama(stage: Stage, source: string) {
         { role: "user", content: source.slice(0, 30_000) },
       ],
     }),
-    signal: AbortSignal.timeout(90_000),
+    signal: AbortSignal.timeout(45_000),
   });
+
   if (!response.ok) throw new Error(`Local AI returned HTTP ${response.status}.`);
   const payload = await response.json() as { message?: { content?: string }; response?: string };
   const content = payload.message?.content || payload.response || "";
   return extractJsonObject(content);
 }
 
-async function callOpenRouter(stage: Stage, source: string) {
+async function callOpenRouter(stage: Stage, source: string, model: string) {
   if (!OPENROUTER_API_KEY) throw new Error("OpenRouter is not configured.");
 
   const response = await fetch(OPENROUTER_URL, {
@@ -407,13 +440,13 @@ async function callOpenRouter(stage: Stage, source: string) {
       "X-OpenRouter-Title": "Talentera GTM Research",
     },
     body: JSON.stringify({
-      model: OPENROUTER_MODEL,
+      model,
       messages: [
         { role: "system", content: systemPrompt(stage) },
         { role: "user", content: source.slice(0, 30_000) },
       ],
       temperature: 0.2,
-      max_tokens: 3_500,
+      max_tokens: LIGHT_EXECUTION_STAGES.has(stage) ? 2_500 : 3_500,
       response_format: { type: "json_object" },
       provider: {
         sort: "price",
@@ -422,7 +455,7 @@ async function callOpenRouter(stage: Stage, source: string) {
       },
       stream: false,
     }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(90_000),
   });
 
   const payload = await response.json() as {
@@ -436,30 +469,27 @@ async function callOpenRouter(stage: Stage, source: string) {
   return { result: extractJsonObject(content), usage: payload.usage || {} };
 }
 
-function premiumCacheKey(stage: Stage, source: string) {
-  return createHash("sha256").update(`${stage}\n${OPENROUTER_MODEL}\n${source}`).digest("hex");
+function premiumCacheKey(stage: Stage, source: string, model: string) {
+  return createHash("sha256").update(`${stage}\n${model}\n${source}`).digest("hex");
 }
 
 async function runStageModel(stage: Stage, source: string, request: NextRequest) {
-  if (!PREMIUM_STAGES.has(stage)) {
-    const result = await callOllama(stage, source);
-    return { result, meta: { ai: "ollama", model: OLLAMA_MODEL, cached: false } };
-  }
+  const model = preferredModelForStage(stage);
 
   if (!OPENROUTER_API_KEY) {
     const result = await callOllama(stage, source);
     return {
       result,
       meta: {
-        ai: "ollama",
+        ai: "ollama" as const,
         model: OLLAMA_MODEL,
         cached: false,
-        warning: `OpenRouter is not configured, so ${stage} used the local model instead.`,
+        warning: `OpenRouter is not configured, so ${stage} used the local fallback model.`,
       },
     };
   }
 
-  const cacheKey = premiumCacheKey(stage, source);
+  const cacheKey = premiumCacheKey(stage, source, model);
   const cached = researchRuntime.premiumCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return { result: cached.result, meta: { ...cached.meta, cached: true } };
@@ -469,22 +499,30 @@ async function runStageModel(stage: Stage, source: string, request: NextRequest)
   if (quotaResponse) return { response: quotaResponse };
 
   try {
-    const { result, usage } = await callOpenRouter(stage, source);
-    const meta = {
-      ai: "openrouter" as const,
-      model: OPENROUTER_MODEL,
+    const { result, usage } = await callOpenRouter(stage, source, model);
+    const meta: OpenRouterMeta & { cached: boolean } = {
+      ai: "openrouter",
+      model,
       cached: false,
       cost: usage.cost,
       promptTokens: usage.prompt_tokens,
       completionTokens: usage.completion_tokens,
       totalTokens: usage.total_tokens,
     };
+
     researchRuntime.premiumCache.set(cacheKey, {
       expiresAt: Date.now() + PREMIUM_CACHE_TTL_MS,
       result,
-      meta,
+      meta: {
+        ai: "openrouter",
+        model,
+        cost: usage.cost,
+        promptTokens: usage.prompt_tokens,
+        completionTokens: usage.completion_tokens,
+        totalTokens: usage.total_tokens,
+      },
     });
-    cleanupRateEntries(Date.now());
+    cleanupRuntime(Date.now());
     return { result, meta };
   } catch (openRouterError) {
     try {
@@ -492,14 +530,16 @@ async function runStageModel(stage: Stage, source: string, request: NextRequest)
       return {
         result,
         meta: {
-          ai: "ollama",
+          ai: "ollama" as const,
           model: OLLAMA_MODEL,
           cached: false,
-          warning: `OpenRouter failed and the local model was used instead: ${openRouterError instanceof Error ? openRouterError.message : "unknown OpenRouter error"}`,
+          warning: `OpenRouter ${model} failed and the local fallback was used instead: ${openRouterError instanceof Error ? openRouterError.message : "unknown OpenRouter error"}`,
         },
       };
     } catch (localError) {
-      throw new Error(`OpenRouter failed (${openRouterError instanceof Error ? openRouterError.message : "unknown error"}) and local AI fallback also failed (${localError instanceof Error ? localError.message : "unknown error"}).`);
+      throw new Error(
+        `OpenRouter ${model} failed (${openRouterError instanceof Error ? openRouterError.message : "unknown error"}) and local AI fallback also failed (${localError instanceof Error ? localError.message : "unknown error"}).`,
+      );
     }
   }
 }
@@ -527,7 +567,7 @@ function fallbackCompany(domain: string, evidence: Awaited<ReturnType<typeof col
   return {
     company_name: first?.title?.split(/[|–—-]/)[0]?.trim() || evidence.canonicalDomain,
     domain: evidence.canonicalDomain,
-    summary: first?.description || `Website research captured for ${evidence.canonicalDomain}, but the local AI service was unavailable.`,
+    summary: first?.description || `Website research captured for ${evidence.canonicalDomain}, but AI analysis was unavailable.`,
     products_services: [],
     value_proposition: [],
     pain_points_solved: [],
@@ -536,7 +576,7 @@ function fallbackCompany(domain: string, evidence: Awaited<ReturnType<typeof col
     target_customer_types: [],
     evidence_notes: [
       `Captured ${evidence.pages.length} public website page(s).`,
-      "AI analysis was unavailable, so only deterministic website metadata is shown. Retry when the local model is ready.",
+      "AI analysis was unavailable, so only deterministic website metadata is shown. Retry this stage later.",
     ],
     confidence: "low",
     requested_domain: domain,
@@ -544,7 +584,11 @@ function fallbackCompany(domain: string, evidence: Awaited<ReturnType<typeof col
 }
 
 function fallbackStage(stage: Stage) {
-  const common = { status: "ai_unavailable", note: "Both the preferred model and fallback were unavailable. Keep the approved upstream context and retry this stage later." };
+  const common = {
+    status: "ai_unavailable",
+    note: "Both OpenRouter and the local fallback were unavailable. Keep the approved upstream context and retry this stage later.",
+  };
+
   if (stage === "tam") return { ...common, market_definition: "", estimated_tam: 0, estimated_tam_basis: "", recommended_markets: [], target_industries: [], employee_bands: [], revenue_bands: [], exclusions: [], assumptions: [], open_questions: [] };
   if (stage === "icp") return { ...common, tier_1: {}, tier_2: {}, tier_3: {} };
   if (stage === "personas") return { ...common, personas: [] };
@@ -556,15 +600,21 @@ function fallbackStage(stage: Stage) {
 
 export async function GET() {
   const localAiReady = await ollamaReady();
+  const openRouterConfigured = Boolean(OPENROUTER_API_KEY);
+
   return NextResponse.json({
     status: "ok",
-    aiReady: localAiReady,
+    aiReady: openRouterConfigured || localAiReady,
     localAiReady,
-    openRouterConfigured: Boolean(OPENROUTER_API_KEY),
+    openRouterConfigured,
     localModel: OLLAMA_MODEL,
     premiumModel: OPENROUTER_MODEL,
-    premiumStages: Array.from(PREMIUM_STAGES),
-    localStages: STAGES.filter((stage) => !PREMIUM_STAGES.has(stage)),
+    lightModel: OPENROUTER_LIGHT_MODEL,
+    premiumStages: Array.from(CORE_REASONING_STAGES),
+    lightStages: Array.from(LIGHT_EXECUTION_STAGES),
+    openRouterStages: STAGES,
+    localStages: [],
+    localFallbackEnabled: true,
     limits: {
       requestsPerHour: REQUESTS_PER_WINDOW,
       premiumRequestsPerHour: PAID_REQUESTS_PER_WINDOW,
@@ -581,11 +631,17 @@ export async function POST(request: NextRequest) {
 
   try {
     const parsed = inputSchema.parse(await request.json());
+
     if (parsed.stage === "company") {
       if (!parsed.domain) return NextResponse.json({ error: "Website domain is required." }, { status: 400 });
       const evidence = await collectWebsiteEvidence(parsed.domain);
+
       try {
-        const modelOutput = await runStageModel("company", `WEBSITE DOMAIN: ${evidence.canonicalDomain}\n\nPUBLIC WEBSITE EVIDENCE:\n${evidence.combinedText}`, request);
+        const modelOutput = await runStageModel(
+          "company",
+          `WEBSITE DOMAIN: ${evidence.canonicalDomain}\n\nPUBLIC WEBSITE EVIDENCE:\n${evidence.combinedText}`,
+          request,
+        );
         if ("response" in modelOutput) return modelOutput.response;
         return NextResponse.json({
           result: modelOutput.result,
@@ -596,10 +652,10 @@ export async function POST(request: NextRequest) {
           result: fallbackCompany(parsed.domain, evidence),
           meta: {
             ai: "fallback",
-            model: OLLAMA_MODEL,
+            model: preferredModelForStage("company"),
             cached: false,
             sources: evidence.pages.map((page) => page.url),
-            warning: error instanceof Error ? error.message : "Local AI unavailable.",
+            warning: error instanceof Error ? error.message : "AI unavailable.",
           },
         });
       }
@@ -609,7 +665,11 @@ export async function POST(request: NextRequest) {
     if (context.length > 60_000) return NextResponse.json({ error: "Approved context is too large." }, { status: 413 });
 
     try {
-      const modelOutput = await runStageModel(parsed.stage, `APPROVED UPSTREAM CONTEXT (source of truth):\n${context}`, request);
+      const modelOutput = await runStageModel(
+        parsed.stage,
+        `APPROVED UPSTREAM CONTEXT (source of truth):\n${context}`,
+        request,
+      );
       if ("response" in modelOutput) return modelOutput.response;
       return NextResponse.json({ result: modelOutput.result, meta: modelOutput.meta });
     } catch (error) {
@@ -617,14 +677,18 @@ export async function POST(request: NextRequest) {
         result: fallbackStage(parsed.stage),
         meta: {
           ai: "fallback",
-          model: PREMIUM_STAGES.has(parsed.stage) ? OPENROUTER_MODEL : OLLAMA_MODEL,
+          model: preferredModelForStage(parsed.stage),
           cached: false,
           warning: error instanceof Error ? error.message : "AI unavailable.",
         },
       });
     }
   } catch (error) {
-    const message = error instanceof z.ZodError ? "Invalid GTM research request." : error instanceof Error ? error.message : "Unexpected GTM research error.";
+    const message = error instanceof z.ZodError
+      ? "Invalid GTM research request."
+      : error instanceof Error
+        ? error.message
+        : "Unexpected GTM research error.";
     return NextResponse.json({ error: message }, { status: 400 });
   } finally {
     slot.release();
