@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 
 const MARITA_OWNER_ID = "31644369";
 const MARITA_OWNER_NAME = "Marita Chedid";
+const DIRECT_APPLICATION_LABEL = "Direct Application Form";
 
 const prospectSchema = z.object({
   linkedinUrl: z.string().url().max(1000),
@@ -25,7 +26,7 @@ const prospectSchema = z.object({
   companyEvidenceUrl: z.string().trim().max(1500).default(""),
   companyVerificationReason: z.string().trim().max(1500).default(""),
   hiring: z.object({
-    status: z.enum(["Hiring Now", "No Active Jobs", "Unknown"]).default("Unknown"),
+    status: z.enum(["Hiring Now", "Accepting Applications", "No Active Jobs", "Unknown"]).default("Unknown"),
     activeJobs: z.number().min(0).max(100000).default(0),
     hiringScore: z.number().min(0).max(100).default(0),
     hiringLabel: z.string().trim().max(120).default(""),
@@ -147,17 +148,18 @@ async function findCompanyId(domain: string) {
 function companyPropertiesFromProspect(prospect: Prospect, includeIdentity = true) {
   const properties: Record<string, string> = {};
   const domain = companyDomain(prospect);
+  const directApplication = prospect.detectedAts === DIRECT_APPLICATION_LABEL;
   if (includeIdentity && prospect.company) properties.name = prospect.company;
   if (includeIdentity && domain) properties.domain = domain;
   if (includeIdentity && prospect.companyWebsite) properties.company_website = prospect.companyWebsite;
   if (prospect.careerPageUrl) properties.career_page_url = prospect.careerPageUrl;
-  if (prospect.detectedAts) {
+  if (prospect.detectedAts && !directApplication) {
     properties.detected_ats = prospect.detectedAts;
     properties.ats_status = "detected";
+    if (prospect.atsConfidence) properties.ats_confidence = prospect.atsConfidence;
+    if (prospect.companyEvidenceUrl) properties.ats_evidence_url = prospect.companyEvidenceUrl;
+    if (prospect.companyVerificationReason) properties.ats_evidence_reason = prospect.companyVerificationReason.slice(0, 1000);
   }
-  if (prospect.atsConfidence) properties.ats_confidence = prospect.atsConfidence;
-  if (prospect.companyEvidenceUrl) properties.ats_evidence_url = prospect.companyEvidenceUrl;
-  if (prospect.companyVerificationReason) properties.ats_evidence_reason = prospect.companyVerificationReason.slice(0, 1000);
   return properties;
 }
 
@@ -218,6 +220,9 @@ function taskBody(prospect: Prospect, clickedAt: string) {
   const phones = allPhones(prospect);
   const priorityLabel = prospect.priority === "high" ? "HIGH" : prospect.priority === "medium" ? "MEDIUM" : "NORMAL";
   const jobs = prospect.hiring.jobsSample.slice(0, 3).map((job) => `• ${job.title}${job.location ? ` — ${job.location}` : ""}`);
+  const atsText = prospect.detectedAts === DIRECT_APPLICATION_LABEL
+    ? DIRECT_APPLICATION_LABEL
+    : `${prospect.detectedAts || "Not detected"}${prospect.atsConfidence ? ` (${prospect.atsConfidence})` : ""}`;
   return [
     `🔥 **${priorityLabel} PRIORITY — SALES SIGNAL**`, "",
     "👤 **Contact**", prospect.fullName,
@@ -228,8 +233,9 @@ function taskBody(prospect: Prospect, clickedAt: string) {
     prospect.previousCompany ? `Previous: ${prospect.previousTitle ? `${prospect.previousTitle} · ` : ""}${prospect.previousCompany}` : "", "",
     "🏢 **Company Intelligence**",
     `Domain: ${companyDomain(prospect) || "Not resolved"}`,
+    `Website: ${prospect.companyWebsite || "Not resolved"}`,
     `Career Page: ${prospect.careerPageUrl || "Not found"}`,
-    `ATS: ${prospect.detectedAts || "Not detected"}${prospect.atsConfidence ? ` (${prospect.atsConfidence})` : ""}`,
+    `ATS / Application: ${atsText}`,
     `Hiring: ${prospect.hiring.status}`,
     `Active Jobs: ${prospect.hiring.activeJobs}`,
     `Hiring Score: ${prospect.hiring.hiringScore}/100${prospect.hiring.hiringLabel ? ` · ${prospect.hiring.hiringLabel}` : ""}`,
@@ -243,9 +249,11 @@ function taskBody(prospect: Prospect, clickedAt: string) {
     "💡 **Suggested Action**",
     prospect.hiring.status === "Hiring Now"
       ? "Lead with the current hiring activity and recruitment scale, then qualify their ATS/process and current bottlenecks."
-      : prospect.recentSignal.type
-        ? "Use the recent role/company change as the opening, then qualify current hiring and recruitment process."
-        : "Qualify hiring activity, current recruitment process, and ATS before pitching.",
+      : prospect.hiring.status === "Accepting Applications"
+        ? "The company is accepting applications through its career form, but no verified open-role list was found. Use this as a light hiring signal and qualify current hiring volume and process."
+        : prospect.recentSignal.type
+          ? "Use the recent role/company change as the opening, then qualify current hiring and recruitment process."
+          : "Qualify hiring activity, current recruitment process, and ATS before pitching.",
   ].filter(Boolean).join("\n");
 }
 
