@@ -10,7 +10,7 @@ const PORT = Number(process.env.PORT || 3000);
 const CACHE_TTL_DAYS = Number(process.env.CACHE_TTL_DAYS || 30);
 const MAX_STATIC_PAGES = Number(process.env.MAX_STATIC_PAGES || 30);
 const MAX_BROWSER_STEPS = Number(process.env.MAX_BROWSER_STEPS || 8);
-const VERSION = '2.0.0';
+const VERSION = '3.0.0';
 let cacheWriteQueue = Promise.resolve();
 
 function terminalCareerStatus(status) { return ['found_verified','no_public_career_page','website_domain_invalid','insufficient_company_data'].includes(String(status || '')); }
@@ -48,20 +48,39 @@ async function persistCacheEntry(key, result, ttlDays = CACHE_TTL_DAYS) {
   cacheWriteQueue = cacheWriteQueue.then(async () => { const cache = await readCache(); cache[key] = { cached_at: now(), ttl_days: ttlDays, result }; await writeCache(cache); }).catch(error => console.error('cache_persist_failed',error.message));
   await cacheWriteQueue;
 }
+
+async function validateKnownCareer(raw, result) {
+  const known = normalizeUrl(raw);
+  if (!known) return result;
+  try {
+    await assertPublic(known);
+    result.career_url = known;
+    result.candidate_urls = unique([known, ...(result.candidate_urls || [])]);
+    result.ats_evidence_reason = 'Existing HubSpot Career Page supplied as a trusted discovery seed; the engine will re-open it and verify the employer/ATS evidence.';
+    result.trace.push({ stage: 'known_career_seed', final_url: known, status: 200 });
+  } catch (error) {
+    result.trace.push({ stage: 'known_career_seed', url: known, error: clean(error.message, 250) });
+  }
+  return result;
+}
+
 async function detect(input, mode = 'career') {
-  const careerOnly = mode === 'career' || input.career_only === true;
+  const atsRequested = mode === 'intelligence' || input.detect_ats === true;
+  const careerOnly = input.career_only === true || (!atsRequested && mode === 'career');
   const raw = input.company_website || input.signalhire_website || input.apollo_website || input.official_website || input.company_domain;
   const website = rootUrl(normalizeUrl(raw));
   const request = {
     company_name: clean(input.company_name,300), company_domain: clean(input.company_domain,500) || domain(website), official_website: website,
-    force_refresh: Boolean(input.force_refresh), force_browser: Boolean(input.force_browser), career_only: careerOnly,
-    stop_on_career: careerOnly || Boolean(input.stop_on_career), require_job_detail: careerOnly ? false : input.require_job_detail !== false,
+    known_career_url: normalizeUrl(input.known_career_url || input.career_url),
+    force_refresh: Boolean(input.force_refresh), force_browser: Boolean(input.force_browser), career_only: careerOnly, detect_ats: atsRequested,
+    stop_on_career: careerOnly ? true : Boolean(input.stop_on_career),
+    require_job_detail: atsRequested ? input.require_job_detail === true : false,
     max_static_pages: Math.max(5,Math.min(60,Number(input.max_static_pages || MAX_STATIC_PAGES))),
     max_browser_steps: Math.max(3,Math.min(20,Number(input.max_browser_steps || MAX_BROWSER_STEPS))),
   };
   let result = baseResult(website);
   if (!website) { result.detection_method = 'input_missing_website'; result.detection_error = 'company_website or company_domain is required'; return { request, result: finalizeCareer(result) }; }
-  const key = domain(website);
+  const key = `${domain(website)}:${atsRequested ? 'full' : 'career'}`;
   try { await assertPublic(website); }
   catch (e) { result.detection_method = 'website_validation_failed'; result.detection_error = clean(e.message,500); result = finalizeCareer(result); await persistCacheEntry(key,result,ttlForCareerStatus(result.career_status)); return { request, result }; }
   const cache = await readCache(); const cached = cache[key];
@@ -69,8 +88,11 @@ async function detect(input, mode = 'career') {
     const complete = terminalCareerStatus(cached.result?.career_status) || Boolean(cached.result?.career_url);
     if (complete) return { request, result: { ...cached.result, cache_hit: true, detection_method: `cache:${cached.result.detection_method}` } };
   }
-  if (!request.force_browser) result = await staticDetect(request,result);
-  if (request.force_browser || !result.career_url) {
+
+  result = await validateKnownCareer(request.known_career_url, result);
+  const shouldStartWithBrowser = request.force_browser || Boolean(request.known_career_url);
+  if (!shouldStartWithBrowser) result = await staticDetect(request,result);
+  if (shouldStartWithBrowser || !result.career_url || (atsRequested && result.ats_status !== 'detected')) {
     try { result = await browserDetect(request,result); }
     catch (e) { result.detection_error = clean(e.message,500); result.detection_method = result.career_url ? 'playwright_failed_after_career_found' : 'playwright_failed'; result.trace.push({ stage: 'playwright', error: result.detection_error }); }
   }
@@ -95,16 +117,21 @@ app.get('/health', (_req,res) => res.json({
   ok: true,
   service: 'gtm-career-browser',
   version: VERSION,
-  capabilities: ['career-detect','negative-cache','arabic-career-signals','browser-pool','blank-page-rejection','adversarial-ai-judge','career-v2'],
+  capabilities: ['career-detect','ats-detect','full-intelligence','known-career-seed','negative-cache','arabic-career-signals','browser-pool','blank-page-rejection','adversarial-ai-judge','career-v3'],
   aiJudge: {
     enabled: String(process.env.AI_JUDGE_ENABLED || 'true').toLowerCase() === 'true',
-    model: process.env.OLLAMA_MODEL || 'qwen3:1.7b',
+    model: process.env.OLLAMA_MODEL || 'qwen3:8b',
   },
   time: now(),
 }));
 app.post('/career-detect', async (req,res) => {
   const started = Date.now();
   try { const payload = await detect(req.body || {},'career'); res.json({ ok: true, service: 'gtm-career-browser', version: VERSION, duration_ms: Date.now() - started, ...payload }); }
+  catch (e) { res.status(500).json({ ok: false, service: 'gtm-career-browser', version: VERSION, duration_ms: Date.now() - started, error: clean(e.message,1000) }); }
+});
+app.post('/intelligence-detect', async (req,res) => {
+  const started = Date.now();
+  try { const payload = await detect({ ...(req.body || {}), detect_ats: true },'intelligence'); res.json({ ok: true, service: 'gtm-career-browser', version: VERSION, duration_ms: Date.now() - started, ...payload }); }
   catch (e) { res.status(500).json({ ok: false, service: 'gtm-career-browser', version: VERSION, duration_ms: Date.now() - started, error: clean(e.message,1000) }); }
 });
 app.use((_req,res) => res.status(404).json({ ok: false, error: 'Not found' }));
