@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { HubSpotApiError, searchAll } from "@/lib/hubspot";
-import { inspectProspectCompany } from "@/lib/prospecting-company-intelligence";
+import { inspectProspectCompany } from "@/lib/prospecting-company-intelligence-gemini";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -115,6 +115,8 @@ export async function GET() {
     signalHireConfigured: Boolean(process.env.SIGNALHIRE_API_KEY),
     smartleadConfigured: Boolean(process.env.SMARTLEAD_API_KEY),
     companyIntelligenceConfigured: Boolean(process.env.CAREER_ENGINE_URL),
+    geminiCareerFallbackConfigured: Boolean(process.env.GEMINI_API_KEY),
+    geminiCareerModel: process.env.GEMINI_CAREER_MODEL || "gemini-2.5-flash-lite",
     defaultSource: "Sales Navigator",
   }, { headers: { "Cache-Control": "no-store" } });
 }
@@ -236,8 +238,9 @@ export async function POST(request: NextRequest) {
         hubspot: hubspot ? { inHubSpot: true, ...hubspot } : { inHubSpot: false, id: "", matchedBy: "" },
       },
       meta: {
-        provider: "SignalHire + Career ATS V3 + Hiring Intelligence",
+        provider: "SignalHire + Career ATS V3 + Gemini Search fallback + Hiring Intelligence",
         creditsLeft: creditsLeft ? Number(creditsLeft) : null,
+        geminiCareerFallbackConfigured: Boolean(process.env.GEMINI_API_KEY),
         smartleadConfigured: Boolean(process.env.SMARTLEAD_API_KEY),
       },
     }, { headers: { "Cache-Control": "no-store" } });
