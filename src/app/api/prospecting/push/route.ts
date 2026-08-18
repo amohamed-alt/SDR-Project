@@ -5,6 +5,9 @@ import { batchRead, HubSpotApiError, readAssociations, searchAll } from "@/lib/h
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const MARITA_OWNER_ID = "31644369";
+const MARITA_OWNER_NAME = "Marita Chedid";
+
 const prospectSchema = z.object({
   linkedinUrl: z.string().url().max(1000),
   source: z.string().trim().max(120).default("Sales Navigator"),
@@ -14,7 +17,9 @@ const prospectSchema = z.object({
   companyWebsite: z.string().trim().max(1000).default(""),
   location: z.string().trim().max(500).default(""),
   email: z.string().trim().max(320).default(""),
+  emails: z.array(z.string().trim().max(320)).max(20).default([]),
   phone: z.string().trim().max(120).default(""),
+  phones: z.array(z.string().trim().max(120)).max(20).default([]),
   score: z.number().min(0).max(100),
   priority: z.enum(["high", "medium", "normal"]),
   previousTitle: z.string().trim().max(250).default(""),
@@ -26,6 +31,8 @@ const prospectSchema = z.object({
   }).default({ type: "", label: "" }),
   scoreReasons: z.array(z.object({ label: z.string().max(250), points: z.number().min(0).max(100) })).max(20).default([]),
 });
+
+type Prospect = z.infer<typeof prospectSchema>;
 
 function token() {
   const value = String(process.env.HUBSPOT_PRIVATE_APP_TOKEN || "").trim();
@@ -55,6 +62,24 @@ function splitName(fullName: string) {
     firstname: parts.shift() || fullName,
     lastname: parts.join(" "),
   };
+}
+
+function uniqueValues(values: string[]) {
+  const seen = new Set<string>();
+  return values.map((value) => value.trim()).filter((value) => {
+    const key = value.toLowerCase();
+    if (!value || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function allEmails(prospect: Prospect) {
+  return uniqueValues([prospect.email, ...prospect.emails]);
+}
+
+function allPhones(prospect: Prospect) {
+  return uniqueValues([prospect.phone, ...prospect.phones]);
 }
 
 function companyDomain(website: string) {
@@ -89,7 +114,7 @@ async function findContact(email: string, linkedinUrl: string) {
   return "";
 }
 
-async function createContact(prospect: z.infer<typeof prospectSchema>) {
+async function createContact(prospect: Prospect) {
   const name = splitName(prospect.fullName);
   const properties: Record<string, string> = {
     firstname: name.firstname,
@@ -107,6 +132,27 @@ async function createContact(prospect: z.infer<typeof prospectSchema>) {
     body: JSON.stringify({ properties }),
   });
   return String(created.id);
+}
+
+async function syncMissingContactDetails(contactId: string, prospect: Prospect) {
+  const current = (await batchRead("contacts", [contactId], ["email", "phone", "gtm_linkedin_url"]))[0];
+  if (!current) return [] as string[];
+
+  const properties: Record<string, string> = {};
+  if (prospect.email && !String(current.properties.email || "").trim()) properties.email = prospect.email.toLowerCase();
+  if (prospect.phone && !String(current.properties.phone || "").trim()) properties.phone = prospect.phone;
+  if (prospect.linkedinUrl && !String(current.properties.gtm_linkedin_url || "").trim() && await contactHasLinkedInProperty()) {
+    properties.gtm_linkedin_url = prospect.linkedinUrl;
+  }
+
+  const updated = Object.keys(properties);
+  if (!updated.length) return updated;
+
+  await hubspotRequest(`/crm/v3/objects/contacts/${contactId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ properties }),
+  });
+  return updated;
 }
 
 async function findCompanyId(website: string) {
@@ -137,11 +183,15 @@ async function existingOpenProspectingTask(contactId: string, fullName: string) 
   }
 }
 
-function taskBody(prospect: z.infer<typeof prospectSchema>) {
+function taskBody(prospect: Prospect, clickedAt: string) {
   const reasons = prospect.scoreReasons.map((item) => `• ${item.label} (+${item.points})`).join("\n");
   const signal = prospect.recentSignal.label || "No recent role-change signal detected";
+  const emails = allEmails(prospect);
+  const phones = allPhones(prospect);
+  const priorityLabel = prospect.priority === "high" ? "HIGH" : prospect.priority === "medium" ? "MEDIUM" : "NORMAL";
+
   return [
-    "🔥 **HIGH PRIORITY — SALES SIGNAL**",
+    `🔥 **${priorityLabel} PRIORITY — SALES SIGNAL**`,
     "",
     "👤 **Contact**",
     prospect.fullName,
@@ -156,22 +206,29 @@ function taskBody(prospect: z.infer<typeof prospectSchema>) {
     prospect.previousCompany ? `Previous: ${prospect.previousTitle ? `${prospect.previousTitle} · ` : ""}${prospect.previousCompany}` : "",
     "",
     "⭐ **Priority Score**",
-    `${prospect.score}/100 — ${prospect.priority.toUpperCase()}`,
-    reasons,
+    `${prospect.score}/100 — ${priorityLabel}`,
+    reasons || "No additional score reasons",
     "",
-    "📞 **Contact**",
-    prospect.phone || "Phone not available",
-    prospect.email || "Email not available",
+    "📱 **Phone Numbers**",
+    ...(phones.length ? phones.map((value, index) => `${index + 1}. ${value}`) : ["Phone not available"]),
+    "",
+    "📧 **Email Addresses**",
+    ...(emails.length ? emails.map((value, index) => `${index + 1}. ${value}`) : ["Email not available"]),
     "",
     "🔗 **LinkedIn**",
     prospect.linkedinUrl,
     "",
+    "🕒 **Queued At**",
+    clickedAt,
+    "",
     "💡 **Suggested Action**",
     prospect.recentSignal.type ? "Use the recent role/company change as the opening, then qualify current hiring and recruitment process." : "Qualify hiring activity, current recruitment process, and ATS before pitching.",
-  ].filter((line) => line !== "").join("\n");
+  ].join("\n");
 }
 
 export async function POST(request: Request) {
+  const clickedAt = new Date().toISOString();
+
   try {
     const parsed = prospectSchema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: "Invalid prospect payload." }, { status: 400 });
@@ -179,9 +236,12 @@ export async function POST(request: Request) {
 
     let contactId = await findContact(prospect.email, prospect.linkedinUrl);
     let contactCreated = false;
+    let contactFieldsUpdated: string[] = [];
     if (!contactId) {
       contactId = await createContact(prospect);
       contactCreated = true;
+    } else {
+      contactFieldsUpdated = await syncMissingContactDetails(contactId, prospect);
     }
 
     const duplicateTask = await existingOpenProspectingTask(contactId, prospect.fullName);
@@ -191,13 +251,16 @@ export async function POST(request: Request) {
         duplicate: true,
         contactId,
         contactCreated,
+        contactFieldsUpdated,
         taskId: String(duplicateTask.id),
+        ownerId: MARITA_OWNER_ID,
+        ownerName: MARITA_OWNER_NAME,
+        clickedAt,
         message: "An open Sales Signal task already exists for this contact.",
       });
     }
 
     const companyId = await findCompanyId(prospect.companyWebsite);
-    const ownerId = String(process.env.MARITA_OWNER_ID || process.env.DEFAULT_SDR_OWNER_ID || "31644369");
     const associations: Array<{ to: { id: string }; types: Array<{ associationCategory: "HUBSPOT_DEFINED"; associationTypeId: number }> }> = [
       { to: { id: contactId }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 204 }] },
     ];
@@ -207,13 +270,13 @@ export async function POST(request: Request) {
       method: "POST",
       body: JSON.stringify({
         properties: {
-          hs_timestamp: new Date().toISOString(),
-          hubspot_owner_id: ownerId,
+          hs_timestamp: clickedAt,
+          hubspot_owner_id: MARITA_OWNER_ID,
           hs_task_subject: `🔥 SALES SIGNAL — ${prospect.fullName}`,
-          hs_task_body: taskBody(prospect),
+          hs_task_body: taskBody(prospect, clickedAt),
           hs_task_status: "NOT_STARTED",
           hs_task_priority: prospect.priority === "high" ? "HIGH" : "MEDIUM",
-          hs_task_type: prospect.phone ? "CALL" : prospect.email ? "EMAIL" : "TODO",
+          hs_task_type: allPhones(prospect).length ? "CALL" : allEmails(prospect).length ? "EMAIL" : "TODO",
         },
         associations,
       }),
@@ -224,9 +287,14 @@ export async function POST(request: Request) {
       duplicate: false,
       contactId,
       contactCreated,
+      contactFieldsUpdated,
       companyId: companyId || null,
       taskId: String(task.id),
-      ownerId,
+      ownerId: MARITA_OWNER_ID,
+      ownerName: MARITA_OWNER_NAME,
+      clickedAt,
+      phonesStoredInTask: allPhones(prospect).length,
+      emailsStoredInTask: allEmails(prospect).length,
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Push prospect to Marita failed", error);
