@@ -64,6 +64,33 @@ jobs:
           }
           echo "SignalHire deployment secret: configured"
 
+      - name: Validate Gemini grounded career fallback
+        env:
+          GEMINI_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$GEMINI_KEY" || {
+            echo "::error::Add GEMINI_API_KEY as a repository Actions secret."
+            exit 1
+          }
+          HTTP_CODE=$(curl --silent --show-error \
+            --connect-timeout 10 \
+            --max-time 60 \
+            --output /tmp/gemini-grounded-test.json \
+            --write-out '%{http_code}' \
+            -X POST \
+            'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent' \
+            -H "x-goog-api-key: $GEMINI_KEY" \
+            -H 'Content-Type: application/json' \
+            -d '{"contents":[{"parts":[{"text":"Use Google Search and return only the current official website domain for AlYemni Group in Saudi Arabia."}]}],"tools":[{"google_search":{}}],"generationConfig":{"temperature":0.1,"maxOutputTokens":200}}' || true)
+          GEMINI_TEXT=$(jq -r '[.candidates[0].content.parts[]?.text // empty] | join(" ")' /tmp/gemini-grounded-test.json 2>/dev/null || true)
+          if [ "$HTTP_CODE" != "200" ] || [ -z "$GEMINI_TEXT" ]; then
+            GEMINI_ERROR=$(jq -r '.error.message // "unknown Gemini error"' /tmp/gemini-grounded-test.json 2>/dev/null || true)
+            echo "::error::Gemini grounded search validation failed (HTTP $HTTP_CODE): $GEMINI_ERROR"
+            exit 1
+          fi
+          echo "Gemini grounded career fallback: configured and responding"
+
       - name: Validate GTM premium AI configuration
         env:
           GTM_OPENROUTER_KEY: ${{ secrets.GTM_RESEARCH_OPENROUTER_API_KEY || secrets.OPENROUTER_API_KEY }}
@@ -84,6 +111,8 @@ jobs:
           environment-variables: |
             SDR_BUILD_REF=${{ env.DEPLOY_SHA }}
             SIGNALHIRE_API_KEY=${{ secrets.SIGNALHIRE_API_KEY }}
+            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+            GEMINI_CAREER_MODEL=gemini-2.5-flash-lite
             GTM_RESEARCH_OPENROUTER_API_KEY=${{ secrets.GTM_RESEARCH_OPENROUTER_API_KEY || secrets.OPENROUTER_API_KEY }}
             GTM_RESEARCH_OPENROUTER_MODEL=openai/gpt-4.1-mini
 
@@ -120,6 +149,18 @@ jobs:
 
           if [ "$READY" != "true" ]; then
             echo "::error::Production never exposed the exact commit $DEPLOY_SHA with ready Career + ATS Intelligence V3 within the bounded deployment window."
+            exit 1
+          fi
+
+          PROSPECTING_HEALTH=$(curl --silent --show-error \
+            --connect-timeout 5 \
+            --max-time 15 \
+            'https://sdr.dashboardtalentera.tech/api/prospecting/analyze' || true)
+          GEMINI_READY=$(printf '%s' "$PROSPECTING_HEALTH" | jq -r '.geminiCareerFallbackConfigured // false' 2>/dev/null || true)
+          GEMINI_MODEL=$(printf '%s' "$PROSPECTING_HEALTH" | jq -r '.geminiCareerModel // ""' 2>/dev/null || true)
+          echo "Prospecting Gemini gate: configured=${GEMINI_READY:-false} model=${GEMINI_MODEL:-none}"
+          if [ "$GEMINI_READY" != "true" ] || [ "$GEMINI_MODEL" != "gemini-2.5-flash-lite" ]; then
+            echo "::error::Prospecting Gemini career fallback is not exposed by the deployed build."
             exit 1
           fi
 
@@ -163,7 +204,7 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'success',
               context: 'hostinger/deploy',
-              description: 'Exact SDR build, Career ATS V3, and GTM OpenRouter validation are live',
+              description: 'Exact SDR build, Career ATS V3, Gemini fallback, and GTM validation are live',
               target_url: process.env.DEPLOY_URL,
             });
 
@@ -180,6 +221,6 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'failure',
               context: 'hostinger/deploy',
-              description: 'SDR production build/version/GTM gate failed',
+              description: 'SDR production build/version/Gemini/GTM gate failed',
               target_url: process.env.DEPLOY_URL,
             });
