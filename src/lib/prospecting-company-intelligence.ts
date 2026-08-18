@@ -238,21 +238,26 @@ async function probeBrandWebsite(domainCandidate: string, companyName: string, o
   return null;
 }
 
-async function resolveAlternateCompanyWebsite(companyName: string, originalDomain: string) {
+async function resolveAlternateCompanyWebsite(
+  companyName: string,
+  originalDomain: string,
+): Promise<WebsiteResolution | null> {
   const candidates = candidateCompanyDomains(companyName, originalDomain);
   if (!candidates.length) return null;
-  let cursor = 0;
-  let resolved: WebsiteResolution | null = null;
-  async function worker() {
-    while (!resolved) {
-      const index = cursor++;
-      if (index >= candidates.length) return;
-      const match = await probeBrandWebsite(candidates[index], companyName, originalDomain);
-      if (match && !resolved) resolved = match;
+
+  const workerCount = Math.min(4, candidates.length);
+  const groups = Array.from({ length: workerCount }, () => [] as string[]);
+  candidates.forEach((candidate, index) => groups[index % workerCount].push(candidate));
+
+  const results = await Promise.all(groups.map(async (group): Promise<WebsiteResolution | null> => {
+    for (const candidate of group) {
+      const match = await probeBrandWebsite(candidate, companyName, originalDomain);
+      if (match) return match;
     }
-  }
-  await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, () => worker()));
-  return resolved;
+    return null;
+  }));
+
+  return results.find((match): match is WebsiteResolution => match !== null) ?? null;
 }
 
 async function hiringFromExistingStore(domains: string[]) {
