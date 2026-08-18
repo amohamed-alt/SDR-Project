@@ -105,11 +105,12 @@ const COMPANY_PROPERTIES = [
 ] as const;
 
 const STORE_PATH = process.env.CAREER_INTELLIGENCE_STORE_PATH || "/app/data/career-intelligence.json";
-const ENGINE_URL = process.env.CAREER_ENGINE_URL || "http://gtm-ats-browser:3000/career-detect";
-const ENGINE_TIMEOUT_MS = Math.max(10_000, Number(process.env.CAREER_ENGINE_TIMEOUT_MS || 90_000));
-const DEFAULT_SCAN_LIMIT = Math.max(1, Math.min(100, Number(process.env.CAREER_SCAN_LIMIT || 25)));
+const ENGINE_URL = process.env.CAREER_ENGINE_URL || "http://gtm-career-browser:3000/intelligence-detect";
+const ENGINE_TIMEOUT_MS = Math.max(10_000, Number(process.env.CAREER_ENGINE_TIMEOUT_MS || 180_000));
+const DEFAULT_SCAN_LIMIT = Math.max(1, Math.min(100, Number(process.env.CAREER_SCAN_LIMIT || 30)));
 const SCAN_CONCURRENCY = Math.max(1, Math.min(12, Number(process.env.CAREER_SCAN_CONCURRENCY || 6)));
 const PORTFOLIO_CACHE_MS = Math.max(10_000, Number(process.env.CAREER_PORTFOLIO_CACHE_MS || 60_000));
+const AUTO_PUSH = String(process.env.CAREER_AUTO_PUSH || "false").toLowerCase() === "true";
 
 let storeQueue: Promise<void> = Promise.resolve();
 let portfolioCache: { expiresAt: number; companies: CareerCompany[] } | null = null;
@@ -150,14 +151,23 @@ function blankCompany(record: HubSpotRecord): CareerCompany {
   const companyName = value(record, "name") || "Unnamed company";
   const domain = normalizeDomain(value(record, "domain") || value(record, "company_website"));
   const website = normalizeWebsite(value(record, "company_website"), domain);
+  const careerPageUrl = value(record, "career_page_url");
+  const detectedAts = value(record, "detected_ats");
+  const atsStatus = value(record, "ats_status");
   let status: CareerStatus = "needs_research";
-  let reason = "Waiting for Career Intelligence scan.";
+  let reason = careerPageUrl && !detectedAts
+    ? "Career Page already exists in HubSpot; ATS fingerprinting is pending."
+    : "Waiting for Career + ATS Intelligence scan.";
+
   if (!domain && isPlaceholderCompany(companyName)) {
     status = "insufficient_company_data";
     reason = "No usable domain and the company identity is blank or a placeholder.";
   } else if (!domain) {
     status = "needs_manual_review";
     reason = "Company has no usable domain; identity resolution is required before crawling.";
+  } else if (careerPageUrl && detectedAts) {
+    status = "found_verified";
+    reason = "Career Page and ATS already exist in HubSpot.";
   }
 
   return {
@@ -165,12 +175,12 @@ function blankCompany(record: HubSpotRecord): CareerCompany {
     companyName,
     domain,
     website,
-    careerPageUrl: value(record, "career_page_url"),
-    detectedAts: value(record, "detected_ats"),
-    atsStatus: value(record, "ats_status"),
+    careerPageUrl,
+    detectedAts,
+    atsStatus,
     atsConfidence: value(record, "ats_confidence"),
     status,
-    confidenceScore: status === "insufficient_company_data" ? 99 : status === "needs_manual_review" ? 40 : 0,
+    confidenceScore: status === "insufficient_company_data" ? 99 : status === "needs_manual_review" ? 40 : status === "found_verified" ? 99 : 0,
     verificationReason: reason,
     verificationSource: "HubSpot",
     evidenceUrl: value(record, "ats_evidence_url"),
@@ -190,9 +200,9 @@ function blankCompany(record: HubSpotRecord): CareerCompany {
 
 function demoCompanies(): CareerCompany[] {
   const records = [
-    { id: "demo-1", name: "YMCO", domain: "ymco.sa", status: "found_verified" as CareerStatus, career: "https://ymco.sa/?page_id=5534", ats: "" },
+    { id: "demo-1", name: "YMCO", domain: "ymco.sa", status: "found_verified" as CareerStatus, career: "https://ymco.sa/?page_id=5534", ats: "Workday" },
     { id: "demo-2", name: "Example Gulf Holdings", domain: "example-gulf.com", status: "needs_research" as CareerStatus, career: "", ats: "" },
-    { id: "demo-3", name: "Arabic Example", domain: "example.sa", status: "needs_manual_review" as CareerStatus, career: "", ats: "" },
+    { id: "demo-3", name: "Existing Career ATS Pending", domain: "example.sa", status: "needs_research" as CareerStatus, career: "https://example.sa/careers", ats: "" },
     { id: "demo-4", name: "Blocked Example", domain: "blocked.example", status: "website_domain_invalid" as CareerStatus, career: "", ats: "" },
   ];
   return records.map((item) => ({
@@ -206,10 +216,10 @@ function demoCompanies(): CareerCompany[] {
     atsConfidence: item.ats ? "high" : "",
     status: item.status,
     confidenceScore: item.status === "found_verified" ? 96 : item.status === "website_domain_invalid" ? 98 : 45,
-    verificationReason: item.status === "found_verified" ? "Verified employer career page." : "Demo record for dashboard validation.",
+    verificationReason: item.status === "found_verified" ? "Verified employer career page and ATS." : "Demo record for dashboard validation.",
     verificationSource: "Demo",
     evidenceUrl: item.career,
-    detectionMethod: item.status === "found_verified" ? "static_career_verified" : "",
+    detectionMethod: item.status === "found_verified" ? "static_career_ats_verified" : "",
     pagesChecked: item.status === "found_verified" ? 4 : 0,
     staticPagesChecked: item.status === "found_verified" ? 4 : 0,
     browserPagesChecked: 0,
@@ -253,13 +263,34 @@ async function saveCompany(company: CareerCompany) {
 
 async function loadHubSpotPortfolio(): Promise<CareerCompany[]> {
   if (process.env.DEMO_MODE === "true") return demoCompanies();
-  const records = await searchAll(
-    "companies",
-    COMPANY_PROPERTIES,
-    [{ propertyName: "career_page_url", operator: "NOT_HAS_PROPERTY" }],
-    ["hs_object_id"],
-  );
-  return records.map(blankCompany);
+
+  // HubSpot filter groups are ANDed inside searchAll, so run two bounded searches
+  // and merge them to get: Career Page missing OR ATS missing.
+  const [missingCareer, missingAts] = await Promise.all([
+    searchAll(
+      "companies",
+      COMPANY_PROPERTIES,
+      [{ propertyName: "career_page_url", operator: "NOT_HAS_PROPERTY" }],
+      ["hs_object_id"],
+    ),
+    searchAll(
+      "companies",
+      COMPANY_PROPERTIES,
+      [{ propertyName: "detected_ats", operator: "NOT_HAS_PROPERTY" }],
+      ["hs_object_id"],
+    ),
+  ]);
+
+  const merged = new Map<string, HubSpotRecord>();
+  for (const record of [...missingCareer, ...missingAts]) merged.set(String(record.id), record);
+  return [...merged.values()].map(blankCompany);
+}
+
+function needsEngineScan(company: CareerCompany) {
+  if (company.status === "processing" || company.status === "needs_manual_review" || company.status === "website_domain_invalid" || company.status === "insufficient_company_data") return false;
+  if (company.status === "needs_research") return true;
+  // Upgrade old V2 records that already found a Career Page but stopped before ATS discovery.
+  return Boolean(company.careerPageUrl && !company.detectedAts && !company.atsStatus);
 }
 
 export async function getCareerPortfolio(force = false): Promise<CareerCompany[]> {
@@ -269,18 +300,32 @@ export async function getCareerPortfolio(force = false): Promise<CareerCompany[]
 
   for (const company of hubspotCompanies) {
     const stored = store.records[company.companyId];
-    merged.set(company.companyId, stored ? { ...company, ...stored, companyName: company.companyName, domain: company.domain || stored.domain, website: company.website || stored.website, hubspotUrl: company.hubspotUrl } : company);
+    const combined = stored
+      ? {
+          ...company,
+          ...stored,
+          companyName: company.companyName,
+          domain: company.domain || stored.domain,
+          website: company.website || stored.website,
+          careerPageUrl: company.careerPageUrl || stored.careerPageUrl,
+          detectedAts: company.detectedAts || stored.detectedAts,
+          atsStatus: company.atsStatus || stored.atsStatus,
+          atsConfidence: company.atsConfidence || stored.atsConfidence,
+          hubspotUrl: company.hubspotUrl,
+        }
+      : company;
+    merged.set(company.companyId, combined);
   }
 
   // Keep completed records visible after they have been pushed to HubSpot and therefore
-  // no longer match the "career_page_url missing" search.
+  // no longer match either "missing" search.
   for (const stored of Object.values(store.records)) {
     if (!merged.has(stored.companyId)) merged.set(stored.companyId, { ...stored });
   }
 
   const companies = [...merged.values()].sort((a, b) => {
-    const priority = (status: CareerStatus) => status === "needs_research" ? 0 : status === "needs_manual_review" ? 1 : status === "processing" ? 2 : 3;
-    return priority(a.status) - priority(b.status) || a.companyName.localeCompare(b.companyName);
+    const priority = (company: CareerCompany) => needsEngineScan(company) ? 0 : company.status === "needs_manual_review" ? 1 : company.status === "processing" ? 2 : 3;
+    return priority(a) - priority(b) || a.companyName.localeCompare(b.companyName);
   });
   portfolioCache = { expiresAt: Date.now() + PORTFOLIO_CACHE_MS, companies };
   return companies.map((item) => ({ ...item }));
@@ -303,7 +348,7 @@ export function summarizeCareerPortfolio(companies: CareerCompany[]): CareerSumm
   return {
     total,
     completed,
-    remaining: Math.max(0, total - completed),
+    remaining: companies.filter(needsEngineScan).length,
     foundVerified,
     noPublicCareer,
     manualReview,
@@ -330,7 +375,14 @@ function engineStatus(value: string): CareerStatus {
 async function callCareerEngine(company: CareerCompany, forceRefresh: boolean): Promise<CareerCompany> {
   if (!company.domain && !company.website) {
     const status: CareerStatus = isPlaceholderCompany(company.companyName) ? "insufficient_company_data" : "needs_manual_review";
-    return { ...company, status, confidenceScore: status === "insufficient_company_data" ? 99 : 40, verificationReason: status === "insufficient_company_data" ? "No usable company identity or domain." : "No domain is available for automated crawling.", verificationSource: "Data validation", lastCheckedAt: new Date().toISOString() };
+    return {
+      ...company,
+      status,
+      confidenceScore: status === "insufficient_company_data" ? 99 : 40,
+      verificationReason: status === "insufficient_company_data" ? "No usable company identity or domain." : "No domain is available for automated crawling.",
+      verificationSource: "Data validation",
+      lastCheckedAt: new Date().toISOString(),
+    };
   }
 
   const controller = new AbortController();
@@ -344,9 +396,15 @@ async function callCareerEngine(company: CareerCompany, forceRefresh: boolean): 
         company_name: company.companyName,
         company_domain: company.domain,
         company_website: company.website,
+        known_career_url: company.careerPageUrl || undefined,
+        detect_ats: true,
+        career_only: false,
+        stop_on_career: false,
+        require_job_detail: false,
+        force_browser: Boolean(company.careerPageUrl && !company.detectedAts),
         force_refresh: forceRefresh,
-        max_static_pages: 30,
-        max_browser_steps: 8,
+        max_static_pages: 36,
+        max_browser_steps: 12,
       }),
       cache: "no-store",
       signal: controller.signal,
@@ -354,20 +412,24 @@ async function callCareerEngine(company: CareerCompany, forceRefresh: boolean): 
     const payload = await response.json().catch(() => ({})) as CareerEngineResponse;
     if (!response.ok || payload.ok === false) throw new Error(payload.error || `Career engine returned HTTP ${response.status}`);
     const result = payload.result || {};
-    const status = engineStatus(String(result.career_status || ""));
+    let status = engineStatus(String(result.career_status || ""));
+    const careerPageUrl = String(result.career_url || company.careerPageUrl || "");
+    if (company.careerPageUrl && !result.career_url && status === "no_public_career_page") status = "needs_manual_review";
+    const detectedAts = String(result.detected_ats || company.detectedAts || "");
+    const atsStatus = String(result.ats_status || company.atsStatus || (careerPageUrl && status === "found_verified" ? "unclear" : ""));
     const detectionMethod = String(result.detection_method || "");
     const cacheHit = Boolean(result.cache_hit) || detectionMethod.startsWith("cache:");
     return {
       ...company,
-      careerPageUrl: String(result.career_url || company.careerPageUrl || ""),
-      detectedAts: String(result.detected_ats || company.detectedAts || ""),
-      atsStatus: String(result.ats_status || company.atsStatus || ""),
+      careerPageUrl,
+      detectedAts,
+      atsStatus: detectedAts ? "detected" : atsStatus,
       atsConfidence: String(result.ats_confidence || company.atsConfidence || ""),
       status,
       confidenceScore: Math.max(0, Math.min(100, Number(result.career_confidence_score || 0))),
-      verificationReason: String(result.career_evidence_reason || result.ats_evidence_reason || result.detection_error || "Career engine completed without a detailed reason."),
-      verificationSource: cacheHit ? "Engine cache" : Boolean(result.playwright_used) ? "Playwright verification" : "Static crawler",
-      evidenceUrl: String(result.career_evidence_url || result.ats_evidence_url || result.career_url || ""),
+      verificationReason: String(result.career_evidence_reason || result.ats_evidence_reason || result.detection_error || "Career + ATS engine completed without a detailed reason."),
+      verificationSource: cacheHit ? "Engine cache" : Boolean(result.playwright_used) ? "Playwright + fingerprint verification" : "Static crawler + fingerprint verification",
+      evidenceUrl: String(result.ats_evidence_url || result.career_evidence_url || result.career_url || company.evidenceUrl || ""),
       detectionMethod,
       pagesChecked: Number(result.pages_checked || 0),
       staticPagesChecked: Number(result.static_pages_checked || 0),
@@ -382,7 +444,7 @@ async function callCareerEngine(company: CareerCompany, forceRefresh: boolean): 
       ...company,
       status: "needs_manual_review",
       confidenceScore: 35,
-      verificationReason: error instanceof Error ? error.message : "Career engine request failed.",
+      verificationReason: error instanceof Error ? error.message : "Career + ATS engine request failed.",
       verificationSource: "Engine error",
       detectionMethod: "engine_request_failed",
       lastCheckedAt: new Date().toISOString(),
@@ -407,28 +469,6 @@ async function mapConcurrent<T, R>(items: T[], concurrency: number, action: (ite
   return results;
 }
 
-export async function runCareerBatch(input: { limit?: number; companyIds?: string[]; forceRefresh?: boolean } = {}) {
-  const companies = await getCareerPortfolio(true);
-  const requestedIds = new Set((input.companyIds || []).map(String));
-  const limit = Math.max(1, Math.min(100, Number(input.limit || DEFAULT_SCAN_LIMIT)));
-  const eligible = companies.filter((company) => {
-    if (requestedIds.size) return requestedIds.has(company.companyId);
-    return company.status === "needs_research";
-  }).slice(0, limit);
-
-  const processed = await mapConcurrent(eligible, SCAN_CONCURRENCY, async (company) => {
-    const processing = { ...company, status: "processing" as CareerStatus };
-    await saveCompany(processing);
-    const result = await callCareerEngine(company, Boolean(input.forceRefresh));
-    await saveCompany(result);
-    return result;
-  });
-
-  portfolioCache = null;
-  const refreshed = await getCareerPortfolio(true);
-  return { processed, summary: summarizeCareerPortfolio(refreshed), remainingEligible: refreshed.filter((company) => company.status === "needs_research").length };
-}
-
 async function patchHubSpotCompany(companyId: string, properties: Record<string, string>) {
   const token = process.env.HUBSPOT_PRIVATE_APP_TOKEN;
   if (!token) throw new Error("HUBSPOT_PRIVATE_APP_TOKEN is not configured");
@@ -441,34 +481,95 @@ async function patchHubSpotCompany(companyId: string, properties: Record<string,
   if (!response.ok) throw new Error(`HubSpot update failed (${response.status}): ${(await response.text()).slice(0, 500)}`);
 }
 
-export async function pushCareerResult(companyId: string) {
+async function pushVerifiedFields(company: CareerCompany, manual = false): Promise<CareerCompany> {
   if (process.env.DEMO_MODE === "true") throw new Error("HubSpot writes are disabled in DEMO_MODE");
-  const portfolio = await getCareerPortfolio(true);
-  const company = portfolio.find((item) => item.companyId === String(companyId));
-  if (!company) throw new Error("Company is not in the Career Intelligence portfolio");
-  if (company.status !== "found_verified" || !company.careerPageUrl) throw new Error("Only Found & Verified results can be pushed to HubSpot");
+  if (company.status !== "found_verified" || !company.careerPageUrl) {
+    if (manual) throw new Error("Only Found & Verified results can be pushed to HubSpot");
+    return company;
+  }
+  if (!manual && company.confidenceScore < 90) return company;
 
-  const current = (await batchRead("companies", [company.companyId], ["career_page_url", "detected_ats", "ats_status", "ats_confidence", "ats_evidence_url", "ats_evidence_reason", "career_portal_type"]))[0];
+  const current = (await batchRead("companies", [company.companyId], [
+    "career_page_url",
+    "detected_ats",
+    "ats_status",
+    "ats_confidence",
+    "ats_evidence_url",
+    "ats_evidence_reason",
+    "career_portal_type",
+  ]))[0];
   if (!current) throw new Error("HubSpot company could not be re-read");
+
   const existingCareer = value(current, "career_page_url");
   if (existingCareer && existingCareer !== company.careerPageUrl) {
-    const skipped = { ...company, hubspotPushStatus: "skipped" as const, verificationReason: `${company.verificationReason} HubSpot already has a different Career Page; no overwrite was performed.` };
-    await saveCompany(skipped);
-    portfolioCache = null;
-    return skipped;
+    return {
+      ...company,
+      hubspotPushStatus: "skipped",
+      verificationReason: `${company.verificationReason} HubSpot already has a different Career Page; no overwrite was performed.`.trim(),
+    };
   }
 
   const properties: Record<string, string> = {};
   if (!existingCareer) properties.career_page_url = company.careerPageUrl;
   if (company.detectedAts && !value(current, "detected_ats")) properties.detected_ats = company.detectedAts;
   if (company.detectedAts && !value(current, "ats_status")) properties.ats_status = "detected";
-  if (company.atsConfidence && !value(current, "ats_confidence")) properties.ats_confidence = company.atsConfidence;
-  if (company.evidenceUrl && !value(current, "ats_evidence_url") && company.detectedAts) properties.ats_evidence_url = company.evidenceUrl;
-  if (company.verificationReason && !value(current, "ats_evidence_reason") && company.detectedAts) properties.ats_evidence_reason = company.verificationReason.slice(0, 1000);
+  if (company.atsConfidence && company.detectedAts && !value(current, "ats_confidence")) properties.ats_confidence = company.atsConfidence;
+  if (company.evidenceUrl && company.detectedAts && !value(current, "ats_evidence_url")) properties.ats_evidence_url = company.evidenceUrl;
+  if (company.verificationReason && company.detectedAts && !value(current, "ats_evidence_reason")) properties.ats_evidence_reason = company.verificationReason.slice(0, 1000);
   if (!value(current, "career_portal_type")) properties.career_portal_type = company.detectedAts ? "vendor_hosted_portal" : "basic_jobs_page";
 
-  if (Object.keys(properties).length) await patchHubSpotCompany(company.companyId, properties);
-  const pushed = { ...company, hubspotPushStatus: "pushed" as const, hubspotPushedAt: new Date().toISOString() };
+  if (!Object.keys(properties).length) {
+    return { ...company, hubspotPushStatus: "skipped", hubspotPushedAt: new Date().toISOString() };
+  }
+
+  await patchHubSpotCompany(company.companyId, properties);
+  return { ...company, hubspotPushStatus: "pushed", hubspotPushedAt: new Date().toISOString() };
+}
+
+export async function runCareerBatch(input: { limit?: number; companyIds?: string[]; forceRefresh?: boolean } = {}) {
+  const companies = await getCareerPortfolio(true);
+  const requestedIds = new Set((input.companyIds || []).map(String));
+  const limit = Math.max(1, Math.min(100, Number(input.limit || DEFAULT_SCAN_LIMIT)));
+  const eligible = companies.filter((company) => {
+    if (requestedIds.size) return requestedIds.has(company.companyId);
+    return needsEngineScan(company);
+  }).slice(0, limit);
+
+  const processed = await mapConcurrent(eligible, SCAN_CONCURRENCY, async (company) => {
+    const processing = { ...company, status: "processing" as CareerStatus };
+    await saveCompany(processing);
+    let result = await callCareerEngine(company, Boolean(input.forceRefresh));
+    if (AUTO_PUSH && result.status === "found_verified") {
+      try {
+        result = await pushVerifiedFields(result, false);
+      } catch (error) {
+        result = {
+          ...result,
+          hubspotPushStatus: "error",
+          verificationReason: `${result.verificationReason} Auto-push failed: ${error instanceof Error ? error.message : "unknown error"}`.trim(),
+        };
+      }
+    }
+    await saveCompany(result);
+    return result;
+  });
+
+  portfolioCache = null;
+  const refreshed = await getCareerPortfolio(true);
+  return {
+    processed,
+    summary: summarizeCareerPortfolio(refreshed),
+    remainingEligible: refreshed.filter(needsEngineScan).length,
+    autoPushEnabled: AUTO_PUSH,
+  };
+}
+
+export async function pushCareerResult(companyId: string) {
+  if (process.env.DEMO_MODE === "true") throw new Error("HubSpot writes are disabled in DEMO_MODE");
+  const portfolio = await getCareerPortfolio(true);
+  const company = portfolio.find((item) => item.companyId === String(companyId));
+  if (!company) throw new Error("Company is not in the Career Intelligence portfolio");
+  const pushed = await pushVerifiedFields(company, true);
   await saveCompany(pushed);
   portfolioCache = null;
   return pushed;
