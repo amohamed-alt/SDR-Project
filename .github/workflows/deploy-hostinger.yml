@@ -76,7 +76,7 @@ jobs:
             GTM_RESEARCH_OPENROUTER_API_KEY=${{ secrets.GTM_RESEARCH_OPENROUTER_API_KEY || secrets.OPENROUTER_API_KEY }}
             GTM_RESEARCH_OPENROUTER_MODEL=openai/gpt-4.1-mini
 
-      - name: Verify exact deployed build, Career V2, and GTM workspace health
+      - name: Verify exact deployed build, Career ATS V3, and GTM workspace health
         run: |
           set -euo pipefail
           READY=false
@@ -92,12 +92,14 @@ jobs:
             IS_READY=$(printf '%s' "$BODY" | jq -r '.ready // false' 2>/dev/null || true)
             VALIDATION_STATE=$(printf '%s' "$BODY" | jq -r '.careerValidationState // "unknown"' 2>/dev/null || true)
             STORED=$(printf '%s' "$BODY" | jq -r '.careerValidationProgress.stored // 0' 2>/dev/null || true)
+            HAS_ATS_CAPABILITY=$(printf '%s' "$BODY" | jq -r '(.careerEngineCapabilities // []) | index("ats-detect") != null' 2>/dev/null || true)
 
-            echo "Production gate ${ATTEMPT}/120: build=${BUILD_REF:-none} generation=${GENERATION:-none} engine=${ENGINE_VERSION:-none} ready=${IS_READY:-false} validation=${VALIDATION_STATE:-unknown} stored=${STORED:-0}"
+            echo "Production gate ${ATTEMPT}/120: build=${BUILD_REF:-none} generation=${GENERATION:-none} engine=${ENGINE_VERSION:-none} ats_capability=${HAS_ATS_CAPABILITY:-false} ready=${IS_READY:-false} validation=${VALIDATION_STATE:-unknown} stored=${STORED:-0}"
 
             if [ "$BUILD_REF" = "$DEPLOY_SHA" ] \
-              && [ "$GENERATION" = "v2" ] \
-              && [[ "$ENGINE_VERSION" == 2.* ]] \
+              && [ "$GENERATION" = "v3" ] \
+              && [[ "$ENGINE_VERSION" == 3.* ]] \
+              && [ "$HAS_ATS_CAPABILITY" = "true" ] \
               && [ "$IS_READY" = "true" ]; then
               READY=true
               break
@@ -106,7 +108,7 @@ jobs:
           done
 
           if [ "$READY" != "true" ]; then
-            echo "::error::Production never exposed the exact commit $DEPLOY_SHA with ready Career Intelligence V2 within the bounded deployment window."
+            echo "::error::Production never exposed the exact commit $DEPLOY_SHA with ready Career + ATS Intelligence V3 within the bounded deployment window."
             exit 1
           fi
 
@@ -150,7 +152,7 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'success',
               context: 'hostinger/deploy',
-              description: 'Exact SDR build, Career V2, and GTM OpenRouter validation are live',
+              description: 'Exact SDR build, Career ATS V3, and GTM OpenRouter validation are live',
               target_url: process.env.DEPLOY_URL,
             });
 
