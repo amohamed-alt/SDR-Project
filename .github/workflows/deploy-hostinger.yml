@@ -64,6 +64,38 @@ jobs:
           }
           echo "SignalHire deployment secret: configured"
 
+      - name: Validate Tavily career fallback
+        env:
+          TAVILY_KEY: ${{ secrets.TAVILY_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$TAVILY_KEY" || {
+            echo "::error::Add TAVILY_API_KEY as a repository Actions secret."
+            exit 1
+          }
+          HTTP_CODE=$(curl --silent --show-error \
+            --connect-timeout 10 \
+            --max-time 45 \
+            --output /tmp/tavily-career-test.json \
+            --write-out '%{http_code}' \
+            -X POST 'https://api.tavily.com/search' \
+            -H "Authorization: Bearer $TAVILY_KEY" \
+            -H 'Content-Type: application/json' \
+            -d '{"query":"\"AlYemni Group\" official website careers jobs","topic":"general","search_depth":"basic","max_results":5,"include_answer":false,"include_raw_content":false}' || true)
+          RESULT_COUNT=$(jq -r '(.results // []) | length' /tmp/tavily-career-test.json 2>/dev/null || echo 0)
+          if [ "$HTTP_CODE" != "200" ] || [ "$RESULT_COUNT" -lt 1 ]; then
+            TAVILY_ERROR=$(jq -r '.detail?.error // .detail // .message // "unknown Tavily error"' /tmp/tavily-career-test.json 2>/dev/null || true)
+            echo "::error::Tavily career fallback validation failed (HTTP $HTTP_CODE, results=$RESULT_COUNT): $TAVILY_ERROR"
+            exit 1
+          fi
+          echo "Tavily career fallback: configured and responding with $RESULT_COUNT results"
+          if jq -r '.results[]?.url // empty' /tmp/tavily-career-test.json | grep -qi 'alyemnigroup\.com'; then
+            echo "Tavily AlYemni regression search: current official domain found"
+          else
+            echo "::warning::Tavily responded successfully, but the AlYemni regression query did not include alyemnigroup.com in its first 5 URLs. Runtime verification will still reject unverified domains."
+            jq -r '.results[]?.url // empty' /tmp/tavily-career-test.json | head -5
+          fi
+
       - name: Validate GTM premium AI configuration
         env:
           GTM_OPENROUTER_KEY: ${{ secrets.GTM_RESEARCH_OPENROUTER_API_KEY || secrets.OPENROUTER_API_KEY }}
@@ -84,6 +116,7 @@ jobs:
           environment-variables: |
             SDR_BUILD_REF=${{ env.DEPLOY_SHA }}
             SIGNALHIRE_API_KEY=${{ secrets.SIGNALHIRE_API_KEY }}
+            TAVILY_API_KEY=${{ secrets.TAVILY_API_KEY }}
             GTM_RESEARCH_OPENROUTER_API_KEY=${{ secrets.GTM_RESEARCH_OPENROUTER_API_KEY || secrets.OPENROUTER_API_KEY }}
             GTM_RESEARCH_OPENROUTER_MODEL=openai/gpt-4.1-mini
 
@@ -163,7 +196,7 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'success',
               context: 'hostinger/deploy',
-              description: 'Exact SDR build, Career ATS V3, and GTM OpenRouter validation are live',
+              description: 'Exact SDR build, Career ATS V3, Tavily fallback, and GTM validation are live',
               target_url: process.env.DEPLOY_URL,
             });
 
@@ -180,6 +213,6 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'failure',
               context: 'hostinger/deploy',
-              description: 'SDR production build/version/GTM gate failed',
+              description: 'SDR production build/version/Tavily/GTM gate failed',
               target_url: process.env.DEPLOY_URL,
             });
