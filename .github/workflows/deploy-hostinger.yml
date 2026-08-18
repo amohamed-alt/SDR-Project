@@ -79,7 +79,7 @@ jobs:
             --output /tmp/gemini-grounded-test.json \
             --write-out '%{http_code}' \
             -X POST \
-            'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent' \
+            'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent' \
             -H "x-goog-api-key: $GEMINI_KEY" \
             -H 'Content-Type: application/json' \
             -d '{"contents":[{"parts":[{"text":"Use Google Search and return only the current official website domain for AlYemni Group in Saudi Arabia."}]}],"tools":[{"google_search":{}}],"generationConfig":{"maxOutputTokens":200}}' || true)
@@ -112,7 +112,7 @@ jobs:
             SDR_BUILD_REF=${{ env.DEPLOY_SHA }}
             SIGNALHIRE_API_KEY=${{ secrets.SIGNALHIRE_API_KEY }}
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
-            GEMINI_CAREER_MODEL=gemini-3.5-flash-lite
+            GEMINI_CAREER_MODEL=gemini-2.5-flash
             GTM_RESEARCH_OPENROUTER_API_KEY=${{ secrets.GTM_RESEARCH_OPENROUTER_API_KEY || secrets.OPENROUTER_API_KEY }}
             GTM_RESEARCH_OPENROUTER_MODEL=openai/gpt-4.1-mini
 
@@ -159,7 +159,7 @@ jobs:
           GEMINI_READY=$(printf '%s' "$PROSPECTING_HEALTH" | jq -r '.geminiCareerFallbackConfigured // false' 2>/dev/null || true)
           GEMINI_MODEL=$(printf '%s' "$PROSPECTING_HEALTH" | jq -r '.geminiCareerModel // ""' 2>/dev/null || true)
           echo "Prospecting Gemini gate: configured=${GEMINI_READY:-false} model=${GEMINI_MODEL:-none}"
-          if [ "$GEMINI_READY" != "true" ] || [ "$GEMINI_MODEL" != "gemini-3.5-flash-lite" ]; then
+          if [ "$GEMINI_READY" != "true" ] || [ "$GEMINI_MODEL" != "gemini-2.5-flash" ]; then
             echo "::error::Prospecting Gemini career fallback is not exposed by the deployed build."
             exit 1
           fi
