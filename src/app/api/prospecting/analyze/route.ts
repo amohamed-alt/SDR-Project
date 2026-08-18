@@ -70,14 +70,22 @@ function daysSince(value?: string | null) {
   return Math.max(0, Math.floor((Date.now() - parsed) / 86_400_000));
 }
 
-function contact(candidate: SignalHireCandidate, type: string, preferredSubtype?: string) {
-  const matches = (candidate.contacts || []).filter((item) => item.type === type && item.value);
-  if (!matches.length) return null;
-  return matches.sort((a, b) => {
-    const subtypeA = preferredSubtype && a.subType === preferredSubtype ? 1000 : 0;
-    const subtypeB = preferredSubtype && b.subType === preferredSubtype ? 1000 : 0;
-    return subtypeB + Number(b.rating || 0) - subtypeA - Number(a.rating || 0);
-  })[0];
+function contacts(candidate: SignalHireCandidate, type: string, preferredSubtype?: string) {
+  const sorted = (candidate.contacts || [])
+    .filter((item) => item.type === type && item.value)
+    .sort((a, b) => {
+      const subtypeA = preferredSubtype && a.subType === preferredSubtype ? 1000 : 0;
+      const subtypeB = preferredSubtype && b.subType === preferredSubtype ? 1000 : 0;
+      return subtypeB + Number(b.rating || 0) - subtypeA - Number(a.rating || 0);
+    });
+
+  const seen = new Set<string>();
+  return sorted.filter((item) => {
+    const key = String(item.value || "").trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function personaScore(title: string) {
@@ -185,8 +193,12 @@ export async function POST(request: NextRequest) {
     const experiences = candidate.experience || [];
     const currentRole = experiences.find((entry) => entry.current) || experiences[0];
     const previousRole = experiences.find((entry) => entry !== currentRole && !entry.current) || experiences[1];
-    const email = contact(candidate, "email", "work");
-    const phone = contact(candidate, "phone", "mobile");
+    const emailContacts = contacts(candidate, "email", "work");
+    const phoneContacts = contacts(candidate, "phone", "mobile");
+    const email = emailContacts[0] || null;
+    const phone = phoneContacts[0] || null;
+    const emails = emailContacts.map((item) => String(item.value || "").trim()).filter(Boolean);
+    const phones = phoneContacts.map((item) => String(item.value || "").trim()).filter(Boolean);
     const location = candidate.locations?.map((entry) => entry.name).filter(Boolean).join(" · ") || currentRole?.location || "";
     const title = currentRole?.position || candidate.headLine || "";
     const recentSignal = recentRoleSignal(currentRole, previousRole);
@@ -229,8 +241,10 @@ export async function POST(request: NextRequest) {
         previousTitle: previousRole?.position || "",
         previousCompany: previousRole?.company || "",
         email: email?.value || "",
+        emails,
         emailConfidence: email?.rating || null,
         phone: phone?.value || "",
+        phones,
         phoneConfidence: phone?.rating || null,
         recentSignal,
         score,
