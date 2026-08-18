@@ -8,11 +8,12 @@ if [ ! -s "$RUNTIME_ENV_FILE" ]; then
   exit 78
 fi
 
-# Deployment-injected GTM credentials are kept separately before loading the
-# persistent runtime file. This lets a GitHub Actions secret safely override an
+# Deployment-injected credentials are kept separately before loading the
+# persistent runtime file. This lets GitHub Actions secrets safely override an
 # older VPS env file without changing or exposing that file.
 DEPLOY_GTM_OPENROUTER_API_KEY="${GTM_RESEARCH_OPENROUTER_API_KEY:-${OPENROUTER_API_KEY:-}}"
 DEPLOY_GTM_OPENROUTER_MODEL="${GTM_RESEARCH_OPENROUTER_MODEL:-}"
+DEPLOY_SIGNALHIRE_API_KEY="${SIGNALHIRE_API_KEY:-}"
 
 set -a
 # shellcheck disable=SC1090
@@ -31,10 +32,21 @@ else
 fi
 export GTM_RESEARCH_OPENROUTER_MODEL
 
+if [ -n "$DEPLOY_SIGNALHIRE_API_KEY" ]; then
+  SIGNALHIRE_API_KEY="$DEPLOY_SIGNALHIRE_API_KEY"
+  export SIGNALHIRE_API_KEY
+fi
+
 if [ -n "${GTM_RESEARCH_OPENROUTER_API_KEY:-${OPENROUTER_API_KEY:-}}" ]; then
   echo "GTM OpenRouter: configured; premium model=${GTM_RESEARCH_OPENROUTER_MODEL}"
 else
   echo "GTM OpenRouter: NOT configured; premium stages will fall back to local Ollama"
+fi
+
+if [ -n "${SIGNALHIRE_API_KEY:-}" ]; then
+  echo "Prospecting SignalHire: configured"
+else
+  echo "Prospecting SignalHire: NOT configured"
 fi
 
 exec node server.js
