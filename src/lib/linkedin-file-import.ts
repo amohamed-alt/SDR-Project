@@ -41,7 +41,9 @@ function findEndOfCentralDirectory(view: DataView) {
 
 async function inflateRaw(bytes: Uint8Array) {
   if (!("DecompressionStream" in globalThis)) throw new Error("This browser cannot unpack Excel files. Save the sheet as CSV and upload it again.");
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw" as CompressionFormat));
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const stream = new Blob([copy.buffer]).stream().pipeThrough(new DecompressionStream("deflate-raw" as CompressionFormat));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
