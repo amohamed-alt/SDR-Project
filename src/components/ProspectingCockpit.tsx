@@ -1,25 +1,41 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
+  BriefcaseBusiness,
+  Building2,
   CheckCircle2,
   CircleAlert,
   Flame,
+  Globe2,
   Link2,
   LoaderCircle,
   PhoneCall,
   Send,
   ShieldCheck,
   Sparkles,
+  Upload,
   UserPlus,
   Users,
   Watch,
 } from "lucide-react";
+import { extractLinkedInUrlsFromFile } from "@/lib/linkedin-file-import";
 import styles from "./ProspectingCockpit.module.css";
 
 type ScoreReason = { label: string; points: number };
+type HiringInsight = {
+  status: "Hiring Now" | "No Active Jobs" | "Unknown";
+  activeJobs: number;
+  hiringScore: number;
+  hiringLabel: string;
+  hasHrJobs: boolean;
+  source: string;
+  sourceUrl: string;
+  checkedAt: string;
+  jobsSample: Array<{ title: string; location: string; url: string }>;
+};
 type Prospect = {
   uid: string;
   linkedinUrl: string;
@@ -31,16 +47,26 @@ type Prospect = {
   title: string;
   company: string;
   companyWebsite: string;
+  companyDomain: string;
   companyLinkedIn: string;
   companySize: string;
   staffCount: number | string | null;
   industry: string;
+  careerPageUrl: string;
+  detectedAts: string;
+  atsConfidence: string;
+  careerConfidence: number;
+  companyEvidenceUrl: string;
+  companyVerificationReason: string;
+  hiring: HiringInsight;
   currentRoleStarted: string;
   previousTitle: string;
   previousCompany: string;
   email: string;
+  emails: string[];
   emailConfidence: number | null;
   phone: string;
+  phones: string[];
   phoneConfidence: number | null;
   recentSignal: { type: string; label: string; ageDays?: number | null };
   score: number;
@@ -49,31 +75,38 @@ type Prospect = {
   hubspot: { inHubSpot: boolean; id: string; matchedBy: string };
 };
 
-type AnalyzeResponse = {
-  prospect?: Prospect;
-  meta?: { creditsLeft?: number | null; smartleadConfigured?: boolean };
-  error?: string;
-};
-
-type RuntimeStatus = {
-  signalHireConfigured: boolean;
-  smartleadConfigured: boolean;
-  defaultSource: string;
-};
-
+type AnalyzeResponse = { prospect?: Prospect; meta?: { creditsLeft?: number | null; smartleadConfigured?: boolean }; error?: string };
+type RuntimeStatus = { signalHireConfigured: boolean; smartleadConfigured: boolean; companyIntelligenceConfigured?: boolean; defaultSource: string };
 type PushState = { loading?: boolean; success?: string; error?: string };
+type BulkState = { loading: boolean; done: number; total: number };
 
 const MAX_IMPORT = 50;
 
 function urlsFromText(value: string) {
-  const candidates = value.split(/[\n,;\t ]+/).map((item) => item.trim()).filter(Boolean);
-  return [...new Set(candidates)].filter((item) => /linkedin\.com\/in\//i.test(item)).slice(0, MAX_IMPORT);
+  const matches = value.match(/(?:https?:\/\/)?(?:[a-z]{2,3}\.)?(?:www\.)?linkedin\.com\/in\/[A-Za-z0-9%._~\-]+\/?/gi) || [];
+  const normalized = matches.map((item) => {
+    try {
+      const url = new URL(/^https?:\/\//i.test(item) ? item : `https://${item}`);
+      url.protocol = "https:";
+      url.hostname = "www.linkedin.com";
+      url.search = "";
+      url.hash = "";
+      return url.toString().replace(/\/$/, "");
+    } catch { return ""; }
+  }).filter(Boolean);
+  return [...new Set(normalized)].slice(0, MAX_IMPORT);
 }
 
 function priorityLabel(priority: Prospect["priority"]) {
   if (priority === "high") return "High priority";
   if (priority === "medium") return "Medium priority";
   return "Normal";
+}
+
+function hiringClass(status: HiringInsight["status"]) {
+  if (status === "Hiring Now") return styles.hiringHot;
+  if (status === "No Active Jobs") return styles.hiringQuiet;
+  return styles.hiringUnknown;
 }
 
 export function ProspectingCockpit() {
@@ -87,6 +120,9 @@ export function ProspectingCockpit() {
   const [creditsLeft, setCreditsLeft] = useState<number | null>(null);
   const [pushState, setPushState] = useState<Record<string, PushState>>({});
   const [watched, setWatched] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulk, setBulk] = useState<BulkState>({ loading: false, done: 0, total: 0 });
+  const [importNote, setImportNote] = useState("");
 
   useEffect(() => {
     fetch("/api/prospecting/analyze", { cache: "no-store" })
@@ -101,6 +137,8 @@ export function ProspectingCockpit() {
   const urls = useMemo(() => urlsFromText(input), [input]);
   const highPriority = results.filter((item) => item.priority === "high").length;
   const existing = results.filter((item) => item.hubspot.inHubSpot).length;
+  const hiringNow = results.filter((item) => item.hiring.status === "Hiring Now").length;
+  const selectedProspects = results.filter((item) => selected.has(item.linkedinUrl));
 
   async function analyzeOne(linkedinUrl: string) {
     const response = await fetch("/api/prospecting/analyze", {
@@ -116,12 +154,14 @@ export function ProspectingCockpit() {
 
   async function analyze() {
     if (!urls.length) {
-      setErrors(["Paste at least one LinkedIn person URL (linkedin.com/in/...)."]);
+      setErrors(["Add at least one LinkedIn profile URL or upload a list."]);
       return;
     }
     setAnalyzing(true);
     setErrors([]);
     setResults([]);
+    setSelected(new Set());
+    setPushState({});
     setProgress({ done: 0, total: urls.length });
 
     const pending = [...urls];
@@ -143,7 +183,6 @@ export function ProspectingCockpit() {
         }
       }
     });
-
     await Promise.all(workers);
     setAnalyzing(false);
   }
@@ -157,15 +196,43 @@ export function ProspectingCockpit() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(prospect),
       });
-      const payload = await response.json() as { pushed?: boolean; duplicate?: boolean; taskId?: string; error?: string; message?: string };
+      const payload = await response.json() as { pushed?: boolean; duplicate?: boolean; taskId?: string; companyId?: string; error?: string; message?: string };
       if (!response.ok) throw new Error(payload.error || "HubSpot push failed.");
       const message = payload.duplicate
-        ? `Already queued · Task ${payload.taskId || "exists"}`
-        : `Marita task created · ${payload.taskId || "done"}`;
+        ? `Already queued · company synced · Task ${payload.taskId || "exists"}`
+        : `Marita task created · company synced · ${payload.taskId || "done"}`;
       setPushState((current) => ({ ...current, [key]: { success: message } }));
+      return true;
     } catch (error) {
       setPushState((current) => ({ ...current, [key]: { error: error instanceof Error ? error.message : "HubSpot push failed." } }));
+      return false;
     }
+  }
+
+  async function pushSelected() {
+    const queue = selectedProspects.filter((prospect) => !pushState[prospect.linkedinUrl]?.success);
+    if (!queue.length) return;
+    setBulk({ loading: true, done: 0, total: queue.length });
+    const pending = [...queue];
+    const workers = Array.from({ length: Math.min(2, pending.length) }, async () => {
+      while (pending.length) {
+        const prospect = pending.shift();
+        if (!prospect) return;
+        await pushToMarita(prospect);
+        setBulk((current) => ({ ...current, done: current.done + 1 }));
+      }
+    });
+    await Promise.all(workers);
+    setBulk((current) => ({ ...current, loading: false }));
+  }
+
+  function toggleSelect(linkedinUrl: string) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(linkedinUrl)) next.delete(linkedinUrl);
+      else next.add(linkedinUrl);
+      return next;
+    });
   }
 
   function toggleWatch(prospect: Prospect) {
@@ -177,24 +244,42 @@ export function ProspectingCockpit() {
     });
   }
 
+  async function importFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setImportNote(`Reading ${file.name}…`);
+    try {
+      const imported = (await extractLinkedInUrlsFromFile(file)).slice(0, MAX_IMPORT);
+      if (!imported.length) throw new Error("I could not find a LinkedIn person URL column in this file.");
+      const merged = [...new Set([...urlsFromText(input), ...imported])].slice(0, MAX_IMPORT);
+      setInput(merged.join("\n"));
+      setImportNote(`${file.name}: found ${imported.length} LinkedIn profile URL${imported.length === 1 ? "" : "s"}.`);
+    } catch (error) {
+      setImportNote(error instanceof Error ? error.message : "Unable to read this file.");
+    }
+  }
+
   return (
     <main className={styles.page}>
       <div className={styles.shell}>
         <header className={styles.header}>
           <div>
             <Link href="/" className={styles.back}><ArrowLeft size={16} /> SDR Command Center</Link>
-            <div className={styles.eyebrow}>PROSPECTING COCKPIT</div>
-            <h1>Sales Navigator → SignalHire → Marita</h1>
-            <p>Paste LinkedIn people URLs, enrich them, score the buying signal, check HubSpot, then route the best prospects to Marita.</p>
+            <div className={styles.eyebrow}>PROSPECTING COCKPIT V2</div>
+            <h1>Sales Navigator → Intelligence → Marita</h1>
+            <p>Resolve people, enrich contact data, verify company domain, Career Page and ATS, detect current hiring, then push selected prospects to Marita in one action.</p>
           </div>
-          <div className={styles.runtime}>
-            <span className={runtime?.signalHireConfigured ? styles.ok : styles.bad}>
-              {runtime?.signalHireConfigured ? <ShieldCheck size={15} /> : <CircleAlert size={15} />}
-              SignalHire {runtime?.signalHireConfigured ? "ready" : "needs key"}
-            </span>
-            <span className={runtime?.smartleadConfigured ? styles.ok : styles.muted}>
-              <Send size={15} /> Smartlead {runtime?.smartleadConfigured ? "ready" : "optional"}
-            </span>
+          <div className={styles.headerRight}>
+            <Link href="/hiring" className={styles.headerButton}><BriefcaseBusiness size={16} /> Hiring Signals</Link>
+            <div className={styles.runtime}>
+              <span className={runtime?.signalHireConfigured ? styles.ok : styles.bad}>
+                {runtime?.signalHireConfigured ? <ShieldCheck size={15} /> : <CircleAlert size={15} />}
+                SignalHire {runtime?.signalHireConfigured ? "ready" : "needs key"}
+              </span>
+              <span className={runtime?.companyIntelligenceConfigured ? styles.ok : styles.muted}><Building2 size={15} /> Career + ATS</span>
+              <span className={runtime?.smartleadConfigured ? styles.ok : styles.muted}><Send size={15} /> Smartlead {runtime?.smartleadConfigured ? "ready" : "later"}</span>
+            </div>
           </div>
         </header>
 
@@ -202,28 +287,39 @@ export function ProspectingCockpit() {
           <div className={styles.importHeader}>
             <div>
               <div className={styles.sectionTitle}><Link2 size={18} /> Add LinkedIn leads</div>
-              <p>Single URL or paste up to {MAX_IMPORT} profiles at once.</p>
+              <p>Paste normal LinkedIn URLs or upload CSV, TSV, TXT, or XLSX. The file importer finds the LinkedIn profile column automatically.</p>
             </div>
-            <label>
+            <label className={styles.sourceField}>
               <span>Source</span>
               <select value={source} onChange={(event) => setSource(event.target.value)}>
                 <option>Sales Navigator</option>
                 <option>LinkedIn URL</option>
+                <option>File Import</option>
                 <option>Manual Research</option>
                 <option>Referral</option>
               </select>
             </label>
           </div>
+
+          <div className={styles.inputActions}>
+            <label className={styles.fileButton}>
+              <Upload size={16} /> Upload lead file
+              <input type="file" accept=".csv,.tsv,.txt,.xlsx" onChange={importFile} />
+            </label>
+            {importNote && <span className={styles.importNote}>{importNote}</span>}
+          </div>
+
           <textarea
             value={input}
             onChange={(event) => setInput(event.target.value)}
-            placeholder={"https://www.linkedin.com/in/person-one\nhttps://www.linkedin.com/in/person-two"}
+            placeholder={"Paste LinkedIn profile links here — one per line"}
+            spellCheck={false}
           />
           <div className={styles.importFooter}>
-            <div className={styles.hint}>{urls.length} valid LinkedIn URL{urls.length === 1 ? "" : "s"}</div>
+            <div className={styles.hint}>{urls.length} valid LinkedIn profile{urls.length === 1 ? "" : "s"} · max {MAX_IMPORT}</div>
             <button className={styles.primary} onClick={analyze} disabled={analyzing || !runtime?.signalHireConfigured || !urls.length}>
               {analyzing ? <LoaderCircle size={17} className={styles.spin} /> : <Sparkles size={17} />}
-              {analyzing ? `Analyzing ${progress.done}/${progress.total}` : "Analyze leads"}
+              {analyzing ? `Building intelligence ${progress.done}/${progress.total}` : "Analyze leads"}
             </button>
           </div>
         </section>
@@ -232,25 +328,45 @@ export function ProspectingCockpit() {
           <section className={styles.summary}>
             <div><Users size={18} /><strong>{results.length}</strong><span>Resolved</span></div>
             <div><Flame size={18} /><strong>{highPriority}</strong><span>High priority</span></div>
+            <div><BriefcaseBusiness size={18} /><strong>{hiringNow}</strong><span>Hiring now</span></div>
             <div><CheckCircle2 size={18} /><strong>{existing}</strong><span>Already HubSpot</span></div>
-            <div><Sparkles size={18} /><strong>{creditsLeft ?? "—"}</strong><span>SignalHire credits left</span></div>
+            <div><Sparkles size={18} /><strong>{creditsLeft ?? "—"}</strong><span>SignalHire credits</span></div>
+          </section>
+        )}
+
+        {results.length > 0 && (
+          <section className={styles.bulkBar}>
+            <div>
+              <strong>{selected.size} selected</strong>
+              <span>Push multiple prospects to Marita with one click.</span>
+            </div>
+            <div className={styles.bulkActions}>
+              <button className={styles.action} onClick={() => setSelected(new Set(results.map((item) => item.linkedinUrl)))}>Select all</button>
+              <button className={styles.action} onClick={() => setSelected(new Set())}>Clear</button>
+              <button className={styles.actionPrimary} onClick={pushSelected} disabled={!selected.size || bulk.loading}>
+                {bulk.loading ? <LoaderCircle size={15} className={styles.spin} /> : <UserPlus size={15} />}
+                {bulk.loading ? `Pushing ${bulk.done}/${bulk.total}` : `Push selected (${selected.size})`}
+              </button>
+            </div>
           </section>
         )}
 
         {errors.length > 0 && (
-          <div className={styles.errors}>
-            {errors.slice(0, 8).map((error) => <div key={error}><CircleAlert size={15} /> {error}</div>)}
-          </div>
+          <div className={styles.errors}>{errors.slice(0, 8).map((error) => <div key={error}><CircleAlert size={15} /> {error}</div>)}</div>
         )}
 
         <section className={styles.results}>
           {results.map((prospect) => {
             const state = pushState[prospect.linkedinUrl] || {};
             const isWatched = watched.has(prospect.linkedinUrl);
+            const isSelected = selected.has(prospect.linkedinUrl);
             return (
-              <article className={styles.card} key={prospect.linkedinUrl}>
+              <article className={`${styles.card} ${isSelected ? styles.cardSelected : ""}`} key={prospect.linkedinUrl}>
                 <div className={styles.cardTop}>
                   <div className={styles.identity}>
+                    <label className={styles.selectBox} title="Select for bulk push">
+                      <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(prospect.linkedinUrl)} />
+                    </label>
                     <div className={styles.avatar}>{prospect.fullName.slice(0, 1).toUpperCase()}</div>
                     <div>
                       <div className={styles.nameLine}>
@@ -261,17 +377,29 @@ export function ProspectingCockpit() {
                       <span>{prospect.company || "Company unavailable"}{prospect.location ? ` · ${prospect.location}` : ""}</span>
                     </div>
                   </div>
-                  <div className={styles.score}>
-                    <strong>{prospect.score}</strong><span>/100</span>
-                  </div>
+                  <div className={styles.score}><strong>{prospect.score}</strong><span>/100</span></div>
                 </div>
 
                 <div className={styles.signals}>
-                  <span className={prospect.recentSignal.type ? styles.signalHot : styles.signalNeutral}>
-                    <Flame size={14} /> {prospect.recentSignal.label || "No recent job-change signal"}
-                  </span>
+                  <span className={prospect.recentSignal.type ? styles.signalHot : styles.signalNeutral}><Flame size={14} /> {prospect.recentSignal.label || "No recent job-change signal"}</span>
+                  <span className={hiringClass(prospect.hiring.status)}><BriefcaseBusiness size={14} /> {prospect.hiring.status}{prospect.hiring.status === "Hiring Now" ? ` · ${prospect.hiring.activeJobs} jobs` : ""}</span>
                   <span><Users size={14} /> {prospect.companySize || (prospect.staffCount ? `${prospect.staffCount} staff` : "Size unknown")}</span>
                   <span><ShieldCheck size={14} /> {prospect.hubspot.inHubSpot ? `HubSpot · ${prospect.hubspot.matchedBy}` : "New to HubSpot"}</span>
+                </div>
+
+                <div className={styles.companyPanel}>
+                  <div className={styles.companyPanelTitle}><Building2 size={16} /><strong>Company Intelligence</strong></div>
+                  <div className={styles.companyGrid}>
+                    <div><span>Domain</span><strong>{prospect.companyDomain || "Not resolved"}</strong></div>
+                    <div><span>ATS</span><strong>{prospect.detectedAts || "Not detected"}</strong></div>
+                    <div><span>Career Page</span>{prospect.careerPageUrl ? <a href={prospect.careerPageUrl} target="_blank" rel="noreferrer">Open verified page</a> : <strong>Not found</strong>}</div>
+                    <div><span>Hiring</span><strong>{prospect.hiring.status}{prospect.hiring.activeJobs ? ` · ${prospect.hiring.activeJobs} roles` : ""}</strong></div>
+                  </div>
+                  {prospect.hiring.jobsSample.length > 0 && (
+                    <div className={styles.jobSamples}>
+                      {prospect.hiring.jobsSample.slice(0, 3).map((job) => <a key={`${job.title}-${job.url}`} href={job.url} target="_blank" rel="noreferrer"><BriefcaseBusiness size={13} /> {job.title}{job.location ? ` · ${job.location}` : ""}</a>)}
+                    </div>
+                  )}
                 </div>
 
                 <div className={styles.grid}>
@@ -281,23 +409,15 @@ export function ProspectingCockpit() {
                   <div><span>Source</span><strong>{prospect.source}</strong></div>
                 </div>
 
-                {prospect.scoreReasons.length > 0 && (
-                  <div className={styles.reasons}>
-                    {prospect.scoreReasons.map((reason) => <span key={`${reason.label}-${reason.points}`}>{reason.label} <b>+{reason.points}</b></span>)}
-                  </div>
-                )}
+                {prospect.scoreReasons.length > 0 && <div className={styles.reasons}>{prospect.scoreReasons.map((reason) => <span key={`${reason.label}-${reason.points}`}>{reason.label} <b>+{reason.points}</b></span>)}</div>}
 
                 <div className={styles.actions}>
                   <button className={styles.actionPrimary} onClick={() => pushToMarita(prospect)} disabled={state.loading}>
-                    {state.loading ? <LoaderCircle size={15} className={styles.spin} /> : <UserPlus size={15} />}
-                    Push to Marita
+                    {state.loading ? <LoaderCircle size={15} className={styles.spin} /> : <UserPlus size={15} />} Push to Marita
                   </button>
-                  <button className={isWatched ? styles.actionActive : styles.action} onClick={() => toggleWatch(prospect)}>
-                    <Watch size={15} /> {isWatched ? "Watching" : "Watch"}
-                  </button>
-                  <button className={styles.action} disabled={!runtime?.smartleadConfigured} title={runtime?.smartleadConfigured ? "Smartlead action will be wired to campaign selection next." : "Add SMARTLEAD_API_KEY first."}>
-                    <Send size={15} /> {runtime?.smartleadConfigured ? "Smartlead" : "Smartlead · add key"}
-                  </button>
+                  <button className={isWatched ? styles.actionActive : styles.action} onClick={() => toggleWatch(prospect)}><Watch size={15} /> {isWatched ? "Watching" : "Watch"}</button>
+                  <button className={styles.action} disabled={!runtime?.smartleadConfigured} title={runtime?.smartleadConfigured ? "Smartlead campaign selection will be wired next." : "Smartlead is intentionally postponed."}><Send size={15} /> Smartlead</button>
+                  {prospect.companyWebsite && <a className={styles.action} href={prospect.companyWebsite} target="_blank" rel="noreferrer"><Globe2 size={15} /> Company</a>}
                   {prospect.phone && <a className={styles.action} href={`tel:${prospect.phone}`}><PhoneCall size={15} /> Call</a>}
                   <a className={styles.action} href={prospect.linkedinUrl} target="_blank" rel="noreferrer"><Link2 size={15} /> LinkedIn</a>
                 </div>
