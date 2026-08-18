@@ -12,7 +12,7 @@ import {
   type ProspectHiringInsight,
 } from "@/lib/prospecting-company-intelligence";
 
-const GEMINI_MODEL = process.env.GEMINI_CAREER_MODEL || "gemini-2.5-flash-lite";
+const GEMINI_MODEL = process.env.GEMINI_CAREER_MODEL || "gemini-3.5-flash-lite";
 const DIRECT_APPLICATION_LABEL = "Direct Application Form";
 
 const ATS_PATTERNS: Array<[RegExp, string]> = [
@@ -114,7 +114,6 @@ Return ONLY one JSON object with this exact shape:
       contents: [{ parts: [{ text: prompt }] }],
       tools: [{ google_search: {} }],
       generationConfig: {
-        temperature: 0.1,
         maxOutputTokens: 1400,
       },
     }),
