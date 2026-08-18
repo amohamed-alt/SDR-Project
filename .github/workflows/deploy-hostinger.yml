@@ -54,6 +54,16 @@ jobs:
             exit 1
           }
 
+      - name: Validate SignalHire configuration
+        env:
+          SIGNALHIRE_KEY: ${{ secrets.SIGNALHIRE_API_KEY }}
+        run: |
+          test -n "$SIGNALHIRE_KEY" || {
+            echo "::error::Add SIGNALHIRE_API_KEY as a repository Actions secret."
+            exit 1
+          }
+          echo "SignalHire deployment secret: configured"
+
       - name: Validate GTM premium AI configuration
         env:
           GTM_OPENROUTER_KEY: ${{ secrets.GTM_RESEARCH_OPENROUTER_API_KEY || secrets.OPENROUTER_API_KEY }}
@@ -73,6 +83,7 @@ jobs:
           docker-compose-path: docker-compose.yml
           environment-variables: |
             SDR_BUILD_REF=${{ env.DEPLOY_SHA }}
+            SIGNALHIRE_API_KEY=${{ secrets.SIGNALHIRE_API_KEY }}
             GTM_RESEARCH_OPENROUTER_API_KEY=${{ secrets.GTM_RESEARCH_OPENROUTER_API_KEY || secrets.OPENROUTER_API_KEY }}
             GTM_RESEARCH_OPENROUTER_MODEL=openai/gpt-4.1-mini
 
