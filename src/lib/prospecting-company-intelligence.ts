@@ -13,8 +13,15 @@ const PUBLIC_EMAIL_DOMAINS = new Set([
   "yahoo.com", "ymail.com", "icloud.com", "me.com", "aol.com", "proton.me", "protonmail.com",
 ]);
 
+const GENERIC_COMPANY_WORDS = new Set([
+  "company", "co", "llc", "ltd", "limited", "inc", "corporation", "corp", "plc",
+  "saudi", "arabia", "ksa", "kingdom", "of", "the", "and",
+]);
+const OPTIONAL_BRAND_WORDS = new Set(["group", "holding", "holdings"]);
+const DIRECT_APPLICATION_LABEL = "Direct Application Form";
+
 export interface ProspectHiringInsight {
-  status: "Hiring Now" | "No Active Jobs" | "Unknown";
+  status: "Hiring Now" | "Accepting Applications" | "No Active Jobs" | "Unknown";
   activeJobs: number;
   hiringScore: number;
   hiringLabel: string;
@@ -37,20 +44,28 @@ export interface ProspectCompanyIntelligence {
   hiring: ProspectHiringInsight;
 }
 
+type CareerEngineResult = {
+  career_status?: string;
+  career_url?: string;
+  career_confidence_score?: number;
+  career_evidence_reason?: string;
+  career_evidence_url?: string;
+  detected_ats?: string;
+  ats_confidence?: string;
+  ats_evidence_url?: string;
+  ats_evidence_reason?: string;
+};
+
 type CareerEngineResponse = {
   ok?: boolean;
-  result?: {
-    career_status?: string;
-    career_url?: string;
-    career_confidence_score?: number;
-    career_evidence_reason?: string;
-    career_evidence_url?: string;
-    detected_ats?: string;
-    ats_confidence?: string;
-    ats_evidence_url?: string;
-    ats_evidence_reason?: string;
-  };
+  result?: CareerEngineResult;
   error?: string;
+};
+
+type WebsiteResolution = {
+  website: string;
+  domain: string;
+  reason: string;
 };
 
 export function normalizeCompanyDomain(raw: string) {
@@ -108,7 +123,7 @@ async function fetchCareerHtml(url: string) {
   const response = await fetch(url, {
     redirect: "follow",
     cache: "no-store",
-    headers: { "User-Agent": "Mozilla/5.0 (compatible; TalenteraGTM/2.0; +https://talentera.com)" },
+    headers: { "User-Agent": "Mozilla/5.0 (compatible; TalenteraGTM/2.1; +https://talentera.com)" },
     signal: AbortSignal.timeout(22_000),
   });
   if (!response.ok) throw new Error(`Career page returned HTTP ${response.status}`);
@@ -116,11 +131,136 @@ async function fetchCareerHtml(url: string) {
   return { text, finalUrl: response.url || url };
 }
 
-async function hiringFromExistingStore(domain: string) {
-  if (!domain) return null;
+function hasDirectApplicationForm(html: string) {
+  return /<input[^>]+type\s*=\s*["']?file|job application form|apply for a job|submit (?:your )?(?:cv|resume)|upload (?:your )?(?:cv|resume)|attach (?:your )?(?:cv|resume)|نموذج طلب التوظيف|طلب التوظيف|تحميل السيرة الذاتية|رفع السيرة الذاتية|أرسل سيرتك|ارسل سيرتك/i.test(html);
+}
+
+function latinCompanyWords(companyName: string) {
+  return companyName
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((word) => word.length > 1 && !GENERIC_COMPANY_WORDS.has(word));
+}
+
+function companyNameVariants(companyName: string) {
+  const words = latinCompanyWords(companyName);
+  if (!words.length) return [] as string[];
+  const core = words.filter((word) => !OPTIONAL_BRAND_WORDS.has(word));
+  const variants = new Set<string>();
+  const add = (parts: string[]) => {
+    const safe = parts.filter(Boolean);
+    if (!safe.length) return;
+    variants.add(safe.join(""));
+    if (safe.length > 1) variants.add(safe.join("-"));
+  };
+
+  add(words);
+  add(core);
+  const first = core[0] || words[0];
+  if (first?.startsWith("al") && first.length >= 5) {
+    const noAl = first.slice(2);
+    add([noAl, ...core.slice(1)]);
+    if (words.some((word) => word === "group")) add([noAl, "group"]);
+  }
+  if (core.length === 1 && words.some((word) => word === "group")) add([core[0], "group"]);
+  return [...variants].filter((value) => value.length >= 4).slice(0, 8);
+}
+
+export function candidateCompanyDomains(companyName: string, originalDomain = "") {
+  const original = normalizeCompanyDomain(originalDomain);
+  const candidates = new Set<string>();
+  for (const stem of companyNameVariants(companyName)) {
+    for (const tld of [".com", ".sa", ".com.sa"]) {
+      const value = `${stem}${tld}`;
+      if (value !== original) candidates.add(value);
+    }
+  }
+  return [...candidates].slice(0, 18);
+}
+
+function compactLatin(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function brandVerificationScore(html: string, finalUrl: string, companyName: string, originalDomain: string) {
+  const raw = html.toLowerCase();
+  const compact = compactLatin(html.slice(0, 1_500_000));
+  const words = latinCompanyWords(companyName);
+  const core = words.filter((word) => !OPTIONAL_BRAND_WORDS.has(word));
+  const fullCompact = words.join("");
+  const coreCompact = core.join("");
+  let score = 0;
+
+  if (fullCompact.length >= 5 && compact.includes(fullCompact)) score += 60;
+  if (coreCompact.length >= 5 && compact.includes(coreCompact)) score += 35;
+  const oldDomain = normalizeCompanyDomain(originalDomain);
+  if (oldDomain && raw.includes(oldDomain)) score += 30;
+  const oldStem = oldDomain.split(".")[0];
+  if (oldStem.length >= 5 && compact.includes(oldStem)) score += 10;
+  if (/career|careers|jobs|join us|join our team|وظائف|التوظيف|انضم/i.test(raw)) score += 5;
+
+  const finalDomain = normalizeCompanyDomain(finalUrl);
+  if (candidateCompanyDomains(companyName, oldDomain).includes(finalDomain)) score += 10;
+  return score;
+}
+
+async function probeBrandWebsite(domainCandidate: string, companyName: string, originalDomain: string): Promise<WebsiteResolution | null> {
+  for (const protocol of ["https", "http"] as const) {
+    const url = `${protocol}://${domainCandidate}/`;
+    try {
+      const response = await fetch(url, {
+        redirect: "follow",
+        cache: "no-store",
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; TalenteraGTM/2.1; +https://talentera.com)" },
+        signal: AbortSignal.timeout(7_000),
+      });
+      if (!response.ok) continue;
+      const contentType = response.headers.get("content-type") || "";
+      if (!/html|text/i.test(contentType)) continue;
+      const html = (await response.text()).slice(0, 1_500_000);
+      const finalUrl = response.url || url;
+      if (brandVerificationScore(html, finalUrl, companyName, originalDomain) < 70) continue;
+      const finalDomain = normalizeCompanyDomain(finalUrl);
+      const final = new URL(finalUrl);
+      return {
+        website: `${final.protocol}//${final.host}/`,
+        domain: finalDomain || domainCandidate,
+        reason: `Verified a current company website from the company name after the supplied domain was inconclusive: ${originalDomain || "unknown"} → ${finalDomain || domainCandidate}.`,
+      };
+    } catch {
+      // Try the next protocol/domain candidate.
+    }
+  }
+  return null;
+}
+
+async function resolveAlternateCompanyWebsite(companyName: string, originalDomain: string) {
+  const candidates = candidateCompanyDomains(companyName, originalDomain);
+  if (!candidates.length) return null;
+  let cursor = 0;
+  let resolved: WebsiteResolution | null = null;
+  async function worker() {
+    while (!resolved) {
+      const index = cursor++;
+      if (index >= candidates.length) return;
+      const match = await probeBrandWebsite(candidates[index], companyName, originalDomain);
+      if (match && !resolved) resolved = match;
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, () => worker()));
+  return resolved;
+}
+
+async function hiringFromExistingStore(domains: string[]) {
+  const normalized = [...new Set(domains.map(normalizeCompanyDomain).filter(Boolean))];
+  if (!normalized.length) return null;
   try {
     const store = await getHiringStore();
-    const match = store.companies.find((company) => normalizeCompanyDomain(company.domain) === domain);
+    const match = store.companies.find((company) => normalized.includes(normalizeCompanyDomain(company.domain)));
     if (!match || !match.lastCheckedAt) return null;
     return {
       status: match.activeJobs > 0 ? "Hiring Now" as const : match.scanStatus === "success" ? "No Active Jobs" as const : "Unknown" as const,
@@ -151,6 +291,7 @@ async function liveHiringScan(careerPageUrl: string, detectedAts: string): Promi
     const links = parseJobLinks(page.text, page.finalUrl);
     const jobs = uniqueJobs(structured.length ? structured : links);
     const explicitEmpty = /(?:no|without)\s+(?:current\s+)?(?:openings|vacancies|positions|jobs)|(?:currently|presently)\s+(?:have|has|with)\s+no\s+(?:openings|vacancies|positions|jobs)/i.test(page.text);
+    const directApplication = hasDirectApplicationForm(page.text);
     const activeJobs = jobs.length;
     const hasHrJobs = jobs.some((job) => isHrOrRecruitingRole(job.title));
     const score = calculateHiringScore({
@@ -160,13 +301,26 @@ async function liveHiringScan(careerPageUrl: string, detectedAts: string): Promi
       hasHrJobs,
       locationCount: new Set(jobs.map((job) => String(job.location || "").trim()).filter(Boolean)).size,
     });
+    const status: ProspectHiringInsight["status"] = activeJobs > 0
+      ? "Hiring Now"
+      : explicitEmpty
+        ? "No Active Jobs"
+        : directApplication
+          ? "Accepting Applications"
+          : "Unknown";
     return {
-      status: activeJobs > 0 ? "Hiring Now" : explicitEmpty ? "No Active Jobs" : "Unknown",
+      status,
       activeJobs,
-      hiringScore: score,
-      hiringLabel: hiringStatus(score),
+      hiringScore: status === "Accepting Applications" ? Math.max(score, 20) : score,
+      hiringLabel: status === "Accepting Applications" ? "Applications Open" : hiringStatus(score),
       hasHrJobs,
-      source: structured.length ? "Live structured jobs" : links.length ? "Live career links" : "Live career check",
+      source: structured.length
+        ? "Live structured jobs"
+        : links.length
+          ? "Live career links"
+          : directApplication
+            ? "Direct career application form"
+            : "Live career check",
       sourceUrl: page.finalUrl,
       checkedAt,
       jobsSample: jobs.slice(0, 5).map((job) => ({
@@ -180,7 +334,7 @@ async function liveHiringScan(careerPageUrl: string, detectedAts: string): Promi
   }
 }
 
-async function callCareerEngine(companyName: string, domain: string, website: string) {
+async function callCareerEngine(companyName: string, domain: string, website: string, forceRefresh = false) {
   if (!domain && !website) return null;
   const engineUrl = process.env.CAREER_ENGINE_URL || "http://gtm-career-browser:3000/intelligence-detect";
   try {
@@ -196,12 +350,12 @@ async function callCareerEngine(companyName: string, domain: string, website: st
         stop_on_career: false,
         require_job_detail: false,
         force_browser: false,
-        force_refresh: false,
-        max_static_pages: 24,
-        max_browser_steps: 8,
+        force_refresh: forceRefresh,
+        max_static_pages: 30,
+        max_browser_steps: 10,
       }),
       cache: "no-store",
-      signal: AbortSignal.timeout(105_000),
+      signal: AbortSignal.timeout(120_000),
     });
     const payload = await response.json().catch(() => ({})) as CareerEngineResponse;
     if (!response.ok || payload.ok === false) return null;
@@ -211,28 +365,52 @@ async function callCareerEngine(companyName: string, domain: string, website: st
   }
 }
 
+function hasCareer(engine: CareerEngineResult | null) {
+  return Boolean(String(engine?.career_url || "").trim());
+}
+
 export async function inspectProspectCompany(input: {
   companyName: string;
   website: string;
   emails: string[];
 }): Promise<ProspectCompanyIntelligence> {
-  const domain = resolveCompanyDomain(input.website, input.emails);
-  const website = normalizeWebsite(input.website, domain);
-  const engine = await callCareerEngine(input.companyName, domain, website);
+  const originalDomain = resolveCompanyDomain(input.website, input.emails);
+  const originalWebsite = normalizeWebsite(input.website, originalDomain);
+  let crawlDomain = originalDomain;
+  let crawlWebsite = originalWebsite;
+  let resolutionReason = "";
+  let engine = await callCareerEngine(input.companyName, crawlDomain, crawlWebsite);
+
+  if (!hasCareer(engine) && input.companyName.trim()) {
+    const alternate = await resolveAlternateCompanyWebsite(input.companyName, originalDomain);
+    if (alternate) {
+      crawlDomain = alternate.domain;
+      crawlWebsite = alternate.website;
+      resolutionReason = alternate.reason;
+      engine = await callCareerEngine(input.companyName, crawlDomain, crawlWebsite, true);
+    }
+  }
+
   const careerPageUrl = String(engine?.career_url || "").trim();
-  const detectedAts = String(engine?.detected_ats || "").trim();
-  const existingHiring = await hiringFromExistingStore(domain);
-  const hiring = existingHiring || await liveHiringScan(careerPageUrl, detectedAts);
+  const actualAts = String(engine?.detected_ats || "").trim();
+  const existingHiring = await hiringFromExistingStore([originalDomain, crawlDomain]);
+  const hiring = existingHiring || await liveHiringScan(careerPageUrl, actualAts);
+  const displayAts = actualAts || (careerPageUrl && hiring.status === "Accepting Applications" ? DIRECT_APPLICATION_LABEL : "");
+  const engineReason = String(engine?.ats_evidence_reason || engine?.career_evidence_reason || "").trim();
+  const verificationReason = [resolutionReason, engineReason].filter(Boolean).join(" ") || (originalDomain
+    ? "Company domain resolved; career intelligence was inconclusive."
+    : "No company domain could be resolved.");
 
   return {
-    domain,
-    website,
+    // Keep the original/contact domain as the CRM identity key, but use the verified current website for crawling and company_website.
+    domain: originalDomain || crawlDomain,
+    website: crawlWebsite || originalWebsite,
     careerPageUrl,
-    detectedAts,
-    atsConfidence: String(engine?.ats_confidence || ""),
+    detectedAts: displayAts,
+    atsConfidence: actualAts ? String(engine?.ats_confidence || "") : displayAts === DIRECT_APPLICATION_LABEL ? "direct" : "",
     careerConfidence: Math.max(0, Math.min(100, Number(engine?.career_confidence_score || 0))),
-    evidenceUrl: String(engine?.ats_evidence_url || engine?.career_evidence_url || careerPageUrl || ""),
-    verificationReason: String(engine?.ats_evidence_reason || engine?.career_evidence_reason || (domain ? "Company domain resolved; career intelligence was inconclusive." : "No company domain could be resolved.")),
+    evidenceUrl: String(engine?.ats_evidence_url || engine?.career_evidence_url || careerPageUrl || crawlWebsite || ""),
+    verificationReason,
     hiring,
   };
 }
