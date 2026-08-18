@@ -175,11 +175,18 @@ export async function POST(request: NextRequest) {
     if (recentSignal.type) { score += 20; scoreReasons.push({ label: recentSignal.label, points: 20 }); }
     if (email?.value) { score += 7; scoreReasons.push({ label: "Email available", points: 7 }); }
     if (phone?.value) { score += 3; scoreReasons.push({ label: "Phone available", points: 3 }); }
-    if (companyIntelligence.detectedAts) { score += 4; scoreReasons.push({ label: `ATS detected: ${companyIntelligence.detectedAts}`, points: 4 }); }
+    const directApplication = companyIntelligence.detectedAts === "Direct Application Form";
+    if (companyIntelligence.detectedAts && !directApplication) {
+      score += 4;
+      scoreReasons.push({ label: `ATS detected: ${companyIntelligence.detectedAts}`, points: 4 });
+    }
     if (companyIntelligence.hiring.status === "Hiring Now") {
       const hiringPoints = companyIntelligence.hiring.activeJobs >= 10 ? 10 : 6;
       score += hiringPoints;
       scoreReasons.push({ label: `${companyIntelligence.hiring.activeJobs} active jobs`, points: hiringPoints });
+    } else if (companyIntelligence.hiring.status === "Accepting Applications") {
+      score += 3;
+      scoreReasons.push({ label: "Career application form is open", points: 3 });
     }
     if (companyIntelligence.hiring.hasHrJobs) { score += 5; scoreReasons.push({ label: "HR / recruiting roles open", points: 5 }); }
     score = Math.min(100, score);
