@@ -173,7 +173,7 @@ async function verifyGeminiCareer(companyName: string, research: GeminiResearch)
     if (!response.ok) return null;
     const html = (await response.text()).slice(0, 3_000_000);
     const finalUrl = response.url || careerCandidate;
-    const officialDomain = normalizeCompanyDomain(research.official_domain || research.official_website);
+    const officialDomain = normalizeCompanyDomain(String(research.official_domain || research.official_website || ""));
     const careerDomain = normalizeCompanyDomain(finalUrl);
     const ats = detectAts(finalUrl, html, research.ats || "");
     const externalAts = Boolean(ats && careerDomain && officialDomain && careerDomain !== officialDomain);
