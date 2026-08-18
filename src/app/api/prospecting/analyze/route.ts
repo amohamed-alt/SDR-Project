@@ -116,7 +116,7 @@ export async function GET() {
     smartleadConfigured: Boolean(process.env.SMARTLEAD_API_KEY),
     companyIntelligenceConfigured: Boolean(process.env.CAREER_ENGINE_URL),
     geminiCareerFallbackConfigured: Boolean(process.env.GEMINI_API_KEY),
-    geminiCareerModel: process.env.GEMINI_CAREER_MODEL || "gemini-2.5-flash-lite",
+    geminiCareerModel: process.env.GEMINI_CAREER_MODEL || "gemini-3.5-flash-lite",
     defaultSource: "Sales Navigator",
   }, { headers: { "Cache-Control": "no-store" } });
 }
