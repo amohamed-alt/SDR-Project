@@ -1,0 +1,51 @@
+name: Start Career ATS Master Audit
+
+on:
+  workflow_run:
+    workflows: ["Deploy SDR Dashboard to Hostinger"]
+    types: [completed]
+  workflow_dispatch:
+
+jobs:
+  start-audit:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Wait for production route and start/resume audit
+        run: |
+          set -euo pipefail
+          BASE='https://sdr.dashboardtalentera.tech/api/career-audit'
+          READY=false
+          for ATTEMPT in $(seq 1 30); do
+            CODE=$(curl --silent --show-error --connect-timeout 5 --max-time 20 \
+              --output /tmp/audit-status.json --write-out '%{http_code}' "$BASE" || true)
+            echo "Career audit route check ${ATTEMPT}/30: HTTP ${CODE:-none}"
+            if [ "$CODE" = "200" ]; then
+              READY=true
+              break
+            fi
+            sleep 10
+          done
+          if [ "$READY" != "true" ]; then
+            echo "::error::Career audit endpoint did not become ready."
+            exit 1
+          fi
+
+          CODE=$(curl --silent --show-error --connect-timeout 5 --max-time 30 \
+            --output /tmp/audit-start.json --write-out '%{http_code}' \
+            -X POST "$BASE" \
+            -H 'Content-Type: application/json' \
+            -d '{"action":"start"}' || true)
+          cat /tmp/audit-start.json || true
+          echo
+          if [ "$CODE" != "200" ] && [ "$CODE" != "202" ]; then
+            echo "::error::Career audit start request failed with HTTP $CODE."
+            exit 1
+          fi
+
+          sleep 5
+          curl --fail --silent --show-error --connect-timeout 5 --max-time 20 "$BASE"
+          echo
