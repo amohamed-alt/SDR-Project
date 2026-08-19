@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { HubSpotApiError, searchAll } from "@/lib/hubspot";
+import {
+  batchRead,
+  getPropertyDefinitions,
+  HubSpotApiError,
+  listDealStages,
+  readAssociations,
+  searchAll,
+} from "@/lib/hubspot";
 import { inspectProspectCompany } from "@/lib/prospecting-company-intelligence-gemini";
 import { normalizeCompanyDomain } from "@/lib/prospecting-company-intelligence";
 
@@ -25,6 +32,15 @@ type SignalHireCandidate = {
 };
 type SignalHireResult = { item?: string; status?: string; candidate?: SignalHireCandidate };
 
+type HubSpotOpenDeal = {
+  id: string;
+  name: string;
+  pipeline: string;
+  pipelineLabel: string;
+  stage: string;
+  stageLabel: string;
+};
+
 type HubSpotCompanyStatus = {
   id: string;
   matchedBy: string;
@@ -36,6 +52,7 @@ type HubSpotCompanyStatus = {
   hasOpenDeal: boolean;
   openDealCount: number;
   associatedDealCount: number;
+  openDeals: HubSpotOpenDeal[];
 };
 
 function normalizeLinkedInUrl(raw: string) {
@@ -123,6 +140,43 @@ async function lookupHubSpot(linkedinUrl: string, email: string) {
   return null;
 }
 
+async function openDealsForCompany(companyId: string): Promise<HubSpotOpenDeal[]> {
+  try {
+    const associations = await readAssociations("companies", "deals", [companyId]);
+    const dealIds = (associations.get(companyId) || []).slice(0, 100);
+    if (!dealIds.length) return [];
+
+    const [deals, stageLabels, pipelineDefinitions] = await Promise.all([
+      batchRead("deals", dealIds, ["dealname", "pipeline", "dealstage", "hs_is_closed"]),
+      listDealStages(),
+      getPropertyDefinitions("deals", ["pipeline"]),
+    ]);
+    const pipelineLabels = new Map(
+      (pipelineDefinitions.find((definition) => definition.name === "pipeline")?.options || [])
+        .map((option) => [String(option.value), String(option.label)]),
+    );
+
+    return deals
+      .filter((deal) => String(deal.properties.hs_is_closed || "").toLowerCase() !== "true")
+      .map((deal) => {
+        const pipeline = String(deal.properties.pipeline || "");
+        const stage = String(deal.properties.dealstage || "");
+        return {
+          id: String(deal.id),
+          name: String(deal.properties.dealname || `Deal ${deal.id}`),
+          pipeline,
+          pipelineLabel: pipelineLabels.get(pipeline) || pipeline,
+          stage,
+          stageLabel: stageLabels.get(stage) || stage,
+        };
+      })
+      .slice(0, 10);
+  } catch (error) {
+    console.error("Prospecting open-deal detail check failed", error);
+    return [];
+  }
+}
+
 async function lookupHubSpotCompany(companyName: string, domainCandidates: string[]): Promise<HubSpotCompanyStatus | null> {
   const properties = [
     "name",
@@ -158,13 +212,22 @@ async function lookupHubSpotCompany(companyName: string, domainCandidates: strin
 
   const accountType = String(company.properties.account_type || "").trim();
   const accountStatus = String(company.properties.account_status || "").trim();
-  const openDealCount = Math.max(0, Number(company.properties.hs_num_open_deals || 0) || 0);
+  const propertyOpenDealCount = Math.max(0, Number(company.properties.hs_num_open_deals || 0) || 0);
   const associatedDealCount = Math.max(0, Number(company.properties.num_associated_deals || 0) || 0);
+  const openDeals = propertyOpenDealCount > 0 ? await openDealsForCompany(String(company.id)) : [];
+  const openDealCount = Math.max(propertyOpenDealCount, openDeals.length);
   const isRetention = accountType.toLowerCase() === "retention";
   const statusParts = [matchedBy];
   if (accountType) statusParts.push(accountType);
   if (accountStatus) statusParts.push(accountStatus);
   statusParts.push(openDealCount > 0 ? `${openDealCount} open deal${openDealCount === 1 ? "" : "s"}` : "No open deals");
+  if (openDeals.length) {
+    const dealSummary = openDeals.slice(0, 2).map((deal) => {
+      const location = [deal.pipelineLabel, deal.stageLabel].filter(Boolean).join(" / ");
+      return `${deal.name}${location ? ` (${location})` : ""}`;
+    }).join("; ");
+    if (dealSummary) statusParts.push(dealSummary);
+  }
 
   return {
     id: String(company.id),
@@ -177,6 +240,7 @@ async function lookupHubSpotCompany(companyName: string, domainCandidates: strin
     hasOpenDeal: openDealCount > 0,
     openDealCount,
     associatedDealCount,
+    openDeals,
   };
 }
 
@@ -330,6 +394,7 @@ export async function POST(request: NextRequest) {
               hasOpenDeal: false,
               openDealCount: 0,
               associatedDealCount: 0,
+              openDeals: [],
             },
         hubspotContact: hubspotContact ? { inHubSpot: true, ...hubspotContact } : { inHubSpot: false, id: "", matchedBy: "" },
       },
