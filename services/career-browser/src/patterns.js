@@ -5,9 +5,32 @@ const ATS = [
   ['Workday', 'Workday', 'enterprise_ats', 98, [/\.myworkdayjobs\.com(?:\/|$)/i, /\.myworkdaysite\.com(?:\/|$)/i]],
   ['Oracle HCM Cloud', 'Oracle', 'enterprise_ats', 98, [/\.oraclecloud\.com\/hcmUI\/CandidateExperience/i, /oraclecloud\.com.*CandidateExperience/i]],
   ['Oracle Taleo', 'Oracle', 'enterprise_ats', 98, [/\.taleo\.net\/careersection/i]],
-  ['SAP SuccessFactors', 'SAP', 'enterprise_ats', 98, [/\.successfactors\.(?:com|eu)(?:\/|$)/i]],
-  ['Talentera', 'Talentera', 'enterprise_ats', 98, [/\.talentera\.com(?:\/|$)/i, /\bpowered\s+by\s+talentera\b/i, /\btalentera\b.{0,100}\b(?:applicant tracking|recruitment|career portal)\b/i]],
+  ['SAP SuccessFactors', 'SAP', 'enterprise_ats', 98, [/\.successfactors\.(?:com|eu)(?:\/|$)/i, /career\d*\.sapsf\.com(?:\/|$)/i]],
+
+  // KABi / HYRDD uses both hyrddsa.com infrastructure and white-label custom domains.
+  // Branding plus the candidate route family is strong evidence even when the employer
+  // hides the vendor behind careers.<company-domain>.
+  ['KABi', 'KABi', 'enterprise_ats', 99, [
+    /\.hyrddsa\.com(?:\/|$)/i,
+    /\bKABi\b/i,
+    /\bHYRDD\b/i,
+    /\/auth\/job-?seeker(?:\/|$)/i,
+    /\/auth\/jobseeker\/signup(?:\/|$)/i,
+    /\/jobs\/details\/[a-f0-9]{24}(?:\/|$)/i,
+  ]],
+
+  ['Talentera', 'Talentera', 'enterprise_ats', 98, [
+    /\.talentera\.com(?:\/|$)/i,
+    /\bpowered\s+by\s+talentera\b/i,
+    /\btalentera\b.{0,100}\b(?:applicant tracking|recruitment|career portal)\b/i,
+    /\btalentera\b.{0,160}\bbayt\.com\b/i,
+    /\bbayt\.com\b.{0,160}\btalentera\b/i,
+  ]],
   ['Elevatus', 'Elevatus', 'mid_market_ats', 97, [/\.elevatus\.io(?:\/|$)/i]],
+  ['Solvait Attract', 'Solvait', 'mid_market_ats', 98, [/attract\.solvait\.com(?:\/|$)/i]],
+  ['KayanHR', 'KayanHR', 'mid_market_ats', 98, [/hunt\.kayanhr\.com(?:\/|$)/i, /\bkayanhr\b.{0,100}\b(?:career|recruit|applicant)\b/i]],
+  ['Adrenalin', 'Adrenalin', 'enterprise_ats', 98, [/\.myadrenalin\.com(?:\/|$)/i, /\bAdrenalin\s+(?:MAX|HRMS|HCM)\b/i]],
+  ['Jobsoid', 'Jobsoid', 'mid_market_ats', 98, [/\.jobsoid\.com(?:\/|$)/i]],
   ['ZenATS', 'ZenHR', 'mid_market_ats', 98, [/\.zenats\.com(?:\/|$)/i, /\.cavall\.io(?:\/|$)/i, /\bpowered\s+by\s+zenats\b/i, /\bzenats\b.{0,100}\bzenhr\b/i]],
   ['Jisr ATS', 'Jisr', 'mid_market_ats', 97, [/jisr\.net\/(?:[a-z]{2}\/)?[^/?#]+\/careers(?:\/|$)/i, /\bpowered\s+by\s+(?:jisr|جسر)\b/i, /\bjisr\s+(?:applicant tracking system|ats)\b/i]],
   ['Bayzat ATS', 'Bayzat', 'mid_market_ats', 96, [/(?:jobs|careers|hiring)\.bayzat\.com(?:\/|$)/i, /\.bayzat\.com\/[^\s"']*(?:hiring|recruit|career|job|candidate)/i, /\bpowered\s+by\s+bayzat\b/i, /\bbayzat\s+(?:hiring management|applicant tracking system|ats)\b/i]],
@@ -20,7 +43,7 @@ const ATS = [
   ['SmartRecruiters', 'SmartRecruiters', 'mid_market_ats', 98, [/(?:jobs|careers)\.smartrecruiters\.com(?:\/|$)/i]],
   ['iCIMS', 'iCIMS', 'enterprise_ats', 98, [/\.icims\.com\/jobs/i]],
   ['Avature', 'Avature', 'enterprise_ats', 98, [/\.avature\.net(?:\/|$)/i]],
-  ['Workable', 'Workable', 'mid_market_ats', 97, [/apply\.workable\.com(?:\/|$)/i, /workable\.com\/j\//i]],
+  ['Workable', 'Workable', 'mid_market_ats', 97, [/apply\.workable\.com(?:\/|$)/i, /jobs\.workable\.com(?:\/|$)/i, /workable\.com\/j\//i, /\/_\/j\/[A-Za-z0-9_-]+\/apply(?:\/|$)/i]],
   ['Ashby', 'Ashby', 'mid_market_ats', 98, [/jobs\.ashbyhq\.com(?:\/|$)/i]],
   ['Recruitee', 'Recruitee', 'mid_market_ats', 97, [/\.recruitee\.com(?:\/|$)/i]],
   ['Teamtailor', 'Teamtailor', 'mid_market_ats', 97, [/\.teamtailor\.com(?:\/|$)/i]],
