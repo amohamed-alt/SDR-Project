@@ -7,13 +7,15 @@ const ATS = [
   ['Oracle Taleo', 'Oracle', 'enterprise_ats', 98, [/\.taleo\.net\/careersection/i]],
   ['SAP SuccessFactors', 'SAP', 'enterprise_ats', 98, [/\.successfactors\.(?:com|eu)(?:\/|$)/i, /career\d*\.sapsf\.com(?:\/|$)/i]],
 
-  // KABi / HYRDD uses both hyrddsa.com infrastructure and white-label custom domains.
-  // Branding plus the candidate route family is strong evidence even when the employer
-  // hides the vendor behind careers.<company-domain>.
+  // High-confidence KABi evidence: vendor infrastructure or explicit branding.
   ['KABi', 'KABi', 'enterprise_ats', 99, [
     /\.hyrddsa\.com(?:\/|$)/i,
     /\bKABi\b/i,
     /\bHYRDD\b/i,
+  ]],
+  // The route family is a useful KABi hint on white-label domains, but by itself
+  // it is not strong enough for an automatic overwrite. Score <97 => medium.
+  ['KABi', 'KABi', 'enterprise_ats', 94, [
     /\/auth\/job-?seeker(?:\/|$)/i,
     /\/auth\/jobseeker\/signup(?:\/|$)/i,
     /\/jobs\/details\/[a-f0-9]{24}(?:\/|$)/i,
