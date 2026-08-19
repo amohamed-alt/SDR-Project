@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { HubSpotApiError, searchAll } from "@/lib/hubspot";
 import { inspectProspectCompany } from "@/lib/prospecting-company-intelligence-gemini";
+import { normalizeCompanyDomain } from "@/lib/prospecting-company-intelligence";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +24,19 @@ type SignalHireCandidate = {
   experience?: SignalHireExperience[];
 };
 type SignalHireResult = { item?: string; status?: string; candidate?: SignalHireCandidate };
+
+type HubSpotCompanyStatus = {
+  id: string;
+  matchedBy: string;
+  name: string;
+  domain: string;
+  accountType: string;
+  accountStatus: string;
+  isRetention: boolean;
+  hasOpenDeal: boolean;
+  openDealCount: number;
+  associatedDealCount: number;
+};
 
 function normalizeLinkedInUrl(raw: string) {
   const url = new URL(raw);
@@ -109,14 +123,70 @@ async function lookupHubSpot(linkedinUrl: string, email: string) {
   return null;
 }
 
+async function lookupHubSpotCompany(companyName: string, domainCandidates: string[]): Promise<HubSpotCompanyStatus | null> {
+  const properties = [
+    "name",
+    "domain",
+    "account_type",
+    "account_status",
+    "hs_num_open_deals",
+    "num_associated_deals",
+  ] as const;
+
+  const domains = [...new Set(domainCandidates.map(normalizeCompanyDomain).filter(Boolean))];
+  let company = null as Awaited<ReturnType<typeof searchAll>>[number] | null;
+  let matchedBy = "";
+
+  for (const domain of domains) {
+    const matches = await searchAll("companies", properties, [{ propertyName: "domain", operator: "EQ", value: domain }]);
+    if (matches[0]) {
+      company = matches[0];
+      matchedBy = "domain";
+      break;
+    }
+  }
+
+  if (!company && companyName.trim()) {
+    const matches = await searchAll("companies", properties, [{ propertyName: "name", operator: "EQ", value: companyName.trim() }]);
+    if (matches[0]) {
+      company = matches[0];
+      matchedBy = "name";
+    }
+  }
+
+  if (!company) return null;
+
+  const accountType = String(company.properties.account_type || "").trim();
+  const accountStatus = String(company.properties.account_status || "").trim();
+  const openDealCount = Math.max(0, Number(company.properties.hs_num_open_deals || 0) || 0);
+  const associatedDealCount = Math.max(0, Number(company.properties.num_associated_deals || 0) || 0);
+  const isRetention = accountType.toLowerCase() === "retention";
+  const statusParts = [matchedBy];
+  if (accountType) statusParts.push(accountType);
+  if (accountStatus) statusParts.push(accountStatus);
+  statusParts.push(openDealCount > 0 ? `${openDealCount} open deal${openDealCount === 1 ? "" : "s"}` : "No open deals");
+
+  return {
+    id: String(company.id),
+    matchedBy: statusParts.join(" · "),
+    name: String(company.properties.name || companyName || ""),
+    domain: String(company.properties.domain || domains[0] || ""),
+    accountType,
+    accountStatus,
+    isRetention,
+    hasOpenDeal: openDealCount > 0,
+    openDealCount,
+    associatedDealCount,
+  };
+}
+
 export async function GET() {
   return NextResponse.json({
     status: "ok",
     signalHireConfigured: Boolean(process.env.SIGNALHIRE_API_KEY),
     smartleadConfigured: Boolean(process.env.SMARTLEAD_API_KEY),
     companyIntelligenceConfigured: Boolean(process.env.CAREER_ENGINE_URL),
-    geminiCareerFallbackConfigured: Boolean(process.env.GEMINI_API_KEY),
-    geminiCareerModel: process.env.GEMINI_CAREER_MODEL || "gemini-3.5-flash-lite",
+    tavilyCareerFallbackConfigured: Boolean(process.env.TAVILY_API_KEY),
     defaultSource: "Sales Navigator",
   }, { headers: { "Cache-Control": "no-store" } });
 }
@@ -193,9 +263,20 @@ export async function POST(request: NextRequest) {
     if (companyIntelligence.hiring.hasHrJobs) { score += 5; scoreReasons.push({ label: "HR / recruiting roles open", points: 5 }); }
     score = Math.min(100, score);
 
-    let hubspot: { id: string; matchedBy: "email" | "linkedin" } | null = null;
-    try { hubspot = await lookupHubSpot(linkedinUrl, String(email?.value || "").toLowerCase()); }
-    catch (error) { console.error("Prospecting HubSpot duplicate check failed", error); }
+    let hubspotContact: { id: string; matchedBy: "email" | "linkedin" } | null = null;
+    let hubspotCompany: HubSpotCompanyStatus | null = null;
+    try {
+      [hubspotContact, hubspotCompany] = await Promise.all([
+        lookupHubSpot(linkedinUrl, String(email?.value || "").toLowerCase()),
+        lookupHubSpotCompany(currentRole?.company || "", [
+          companyIntelligence.domain,
+          companyIntelligence.website,
+          currentRole?.website || "",
+        ]),
+      ]);
+    } catch (error) {
+      console.error("Prospecting HubSpot CRM check failed", error);
+    }
 
     const priority = score >= 80 ? "high" : score >= 60 ? "medium" : "normal";
     return NextResponse.json({
@@ -235,12 +316,27 @@ export async function POST(request: NextRequest) {
         score,
         priority,
         scoreReasons,
-        hubspot: hubspot ? { inHubSpot: true, ...hubspot } : { inHubSpot: false, id: "", matchedBy: "" },
+        hubspot: hubspotCompany
+          ? { inHubSpot: true, ...hubspotCompany }
+          : {
+              inHubSpot: false,
+              id: "",
+              matchedBy: "",
+              name: currentRole?.company || "",
+              domain: companyIntelligence.domain,
+              accountType: "",
+              accountStatus: "",
+              isRetention: false,
+              hasOpenDeal: false,
+              openDealCount: 0,
+              associatedDealCount: 0,
+            },
+        hubspotContact: hubspotContact ? { inHubSpot: true, ...hubspotContact } : { inHubSpot: false, id: "", matchedBy: "" },
       },
       meta: {
-        provider: "SignalHire + Career ATS V3 + Gemini Search fallback + Hiring Intelligence",
+        provider: "SignalHire + Career ATS V3 + Tavily fallback + Hiring Intelligence + HubSpot company status",
         creditsLeft: creditsLeft ? Number(creditsLeft) : null,
-        geminiCareerFallbackConfigured: Boolean(process.env.GEMINI_API_KEY),
+        tavilyCareerFallbackConfigured: Boolean(process.env.TAVILY_API_KEY),
         smartleadConfigured: Boolean(process.env.SMARTLEAD_API_KEY),
       },
     }, { headers: { "Cache-Control": "no-store" } });
