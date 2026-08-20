@@ -6,7 +6,7 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/common.js && node --check src/static.js && node --check src/browser.js && node --check src/judge.js && node --check src/takafo.js && node --check src/external-careers.js && node --check src/patterns.js && node --test src/*.test.js"
+    "check": "node --check src/server.js && node --check src/common.js && node --check src/static.js && node --check src/browser.js && node --check src/judge.js && node --check src/takafo.js && node --check src/external-careers.js && node --check src/patterns.js && node --check src/salesnav.js && node --test src/*.test.js"
   },
   "engines": { "node": ">=22" },
   "dependencies": {
