@@ -3,6 +3,7 @@
 }
 
 .gtmLauncher,
+.salesNavLauncher,
 .careerLauncher,
 .priorityLauncher,
 .hiringLauncher,
@@ -26,9 +27,15 @@
 }
 
 .gtmLauncher {
-  bottom: 310px;
+  bottom: 368px;
   background: #0f5f7a;
   box-shadow: 0 14px 34px rgba(15, 95, 122, 0.28);
+}
+
+.salesNavLauncher {
+  bottom: 310px;
+  background: #2867b2;
+  box-shadow: 0 14px 34px rgba(40, 103, 178, 0.28);
 }
 
 .careerLauncher {
@@ -56,6 +63,7 @@
 }
 
 .gtmLauncher span,
+.salesNavLauncher span,
 .careerLauncher span,
 .priorityLauncher span,
 .hiringLauncher span,
@@ -64,6 +72,7 @@
 }
 
 .gtmLauncher small,
+.salesNavLauncher small,
 .careerLauncher small,
 .priorityLauncher small,
 .hiringLauncher small,
@@ -79,6 +88,7 @@
 }
 
 .gtmLauncher:hover,
+.salesNavLauncher:hover,
 .careerLauncher:hover,
 .priorityLauncher:hover,
 .hiringLauncher:hover,
@@ -89,6 +99,7 @@
 
 @media (max-width: 720px) {
   .gtmLauncher,
+  .salesNavLauncher,
   .careerLauncher,
   .priorityLauncher,
   .hiringLauncher,
@@ -96,7 +107,8 @@
     right: 14px;
   }
 
-  .gtmLauncher { bottom: 304px; }
+  .gtmLauncher { bottom: 362px; }
+  .salesNavLauncher { bottom: 304px; }
   .careerLauncher { bottom: 246px; }
   .priorityLauncher { bottom: 188px; }
   .hiringLauncher { bottom: 72px; }
