@@ -5,12 +5,13 @@ const { clean, unique, now, normalizeUrl, rootUrl, domain, assertPublic, fingerp
 const { staticDetect } = require('./static');
 const { browserDetect } = require('./browser');
 const { applyAiJudge } = require('./judge');
+const { extractSalesNavSearch, sessionConfigured } = require('./salesnav');
 
 const PORT = Number(process.env.PORT || 3000);
 const CACHE_TTL_DAYS = Number(process.env.CACHE_TTL_DAYS || 30);
 const MAX_STATIC_PAGES = Number(process.env.MAX_STATIC_PAGES || 30);
 const MAX_BROWSER_STEPS = Number(process.env.MAX_BROWSER_STEPS || 8);
-const VERSION = '3.0.0';
+const VERSION = '3.1.0';
 let cacheWriteQueue = Promise.resolve();
 
 function terminalCareerStatus(status) { return ['found_verified','no_public_career_page','website_domain_invalid','insufficient_company_data'].includes(String(status || '')); }
@@ -100,8 +101,6 @@ async function detect(input, mode = 'career') {
   result.candidate_urls = unique(result.candidate_urls).filter(url => isJobDetailUrl(url) || fingerprint(url) || scoreCareer({ href: url, text: '' },website) >= 70).slice(0,120);
   result.trace = result.trace.slice(0,120);
 
-  // The local model is a bounded second opinion, never the discovery source.
-  // It can only confirm the fixed candidate URL or downgrade it to manual review.
   result = await applyAiJudge(request, result);
   result.trace = result.trace.slice(0,120);
 
@@ -117,13 +116,29 @@ app.get('/health', (_req,res) => res.json({
   ok: true,
   service: 'gtm-career-browser',
   version: VERSION,
-  capabilities: ['career-detect','ats-detect','full-intelligence','known-career-seed','negative-cache','arabic-career-signals','browser-pool','blank-page-rejection','adversarial-ai-judge','career-v3'],
+  capabilities: ['career-detect','ats-detect','full-intelligence','known-career-seed','negative-cache','arabic-career-signals','browser-pool','blank-page-rejection','adversarial-ai-judge','career-v3','salesnav-extract'],
+  salesNav: { configured: sessionConfigured(), maxResults: Math.max(1, Math.min(100, Number(process.env.SALESNAV_MAX_RESULTS || 50))) },
   aiJudge: {
     enabled: String(process.env.AI_JUDGE_ENABLED || 'true').toLowerCase() === 'true',
     model: process.env.OLLAMA_MODEL || 'qwen3:8b',
   },
   time: now(),
 }));
+app.get('/salesnav-status', (_req,res) => res.json({
+  ok: true,
+  configured: sessionConfigured(),
+  maxResults: Math.max(1, Math.min(100, Number(process.env.SALESNAV_MAX_RESULTS || 50))),
+}));
+app.post('/salesnav-extract', async (req,res) => {
+  const started = Date.now();
+  try {
+    const payload = await extractSalesNavSearch(req.body?.searchUrl, req.body?.limit || 50);
+    const statusCode = payload.ok ? 200 : payload.status === 'session_required' || payload.status === 'session_expired' ? 412 : 400;
+    res.status(statusCode).json({ service: 'gtm-career-browser', version: VERSION, duration_ms: Date.now() - started, ...payload });
+  } catch (e) {
+    res.status(400).json({ ok: false, service: 'gtm-career-browser', version: VERSION, duration_ms: Date.now() - started, error: clean(e.message,1000) });
+  }
+});
 app.post('/career-detect', async (req,res) => {
   const started = Date.now();
   try { const payload = await detect(req.body || {},'career'); res.json({ ok: true, service: 'gtm-career-browser', version: VERSION, duration_ms: Date.now() - started, ...payload }); }
