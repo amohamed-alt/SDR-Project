@@ -4,19 +4,21 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Flame, ListTodo, PhoneCall, Radar, Search, Sparkles } from "lucide-react";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardMotion";
+import { AtsIntentSearch } from "@/components/AtsIntentSearch";
 import { CareerIntelligence } from "@/components/CareerIntelligence";
 import { HiringIntelligence } from "@/components/HiringIntelligence";
 import { MaqsamCallsDashboard } from "@/components/MaqsamCallsDashboard";
 import { MaritaPriorityQueue } from "@/components/MaritaPriorityQueue";
 import styles from "@/components/DashboardShell.module.css";
 
-type ShellView = "core" | "maqsam" | "hiring" | "career" | "marita-priority";
+type ShellView = "core" | "maqsam" | "hiring" | "career" | "ats-intent" | "marita-priority";
 
 function viewFromUrl(): ShellView {
   const view = new URLSearchParams(window.location.search).get("view");
   if (view === "maqsam") return "maqsam";
   if (view === "hiring") return "hiring";
   if (view === "career") return "career";
+  if (view === "ats-intent") return "ats-intent";
   if (view === "marita-priority") return "marita-priority";
   return "core";
 }
@@ -42,6 +44,7 @@ export function Dashboard() {
   if (view === "maqsam") return <MaqsamCallsDashboard onBack={() => changeView("core")}/>;
   if (view === "hiring") return <HiringIntelligence onBack={() => changeView("core")}/>;
   if (view === "career") return <CareerIntelligence onBack={() => changeView("core")}/>;
+  if (view === "ats-intent") return <AtsIntentSearch onBack={() => changeView("core")}/>;
   if (view === "marita-priority") return <MaritaPriorityQueue onBack={() => changeView("core")}/>;
 
   return <div className={styles.shell}>
@@ -64,5 +67,8 @@ export function Dashboard() {
     <Link className={styles.maqsamLauncher} href="/marita-calls">
       <PhoneCall size={17}/><span>Marita Calls</span><small>Maqsam</small>
     </Link>
+    <button className={styles.intentLauncher} type="button" onClick={() => changeView("ats-intent")}>
+      <Search size={17}/><span>ATS Intent</span><small>LinkedIn Posts</small>
+    </button>
   </div>;
 }

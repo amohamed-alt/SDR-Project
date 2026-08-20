@@ -7,7 +7,8 @@
 .careerLauncher,
 .priorityLauncher,
 .hiringLauncher,
-.maqsamLauncher {
+.maqsamLauncher,
+.intentLauncher {
   position: fixed;
   right: 24px;
   z-index: 122;
@@ -62,12 +63,19 @@
   box-shadow: 0 14px 34px rgba(116, 75, 196, 0.28);
 }
 
+.intentLauncher {
+  bottom: 20px;
+  background: #7f285f;
+  box-shadow: 0 14px 34px rgba(127, 40, 95, 0.28);
+}
+
 .gtmLauncher span,
 .salesNavLauncher span,
 .careerLauncher span,
 .priorityLauncher span,
 .hiringLauncher span,
-.maqsamLauncher span {
+.maqsamLauncher span,
+.intentLauncher span {
   line-height: 1;
 }
 
@@ -76,7 +84,8 @@
 .careerLauncher small,
 .priorityLauncher small,
 .hiringLauncher small,
-.maqsamLauncher small {
+.maqsamLauncher small,
+.intentLauncher small {
   padding: 3px 6px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.16);
@@ -92,7 +101,8 @@
 .careerLauncher:hover,
 .priorityLauncher:hover,
 .hiringLauncher:hover,
-.maqsamLauncher:hover {
+.maqsamLauncher:hover,
+.intentLauncher:hover {
   transform: translateY(-2px);
   filter: brightness(0.94);
 }
@@ -103,7 +113,8 @@
   .careerLauncher,
   .priorityLauncher,
   .hiringLauncher,
-  .maqsamLauncher {
+  .maqsamLauncher,
+  .intentLauncher {
     right: 14px;
   }
 
@@ -113,4 +124,5 @@
   .priorityLauncher { bottom: 188px; }
   .hiringLauncher { bottom: 72px; }
   .maqsamLauncher { bottom: 130px; }
+  .intentLauncher { bottom: 14px; }
 }
