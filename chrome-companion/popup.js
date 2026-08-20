@@ -72,6 +72,38 @@ async function extractCurrentSalesNavPage() {
       return url.toString();
     } catch { return ''; }
   };
+  const normalizePublic = (href) => {
+    try {
+      const url = new URL(href, location.origin);
+      const candidateHost = url.hostname.toLowerCase().replace(/^www\./, '');
+      if (candidateHost !== 'linkedin.com' || !/^\/in\/[^/?#]+/i.test(url.pathname)) return '';
+      url.protocol = 'https:';
+      url.hostname = 'www.linkedin.com';
+      url.search = '';
+      url.hash = '';
+      return url.toString().replace(/\/$/, '');
+    } catch { return ''; }
+  };
+  const publicFromMarkup = (markup) => {
+    if (!markup) return '';
+    const variants = [
+      String(markup),
+      String(markup).replace(/\\u002[fF]/g, '/').replace(/\\\//g, '/').replace(/&amp;/g, '&'),
+    ];
+    for (const value of variants) {
+      const absolute = value.match(/https?:\/\/(?:www\.)?linkedin\.com\/in\/[A-Za-z0-9_%.-]+/i)?.[0];
+      if (absolute) {
+        const normalized = normalizePublic(absolute);
+        if (normalized) return normalized;
+      }
+      const relative = value.match(/\/in\/[A-Za-z0-9_%.-]+/i)?.[0];
+      if (relative) {
+        const normalized = normalizePublic(relative);
+        if (normalized) return normalized;
+      }
+    }
+    return '';
+  };
   const selectors = [
     'a[href*="/sales/lead/"]',
     'a[href*="/in/"]',
@@ -100,7 +132,9 @@ async function extractCurrentSalesNavPage() {
       const salesAnchor = cardAnchors.find((node) => /\/sales\/lead\//i.test(String(node.getAttribute('href') || '')));
       const publicAnchor = cardAnchors.find((node) => /\/in\//i.test(String(node.getAttribute('href') || '')));
       const salesLeadUrl = salesAnchor ? normalize(salesAnchor.getAttribute('href') || '') : (/\/sales\/lead\//i.test(href) ? href : '');
-      const linkedinUrl = publicAnchor ? normalize(publicAnchor.getAttribute('href') || '').replace(/[?#].*$/, '') : (/\/in\//i.test(href) ? href.replace(/[?#].*$/, '') : '');
+      const linkedinUrl = publicAnchor
+        ? normalizePublic(publicAnchor.getAttribute('href') || '')
+        : (/\/in\//i.test(href) ? normalizePublic(href) : publicFromMarkup(card.outerHTML));
       const key = salesLeadUrl || linkedinUrl;
       if (!key || found.has(key)) continue;
 
@@ -116,13 +150,16 @@ async function extractCurrentSalesNavPage() {
 
       const connectionDegree = rawText.match(/\b(1st|2nd|3rd)\b/i)?.[1] || '';
       const locationLine = lines.find((line) => /Saudi|Riyadh|Jeddah|Dammam|Khobar|United Arab Emirates|Dubai|Abu Dhabi|Sharjah|Qatar|Doha|Bahrain|Oman|Muscat|Kuwait|Jordan|Egypt|Cairo/i.test(line)) || '';
-      const ignored = /^(1st|2nd|3rd|save|message|connect|view profile|more|shared connections?|recently posted)$/i;
-      const secondary = lines.filter((line) => line !== name && !ignored.test(line) && line.length < 240);
+      const ignored = /(?:\b(?:1st|2nd|3rd)\b.*degree connection|linkedin premium member|^save$|^message$|^connect$|^view profile$|^more$|shared connections?|recently posted)/i;
+      const secondary = lines.filter((line) => line !== name && line !== locationLine && !ignored.test(line) && line.length < 240);
+      const likelyTitle = secondary[0] || '';
+      let likelyCompany = secondary[1] || '';
+      if (/degree connection|premium member|^[·•\s-]*(?:1st|2nd|3rd)\b/i.test(likelyCompany)) likelyCompany = '';
 
       found.set(key, {
         name,
-        title: secondary[0] || '',
-        company: secondary[1] || '',
+        title: likelyTitle,
+        company: likelyCompany,
         location: locationLine,
         connectionDegree,
         salesLeadUrl,
@@ -152,6 +189,68 @@ async function extractCurrentSalesNavPage() {
   return { ok: true, sourceUrl, leads: [...found.values()].slice(0, 25) };
 }
 
+async function resolvePublicLinkedInFromSalesLeadPages(salesLeadUrls) {
+  const normalizePublic = (href) => {
+    try {
+      const url = new URL(href, location.origin);
+      const host = url.hostname.toLowerCase().replace(/^www\./, '');
+      if (host !== 'linkedin.com' || !/^\/in\/[^/?#]+/i.test(url.pathname)) return '';
+      url.protocol = 'https:';
+      url.hostname = 'www.linkedin.com';
+      url.search = '';
+      url.hash = '';
+      return url.toString().replace(/\/$/, '');
+    } catch { return ''; }
+  };
+  const fromText = (text) => {
+    if (!text) return '';
+    const variants = [
+      String(text),
+      String(text).replace(/\\u002[fF]/g, '/').replace(/\\\//g, '/').replace(/&amp;/g, '&'),
+    ];
+    for (const value of variants) {
+      const absolute = value.match(/https?:\/\/(?:www\.)?linkedin\.com\/in\/[A-Za-z0-9_%.-]+/i)?.[0];
+      if (absolute) {
+        const normalized = normalizePublic(absolute);
+        if (normalized) return normalized;
+      }
+      const relative = value.match(/\/in\/[A-Za-z0-9_%.-]+/i)?.[0];
+      if (relative) {
+        const normalized = normalizePublic(relative);
+        if (normalized) return normalized;
+      }
+    }
+    return '';
+  };
+  const result = {};
+  for (const salesLeadUrl of salesLeadUrls.slice(0, 50)) {
+    try {
+      const url = new URL(salesLeadUrl, location.origin);
+      const host = url.hostname.toLowerCase().replace(/^www\./, '');
+      if (host !== 'linkedin.com' || !/^\/sales\/lead\//i.test(url.pathname)) continue;
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        credentials: 'include',
+        cache: 'no-store',
+        redirect: 'follow',
+      });
+      if (!response.ok) continue;
+      const html = await response.text();
+      let profile = fromText(html);
+      if (!profile) {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const anchor = doc.querySelector('a[href*="linkedin.com/in/"],a[href^="/in/"]');
+        profile = normalizePublic(anchor?.getAttribute('href') || '');
+      }
+      if (profile) result[salesLeadUrl] = profile;
+    } catch {
+      // Keep this lead unresolved; the caller will skip it rather than guessing.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 180));
+  }
+  return result;
+}
+
 function clickSalesNavPager(direction) {
   const label = direction === 'next' ? /next/i : /previous|prev/i;
   const buttons = [...document.querySelectorAll('button')];
@@ -177,6 +276,22 @@ async function extractPage(tabId) {
     func: extractCurrentSalesNavPage,
   });
   return result?.[0]?.result || { ok: false, error: 'Could not read this page.', leads: [] };
+}
+
+async function resolveMissingProfileUrls(tabId, leads) {
+  const missing = leads.filter((lead) => !lead.linkedinUrl && lead.salesLeadUrl).map((lead) => lead.salesLeadUrl);
+  if (!missing.length) return leads;
+  const result = await chrome.scripting.executeScript({
+    target: { tabId },
+    world: 'MAIN',
+    func: resolvePublicLinkedInFromSalesLeadPages,
+    args: [missing],
+  });
+  const mapping = result?.[0]?.result || {};
+  return leads.map((lead) => ({
+    ...lead,
+    linkedinUrl: lead.linkedinUrl || mapping[lead.salesLeadUrl] || '',
+  }));
 }
 
 async function clickPager(tabId, direction) {
@@ -235,17 +350,31 @@ async function run(twoPages) {
           pagesRead = 2;
         }
         await clickPager(tab.id, 'previous').catch(() => false);
+        await new Promise((resolve) => setTimeout(resolve, 900));
       }
     }
 
     leads = dedupe(leads);
     if (!leads.length) throw new Error('No Sales Navigator lead cards were found on the current results page.');
-    const clean = leads.filter((lead) => String(lead.connectionDegree || '').toLowerCase() !== '1st');
+    let clean = leads.filter((lead) => String(lead.connectionDegree || '').toLowerCase() !== '1st');
     if (!clean.length) throw new Error('All extracted people are 1st-degree connections, so nothing was imported.');
 
-    setStatus('runStatus', `Importing ${clean.length} clean leads to the SDR Dashboard…`);
-    const payload = await importBatch(clean, first.sourceUrl, pagesRead);
-    setStatus('runStatus', `Done · ${payload.imported} leads sent. Open the SDR Dashboard to watch enrichment.`, 'ok');
+    const alreadyResolved = clean.filter((lead) => Boolean(lead.linkedinUrl)).length;
+    const missingProfiles = clean.length - alreadyResolved;
+    if (missingProfiles > 0) {
+      setStatus('runStatus', `Resolving ${missingProfiles} public LinkedIn profile URL${missingProfiles === 1 ? '' : 's'} inside your current Chrome session…`);
+      clean = await resolveMissingProfileUrls(tab.id, clean);
+    }
+
+    const directProfiles = clean.filter((lead) => Boolean(lead.linkedinUrl));
+    const unresolved = clean.length - directProfiles.length;
+    if (!directProfiles.length) {
+      throw new Error('Sales Nav leads were found, but no public LinkedIn /in/ profile URLs could be resolved. Refresh the Sales Nav results and try again.');
+    }
+
+    setStatus('runStatus', `Importing ${directProfiles.length} leads with direct LinkedIn profile URLs${unresolved ? ` · ${unresolved} unresolved skipped` : ''}…`);
+    const payload = await importBatch(directProfiles, first.sourceUrl, pagesRead);
+    setStatus('runStatus', `Done · ${payload.imported} direct LinkedIn profiles sent${unresolved ? ` · ${unresolved} skipped safely` : ''}. Open the SDR Dashboard to watch enrichment.`, 'ok');
   } catch (error) {
     setStatus('runStatus', error instanceof Error ? error.message : 'Extraction failed.', 'bad');
   } finally {
