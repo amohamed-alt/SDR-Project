@@ -132,7 +132,12 @@ app.get('/salesnav-status', (_req,res) => res.json({
 app.post('/salesnav-extract', async (req,res) => {
   const started = Date.now();
   try {
-    const payload = await extractSalesNavSearch(req.body?.searchUrl, req.body?.limit || 50);
+    const payload = await extractSalesNavSearch(
+      req.body?.searchUrl,
+      req.body?.limit || 50,
+      req.body?.sessionToken || '',
+      req.body?.jsessionToken || '',
+    );
     const statusCode = payload.ok ? 200 : payload.status === 'session_required' || payload.status === 'session_expired' ? 412 : 400;
     res.status(statusCode).json({ service: 'gtm-career-browser', version: VERSION, duration_ms: Date.now() - started, ...payload });
   } catch (e) {
