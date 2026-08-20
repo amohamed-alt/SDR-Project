@@ -77,11 +77,8 @@ export function MaritaPriorityQueue({ onBack }: { onBack: () => void }) {
 
   const pageSize = 100;
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const visible = filtered.slice((page - 1) * pageSize, page * pageSize);
-
-  useEffect(() => {
-    if (page > pages) setPage(pages);
-  }, [page, pages]);
+  const safePage = Math.min(page, pages);
+  const visible = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   const selectedCompanies = useMemo(() => (data?.companies ?? []).filter((company) => selected.has(company.companyId)), [data, selected]);
   const selectedTaskIds = useMemo(() => [...new Set(selectedCompanies.flatMap((company) => company.taskIds))], [selectedCompanies]);
@@ -191,7 +188,7 @@ export function MaritaPriorityQueue({ onBack }: { onBack: () => void }) {
           </tbody>
         </table>
       </div>
-      <div className={styles.pagination}><span>Page {page} / {pages}</span><div><button type="button" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</button><button type="button" disabled={page >= pages} onClick={() => setPage((value) => Math.min(pages, value + 1))}>Next</button></div></div>
+      <div className={styles.pagination}><span>Page {safePage} / {pages}</span><div><button type="button" disabled={safePage <= 1} onClick={() => setPage(Math.max(1, safePage - 1))}>Previous</button><button type="button" disabled={safePage >= pages} onClick={() => setPage(Math.min(pages, safePage + 1))}>Next</button></div></div>
     </section>
   </main>;
 }
