@@ -57,7 +57,7 @@ async function ping() {
   }
 }
 
-function extractCurrentSalesNavPage() {
+async function extractCurrentSalesNavPage() {
   const sourceUrl = location.href;
   const host = location.hostname.toLowerCase().replace(/^www\./, '');
   if ((host !== 'linkedin.com' && !host.endsWith('.linkedin.com')) || !/^\/sales\/search\/people\/?$/i.test(location.pathname)) {
@@ -78,62 +78,78 @@ function extractCurrentSalesNavPage() {
     'a[data-control-name*="lead"]',
     'a[data-control-name*="profile"]',
   ].join(',');
-  const anchors = [...document.querySelectorAll(selectors)];
-  const seen = new Set();
-  const leads = [];
+  const found = new Map();
 
-  for (const anchor of anchors) {
-    const href = normalize(anchor.getAttribute('href') || '');
-    if (!href || (!/\/sales\/lead\//i.test(href) && !/\/in\//i.test(href))) continue;
-    const card = anchor.closest('[data-x-search-result]')
-      || anchor.closest('[role="listitem"]')
-      || anchor.closest('li')
-      || anchor.closest('[class*="search-results__result-item"]')
-      || anchor.closest('[class*="result-list"]')
-      || anchor.parentElement?.parentElement
-      || anchor.parentElement;
-    if (!card) continue;
+  const scan = () => {
+    const anchors = [...document.querySelectorAll(selectors)];
+    for (const anchor of anchors) {
+      const href = normalize(anchor.getAttribute('href') || '');
+      if (!href || (!/\/sales\/lead\//i.test(href) && !/\/in\//i.test(href))) continue;
+      const card = anchor.closest('[data-x-search-result]')
+        || anchor.closest('[role="listitem"]')
+        || anchor.closest('li')
+        || anchor.closest('[class*="search-results__result-item"]')
+        || anchor.closest('[class*="result-list"]')
+        || anchor.parentElement?.parentElement
+        || anchor.parentElement;
+      if (!card) continue;
 
-    const rawText = String(card.innerText || '').replace(/\n{3,}/g, '\n').trim();
-    if (!rawText || rawText.length > 8000) continue;
-    const cardAnchors = [...card.querySelectorAll('a')];
-    const salesAnchor = cardAnchors.find((node) => /\/sales\/lead\//i.test(String(node.getAttribute('href') || '')));
-    const publicAnchor = cardAnchors.find((node) => /\/in\//i.test(String(node.getAttribute('href') || '')));
-    const salesLeadUrl = salesAnchor ? normalize(salesAnchor.getAttribute('href') || '') : (/\/sales\/lead\//i.test(href) ? href : '');
-    const linkedinUrl = publicAnchor ? normalize(publicAnchor.getAttribute('href') || '').replace(/[?#].*$/, '') : (/\/in\//i.test(href) ? href.replace(/[?#].*$/, '') : '');
-    const key = salesLeadUrl || linkedinUrl;
-    if (!key || seen.has(key)) continue;
+      const rawText = String(card.innerText || '').replace(/\n{3,}/g, '\n').trim();
+      if (!rawText || rawText.length > 8000) continue;
+      const cardAnchors = [...card.querySelectorAll('a')];
+      const salesAnchor = cardAnchors.find((node) => /\/sales\/lead\//i.test(String(node.getAttribute('href') || '')));
+      const publicAnchor = cardAnchors.find((node) => /\/in\//i.test(String(node.getAttribute('href') || '')));
+      const salesLeadUrl = salesAnchor ? normalize(salesAnchor.getAttribute('href') || '') : (/\/sales\/lead\//i.test(href) ? href : '');
+      const linkedinUrl = publicAnchor ? normalize(publicAnchor.getAttribute('href') || '').replace(/[?#].*$/, '') : (/\/in\//i.test(href) ? href.replace(/[?#].*$/, '') : '');
+      const key = salesLeadUrl || linkedinUrl;
+      if (!key || found.has(key)) continue;
 
-    const lines = rawText.split('\n').map((line) => line.trim()).filter(Boolean);
-    const candidateAnchors = cardAnchors.filter((node) => /\/sales\/lead\/|\/in\//i.test(String(node.getAttribute('href') || '')));
-    const nameAnchor = candidateAnchors.find((node) => {
-      const text = String(node.innerText || node.getAttribute('aria-label') || '').trim();
-      return text.length >= 2 && text.length <= 160 && !/^(view|save|message|connect|more)$/i.test(text);
-    }) || anchor;
-    let name = String(nameAnchor.innerText || nameAnchor.getAttribute('aria-label') || '').replace(/^view\s+/i, '').trim();
-    if (!name) name = lines[0] || '';
-    if (!name || name.length > 180 || /^(view|save|message|connect|more)$/i.test(name)) continue;
+      const lines = rawText.split('\n').map((line) => line.trim()).filter(Boolean);
+      const candidateAnchors = cardAnchors.filter((node) => /\/sales\/lead\/|\/in\//i.test(String(node.getAttribute('href') || '')));
+      const nameAnchor = candidateAnchors.find((node) => {
+        const text = String(node.innerText || node.getAttribute('aria-label') || '').trim();
+        return text.length >= 2 && text.length <= 160 && !/^(view|save|message|connect|more)$/i.test(text);
+      }) || anchor;
+      let name = String(nameAnchor.innerText || nameAnchor.getAttribute('aria-label') || '').replace(/^view\s+/i, '').trim();
+      if (!name) name = lines[0] || '';
+      if (!name || name.length > 180 || /^(view|save|message|connect|more)$/i.test(name)) continue;
 
-    const connectionDegree = rawText.match(/\b(1st|2nd|3rd)\b/i)?.[1] || '';
-    const locationLine = lines.find((line) => /Saudi|Riyadh|Jeddah|Dammam|Khobar|United Arab Emirates|Dubai|Abu Dhabi|Sharjah|Qatar|Doha|Bahrain|Oman|Muscat|Kuwait|Jordan|Egypt|Cairo/i.test(line)) || '';
-    const ignored = /^(1st|2nd|3rd|save|message|connect|view profile|more|shared connections?|recently posted)$/i;
-    const secondary = lines.filter((line) => line !== name && !ignored.test(line) && line.length < 240);
+      const connectionDegree = rawText.match(/\b(1st|2nd|3rd)\b/i)?.[1] || '';
+      const locationLine = lines.find((line) => /Saudi|Riyadh|Jeddah|Dammam|Khobar|United Arab Emirates|Dubai|Abu Dhabi|Sharjah|Qatar|Doha|Bahrain|Oman|Muscat|Kuwait|Jordan|Egypt|Cairo/i.test(line)) || '';
+      const ignored = /^(1st|2nd|3rd|save|message|connect|view profile|more|shared connections?|recently posted)$/i;
+      const secondary = lines.filter((line) => line !== name && !ignored.test(line) && line.length < 240);
 
-    leads.push({
-      name,
-      title: secondary[0] || '',
-      company: secondary[1] || '',
-      location: locationLine,
-      connectionDegree,
-      salesLeadUrl,
-      linkedinUrl,
-      rawText: rawText.slice(0, 2200),
-    });
-    seen.add(key);
-    if (leads.length >= 25) break;
+      found.set(key, {
+        name,
+        title: secondary[0] || '',
+        company: secondary[1] || '',
+        location: locationLine,
+        connectionDegree,
+        salesLeadUrl,
+        linkedinUrl,
+        rawText: rawText.slice(0, 2200),
+      });
+    }
+  };
+
+  const scrollers = [...document.querySelectorAll('main,[role="main"],[class*="search-results"],[class*="result-list"],div')]
+    .filter((node) => node instanceof HTMLElement && node.scrollHeight > node.clientHeight + 300)
+    .sort((a, b) => b.scrollHeight - a.scrollHeight);
+  const target = scrollers[0] || document.scrollingElement || document.documentElement;
+  const originalTop = target.scrollTop || window.scrollY || 0;
+
+  for (let step = 0; step < 8 && found.size < 25; step += 1) {
+    scan();
+    const maxTop = Math.max(0, target.scrollHeight - target.clientHeight);
+    const top = Math.min(maxTop, Math.round(maxTop * (step + 1) / 8));
+    if (typeof target.scrollTo === 'function') target.scrollTo({ top, behavior: 'auto' });
+    else window.scrollTo(0, top);
+    await new Promise((resolve) => setTimeout(resolve, 350));
   }
+  scan();
+  if (typeof target.scrollTo === 'function') target.scrollTo({ top: originalTop, behavior: 'auto' });
 
-  return { ok: true, sourceUrl, leads };
+  return { ok: true, sourceUrl, leads: [...found.values()].slice(0, 25) };
 }
 
 function clickSalesNavPager(direction) {
@@ -212,7 +228,7 @@ async function run(twoPages) {
       setStatus('runStatus', `Page 1: ${leads.length}. Opening page 2…`);
       const moved = await clickPager(tab.id, 'next');
       if (moved) {
-        await new Promise((resolve) => setTimeout(resolve, 2200));
+        await new Promise((resolve) => setTimeout(resolve, 2400));
         const second = await extractPage(tab.id);
         if (second.ok) {
           leads = dedupe([...leads, ...(second.leads || [])]);
