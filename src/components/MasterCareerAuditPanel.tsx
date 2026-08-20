@@ -67,9 +67,12 @@ export function MasterCareerAuditPanel() {
   }, []);
 
   useEffect(() => {
-    void load();
+    const initial = window.setTimeout(() => void load(), 0);
     const interval = window.setInterval(() => void load(), 15_000);
-    return () => window.clearInterval(interval);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(interval);
+    };
   }, [load]);
 
   const progress = useMemo(() => {
