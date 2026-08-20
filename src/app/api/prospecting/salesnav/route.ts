@@ -1,6 +1,6 @@
-import { readFile } from "node:fs/promises";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { getLinkedInSession } from "@/lib/salesnav-session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,47 +12,6 @@ const requestSchema = z.object({
 });
 
 const ENGINE_URL = process.env.SALESNAV_ENGINE_URL || "http://gtm-career-browser:3000/salesnav-extract";
-const RUNTIME_ENV_FILE = process.env.SDR_RUNTIME_ENV_FILE || "/run/sdr-env/.env";
-
-type RuntimeSecrets = {
-  liAt: string;
-  jsessionId: string;
-};
-
-function unquote(value: string) {
-  const trimmed = value.trim();
-  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
-function parseRuntimeValue(content: string, key: string) {
-  for (const rawLine of content.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const normalized = line.startsWith("export ") ? line.slice(7).trim() : line;
-    const index = normalized.indexOf("=");
-    if (index < 1 || normalized.slice(0, index).trim() !== key) continue;
-    return unquote(normalized.slice(index + 1));
-  }
-  return "";
-}
-
-async function linkedinSecrets(): Promise<RuntimeSecrets> {
-  let liAt = String(process.env.LINKEDIN_LI_AT || "").trim();
-  let jsessionId = String(process.env.LINKEDIN_JSESSIONID || "").trim();
-  if (liAt) return { liAt, jsessionId };
-
-  try {
-    const content = await readFile(RUNTIME_ENV_FILE, "utf8");
-    liAt = parseRuntimeValue(content, "LINKEDIN_LI_AT").trim();
-    jsessionId = parseRuntimeValue(content, "LINKEDIN_JSESSIONID").trim();
-  } catch {
-    // Runtime env is optional. The UI will expose a safe "not connected" state.
-  }
-  return { liAt, jsessionId };
-}
 
 function validSalesNavUrl(raw: string) {
   try {
@@ -66,7 +25,7 @@ function validSalesNavUrl(raw: string) {
 }
 
 export async function GET() {
-  const session = await linkedinSecrets();
+  const session = await getLinkedInSession();
   return NextResponse.json({
     status: "ok",
     sessionConfigured: Boolean(session.liAt),
@@ -82,10 +41,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Paste a valid Sales Navigator People Search URL." }, { status: 400 });
   }
 
-  const session = await linkedinSecrets();
+  const session = await getLinkedInSession();
   if (!session.liAt) {
     return NextResponse.json({
-      error: "LinkedIn Sales Navigator session is not connected on the VPS yet.",
+      error: "LinkedIn Sales Navigator session is not connected yet.",
       status: "session_required",
       sessionConfigured: false,
     }, { status: 412 });

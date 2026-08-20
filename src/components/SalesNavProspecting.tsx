@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  ArrowLeft, Building2, CheckCircle2, CircleAlert, ExternalLink, Filter, LoaderCircle,
-  Mail, Phone, Radar, Search, ShieldCheck, Sparkles, UserPlus, UsersRound,
+  ArrowLeft, Building2, CheckCircle2, CircleAlert, ExternalLink, Filter, KeyRound, LoaderCircle,
+  Mail, Phone, Radar, Save, Search, Settings2, ShieldCheck, Sparkles, UserPlus, UsersRound,
 } from "lucide-react";
 import styles from "./SalesNavProspecting.module.css";
 
@@ -68,6 +68,13 @@ type Runtime = {
   sessionConfigured: boolean;
   signalHireConfigured: boolean;
   maxResults: number;
+};
+
+type SessionStatus = {
+  configured: boolean;
+  unlocked: boolean;
+  updatedAt?: string;
+  source?: string;
 };
 
 type ExtractResponse = {
@@ -136,13 +143,94 @@ export function SalesNavProspecting() {
   const [view, setView] = useState<View>("net-new");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [sessionPanelOpen, setSessionPanelOpen] = useState(false);
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus | null>(null);
+  const [setupKey, setSetupKey] = useState("");
+  const [liAt, setLiAt] = useState("");
+  const [jsessionId, setJsessionId] = useState("");
+  const [sessionBusy, setSessionBusy] = useState(false);
+  const [sessionMessage, setSessionMessage] = useState("");
+
+  async function refreshRuntime() {
+    try {
+      const response = await fetch("/api/prospecting/salesnav", { cache: "no-store" });
+      const payload = await response.json() as Runtime;
+      setRuntime(payload);
+    } catch {
+      setRuntime({ sessionConfigured: false, signalHireConfigured: false, maxResults: MAX_RESULTS });
+    }
+  }
+
+  async function refreshSessionStatus() {
+    try {
+      const response = await fetch("/api/prospecting/salesnav/session", { cache: "no-store" });
+      const payload = await response.json() as SessionStatus;
+      setSessionStatus(payload);
+    } catch {
+      setSessionStatus({ configured: false, unlocked: false });
+    }
+  }
 
   useEffect(() => {
-    fetch("/api/prospecting/salesnav", { cache: "no-store" })
-      .then((response) => response.json())
-      .then((payload: Runtime) => setRuntime(payload))
-      .catch(() => setRuntime({ sessionConfigured: false, signalHireConfigured: false, maxResults: MAX_RESULTS }));
+    let active = true;
+    void fetch("/api/prospecting/salesnav", { cache: "no-store" })
+      .then((response) => response.json() as Promise<Runtime>)
+      .then((payload) => { if (active) setRuntime(payload); })
+      .catch(() => { if (active) setRuntime({ sessionConfigured: false, signalHireConfigured: false, maxResults: MAX_RESULTS }); });
+    void fetch("/api/prospecting/salesnav/session", { cache: "no-store" })
+      .then((response) => response.json() as Promise<SessionStatus>)
+      .then((payload) => { if (active) setSessionStatus(payload); })
+      .catch(() => { if (active) setSessionStatus({ configured: false, unlocked: false }); });
+    return () => { active = false; };
   }, []);
+
+  async function unlockSessionSettings() {
+    if (!setupKey.trim()) return;
+    setSessionBusy(true);
+    setSessionMessage("");
+    try {
+      const response = await fetch("/api/prospecting/salesnav/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "unlock", setupKey: setupKey.trim() }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Could not unlock session settings.");
+      setSetupKey("");
+      setSessionMessage("Session settings unlocked on this browser.");
+      await refreshSessionStatus();
+    } catch (requestError) {
+      setSessionMessage(requestError instanceof Error ? requestError.message : "Could not unlock session settings.");
+    } finally {
+      setSessionBusy(false);
+    }
+  }
+
+  async function saveSession() {
+    if (!liAt.trim()) {
+      setSessionMessage("Paste li_at first.");
+      return;
+    }
+    setSessionBusy(true);
+    setSessionMessage("");
+    try {
+      const response = await fetch("/api/prospecting/salesnav/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save", liAt: liAt.trim(), jsessionId: jsessionId.trim() }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Could not save LinkedIn session.");
+      setLiAt("");
+      setJsessionId("");
+      setSessionMessage("LinkedIn session saved. You can run Sales Nav now.");
+      await Promise.all([refreshRuntime(), refreshSessionStatus()]);
+    } catch (requestError) {
+      setSessionMessage(requestError instanceof Error ? requestError.message : "Could not save LinkedIn session.");
+    } finally {
+      setSessionBusy(false);
+    }
+  }
 
   async function enrichLead(lead: SalesNavLead): Promise<Row> {
     const key = lead.linkedinUrl || lead.salesLeadUrl || `${lead.name}:${lead.company}`;
@@ -295,6 +383,7 @@ export function SalesNavProspecting() {
         <div className={styles.runtime}>
           <span data-ok={runtime?.sessionConfigured || false}><ShieldCheck size={13}/>{runtime?.sessionConfigured ? "LinkedIn session ready" : "LinkedIn session needed"}</span>
           <span data-ok={runtime?.signalHireConfigured || false}><Sparkles size={13}/>{runtime?.signalHireConfigured ? "SignalHire ready" : "SignalHire missing"}</span>
+          <button type="button" className={styles.manageButton} onClick={() => setSessionPanelOpen((current) => !current)}><Settings2 size={13}/>{sessionPanelOpen ? "Close settings" : "LinkedIn session"}</button>
         </div>
       </header>
 
@@ -306,7 +395,23 @@ export function SalesNavProspecting() {
         </div>
       </section>
 
-      {!runtime?.sessionConfigured && <div className={styles.warning}><CircleAlert size={15}/><div><strong>One-time LinkedIn session setup is still required.</strong><span>The extractor is installed, but the VPS must have a valid Sales Navigator session before it can read a search URL.</span></div></div>}
+      {sessionPanelOpen && <section className={styles.sessionPanel}>
+        <div className={styles.sessionHead}>
+          <div><strong><ShieldCheck size={15}/>LinkedIn session settings</strong><span>Secrets are saved server-side only and are never shown back in the browser.</span></div>
+          <small>{sessionStatus?.configured ? "Session configured" : "No session saved"}</small>
+        </div>
+        {!sessionStatus?.unlocked ? <div className={styles.unlockRow}>
+          <label><KeyRound size={14}/><input type="password" value={setupKey} onChange={(event) => setSetupKey(event.target.value)} placeholder="Admin setup key" autoComplete="off"/></label>
+          <button type="button" onClick={() => void unlockSessionSettings()} disabled={sessionBusy || !setupKey.trim()}>{sessionBusy ? <LoaderCircle className={styles.spin} size={14}/> : <KeyRound size={14}/>}Unlock</button>
+        </div> : <div className={styles.sessionFields}>
+          <label><span>li_at</span><input type="password" value={liAt} onChange={(event) => setLiAt(event.target.value)} placeholder="Paste li_at cookie value" autoComplete="off"/></label>
+          <label><span>JSESSIONID <small>optional</small></span><input type="password" value={jsessionId} onChange={(event) => setJsessionId(event.target.value)} placeholder="Paste JSESSIONID" autoComplete="off"/></label>
+          <button type="button" onClick={() => void saveSession()} disabled={sessionBusy || !liAt.trim()}>{sessionBusy ? <LoaderCircle className={styles.spin} size={14}/> : <Save size={14}/>}Save session</button>
+        </div>}
+        {sessionMessage && <div className={styles.sessionMessage}>{sessionMessage}</div>}
+      </section>}
+
+      {!runtime?.sessionConfigured && <div className={styles.warning}><CircleAlert size={15}/><div><strong>LinkedIn session setup is required.</strong><span>Click “LinkedIn session” above, unlock the settings once, then paste li_at and optional JSESSIONID directly here — no terminal needed.</span></div></div>}
       {error && <div className={styles.error}><CircleAlert size={15}/>{error}</div>}
       {note && <div className={styles.note}><CheckCircle2 size={15}/>{note}</div>}
 
