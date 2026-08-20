@@ -254,18 +254,31 @@ export async function readAssociations(
   const associationMap = new Map<string, string[]>();
   if (!fromIds.length) return associationMap;
 
+  const readBatch = async (batch: string[]) => {
+    const body = JSON.stringify({ inputs: batch.map((id) => ({ id })) });
+    try {
+      return await hubspotRequest<AssociationResponse>(
+        `/crm/associations/2026-03/${fromObjectType}/${toObjectType}/batch/read`,
+        { method: "POST", body },
+      );
+    } catch (error) {
+      if (!(error instanceof HubSpotApiError) || ![400, 404, 405].includes(error.status)) throw error;
+      return hubspotRequest<AssociationResponse>(
+        `/crm/v4/associations/${fromObjectType}/${toObjectType}/batch/read`,
+        { method: "POST", body },
+      );
+    }
+  };
+
   const responses = await mapConcurrent(
     chunks([...new Set(fromIds)]),
     BATCH_CONCURRENCY,
-    (batch) => hubspotRequest<AssociationResponse>(`/crm/v4/associations/${fromObjectType}/${toObjectType}/batch/read`, {
-      method: "POST",
-      body: JSON.stringify({ inputs: batch.map((id) => ({ id })) }),
-    }),
+    readBatch,
   );
 
   for (const response of responses) {
-    for (const item of response.results) {
-      associationMap.set(item.from.id, item.to.map((target) => String(target.toObjectId)));
+    for (const item of response.results ?? []) {
+      associationMap.set(item.from.id, (item.to ?? []).map((target) => String(target.toObjectId)));
     }
   }
 
