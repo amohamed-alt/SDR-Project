@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Flame, ListTodo, PhoneCall, Search, Sparkles } from "lucide-react";
+import { Flame, ListTodo, PhoneCall, Radar, Search, Sparkles } from "lucide-react";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardMotion";
 import { CareerIntelligence } from "@/components/CareerIntelligence";
 import { HiringIntelligence } from "@/components/HiringIntelligence";
@@ -49,11 +49,14 @@ export function Dashboard() {
     <Link className={styles.gtmLauncher} href="/gtm-research">
       <Sparkles size={17}/><span>GTM Research</span><small>AI Wizard</small>
     </Link>
+    <Link className={styles.salesNavLauncher} href="/salesnav-prospecting">
+      <Radar size={17}/><span>Sales Nav</span><small>Net New</small>
+    </Link>
     <button className={styles.careerLauncher} type="button" onClick={() => changeView("career")}>
       <Search size={17}/><span>Career Intelligence</span><small>Career + ATS</small>
     </button>
     <button className={styles.priorityLauncher} type="button" onClick={() => changeView("marita-priority")}>
-      <ListTodo size={17}/><span>Marita Priority</span><small>Never Called</small>
+      <ListTodo size={17}/><span>Marita Priority</span><small>Call Next</small>
     </button>
     <button className={styles.hiringLauncher} type="button" onClick={() => changeView("hiring")}>
       <Flame size={17}/><span>Hiring Signals</span><small>KSA + UAE</small>
