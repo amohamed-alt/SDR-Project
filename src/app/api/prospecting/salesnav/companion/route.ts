@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { SALESNAV_SETUP_COOKIE, verifySalesNavSetupKey } from "@/lib/salesnav-session";
+import { SALESNAV_SETUP_COOKIE, clearLinkedInSession, verifySalesNavSetupKey } from "@/lib/salesnav-session";
 import {
   companionStatus,
   generateCompanionToken,
@@ -74,6 +74,7 @@ export async function GET(request: NextRequest) {
     createdAt: status.createdAt,
     lastUsedAt: status.lastUsedAt,
     unlocked: isUnlocked,
+    signalHireConfigured: Boolean(process.env.SIGNALHIRE_API_KEY),
     latestBatch: latest,
   }, { headers: corsHeaders() });
 }
@@ -86,10 +87,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unlock Sales Nav admin settings first." }, { status: 401, headers: corsHeaders() });
     }
     const token = await generateCompanionToken();
+    await clearLinkedInSession();
     return NextResponse.json({
       ok: true,
       token,
-      message: "Pairing token generated. It is shown only in this response; save it in the Chrome Companion.",
+      oldVpsSessionCleared: true,
+      message: "Pairing token generated. The old VPS LinkedIn session was removed. Save this token in the Chrome Companion.",
     }, { headers: corsHeaders() });
   }
 
@@ -103,9 +106,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid or expired companion pairing token." }, { status: 401, headers: corsHeaders() });
   }
 
-  const host = new URL(parsed.data.sourceUrl).hostname.toLowerCase().replace(/^www\./, "");
-  if (host !== "linkedin.com" && !host.endsWith(".linkedin.com")) {
-    return NextResponse.json({ error: "Only LinkedIn Sales Navigator pages can be imported." }, { status: 400, headers: corsHeaders() });
+  const source = new URL(parsed.data.sourceUrl);
+  const host = source.hostname.toLowerCase().replace(/^www\./, "");
+  if ((host !== "linkedin.com" && !host.endsWith(".linkedin.com")) || !/^\/sales\/search\/people\/?$/i.test(source.pathname)) {
+    return NextResponse.json({ error: "Only LinkedIn Sales Navigator People Search pages can be imported." }, { status: 400, headers: corsHeaders() });
   }
 
   const unique = new Map<string, z.infer<typeof leadSchema>>();
