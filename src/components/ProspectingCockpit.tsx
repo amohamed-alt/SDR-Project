@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -26,7 +26,7 @@ import styles from "./ProspectingCockpit.module.css";
 
 type ScoreReason = { label: string; points: number };
 type HiringInsight = {
-  status: "Hiring Now" | "No Active Jobs" | "Unknown";
+  status: "Hiring Now" | "Accepting Applications" | "No Active Jobs" | "Unknown";
   activeJobs: number;
   hiringScore: number;
   hiringLabel: string;
@@ -73,14 +73,35 @@ type Prospect = {
   priority: "high" | "medium" | "normal";
   scoreReasons: ScoreReason[];
   hubspot: { inHubSpot: boolean; id: string; matchedBy: string };
+  hubspotContact?: { inHubSpot: boolean; id: string; matchedBy: string };
 };
 
-type AnalyzeResponse = { prospect?: Prospect; meta?: { creditsLeft?: number | null; smartleadConfigured?: boolean }; error?: string };
-type RuntimeStatus = { signalHireConfigured: boolean; smartleadConfigured: boolean; companyIntelligenceConfigured?: boolean; defaultSource: string };
+type AnalyzeResponse = {
+  prospect?: Prospect;
+  meta?: { creditsLeft?: number | null; smartleadConfigured?: boolean };
+  error?: string;
+};
+type IntelligenceResponse = {
+  patch?: Partial<Prospect>;
+  error?: string;
+};
+type RuntimeStatus = {
+  signalHireConfigured: boolean;
+  smartleadConfigured: boolean;
+  companyIntelligenceConfigured?: boolean;
+  defaultSource: string;
+};
 type PushState = { loading?: boolean; success?: string; error?: string };
 type BulkState = { loading: boolean; done: number; total: number };
+type IntelligenceState = {
+  status: "idle" | "loading" | "done" | "error";
+  stage: string;
+  error?: string;
+};
+type IntelligenceQueueItem = { prospect: Prospect; runId: number };
 
 const MAX_IMPORT = 50;
+const DEEP_INTELLIGENCE_CONCURRENCY = 2;
 
 function urlsFromText(value: string) {
   const matches = value.match(/(?:https?:\/\/)?(?:[a-z]{2,3}\.)?(?:www\.)?linkedin\.com\/in\/[A-Za-z0-9%._~\-]+\/?/gi) || [];
@@ -92,7 +113,9 @@ function urlsFromText(value: string) {
       url.search = "";
       url.hash = "";
       return url.toString().replace(/\/$/, "");
-    } catch { return ""; }
+    } catch {
+      return "";
+    }
   }).filter(Boolean);
   return [...new Set(normalized)].slice(0, MAX_IMPORT);
 }
@@ -123,6 +146,10 @@ export function ProspectingCockpit() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulk, setBulk] = useState<BulkState>({ loading: false, done: 0, total: 0 });
   const [importNote, setImportNote] = useState("");
+  const [intelligence, setIntelligence] = useState<Record<string, IntelligenceState>>({});
+  const intelligenceQueueRef = useRef<IntelligenceQueueItem[]>([]);
+  const intelligenceWorkersRef = useRef(0);
+  const runIdRef = useRef(0);
 
   useEffect(() => {
     fetch("/api/prospecting/analyze", { cache: "no-store" })
@@ -131,7 +158,11 @@ export function ProspectingCockpit() {
         setRuntime(payload);
         if (payload.defaultSource) setSource(payload.defaultSource);
       })
-      .catch(() => setRuntime({ signalHireConfigured: false, smartleadConfigured: false, defaultSource: "Sales Navigator" }));
+      .catch(() => setRuntime({
+        signalHireConfigured: false,
+        smartleadConfigured: false,
+        defaultSource: "Sales Navigator",
+      }));
   }, []);
 
   const urls = useMemo(() => urlsFromText(input), [input]);
@@ -141,15 +172,86 @@ export function ProspectingCockpit() {
   const selectedProspects = results.filter((item) => selected.has(item.linkedinUrl));
 
   async function analyzeOne(linkedinUrl: string) {
-    const response = await fetch("/api/prospecting/analyze", {
+    const response = await fetch("/api/prospecting/resolve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ linkedinUrl, source }),
     });
     const payload = await response.json() as AnalyzeResponse;
-    if (!response.ok || !payload.prospect) throw new Error(payload.error || `${linkedinUrl}: analysis failed`);
+    if (!response.ok || !payload.prospect) {
+      throw new Error(payload.error || `${linkedinUrl}: resolution failed`);
+    }
     if (typeof payload.meta?.creditsLeft === "number") setCreditsLeft(payload.meta.creditsLeft);
     return payload.prospect;
+  }
+
+  async function enrichProspect(prospect: Prospect, runId: number) {
+    if (runId !== runIdRef.current) return;
+    const key = prospect.linkedinUrl;
+    setIntelligence((current) => ({
+      ...current,
+      [key]: { status: "loading", stage: "Career + ATS + hiring + HubSpot" },
+    }));
+
+    try {
+      const response = await fetch("/api/prospecting/intelligence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          linkedinUrl: prospect.linkedinUrl,
+          company: prospect.company,
+          companyWebsite: prospect.companyWebsite,
+          companyDomain: prospect.companyDomain,
+          email: prospect.email,
+          emails: prospect.emails,
+          score: prospect.score,
+          scoreReasons: prospect.scoreReasons,
+        }),
+      });
+      const payload = await response.json() as IntelligenceResponse;
+      if (!response.ok || !payload.patch) {
+        throw new Error(payload.error || "Company intelligence failed.");
+      }
+      if (runId !== runIdRef.current) return;
+
+      setResults((current) => current
+        .map((item) => item.linkedinUrl === key ? { ...item, ...payload.patch } as Prospect : item)
+        .sort((a, b) => b.score - a.score));
+      setIntelligence((current) => ({
+        ...current,
+        [key]: { status: "done", stage: "Intelligence ready" },
+      }));
+    } catch (error) {
+      if (runId !== runIdRef.current) return;
+      setIntelligence((current) => ({
+        ...current,
+        [key]: {
+          status: "error",
+          stage: "Fast lead data ready",
+          error: error instanceof Error ? error.message : "Company intelligence failed.",
+        },
+      }));
+    }
+  }
+
+  function drainIntelligenceQueue() {
+    while (
+      intelligenceWorkersRef.current < DEEP_INTELLIGENCE_CONCURRENCY
+      && intelligenceQueueRef.current.length > 0
+    ) {
+      const item = intelligenceQueueRef.current.shift();
+      if (!item) return;
+      intelligenceWorkersRef.current += 1;
+      void enrichProspect(item.prospect, item.runId).finally(() => {
+        intelligenceWorkersRef.current -= 1;
+        drainIntelligenceQueue();
+      });
+    }
+  }
+
+  function queueIntelligence(prospect: Prospect, runId: number) {
+    intelligenceQueueRef.current.push({ prospect, runId });
+    drainIntelligenceQueue();
   }
 
   async function analyze() {
@@ -157,15 +259,18 @@ export function ProspectingCockpit() {
       setErrors(["Add at least one LinkedIn profile URL or upload a list."]);
       return;
     }
+
+    const runId = ++runIdRef.current;
+    intelligenceQueueRef.current = [];
     setAnalyzing(true);
     setErrors([]);
     setResults([]);
     setSelected(new Set());
     setPushState({});
+    setIntelligence({});
     setProgress({ done: 0, total: urls.length });
 
     const pending = [...urls];
-    const found: Prospect[] = [];
     const failures: string[] = [];
     const workers = Array.from({ length: Math.min(3, pending.length) }, async () => {
       while (pending.length) {
@@ -173,18 +278,25 @@ export function ProspectingCockpit() {
         if (!linkedinUrl) return;
         try {
           const prospect = await analyzeOne(linkedinUrl);
-          found.push(prospect);
-          setResults([...found].sort((a, b) => b.score - a.score));
+          if (runId !== runIdRef.current) return;
+          setResults((current) => [
+            ...current.filter((item) => item.linkedinUrl !== prospect.linkedinUrl),
+            prospect,
+          ].sort((a, b) => b.score - a.score));
+          queueIntelligence(prospect, runId);
         } catch (error) {
           failures.push(error instanceof Error ? error.message : `${linkedinUrl}: failed`);
           setErrors([...failures]);
         } finally {
-          setProgress((current) => ({ ...current, done: current.done + 1 }));
+          if (runId === runIdRef.current) {
+            setProgress((current) => ({ ...current, done: current.done + 1 }));
+          }
         }
       }
     });
+
     await Promise.all(workers);
-    setAnalyzing(false);
+    if (runId === runIdRef.current) setAnalyzing(false);
   }
 
   async function pushToMarita(prospect: Prospect) {
@@ -196,7 +308,14 @@ export function ProspectingCockpit() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(prospect),
       });
-      const payload = await response.json() as { pushed?: boolean; duplicate?: boolean; taskId?: string; companyId?: string; error?: string; message?: string };
+      const payload = await response.json() as {
+        pushed?: boolean;
+        duplicate?: boolean;
+        taskId?: string;
+        companyId?: string;
+        error?: string;
+        message?: string;
+      };
       if (!response.ok) throw new Error(payload.error || "HubSpot push failed.");
       const message = payload.duplicate
         ? `Already queued · company synced · Task ${payload.taskId || "exists"}`
@@ -204,7 +323,10 @@ export function ProspectingCockpit() {
       setPushState((current) => ({ ...current, [key]: { success: message } }));
       return true;
     } catch (error) {
-      setPushState((current) => ({ ...current, [key]: { error: error instanceof Error ? error.message : "HubSpot push failed." } }));
+      setPushState((current) => ({
+        ...current,
+        [key]: { error: error instanceof Error ? error.message : "HubSpot push failed." },
+      }));
       return false;
     }
   }
@@ -251,7 +373,9 @@ export function ProspectingCockpit() {
     setImportNote(`Reading ${file.name}…`);
     try {
       const imported = (await extractLinkedInUrlsFromFile(file)).slice(0, MAX_IMPORT);
-      if (!imported.length) throw new Error("I could not find a LinkedIn person URL column in this file.");
+      if (!imported.length) {
+        throw new Error("I could not find a LinkedIn person URL column in this file.");
+      }
       const merged = [...new Set([...urlsFromText(input), ...imported])].slice(0, MAX_IMPORT);
       setInput(merged.join("\n"));
       setImportNote(`${file.name}: found ${imported.length} LinkedIn profile URL${imported.length === 1 ? "" : "s"}.`);
@@ -268,7 +392,7 @@ export function ProspectingCockpit() {
             <Link href="/" className={styles.back}><ArrowLeft size={16} /> SDR Command Center</Link>
             <div className={styles.eyebrow}>PROSPECTING COCKPIT V2</div>
             <h1>Sales Navigator → Intelligence → Marita</h1>
-            <p>Resolve people, enrich contact data, verify company domain, Career Page and ATS, detect current hiring, then push selected prospects to Marita in one action.</p>
+            <p>Resolve people fast, then verify company domain, Career Page, ATS, hiring and HubSpot in the background while you keep working.</p>
           </div>
           <div className={styles.headerRight}>
             <Link href="/hiring" className={styles.headerButton}><BriefcaseBusiness size={16} /> Hiring Signals</Link>
@@ -319,7 +443,7 @@ export function ProspectingCockpit() {
             <div className={styles.hint}>{urls.length} valid LinkedIn profile{urls.length === 1 ? "" : "s"} · max {MAX_IMPORT}</div>
             <button className={styles.primary} onClick={analyze} disabled={analyzing || !runtime?.signalHireConfigured || !urls.length}>
               {analyzing ? <LoaderCircle size={17} className={styles.spin} /> : <Sparkles size={17} />}
-              {analyzing ? `Building intelligence ${progress.done}/${progress.total}` : "Analyze leads"}
+              {analyzing ? `Resolving leads ${progress.done}/${progress.total}` : "Analyze leads"}
             </button>
           </div>
         </section>
@@ -338,7 +462,7 @@ export function ProspectingCockpit() {
           <section className={styles.bulkBar}>
             <div>
               <strong>{selected.size} selected</strong>
-              <span>Push multiple prospects to Marita with one click.</span>
+              <span>Lead cards are usable immediately; deep company intelligence continues in the background.</span>
             </div>
             <div className={styles.bulkActions}>
               <button className={styles.action} onClick={() => setSelected(new Set(results.map((item) => item.linkedinUrl)))}>Select all</button>
@@ -358,6 +482,8 @@ export function ProspectingCockpit() {
         <section className={styles.results}>
           {results.map((prospect) => {
             const state = pushState[prospect.linkedinUrl] || {};
+            const intelligenceState = intelligence[prospect.linkedinUrl] || { status: "idle", stage: "" } as IntelligenceState;
+            const intelligenceLoading = intelligenceState.status === "loading";
             const isWatched = watched.has(prospect.linkedinUrl);
             const isSelected = selected.has(prospect.linkedinUrl);
             return (
@@ -382,23 +508,72 @@ export function ProspectingCockpit() {
 
                 <div className={styles.signals}>
                   <span className={prospect.recentSignal.type ? styles.signalHot : styles.signalNeutral}><Flame size={14} /> {prospect.recentSignal.label || "No recent job-change signal"}</span>
-                  <span className={hiringClass(prospect.hiring.status)}><BriefcaseBusiness size={14} /> {prospect.hiring.status}{prospect.hiring.status === "Hiring Now" ? ` · ${prospect.hiring.activeJobs} jobs` : ""}</span>
+                  <span className={intelligenceLoading ? styles.hiringUnknown : hiringClass(prospect.hiring.status)}>
+                    {intelligenceLoading ? <LoaderCircle size={14} className={styles.spin} /> : <BriefcaseBusiness size={14} />}
+                    {intelligenceLoading ? "Hiring · checking…" : `${prospect.hiring.status}${prospect.hiring.status === "Hiring Now" ? ` · ${prospect.hiring.activeJobs} jobs` : ""}`}
+                  </span>
                   <span><Users size={14} /> {prospect.companySize || (prospect.staffCount ? `${prospect.staffCount} staff` : "Size unknown")}</span>
-                  <span><ShieldCheck size={14} /> {prospect.hubspot.inHubSpot ? `HubSpot · ${prospect.hubspot.matchedBy}` : "New to HubSpot"}</span>
+                  <span>
+                    <ShieldCheck size={14} />
+                    {intelligenceLoading && !prospect.hubspot.matchedBy
+                      ? "HubSpot · checking…"
+                      : prospect.hubspot.inHubSpot
+                        ? `HubSpot · ${prospect.hubspot.matchedBy}`
+                        : "New to HubSpot"}
+                  </span>
                 </div>
 
                 <div className={styles.companyPanel}>
-                  <div className={styles.companyPanelTitle}><Building2 size={16} /><strong>Company Intelligence</strong></div>
+                  <div className={styles.companyPanelTitle}>
+                    <Building2 size={16} />
+                    <strong>Company Intelligence</strong>
+                    {intelligenceState.status === "loading" && (
+                      <span className={styles.muted} style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 7px", borderRadius: 999, fontSize: 10, fontWeight: 800 }}>
+                        <LoaderCircle size={12} className={styles.spin} /> Background enrichment
+                      </span>
+                    )}
+                    {intelligenceState.status === "done" && (
+                      <span className={styles.ok} style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 7px", borderRadius: 999, fontSize: 10, fontWeight: 800 }}>
+                        <CheckCircle2 size={12} /> Ready
+                      </span>
+                    )}
+                    {intelligenceState.status === "error" && (
+                      <span className={styles.bad} title={intelligenceState.error} style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 7px", borderRadius: 999, fontSize: 10, fontWeight: 800 }}>
+                        <CircleAlert size={12} /> Partial
+                      </span>
+                    )}
+                  </div>
                   <div className={styles.companyGrid}>
-                    <div><span>Domain</span><strong>{prospect.companyDomain || "Not resolved"}</strong></div>
-                    <div><span>ATS</span><strong>{prospect.detectedAts || "Not detected"}</strong></div>
-                    <div><span>Career Page</span>{prospect.careerPageUrl ? <a href={prospect.careerPageUrl} target="_blank" rel="noreferrer">Open verified page</a> : <strong>Not found</strong>}</div>
-                    <div><span>Hiring</span><strong>{prospect.hiring.status}{prospect.hiring.activeJobs ? ` · ${prospect.hiring.activeJobs} roles` : ""}</strong></div>
+                    <div>
+                      <span>Domain</span>
+                      <strong>{prospect.companyDomain || (intelligenceLoading ? "Resolving…" : "Not resolved")}</strong>
+                    </div>
+                    <div>
+                      <span>ATS</span>
+                      <strong>{prospect.detectedAts || (intelligenceLoading ? "Checking…" : "Not detected")}</strong>
+                    </div>
+                    <div>
+                      <span>Career Page</span>
+                      {prospect.careerPageUrl
+                        ? <a href={prospect.careerPageUrl} target="_blank" rel="noreferrer">Open verified page</a>
+                        : <strong>{intelligenceLoading ? "Checking…" : "Not found"}</strong>}
+                    </div>
+                    <div>
+                      <span>Hiring</span>
+                      <strong>{intelligenceLoading ? "Checking…" : `${prospect.hiring.status}${prospect.hiring.activeJobs ? ` · ${prospect.hiring.activeJobs} roles` : ""}`}</strong>
+                    </div>
                   </div>
                   {prospect.hiring.jobsSample.length > 0 && (
                     <div className={styles.jobSamples}>
-                      {prospect.hiring.jobsSample.slice(0, 3).map((job) => <a key={`${job.title}-${job.url}`} href={job.url} target="_blank" rel="noreferrer"><BriefcaseBusiness size={13} /> {job.title}{job.location ? ` · ${job.location}` : ""}</a>)}
+                      {prospect.hiring.jobsSample.slice(0, 3).map((job) => (
+                        <a key={`${job.title}-${job.url}`} href={job.url} target="_blank" rel="noreferrer">
+                          <BriefcaseBusiness size={13} /> {job.title}{job.location ? ` · ${job.location}` : ""}
+                        </a>
+                      ))}
                     </div>
+                  )}
+                  {intelligenceState.status === "error" && intelligenceState.error && (
+                    <div className={styles.inlineError}><CircleAlert size={15} /> Deep intelligence: {intelligenceState.error}</div>
                   )}
                 </div>
 
@@ -409,15 +584,31 @@ export function ProspectingCockpit() {
                   <div><span>Source</span><strong>{prospect.source}</strong></div>
                 </div>
 
-                {prospect.scoreReasons.length > 0 && <div className={styles.reasons}>{prospect.scoreReasons.map((reason) => <span key={`${reason.label}-${reason.points}`}>{reason.label} <b>+{reason.points}</b></span>)}</div>}
+                {prospect.scoreReasons.length > 0 && (
+                  <div className={styles.reasons}>
+                    {prospect.scoreReasons.map((reason) => (
+                      <span key={`${reason.label}-${reason.points}`}>{reason.label} <b>+{reason.points}</b></span>
+                    ))}
+                  </div>
+                )}
 
                 <div className={styles.actions}>
                   <button className={styles.actionPrimary} onClick={() => pushToMarita(prospect)} disabled={state.loading}>
                     {state.loading ? <LoaderCircle size={15} className={styles.spin} /> : <UserPlus size={15} />} Push to Marita
                   </button>
-                  <button className={isWatched ? styles.actionActive : styles.action} onClick={() => toggleWatch(prospect)}><Watch size={15} /> {isWatched ? "Watching" : "Watch"}</button>
-                  <button className={styles.action} disabled={!runtime?.smartleadConfigured} title={runtime?.smartleadConfigured ? "Smartlead campaign selection will be wired next." : "Smartlead is intentionally postponed."}><Send size={15} /> Smartlead</button>
-                  {prospect.companyWebsite && <a className={styles.action} href={prospect.companyWebsite} target="_blank" rel="noreferrer"><Globe2 size={15} /> Company</a>}
+                  <button className={isWatched ? styles.actionActive : styles.action} onClick={() => toggleWatch(prospect)}>
+                    <Watch size={15} /> {isWatched ? "Watching" : "Watch"}
+                  </button>
+                  <button
+                    className={styles.action}
+                    disabled={!runtime?.smartleadConfigured}
+                    title={runtime?.smartleadConfigured ? "Smartlead campaign selection will be wired next." : "Smartlead is intentionally postponed."}
+                  >
+                    <Send size={15} /> Smartlead
+                  </button>
+                  {prospect.companyWebsite && (
+                    <a className={styles.action} href={prospect.companyWebsite} target="_blank" rel="noreferrer"><Globe2 size={15} /> Company</a>
+                  )}
                   {prospect.phone && <a className={styles.action} href={`tel:${prospect.phone}`}><PhoneCall size={15} /> Call</a>}
                   <a className={styles.action} href={prospect.linkedinUrl} target="_blank" rel="noreferrer"><Link2 size={15} /> LinkedIn</a>
                 </div>
