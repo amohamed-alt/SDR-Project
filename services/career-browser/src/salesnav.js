@@ -32,23 +32,21 @@ function normalizePublicLinkedIn(raw) {
   }
 }
 
-function sessionConfigured() {
-  return Boolean(String(process.env.LINKEDIN_LI_AT || '').trim());
+function effectiveSessionToken(provided) {
+  return String(provided || process.env.LINKEDIN_LI_AT || '').trim();
 }
 
-async function addLinkedInSession(context) {
-  const liAt = String(process.env.LINKEDIN_LI_AT || '').trim();
+function sessionConfigured(provided) {
+  return Boolean(effectiveSessionToken(provided));
+}
+
+async function addLinkedInSession(context, providedLiAt, providedJsession) {
+  const liAt = effectiveSessionToken(providedLiAt);
   if (!liAt) return false;
   const cookies = [{
-    name: 'li_at',
-    value: liAt,
-    domain: '.linkedin.com',
-    path: '/',
-    httpOnly: true,
-    secure: true,
-    sameSite: 'None',
+    name: 'li_at', value: liAt, domain: '.linkedin.com', path: '/', httpOnly: true, secure: true, sameSite: 'None',
   }];
-  const jsession = String(process.env.LINKEDIN_JSESSIONID || '').trim();
+  const jsession = String(providedJsession || process.env.LINKEDIN_JSESSIONID || '').trim();
   if (jsession) cookies.push({
     name: 'JSESSIONID', value: jsession, domain: '.linkedin.com', path: '/', httpOnly: false, secure: true, sameSite: 'None',
   });
@@ -130,22 +128,18 @@ async function clickNext(page) {
   return page.url() !== before || await next.count() > 0;
 }
 
-async function extractSalesNavSearch(rawUrl, requestedLimit = SALESNAV_MAX_RESULTS) {
+async function extractSalesNavSearch(rawUrl, requestedLimit = SALESNAV_MAX_RESULTS, sessionToken = '', jsessionToken = '') {
   const searchUrl = normalizeSalesNavSearchUrl(rawUrl);
   const limit = Math.max(1, Math.min(SALESNAV_MAX_RESULTS, Number(requestedLimit || SALESNAV_MAX_RESULTS)));
-  if (!sessionConfigured()) {
+  if (!sessionConfigured(sessionToken)) {
     return { ok: false, status: 'session_required', error: 'LinkedIn session is not connected on the VPS.', configured: false, leads: [] };
   }
 
   const browser = await getSharedBrowser();
-  const context = await browser.newContext({
-    locale: 'en-US',
-    viewport: { width: 1440, height: 1000 },
-    serviceWorkers: 'block',
-  });
+  const context = await browser.newContext({ locale: 'en-US', viewport: { width: 1440, height: 1000 }, serviceWorkers: 'block' });
   context.setDefaultTimeout(10000);
   context.setDefaultNavigationTimeout(SALESNAV_TIMEOUT_MS);
-  await addLinkedInSession(context);
+  await addLinkedInSession(context, sessionToken, jsessionToken);
   const page = await context.newPage();
 
   try {
