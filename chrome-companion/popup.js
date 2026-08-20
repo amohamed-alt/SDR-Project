@@ -1,8 +1,11 @@
 const $ = (id) => document.getElementById(id);
 const DEFAULT_DASHBOARD = 'https://sdr.dashboardtalentera.tech';
+const CLIENT_VERSION = chrome.runtime.getManifest().version;
+const PARSER_VERSION = 'card-v2';
 
 function setStatus(id, message, state = 'muted') {
   const node = $(id);
+  if (!node) return;
   node.textContent = message;
   node.className = `status ${state}`;
 }
@@ -21,6 +24,7 @@ async function loadSettings() {
   const stored = await chrome.storage.local.get(['dashboardUrl', 'pairingToken']);
   $('dashboard').value = cleanDashboard(stored.dashboardUrl || DEFAULT_DASHBOARD);
   $('token').value = stored.pairingToken || '';
+  setStatus('versionStatus', `Companion v${CLIENT_VERSION} · parser ${PARSER_VERSION}`);
 }
 
 async function saveSettings() {
@@ -46,12 +50,15 @@ async function ping() {
   setStatus('pairStatus', 'Testing connection…');
   try {
     const response = await fetch(`${dashboardUrl}/api/prospecting/salesnav/companion`, {
-      headers: { Authorization: `Bearer ${pairingToken}` },
+      headers: {
+        Authorization: `Bearer ${pairingToken}`,
+        'X-Companion-Version': CLIENT_VERSION,
+      },
       cache: 'no-store',
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.ok) throw new Error(payload.error || 'Pairing rejected');
-    setStatus('pairStatus', 'Connected to SDR Dashboard.', 'ok');
+    setStatus('pairStatus', `Connected to SDR Dashboard · v${CLIENT_VERSION}`, 'ok');
   } catch (error) {
     setStatus('pairStatus', error instanceof Error ? error.message : 'Connection failed.', 'bad');
   }
@@ -64,103 +71,129 @@ async function extractCurrentSalesNavPage() {
     return { ok: false, error: 'Open a Sales Navigator People Search page first.', sourceUrl, leads: [] };
   }
 
-  const normalize = (href) => {
+  const textOf = (node) => String(node?.innerText || node?.textContent || node?.getAttribute?.('aria-label') || '').replace(/\s+/g, ' ').trim();
+
+  const normalizeLinkedIn = (href) => {
     try {
-      const url = new URL(href, location.origin);
-      if (url.hostname.toLowerCase().replace(/^www\./, '') !== 'linkedin.com') return '';
+      const url = new URL(String(href || ''), location.origin);
+      const candidateHost = url.hostname.toLowerCase().replace(/^www\./, '');
+      if (candidateHost !== 'linkedin.com') return '';
+      url.protocol = 'https:';
+      url.hostname = 'www.linkedin.com';
       url.hash = '';
       return url.toString();
     } catch { return ''; }
   };
+
   const normalizePublic = (href) => {
+    const normalized = normalizeLinkedIn(href);
+    if (!normalized) return '';
     try {
-      const url = new URL(href, location.origin);
-      const candidateHost = url.hostname.toLowerCase().replace(/^www\./, '');
-      if (candidateHost !== 'linkedin.com' || !/^\/in\/[^/?#]+/i.test(url.pathname)) return '';
-      url.protocol = 'https:';
-      url.hostname = 'www.linkedin.com';
+      const url = new URL(normalized);
+      if (!/^\/in\/[^/?#]+/i.test(url.pathname)) return '';
       url.search = '';
-      url.hash = '';
       return url.toString().replace(/\/$/, '');
     } catch { return ''; }
   };
-  const publicFromMarkup = (markup) => {
-    if (!markup) return '';
-    const variants = [
-      String(markup),
-      String(markup).replace(/\\u002[fF]/g, '/').replace(/\\\//g, '/').replace(/&amp;/g, '&'),
-    ];
-    for (const value of variants) {
-      const absolute = value.match(/https?:\/\/(?:www\.)?linkedin\.com\/in\/[A-Za-z0-9_%.-]+/i)?.[0];
-      if (absolute) {
-        const normalized = normalizePublic(absolute);
-        if (normalized) return normalized;
-      }
-      const relative = value.match(/\/in\/[A-Za-z0-9_%.-]+/i)?.[0];
-      if (relative) {
-        const normalized = normalizePublic(relative);
-        if (normalized) return normalized;
-      }
+
+  const isNoise = (value) => {
+    const text = String(value || '').trim();
+    if (!text) return true;
+    return /(?:\b(?:1st|2nd|3rd)\b.*degree connection|linkedin premium member|shared connections?|recently posted|^save$|^message$|^connect$|^view profile$|^more$|^follow$)/i.test(text);
+  };
+
+  const companyFromCard = (card, anchors, lines, name, locationText) => {
+    const structured = textOf(card.querySelector('[data-anonymize="company-name"]'));
+    if (structured && !isNoise(structured)) return structured;
+
+    const companyAnchor = anchors.find((node) => {
+      const href = String(node.getAttribute('href') || '');
+      return /\/sales\/company\/|\/company\//i.test(href) && !/\/sales\/lead\//i.test(href);
+    });
+    const linked = textOf(companyAnchor);
+    if (linked && !isNoise(linked)) return linked;
+
+    const candidates = lines.filter((line) => line !== name && line !== locationText && !isNoise(line) && line.length <= 180);
+    const companyLike = candidates.find((line) => /\bat\b|@/i.test(line));
+    if (companyLike) {
+      const match = companyLike.match(/(?:\bat\b|@)\s+(.+)$/i);
+      if (match?.[1] && !isNoise(match[1])) return match[1].trim();
     }
     return '';
   };
+
+  const titleFromCard = (card, lines, name, company, locationText) => {
+    const structured = textOf(card.querySelector('[data-anonymize="job-title"]'));
+    if (structured && !isNoise(structured)) return structured;
+
+    const candidates = lines.filter((line) => line !== name && line !== company && line !== locationText && !isNoise(line) && line.length <= 240);
+    let title = candidates[0] || '';
+    if (company && title.toLowerCase().endsWith(company.toLowerCase())) {
+      title = title.slice(0, -company.length).replace(/[·•,@\-\s]+$/g, '').trim();
+    }
+    return title;
+  };
+
+  const locationFromCard = (card, lines) => {
+    const structured = textOf(card.querySelector('[data-anonymize="location"]'));
+    if (structured && !isNoise(structured)) return structured;
+    return lines.find((line) => /Saudi|Riyadh|Jeddah|Dammam|Khobar|United Arab Emirates|Dubai|Abu Dhabi|Sharjah|Qatar|Doha|Bahrain|Oman|Muscat|Kuwait|Jordan|Egypt|Cairo/i.test(line)) || '';
+  };
+
+  const nameFromCard = (card, anchors, fallbackAnchor, lines) => {
+    const structured = textOf(card.querySelector('[data-anonymize="person-name"]'));
+    if (structured && !isNoise(structured)) return structured;
+    const candidate = anchors.find((node) => {
+      const href = String(node.getAttribute('href') || '');
+      const text = textOf(node);
+      return /\/sales\/lead\/|\/in\//i.test(href) && text.length >= 2 && text.length <= 180 && !isNoise(text);
+    });
+    return textOf(candidate || fallbackAnchor) || lines.find((line) => !isNoise(line)) || '';
+  };
+
   const selectors = [
     'a[href*="/sales/lead/"]',
     'a[href*="/in/"]',
-    'a[data-control-name*="lead"]',
-    'a[data-control-name*="profile"]',
+    '[data-anonymize="person-name"]',
   ].join(',');
   const found = new Map();
 
   const scan = () => {
-    const anchors = [...document.querySelectorAll(selectors)];
-    for (const anchor of anchors) {
-      const href = normalize(anchor.getAttribute('href') || '');
-      if (!href || (!/\/sales\/lead\//i.test(href) && !/\/in\//i.test(href))) continue;
-      const card = anchor.closest('[data-x-search-result]')
-        || anchor.closest('[role="listitem"]')
-        || anchor.closest('li')
-        || anchor.closest('[class*="search-results__result-item"]')
-        || anchor.closest('[class*="result-list"]')
-        || anchor.parentElement?.parentElement
-        || anchor.parentElement;
+    const seeds = [...document.querySelectorAll(selectors)];
+    for (const seed of seeds) {
+      const card = seed.closest('[data-x-search-result]')
+        || seed.closest('[role="listitem"]')
+        || seed.closest('li')
+        || seed.closest('[class*="search-results__result-item"]')
+        || seed.closest('[class*="result-list"]')
+        || seed.parentElement?.parentElement
+        || seed.parentElement;
       if (!card) continue;
 
       const rawText = String(card.innerText || '').replace(/\n{3,}/g, '\n').trim();
-      if (!rawText || rawText.length > 8000) continue;
-      const cardAnchors = [...card.querySelectorAll('a')];
-      const salesAnchor = cardAnchors.find((node) => /\/sales\/lead\//i.test(String(node.getAttribute('href') || '')));
-      const publicAnchor = cardAnchors.find((node) => /\/in\//i.test(String(node.getAttribute('href') || '')));
-      const salesLeadUrl = salesAnchor ? normalize(salesAnchor.getAttribute('href') || '') : (/\/sales\/lead\//i.test(href) ? href : '');
-      const linkedinUrl = publicAnchor
-        ? normalizePublic(publicAnchor.getAttribute('href') || '')
-        : (/\/in\//i.test(href) ? normalizePublic(href) : publicFromMarkup(card.outerHTML));
-      const key = salesLeadUrl || linkedinUrl;
-      if (!key || found.has(key)) continue;
-
+      if (!rawText || rawText.length > 9000) continue;
       const lines = rawText.split('\n').map((line) => line.trim()).filter(Boolean);
-      const candidateAnchors = cardAnchors.filter((node) => /\/sales\/lead\/|\/in\//i.test(String(node.getAttribute('href') || '')));
-      const nameAnchor = candidateAnchors.find((node) => {
-        const text = String(node.innerText || node.getAttribute('aria-label') || '').trim();
-        return text.length >= 2 && text.length <= 160 && !/^(view|save|message|connect|more)$/i.test(text);
-      }) || anchor;
-      let name = String(nameAnchor.innerText || nameAnchor.getAttribute('aria-label') || '').replace(/^view\s+/i, '').trim();
-      if (!name) name = lines[0] || '';
-      if (!name || name.length > 180 || /^(view|save|message|connect|more)$/i.test(name)) continue;
+      const anchors = [...card.querySelectorAll('a')];
+      const salesAnchor = anchors.find((node) => /\/sales\/lead\//i.test(String(node.getAttribute('href') || '')));
+      const publicAnchor = anchors.find((node) => /\/in\//i.test(String(node.getAttribute('href') || '')));
+      const salesLeadUrl = salesAnchor ? normalizeLinkedIn(salesAnchor.getAttribute('href') || '') : '';
+      const linkedinUrl = publicAnchor ? normalizePublic(publicAnchor.getAttribute('href') || '') : '';
+      if (!salesLeadUrl && !linkedinUrl) continue;
 
+      const name = nameFromCard(card, anchors, salesAnchor || publicAnchor || seed, lines).replace(/^view\s+/i, '').trim();
+      if (!name || name.length > 200 || isNoise(name)) continue;
+      const locationText = locationFromCard(card, lines);
+      const company = companyFromCard(card, anchors, lines, name, locationText);
+      const title = titleFromCard(card, lines, name, company, locationText);
       const connectionDegree = rawText.match(/\b(1st|2nd|3rd)\b/i)?.[1] || '';
-      const locationLine = lines.find((line) => /Saudi|Riyadh|Jeddah|Dammam|Khobar|United Arab Emirates|Dubai|Abu Dhabi|Sharjah|Qatar|Doha|Bahrain|Oman|Muscat|Kuwait|Jordan|Egypt|Cairo/i.test(line)) || '';
-      const ignored = /(?:\b(?:1st|2nd|3rd)\b.*degree connection|linkedin premium member|^save$|^message$|^connect$|^view profile$|^more$|shared connections?|recently posted)/i;
-      const secondary = lines.filter((line) => line !== name && line !== locationLine && !ignored.test(line) && line.length < 240);
-      const likelyTitle = secondary[0] || '';
-      let likelyCompany = secondary[1] || '';
-      if (/degree connection|premium member|^[·•\s-]*(?:1st|2nd|3rd)\b/i.test(likelyCompany)) likelyCompany = '';
+      const key = salesLeadUrl || linkedinUrl || `${name}:${company}`;
+      if (found.has(key)) continue;
 
       found.set(key, {
         name,
-        title: likelyTitle,
-        company: likelyCompany,
-        location: locationLine,
+        title,
+        company,
+        location: locationText,
         connectionDegree,
         salesLeadUrl,
         linkedinUrl,
@@ -175,80 +208,18 @@ async function extractCurrentSalesNavPage() {
   const target = scrollers[0] || document.scrollingElement || document.documentElement;
   const originalTop = target.scrollTop || window.scrollY || 0;
 
-  for (let step = 0; step < 8 && found.size < 25; step += 1) {
+  for (let step = 0; step < 7 && found.size < 25; step += 1) {
     scan();
     const maxTop = Math.max(0, target.scrollHeight - target.clientHeight);
-    const top = Math.min(maxTop, Math.round(maxTop * (step + 1) / 8));
+    const top = Math.min(maxTop, Math.round(maxTop * (step + 1) / 7));
     if (typeof target.scrollTo === 'function') target.scrollTo({ top, behavior: 'auto' });
     else window.scrollTo(0, top);
-    await new Promise((resolve) => setTimeout(resolve, 350));
+    await new Promise((resolve) => setTimeout(resolve, 300));
   }
   scan();
   if (typeof target.scrollTo === 'function') target.scrollTo({ top: originalTop, behavior: 'auto' });
 
   return { ok: true, sourceUrl, leads: [...found.values()].slice(0, 25) };
-}
-
-async function resolvePublicLinkedInFromSalesLeadPages(salesLeadUrls) {
-  const normalizePublic = (href) => {
-    try {
-      const url = new URL(href, location.origin);
-      const host = url.hostname.toLowerCase().replace(/^www\./, '');
-      if (host !== 'linkedin.com' || !/^\/in\/[^/?#]+/i.test(url.pathname)) return '';
-      url.protocol = 'https:';
-      url.hostname = 'www.linkedin.com';
-      url.search = '';
-      url.hash = '';
-      return url.toString().replace(/\/$/, '');
-    } catch { return ''; }
-  };
-  const fromText = (text) => {
-    if (!text) return '';
-    const variants = [
-      String(text),
-      String(text).replace(/\\u002[fF]/g, '/').replace(/\\\//g, '/').replace(/&amp;/g, '&'),
-    ];
-    for (const value of variants) {
-      const absolute = value.match(/https?:\/\/(?:www\.)?linkedin\.com\/in\/[A-Za-z0-9_%.-]+/i)?.[0];
-      if (absolute) {
-        const normalized = normalizePublic(absolute);
-        if (normalized) return normalized;
-      }
-      const relative = value.match(/\/in\/[A-Za-z0-9_%.-]+/i)?.[0];
-      if (relative) {
-        const normalized = normalizePublic(relative);
-        if (normalized) return normalized;
-      }
-    }
-    return '';
-  };
-  const result = {};
-  for (const salesLeadUrl of salesLeadUrls.slice(0, 50)) {
-    try {
-      const url = new URL(salesLeadUrl, location.origin);
-      const host = url.hostname.toLowerCase().replace(/^www\./, '');
-      if (host !== 'linkedin.com' || !/^\/sales\/lead\//i.test(url.pathname)) continue;
-      const response = await fetch(url.toString(), {
-        method: 'GET',
-        credentials: 'include',
-        cache: 'no-store',
-        redirect: 'follow',
-      });
-      if (!response.ok) continue;
-      const html = await response.text();
-      let profile = fromText(html);
-      if (!profile) {
-        const doc = new DOMParser().parseFromString(html, 'text/html');
-        const anchor = doc.querySelector('a[href*="linkedin.com/in/"],a[href^="/in/"]');
-        profile = normalizePublic(anchor?.getAttribute('href') || '');
-      }
-      if (profile) result[salesLeadUrl] = profile;
-    } catch {
-      // Keep this lead unresolved; the caller will skip it rather than guessing.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 180));
-  }
-  return result;
 }
 
 function clickSalesNavPager(direction) {
@@ -278,22 +249,6 @@ async function extractPage(tabId) {
   return result?.[0]?.result || { ok: false, error: 'Could not read this page.', leads: [] };
 }
 
-async function resolveMissingProfileUrls(tabId, leads) {
-  const missing = leads.filter((lead) => !lead.linkedinUrl && lead.salesLeadUrl).map((lead) => lead.salesLeadUrl);
-  if (!missing.length) return leads;
-  const result = await chrome.scripting.executeScript({
-    target: { tabId },
-    world: 'MAIN',
-    func: resolvePublicLinkedInFromSalesLeadPages,
-    args: [missing],
-  });
-  const mapping = result?.[0]?.result || {};
-  return leads.map((lead) => ({
-    ...lead,
-    linkedinUrl: lead.linkedinUrl || mapping[lead.salesLeadUrl] || '',
-  }));
-}
-
 async function clickPager(tabId, direction) {
   const result = await chrome.scripting.executeScript({
     target: { tabId },
@@ -320,8 +275,16 @@ async function importBatch(leads, sourceUrl, pagesRead) {
     headers: {
       Authorization: `Bearer ${pairingToken}`,
       'Content-Type': 'application/json',
+      'X-Companion-Version': CLIENT_VERSION,
     },
-    body: JSON.stringify({ action: 'import', sourceUrl, pagesRead, leads }),
+    body: JSON.stringify({
+      action: 'import',
+      sourceUrl,
+      pagesRead,
+      clientVersion: CLIENT_VERSION,
+      parserVersion: PARSER_VERSION,
+      leads,
+    }),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload.ok) throw new Error(payload.error || `Dashboard returned HTTP ${response.status}`);
@@ -331,7 +294,7 @@ async function importBatch(leads, sourceUrl, pagesRead) {
 async function run(twoPages) {
   $('extract25').disabled = true;
   $('extract50').disabled = true;
-  setStatus('runStatus', 'Reading Sales Navigator…');
+  setStatus('runStatus', 'Reading the visible Sales Navigator result cards…');
   try {
     const tab = await activeTab();
     const first = await extractPage(tab.id);
@@ -340,41 +303,28 @@ async function run(twoPages) {
     let pagesRead = 1;
 
     if (twoPages && leads.length < 50) {
-      setStatus('runStatus', `Page 1: ${leads.length}. Opening page 2…`);
+      setStatus('runStatus', `Page 1: ${leads.length}. Moving to page 2…`);
       const moved = await clickPager(tab.id, 'next');
       if (moved) {
-        await new Promise((resolve) => setTimeout(resolve, 2400));
+        await new Promise((resolve) => setTimeout(resolve, 2200));
         const second = await extractPage(tab.id);
         if (second.ok) {
           leads = dedupe([...leads, ...(second.leads || [])]);
           pagesRead = 2;
         }
-        await clickPager(tab.id, 'previous').catch(() => false);
-        await new Promise((resolve) => setTimeout(resolve, 900));
       }
     }
 
     leads = dedupe(leads);
-    if (!leads.length) throw new Error('No Sales Navigator lead cards were found on the current results page.');
-    let clean = leads.filter((lead) => String(lead.connectionDegree || '').toLowerCase() !== '1st');
+    if (!leads.length) throw new Error('No Sales Navigator lead cards were found on this search page.');
+    const clean = leads.filter((lead) => String(lead.connectionDegree || '').toLowerCase() !== '1st');
     if (!clean.length) throw new Error('All extracted people are 1st-degree connections, so nothing was imported.');
 
-    const alreadyResolved = clean.filter((lead) => Boolean(lead.linkedinUrl)).length;
-    const missingProfiles = clean.length - alreadyResolved;
-    if (missingProfiles > 0) {
-      setStatus('runStatus', `Resolving ${missingProfiles} public LinkedIn profile URL${missingProfiles === 1 ? '' : 's'} inside your current Chrome session…`);
-      clean = await resolveMissingProfileUrls(tab.id, clean);
-    }
-
-    const directProfiles = clean.filter((lead) => Boolean(lead.linkedinUrl));
-    const unresolved = clean.length - directProfiles.length;
-    if (!directProfiles.length) {
-      throw new Error('Sales Nav leads were found, but no public LinkedIn /in/ profile URLs could be resolved. Refresh the Sales Nav results and try again.');
-    }
-
-    setStatus('runStatus', `Importing ${directProfiles.length} leads with direct LinkedIn profile URLs${unresolved ? ` · ${unresolved} unresolved skipped` : ''}…`);
-    const payload = await importBatch(directProfiles, first.sourceUrl, pagesRead);
-    setStatus('runStatus', `Done · ${payload.imported} direct LinkedIn profiles sent${unresolved ? ` · ${unresolved} skipped safely` : ''}. Open the SDR Dashboard to watch enrichment.`, 'ok');
+    const directProfiles = clean.filter((lead) => Boolean(lead.linkedinUrl)).length;
+    const withCompany = clean.filter((lead) => Boolean(lead.company)).length;
+    setStatus('runStatus', `Importing ${clean.length} leads · ${withCompany} companies parsed · ${directProfiles} direct profile URLs visible…`);
+    const payload = await importBatch(clean, first.sourceUrl, pagesRead);
+    setStatus('runStatus', `Done · ${payload.imported} sent · v${CLIENT_VERSION}. Dashboard will resolve missing profile URLs through SignalHire, not extra LinkedIn requests.`, 'ok');
   } catch (error) {
     setStatus('runStatus', error instanceof Error ? error.message : 'Extraction failed.', 'bad');
   } finally {
