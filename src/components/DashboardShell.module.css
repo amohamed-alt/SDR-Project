@@ -4,6 +4,7 @@
 
 .gtmLauncher,
 .careerLauncher,
+.priorityLauncher,
 .hiringLauncher,
 .maqsamLauncher {
   position: fixed;
@@ -25,15 +26,21 @@
 }
 
 .gtmLauncher {
-  bottom: 252px;
+  bottom: 310px;
   background: #0f5f7a;
   box-shadow: 0 14px 34px rgba(15, 95, 122, 0.28);
 }
 
 .careerLauncher {
-  bottom: 194px;
+  bottom: 252px;
   background: #116f67;
   box-shadow: 0 14px 34px rgba(17, 111, 103, 0.28);
+}
+
+.priorityLauncher {
+  bottom: 194px;
+  background: #b56a18;
+  box-shadow: 0 14px 34px rgba(181, 106, 24, 0.28);
 }
 
 .hiringLauncher {
@@ -50,6 +57,7 @@
 
 .gtmLauncher span,
 .careerLauncher span,
+.priorityLauncher span,
 .hiringLauncher span,
 .maqsamLauncher span {
   line-height: 1;
@@ -57,6 +65,7 @@
 
 .gtmLauncher small,
 .careerLauncher small,
+.priorityLauncher small,
 .hiringLauncher small,
 .maqsamLauncher small {
   padding: 3px 6px;
@@ -71,6 +80,7 @@
 
 .gtmLauncher:hover,
 .careerLauncher:hover,
+.priorityLauncher:hover,
 .hiringLauncher:hover,
 .maqsamLauncher:hover {
   transform: translateY(-2px);
@@ -80,24 +90,15 @@
 @media (max-width: 720px) {
   .gtmLauncher,
   .careerLauncher,
+  .priorityLauncher,
   .hiringLauncher,
   .maqsamLauncher {
     right: 14px;
   }
 
-  .gtmLauncher {
-    bottom: 246px;
-  }
-
-  .careerLauncher {
-    bottom: 188px;
-  }
-
-  .hiringLauncher {
-    bottom: 72px;
-  }
-
-  .maqsamLauncher {
-    bottom: 130px;
-  }
+  .gtmLauncher { bottom: 304px; }
+  .careerLauncher { bottom: 246px; }
+  .priorityLauncher { bottom: 188px; }
+  .hiringLauncher { bottom: 72px; }
+  .maqsamLauncher { bottom: 130px; }
 }
