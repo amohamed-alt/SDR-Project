@@ -14,6 +14,7 @@ The project is configured for Talentera's EU1 HubSpot portal and defaults to Mar
 - Sales email sends, opens, clicks, replies, and reply rate
 - Contact data quality across email, phone, LinkedIn, company association, country, source, ICP, Apollo, SignalHire, and MillionVerifier fields
 - Company country, industry, employee count, ICP context, detected ATS, and ATS confidence
+- ATS Intent Search for public LinkedIn post discovery, commercial-intent scoring, regional filtering, and ATS/vendor mentions without using a LinkedIn login on the VPS
 - Deals associated with SDR-owned contacts, stage conversion, open pipeline, and meeting-to-deal conversion
 - In-dashboard searchable drill-down drawers for KPI cards, alerts, funnel stages, chart slices, bars, and daily activity points
 - Safe HubSpot links inside every drill-down result: CRM records open directly, while activities open their associated contact timeline instead of unsupported standalone activity URLs
@@ -92,6 +93,7 @@ Google OAuth requests the least-privilege Calendar scopes needed to create event
 | `MARITA_GOOGLE_EMAIL` | Google account accepted for the default Marita organizer |
 | `ABDULLAH_GOOGLE_EMAIL` | Google account accepted for the Abdullah organizer link |
 | `GOOGLE_TOKEN_STORE_PATH` | Encrypted credential path; defaults to `/app/data/google-calendar.json` |
+| `TAVILY_API_KEY` | Server-only public-web search key used by Career fallback and ATS Intent Search |
 | `DEMO_MODE` | Use safe synthetic data without calling HubSpot |
 
 ## Quality checks
