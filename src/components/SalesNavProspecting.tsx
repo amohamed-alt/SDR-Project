@@ -172,8 +172,16 @@ export function SalesNavProspecting() {
   }
 
   useEffect(() => {
-    void refreshRuntime();
-    void refreshSessionStatus();
+    let active = true;
+    void fetch("/api/prospecting/salesnav", { cache: "no-store" })
+      .then((response) => response.json() as Promise<Runtime>)
+      .then((payload) => { if (active) setRuntime(payload); })
+      .catch(() => { if (active) setRuntime({ sessionConfigured: false, signalHireConfigured: false, maxResults: MAX_RESULTS }); });
+    void fetch("/api/prospecting/salesnav/session", { cache: "no-store" })
+      .then((response) => response.json() as Promise<SessionStatus>)
+      .then((payload) => { if (active) setSessionStatus(payload); })
+      .catch(() => { if (active) setSessionStatus({ configured: false, unlocked: false }); });
+    return () => { active = false; };
   }, []);
 
   async function unlockSessionSettings() {
