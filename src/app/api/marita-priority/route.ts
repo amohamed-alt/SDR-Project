@@ -4,7 +4,7 @@ import { getMaritaPriorityQueue, rescheduleMaritaTasks } from "@/lib/marita-prio
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 180;
 
 const rescheduleSchema = z.object({
   taskIds: z.array(z.string().regex(/^\d+$/)).min(1).max(1000),
