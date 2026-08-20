@@ -11,14 +11,20 @@ import {
   type ProspectCompanyIntelligence,
   type ProspectHiringInsight,
 } from "@/lib/prospecting-company-intelligence";
+import {
+  isThirdPartyCompanyDomain,
+  thirdPartyCompanyDomains,
+} from "@/lib/company-domain-safety";
 
 const DIRECT_APPLICATION_LABEL = "Direct Application Form";
 const TAVILY_ENDPOINT = "https://api.tavily.com/search";
-const BLOCKED_RESULT_DOMAINS = [
-  "linkedin.com", "facebook.com", "instagram.com", "x.com", "twitter.com",
-  "glassdoor.com", "indeed.com", "crunchbase.com", "bayt.com", "naukrigulf.com",
-  "zoominfo.com", "rocketreach.co", "signalhire.com", "wikipedia.org",
-];
+const BLOCKED_RESULT_DOMAINS = [...new Set([
+  ...thirdPartyCompanyDomains,
+  "jobstreet.com",
+  "foundit.in",
+  "founditgulf.com",
+  "careerbuilder.com",
+])];
 
 const ATS_PATTERNS: Array<[RegExp, string]> = [
   [/myworkdayjobs\.com|workday\.com/i, "Workday"],
@@ -93,7 +99,8 @@ function companyVariants(companyName: string) {
     .filter(Boolean);
   const stop = new Set(["group", "company", "co", "llc", "ltd", "limited", "holding", "holdings", "inc", "corp", "corporation", "the"]);
   const core = words.filter((word) => !stop.has(word));
-  return [...new Set([words.join(""), core.join(""), ...core.filter((word) => word.length >= 4)])].filter((value) => value.length >= 4);
+  return [...new Set([words.join(""), core.join(""), ...core.filter((word) => word.length >= 4)])]
+    .filter((value) => value.length >= 4);
 }
 
 function brandMatchScore(companyName: string, ...texts: string[]) {
@@ -125,6 +132,39 @@ function hasCareerSignal(url: string, title: string, content: string, html: stri
   );
 }
 
+function sanitizeFreeResult(
+  companyName: string,
+  result: ProspectCompanyIntelligence,
+): ProspectCompanyIntelligence {
+  const badDomain = result.domain && isThirdPartyCompanyDomain(result.domain, companyName);
+  const badWebsite = result.website && isThirdPartyCompanyDomain(result.website, companyName);
+  const badCareer = result.careerPageUrl && isThirdPartyCompanyDomain(result.careerPageUrl, companyName);
+  const badEvidence = result.evidenceUrl && isThirdPartyCompanyDomain(result.evidenceUrl, companyName);
+
+  if (!badDomain && !badWebsite && !badCareer) return result;
+
+  const rejected = [
+    badDomain ? result.domain : "",
+    badWebsite ? result.website : "",
+    badCareer ? result.careerPageUrl : "",
+  ].filter(Boolean).join(", ");
+
+  return {
+    ...result,
+    domain: badDomain ? "" : result.domain,
+    website: badWebsite ? "" : result.website,
+    careerPageUrl: badCareer ? "" : result.careerPageUrl,
+    detectedAts: badCareer ? "" : result.detectedAts,
+    atsConfidence: badCareer ? "" : result.atsConfidence,
+    careerConfidence: badCareer ? 0 : result.careerConfidence,
+    evidenceUrl: badEvidence ? "" : result.evidenceUrl,
+    verificationReason: [
+      `Rejected third-party job board/aggregator as company identity${rejected ? `: ${rejected}` : ""}.`,
+      result.verificationReason,
+    ].filter(Boolean).join(" "),
+  };
+}
+
 async function tavilySearch(companyName: string, suppliedDomain: string) {
   const apiKey = String(process.env.TAVILY_API_KEY || "").trim();
   if (!apiKey || !companyName.trim()) return [] as TavilyResult[];
@@ -137,7 +177,7 @@ async function tavilySearch(companyName: string, suppliedDomain: string) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      query: `\"${companyName}\" official website careers jobs.${domainHint}`,
+      query: `\"${companyName}\" official company website careers jobs.${domainHint} Do not return job boards, recruitment marketplaces, directories, or company profile aggregators.`,
       topic: "general",
       search_depth: "basic",
       max_results: 8,
@@ -154,7 +194,10 @@ async function tavilySearch(companyName: string, suppliedDomain: string) {
   }
   const payload = await response.json().catch(() => ({})) as TavilyResponse;
   return (payload.results || [])
-    .filter((result) => cleanUrl(result.url))
+    .filter((result) => {
+      const url = cleanUrl(result.url);
+      return Boolean(url) && !isThirdPartyCompanyDomain(url, companyName);
+    })
     .sort((a, b) => {
       const aCareer = /career|jobs|vacan|join|recruit|employment/i.test(`${a.url} ${a.title}`) ? 0.2 : 0;
       const bCareer = /career|jobs|vacan|join|recruit|employment/i.test(`${b.url} ${b.title}`) ? 0.2 : 0;
@@ -213,12 +256,12 @@ function buildHiring(html: string, finalUrl: string, source: string): ProspectHi
 
 async function verifyResult(companyName: string, result: TavilyResult): Promise<VerifiedCandidate | null> {
   const candidateUrl = cleanUrl(result.url);
-  if (!candidateUrl) return null;
+  if (!candidateUrl || isThirdPartyCompanyDomain(candidateUrl, companyName)) return null;
   try {
     const response = await fetch(candidateUrl, {
       redirect: "follow",
       cache: "no-store",
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; TalenteraGTM/2.3; +https://talentera.com)" },
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; TalenteraGTM/2.4; +https://talentera.com)" },
       signal: AbortSignal.timeout(20_000),
     });
     if (!response.ok) return null;
@@ -226,6 +269,8 @@ async function verifyResult(companyName: string, result: TavilyResult): Promise<
     if (!/html|text/i.test(contentType)) return null;
     const html = (await response.text()).slice(0, 3_000_000);
     const finalUrl = response.url || candidateUrl;
+    if (isThirdPartyCompanyDomain(finalUrl, companyName)) return null;
+
     const title = String(result.title || "");
     const content = String(result.content || "");
     const brandScore = brandMatchScore(companyName, html, title, content, finalUrl);
@@ -255,8 +300,10 @@ export async function inspectProspectCompany(input: {
   website: string;
   emails: string[];
 }): Promise<ProspectCompanyIntelligence> {
-  const free = await inspectFreeProspectCompany(input);
-  if (free.careerPageUrl || !String(process.env.TAVILY_API_KEY || "").trim() || !input.companyName.trim()) return free;
+  const free = sanitizeFreeResult(input.companyName, await inspectFreeProspectCompany(input));
+  if (free.careerPageUrl || !String(process.env.TAVILY_API_KEY || "").trim() || !input.companyName.trim()) {
+    return free;
+  }
 
   const results = await tavilySearch(input.companyName, free.domain || normalizeCompanyDomain(input.website));
   if (!results.length) return free;
@@ -267,11 +314,11 @@ export async function inspectProspectCompany(input: {
     if (!verified) continue;
     if (!bestWebsite || verified.searchScore > bestWebsite.searchScore) bestWebsite = verified;
 
-    const retry = await inspectFreeProspectCompany({
+    const retry = sanitizeFreeResult(input.companyName, await inspectFreeProspectCompany({
       companyName: input.companyName,
       website: verified.officialWebsite,
       emails: input.emails,
-    });
+    }));
     if (retry.careerPageUrl) {
       return {
         ...retry,
@@ -291,7 +338,7 @@ export async function inspectProspectCompany(input: {
         atsConfidence: verified.ats === DIRECT_APPLICATION_LABEL ? "direct" : verified.ats ? "high" : "",
         careerConfidence: 95,
         evidenceUrl: verified.finalUrl,
-        verificationReason: "Tavily fallback found a career destination after Career V3 was inconclusive; the result was fetched and brand/career verified live before use.",
+        verificationReason: "Tavily fallback found a career destination after Career V3 was inconclusive; the result was fetched, checked against third-party job boards, and brand/career verified live before use.",
         hiring: verified.hiring,
       };
     }
