@@ -28,13 +28,13 @@
 
     <section class="card">
       <h2>Extract current Sales Nav search</h2>
-      <p class="small">Open a Sales Navigator People Search first. 1st-degree connections are filtered before import.</p>
+      <p class="small">Open a Sales Navigator People Search first. 1st-degree connections are filtered, then the companion resolves the direct linkedin.com/in/ profile URL before import.</p>
       <button id="extract25" class="primary">Extract current page</button>
       <button id="extract50" class="primary">Extract up to 50 · 2 pages</button>
       <div id="runStatus" class="status muted">Ready</div>
     </section>
 
-    <footer>No cookie permission · no background crawler · max 50 per run</footer>
+    <footer>No cookie permission · no background crawler · direct profile URLs only · max 50 per run</footer>
   </main>
   <script src="popup.js"></script>
 </body>
