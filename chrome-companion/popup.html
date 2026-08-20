@@ -11,7 +11,8 @@
     <header>
       <div class="eyebrow">TALENTERA SDR</div>
       <h1>Sales Nav Companion</h1>
-      <p>Reads only the Sales Navigator tab you trigger. It never reads or exports LinkedIn cookies.</p>
+      <p>Reads only the Sales Navigator result cards you explicitly trigger. It never reads or exports LinkedIn cookies.</p>
+      <div id="versionStatus" class="status muted">Loading version…</div>
     </header>
 
     <section class="card">
@@ -28,13 +29,13 @@
 
     <section class="card">
       <h2>Extract current Sales Nav search</h2>
-      <p class="small">Open a Sales Navigator People Search first. 1st-degree connections are filtered, then the companion resolves the direct linkedin.com/in/ profile URL before import.</p>
+      <p class="small">Open a Sales Navigator People Search first. 1st-degree connections are filtered before import. Missing public /in/ URLs are resolved by SignalHire after import instead of hidden LinkedIn profile requests.</p>
       <button id="extract25" class="primary">Extract current page</button>
       <button id="extract50" class="primary">Extract up to 50 · 2 pages</button>
       <div id="runStatus" class="status muted">Ready</div>
     </section>
 
-    <footer>No cookie permission · no background crawler · direct profile URLs only · max 50 per run</footer>
+    <footer>No cookie permission · no hidden profile fetches · no background crawler · max 50 per run</footer>
   </main>
   <script src="popup.js"></script>
 </body>

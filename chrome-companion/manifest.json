@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Talentera Sales Nav Companion",
-  "version": "1.1.0",
-  "description": "User-triggered Sales Navigator extraction that resolves direct LinkedIn profile URLs without cookie access or background crawling.",
+  "version": "1.2.0",
+  "description": "User-triggered Sales Navigator card extraction for the Talentera SDR dashboard. No cookie access, no hidden LinkedIn profile fetches, and no background crawling.",
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": ["https://sdr.dashboardtalentera.tech/*"],
   "action": {

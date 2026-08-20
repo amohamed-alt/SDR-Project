@@ -27,6 +27,8 @@ export type CompanionBatch = {
   importedAt: string;
   sourceUrl: string;
   pagesRead: number;
+  clientVersion?: string;
+  parserVersion?: string;
   leads: CompanionLead[];
 };
 
