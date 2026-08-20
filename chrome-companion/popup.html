@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Sales Nav Companion</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <main>
+    <header>
+      <div class="eyebrow">TALENTERA SDR</div>
+      <h1>Sales Nav Companion</h1>
+      <p>Reads only the Sales Navigator tab you trigger. It never reads or exports LinkedIn cookies.</p>
+    </header>
+
+    <section class="card">
+      <label>Dashboard URL</label>
+      <input id="dashboard" value="https://sdr.dashboardtalentera.tech" />
+      <label>Pairing token</label>
+      <input id="token" type="password" placeholder="Paste token from SDR Dashboard" autocomplete="off" />
+      <div class="row">
+        <button id="save" class="secondary">Save pairing</button>
+        <button id="ping" class="secondary">Test connection</button>
+      </div>
+      <div id="pairStatus" class="status muted">Not checked</div>
+    </section>
+
+    <section class="card">
+      <h2>Extract current Sales Nav search</h2>
+      <p class="small">Open a Sales Navigator People Search first. 1st-degree connections are filtered before import.</p>
+      <button id="extract25" class="primary">Extract current page</button>
+      <button id="extract50" class="primary">Extract up to 50 · 2 pages</button>
+      <div id="runStatus" class="status muted">Ready</div>
+    </section>
+
+    <footer>No cookie permission · no background crawler · max 50 per run</footer>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
