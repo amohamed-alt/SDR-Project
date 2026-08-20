@@ -25,6 +25,7 @@ import {
   XCircle,
   Zap,
 } from "lucide-react";
+import { MasterCareerAuditPanel } from "@/components/MasterCareerAuditPanel";
 import styles from "@/components/CareerIntelligence.module.css";
 
 type CareerStatus =
@@ -303,6 +304,8 @@ export function CareerIntelligence({ onBack }: { onBack: () => void }) {
     </section>
 
     {error && <div className={styles.errorBanner}><CircleAlert size={16}/><span>{error}</span><button type="button" onClick={() => setError("")}><X size={14}/></button></div>}
+
+    <MasterCareerAuditPanel />
 
     <section className={styles.metrics}>
       <MetricCard icon={<Database size={18}/>} label="Total Portfolio" value={String(summary?.total ?? 0)} helper={`${summary?.remaining ?? 0} still unresolved`}/>
