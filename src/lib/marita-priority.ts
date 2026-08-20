@@ -80,7 +80,8 @@ function reliableAts(company: HubSpotRecord) {
   const ats = text(company, "detected_ats");
   const status = text(company, "ats_status").toLowerCase();
   const generic = /^(?:custom|unknown|not detected|not_detected|none|n\/a)$/i.test(ats);
-  return Boolean(ats) && !generic && status === "detected";
+  const explicitlyNotDetected = status === "not_detected" || status === "unclear" || status === "not_checked";
+  return Boolean(ats) && !generic && !explicitlyNotDetected;
 }
 
 function priorityFor(noAts: boolean, hasEmail: boolean): { tier: MaritaPriorityTier; label: string } {
@@ -128,7 +129,11 @@ async function calledCompanyIds() {
   const calledContacts = unique([
     ...callIds.flatMap((id) => callContacts.get(id) ?? []),
     ...maqsamCalls
-      .filter((call) => call.matchStatus === "matched" && String(call.direction ?? "").toUpperCase() !== "INBOUND")
+      .filter((call) => {
+        const agent = `${call.agentName ?? ""} ${call.agentEmail ?? ""}`.trim().toLowerCase();
+        const isMarita = !agent || agent.includes("marita");
+        return isMarita && call.matchStatus === "matched" && String(call.direction ?? "").toUpperCase() !== "INBOUND";
+      })
       .map((call) => String(call.hubspotContactId ?? "")),
   ]);
 
