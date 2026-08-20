@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Talentera Sales Nav Companion",
+  "version": "1.0.0",
+  "description": "User-triggered Sales Navigator extraction for the Talentera SDR dashboard. No cookie access and no background crawling.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["https://sdr.dashboardtalentera.tech/*"],
+  "action": {
+    "default_title": "Sales Nav Companion",
+    "default_popup": "popup.html"
+  }
+}
