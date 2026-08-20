@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { resolveCompanyDomain } from "@/lib/prospecting-company-intelligence";
+import { safeCompanyDomain, safeCompanyWebsite } from "@/lib/company-domain-safety";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -134,14 +135,6 @@ function recentRoleSignal(current: SignalHireExperience | undefined, previous: S
   return { type: "new_role", label: `Started current role ${ageDays} days ago`, ageDays };
 }
 
-function normalizeWebsite(raw: string, domain: string) {
-  const value = String(raw || "").trim();
-  if (value && value.toLowerCase() !== "n/a") {
-    return /^https?:\/\//i.test(value) ? value : `https://${value}`;
-  }
-  return domain ? `https://${domain}` : "";
-}
-
 function emptyHiring() {
   return {
     status: "Unknown" as const,
@@ -210,9 +203,16 @@ export async function POST(request: NextRequest) {
     const location = candidate.locations?.map((entry) => entry.name).filter(Boolean).join(" · ") || currentRole?.location || "";
     const title = currentRole?.position || candidate.headLine || "";
     const recentSignal = recentRoleSignal(currentRole, previousRole);
+    const companyName = currentRole?.company || "";
+
+    // SignalHire can sometimes expose a job-board/company-profile URL as the role website.
+    // Never promote Wuzzuf/Bayt/Indeed/etc. into the actual company identity.
     const suppliedWebsite = currentRole?.website && currentRole.website !== "n/a" ? currentRole.website : "";
-    const companyDomain = resolveCompanyDomain(suppliedWebsite, emails);
-    const companyWebsite = normalizeWebsite(suppliedWebsite, companyDomain);
+    const safeSuppliedWebsite = safeCompanyWebsite(suppliedWebsite, companyName);
+    const emailDomain = resolveCompanyDomain("", emails);
+    const companyDomain = safeCompanyDomain(safeSuppliedWebsite || emailDomain, companyName)
+      || safeCompanyDomain(emailDomain, companyName);
+    const companyWebsite = safeSuppliedWebsite || (companyDomain ? `https://${companyDomain}` : "");
 
     let score = 15;
     const scoreReasons: Array<{ label: string; points: number }> = [
@@ -260,7 +260,7 @@ export async function POST(request: NextRequest) {
         photoUrl: candidate.photo?.url || "",
         location,
         title,
-        company: currentRole?.company || "",
+        company: companyName,
         companyWebsite,
         companyDomain,
         companyLinkedIn: currentRole?.companyUrl && currentRole.companyUrl !== "n/a" ? currentRole.companyUrl : "",
