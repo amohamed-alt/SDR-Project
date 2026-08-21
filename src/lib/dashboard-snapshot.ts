@@ -1,5 +1,9 @@
 import { unstable_cache } from "next/cache";
 import { buildDashboard } from "@/lib/analytics";
+import {
+  readPersistedDashboardSnapshot,
+  writePersistedDashboardSnapshot,
+} from "@/lib/dashboard-cache-api";
 import type { DashboardData, DashboardFilters } from "@/lib/types";
 
 const SNAPSHOT_FRESH_MS = 10 * 60 * 1000;
@@ -8,7 +12,7 @@ const ACTIVE_FILTER_TTL_MS = 60 * 60 * 1000;
 
 const cachedDashboard = unstable_cache(
   async (filters: DashboardFilters) => buildDashboard(filters),
-  ["sdr-dashboard-live-v6-performance"],
+  ["sdr-dashboard-live-v7-fastapi-cache"],
   { revalidate: 600, tags: ["sdr-dashboard"] },
 );
 
@@ -27,7 +31,7 @@ export type DashboardSnapshotResult = {
   data: DashboardData;
   refreshing: boolean;
   ageSeconds: number;
-  cacheStatus: "memory" | "next-cache";
+  cacheStatus: "memory" | "fastapi-disk" | "next-cache";
 };
 
 const snapshots = new Map<string, SnapshotEntry>();
@@ -52,17 +56,25 @@ function generatedAtMs(data: DashboardData) {
   return Number.isFinite(parsed) ? parsed : Date.now();
 }
 
+function persistSnapshot(filters: DashboardFilters, data: DashboardData, refreshedAt: number) {
+  void writePersistedDashboardSnapshot(filters, data, refreshedAt).catch((error) => {
+    console.warn("Unable to persist dashboard snapshot", error);
+  });
+}
+
 function startRefresh(key: string, filters: DashboardFilters) {
   const existing = inflightRefreshes.get(key);
   if (existing) return existing;
 
   const refresh = buildDashboard(filters)
     .then((data) => {
+      const refreshedAt = generatedAtMs(data);
       snapshots.set(key, {
         data,
-        refreshedAt: generatedAtMs(data),
+        refreshedAt,
         lastAccessedAt: Date.now(),
       });
+      persistSnapshot(filters, data, refreshedAt);
       return data;
     })
     .finally(() => {
@@ -116,13 +128,28 @@ export async function getDashboardSnapshot(
   let cacheStatus: DashboardSnapshotResult["cacheStatus"] = "memory";
 
   if (!snapshot) {
+    const persisted = await readPersistedDashboardSnapshot(filters);
+    if (persisted) {
+      snapshot = {
+        data: persisted.data,
+        refreshedAt: persisted.refreshedAt,
+        lastAccessedAt: now,
+      };
+      snapshots.set(key, snapshot);
+      cacheStatus = "fastapi-disk";
+    }
+  }
+
+  if (!snapshot) {
     const data = await cachedDashboard(filters);
+    const refreshedAt = generatedAtMs(data);
     snapshot = {
       data,
-      refreshedAt: generatedAtMs(data),
+      refreshedAt,
       lastAccessedAt: now,
     };
     snapshots.set(key, snapshot);
+    persistSnapshot(filters, data, refreshedAt);
     cacheStatus = "next-cache";
   } else {
     snapshot.lastAccessedAt = now;
