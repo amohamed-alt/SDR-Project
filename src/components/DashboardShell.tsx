@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { BrainCircuit, Flame, ListTodo, LoaderCircle, PhoneCall, Radar, Search, Sparkles } from "lucide-react";
+import { BrainCircuit, Building2, Flame, ListTodo, LoaderCircle, PhoneCall, Radar, Search, Sparkles } from "lucide-react";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardMotion";
 import styles from "@/components/DashboardShell.module.css";
 
@@ -70,6 +70,9 @@ export function Dashboard() {
 
   return <div className={styles.shell}>
     <ExistingDashboard/>
+    <Link className={styles.companyLauncher} href="/company-enrichment">
+      <Building2 size={17}/><span>Company Repair</span><small>HubSpot Enrich</small>
+    </Link>
     <Link className={styles.brainLauncher} href="/account-intelligence">
       <BrainCircuit size={17}/><span>GTM Brain</span><small>Account Intel</small>
     </Link>
@@ -92,7 +95,7 @@ export function Dashboard() {
       <PhoneCall size={17}/><span>Marita Calls</span><small>Maqsam</small>
     </Link>
     <button className={styles.intentLauncher} type="button" onClick={() => changeView("ats-intent")}>
-      <Search size={17}/><span>ATS Intent</span><small>LinkedIn Posts</small>
+      <Search size={17}/><span>ATS Intent</span><small>LinkedIn + SignalHire</small>
     </button>
   </div>;
 }
