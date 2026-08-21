@@ -26,6 +26,7 @@ try {
   const [
     healthResponse,
     dashboardResponse,
+    cacheHealthResponse,
     maqsamCallsResponse,
     rejectedMaqsamIngestResponse,
     calendarStatusResponse,
@@ -41,6 +42,7 @@ try {
   ] = await Promise.all([
     fetch(`http://127.0.0.1:${port}/api/health`),
     fetch(`http://127.0.0.1:${port}/api/dashboard?from=2026-07-01&to=2026-07-19&ownerId=31644369`),
+    fetch(`http://127.0.0.1:${port}/api/dashboard/cache-health`),
     fetch(`http://127.0.0.1:${port}/api/maqsam/calls?from=2026-07-01&to=2026-07-19`),
     fetch(`http://127.0.0.1:${port}/api/maqsam/calls`, {
       method: "POST",
@@ -74,9 +76,10 @@ try {
     fetch(`http://127.0.0.1:${port}/marita-calls`),
     fetch(`http://127.0.0.1:${port}/gtm-research`),
   ]);
-  if (!healthResponse.ok || !dashboardResponse.ok || !maqsamCallsResponse.ok || !calendarStatusResponse.ok || !abdullahCalendarStatusResponse.ok || !emptyCountryBatchResponse.ok || !gtmResearchHealthResponse.ok || !pageResponse.ok || !maritaCallsPageResponse.ok || !gtmResearchPageResponse.ok) throw new Error("One or more smoke-test routes returned an error");
+  if (!healthResponse.ok || !dashboardResponse.ok || !cacheHealthResponse.ok || !maqsamCallsResponse.ok || !calendarStatusResponse.ok || !abdullahCalendarStatusResponse.ok || !emptyCountryBatchResponse.ok || !gtmResearchHealthResponse.ok || !pageResponse.ok || !maritaCallsPageResponse.ok || !gtmResearchPageResponse.ok) throw new Error("One or more smoke-test routes returned an error");
   const health = await healthResponse.json();
   const dashboard = await dashboardResponse.json();
+  const cacheHealth = await cacheHealthResponse.json();
   const maqsamCalls = await maqsamCallsResponse.json();
   const calendarStatus = await calendarStatusResponse.json();
   const abdullahCalendarStatus = await abdullahCalendarStatusResponse.json();
@@ -88,7 +91,8 @@ try {
   const gtmResearchPage = await gtmResearchPageResponse.text();
   if (health.status !== "ok") throw new Error("Health response is invalid");
   if (!dashboard.kpis || dashboard.meta?.isDemo !== true) throw new Error("Dashboard response is invalid");
-  if (dashboardResponse.headers.get("x-dashboard-cache-version") !== "v6-performance") throw new Error("Dashboard snapshot cache headers are missing");
+  if (dashboardResponse.headers.get("x-dashboard-cache-version") !== "v7-fastapi-persistent") throw new Error("Dashboard snapshot cache headers are missing");
+  if (cacheHealth.status !== "disabled" || cacheHealth.configured !== false) throw new Error("Dashboard cache health fallback is invalid in smoke mode");
   if (!Array.isArray(maqsamCalls.calls) || typeof maqsamCalls.meta?.totalStored !== "number") throw new Error("Maqsam calls response is invalid");
   if (rejectedMaqsamIngestResponse.status !== 401) throw new Error("Maqsam ingest secret protection is invalid");
   if (!dashboard.dailyActivities?.some((point) => typeof point.whatsAppMessages === "number")) throw new Error("Daily WhatsApp activity data is missing");
@@ -104,7 +108,7 @@ try {
   if (!page.includes("SDR Command Center") || !page.includes("Inbound vs Outbound") || !page.includes("Marita Calls") || !page.includes("GTM Research")) throw new Error("Dashboard analytics entries are missing");
   if (!maritaCallsPage.includes("Maqsam Call Intelligence")) throw new Error("Marita calls page is missing");
   if (!gtmResearchPage.includes("GTM Strategy Workspace") || !gtmResearchPage.includes("Company Research") || !gtmResearchPage.includes("Human Overview")) throw new Error("GTM research page is missing");
-  console.log("Smoke tests passed: dashboard snapshots, GTM research workspace/health, Marita calls route, Maqsam API, separate organizer status, inbound/outbound entry, task-country caching, WhatsApp data, and protected routes are operational.");
+  console.log("Smoke tests passed: dashboard snapshots/cache health, GTM research workspace/health, Marita calls route, Maqsam API, separate organizer status, inbound/outbound entry, task-country caching, WhatsApp data, and protected routes are operational.");
 } finally {
   server.kill("SIGTERM");
 }
