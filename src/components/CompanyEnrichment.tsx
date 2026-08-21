@@ -51,12 +51,12 @@ export function CompanyEnrichment() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  async function analyze(event?: FormEvent) {
+  async function analyze(event?: FormEvent, preserveSuccess = false) {
     event?.preventDefault();
     if (!domain.trim() || loading) return;
     setLoading(true);
     setError("");
-    setSuccess("");
+    if (!preserveSuccess) setSuccess("");
     try {
       const response = await fetch("/api/company-enrichment", {
         method: "POST",
@@ -91,9 +91,10 @@ export function CompanyEnrichment() {
       if (!response.ok) throw new Error(body.error || `HubSpot push failed (${response.status})`);
       const pushed = body.pushed || [];
       const skipped = body.skippedConflicts || [];
-      setSuccess(pushed.length ? `Updated ${pushed.length} HubSpot properties: ${pushed.join(", ")}.` : "No safe HubSpot changes were needed.");
-      if (skipped.length) setSuccess((current) => `${current} ${skipped.length} conflict(s) were left untouched.`);
-      await analyze();
+      let message = pushed.length ? `Updated ${pushed.length} HubSpot properties: ${pushed.join(", ")}.` : "No safe HubSpot changes were needed.";
+      if (skipped.length) message += ` ${skipped.length} conflict(s) were left untouched.`;
+      setSuccess(message);
+      await analyze(undefined, true);
     } catch (pushError) {
       setError(pushError instanceof Error ? pushError.message : "Unable to push repairs to HubSpot.");
     } finally {
