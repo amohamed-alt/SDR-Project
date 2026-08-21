@@ -1,17 +1,38 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Flame, ListTodo, PhoneCall, Radar, Search, Sparkles } from "lucide-react";
+import { BrainCircuit, Flame, ListTodo, LoaderCircle, PhoneCall, Radar, Search, Sparkles } from "lucide-react";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardMotion";
-import { AtsIntentSearch } from "@/components/AtsIntentSearch";
-import { CareerIntelligence } from "@/components/CareerIntelligence";
-import { HiringIntelligence } from "@/components/HiringIntelligence";
-import { MaqsamCallsDashboard } from "@/components/MaqsamCallsDashboard";
-import { MaritaPriorityQueue } from "@/components/MaritaPriorityQueue";
 import styles from "@/components/DashboardShell.module.css";
 
 type ShellView = "core" | "maqsam" | "hiring" | "career" | "ats-intent" | "marita-priority";
+
+function ViewLoading() {
+  return <main className={styles.viewLoading}><LoaderCircle size={24}/><strong>Loading workspace…</strong></main>;
+}
+
+const AtsIntentSearch = dynamic(
+  () => import("@/components/AtsIntentSearch").then((module) => module.AtsIntentSearch),
+  { ssr: false, loading: ViewLoading },
+);
+const CareerIntelligence = dynamic(
+  () => import("@/components/CareerIntelligence").then((module) => module.CareerIntelligence),
+  { ssr: false, loading: ViewLoading },
+);
+const HiringIntelligence = dynamic(
+  () => import("@/components/HiringIntelligence").then((module) => module.HiringIntelligence),
+  { ssr: false, loading: ViewLoading },
+);
+const MaqsamCallsDashboard = dynamic(
+  () => import("@/components/MaqsamCallsDashboard").then((module) => module.MaqsamCallsDashboard),
+  { ssr: false, loading: ViewLoading },
+);
+const MaritaPriorityQueue = dynamic(
+  () => import("@/components/MaritaPriorityQueue").then((module) => module.MaritaPriorityQueue),
+  { ssr: false, loading: ViewLoading },
+);
 
 function viewFromUrl(): ShellView {
   const view = new URLSearchParams(window.location.search).get("view");
@@ -49,6 +70,9 @@ export function Dashboard() {
 
   return <div className={styles.shell}>
     <ExistingDashboard/>
+    <Link className={styles.brainLauncher} href="/account-intelligence">
+      <BrainCircuit size={17}/><span>GTM Brain</span><small>Account Intel</small>
+    </Link>
     <Link className={styles.gtmLauncher} href="/gtm-research">
       <Sparkles size={17}/><span>GTM Research</span><small>AI Wizard</small>
     </Link>

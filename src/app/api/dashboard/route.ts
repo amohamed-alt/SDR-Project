@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(snapshot.data, {
       headers: {
         "Cache-Control": "private, max-age=0, must-revalidate, stale-while-revalidate=60",
-        "X-Dashboard-Cache-Version": "v6-performance",
+        "X-Dashboard-Cache-Version": "v7-fastapi-persistent",
         "X-Dashboard-Cache": snapshot.cacheStatus,
         "X-Dashboard-Snapshot-Age": String(snapshot.ageSeconds),
         "X-Dashboard-Refreshing": snapshot.refreshing ? "1" : "0",
