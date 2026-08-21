@@ -28,5 +28,22 @@ jobs:
         run: |
           npm install --omit=dev --no-audit --no-fund
           npm run check
+      - name: Validate FastAPI dashboard cache
+        run: |
+          python -m py_compile services/dashboard-cache/app.py services/dashboard-cache/smoke.py
+          docker build -t sdr-dashboard-cache-ci services/dashboard-cache
+          docker run -d --rm --name sdr-dashboard-cache-ci -p 127.0.0.1:18080:8000 sdr-dashboard-cache-ci
+          trap 'docker rm -f sdr-dashboard-cache-ci >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:18080/health >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs sdr-dashboard-cache-ci
+              exit 1
+            fi
+            sleep 1
+          done
+          python services/dashboard-cache/smoke.py
       - name: Validate production Docker Compose
         run: SDR_ENV_FILE=.env.example docker compose -f docker-compose.yml config >/dev/null
