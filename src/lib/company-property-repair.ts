@@ -41,11 +41,12 @@ function normalizeComparable(property: RepairableCompanyProperty, value: string)
     if (!input) return "";
     try {
       const parsed = new URL(/^https?:\/\//i.test(input) ? input : `https://${input}`);
+      parsed.hostname = parsed.hostname.toLowerCase().replace(/^www\./, "");
       parsed.hash = "";
       if (parsed.pathname === "/") parsed.pathname = "";
       return parsed.toString().replace(/\/$/, "").toLowerCase();
     } catch {
-      return input.replace(/\/$/, "").toLowerCase();
+      return input.replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/$/, "").toLowerCase();
     }
   }
   return input.replace(/\s+/g, " ").trim().toLowerCase();
