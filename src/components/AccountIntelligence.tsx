@@ -193,7 +193,8 @@ export function AccountIntelligence() {
   }
 
   useEffect(() => {
-    void load();
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   const accounts = useMemo<EnrichedAccount[]>(() => {
@@ -216,9 +217,12 @@ export function AccountIntelligence() {
       jobs: company.jobs,
     })));
     const byId = new Map(companies.map((company) => [company.companyId, company]));
-    return scored
-      .map((account) => ({ ...account, source: byId.get(account.companyId) }))
-      .filter((account): account is EnrichedAccount => Boolean(account.source));
+    const enriched: EnrichedAccount[] = [];
+    for (const account of scored) {
+      const source = byId.get(account.companyId);
+      if (source) enriched.push({ ...account, source });
+    }
+    return enriched;
   }, [data]);
 
   const filtered = useMemo(() => {
