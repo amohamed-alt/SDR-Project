@@ -101,7 +101,7 @@ export function AtsIntentSearch({ onBack }: { onBack: () => void }) {
     }
   }
 
-  function useQuickSearch(value: string) {
+  function applyQuickSearch(value: string) {
     setKeyword(value);
   }
 
@@ -158,7 +158,7 @@ export function AtsIntentSearch({ onBack }: { onBack: () => void }) {
         <div className={styles.quickRow}>
           <span>Quick searches</span>
           {QUICK_SEARCHES.map((value) => (
-            <button key={value} type="button" onClick={() => useQuickSearch(value)} className={keyword === value ? styles.quickActive : ""}>{value}</button>
+            <button key={value} type="button" onClick={() => applyQuickSearch(value)} className={keyword === value ? styles.quickActive : ""}>{value}</button>
           ))}
         </div>
       </section>
