@@ -223,11 +223,13 @@ export async function POST(request: NextRequest) {
     const companyDomain = normalizeDomain(clean(currentRole?.website, 500)) || (emails[0]?.includes("@") ? normalizeDomain(emails[0].split("@")[1]) : "");
     const companyWebsite = companyDomain ? `https://${companyDomain}` : "";
     const titleValue = clean(currentRole?.position || candidate.headLine, 250);
+    const vendorMention = vendors.length ? ` Vendor mention: ${vendors.join(", ")} (signal only; not verified as current ATS).` : "";
     let score = Math.round(35 + intentScore * 0.5 + best.confidence * 0.1);
     const scoreReasons = [
       { label: `${signalLabel} from public LinkedIn post`, points: Math.round(intentScore * 0.35) },
       { label: `Author/profile match confidence ${best.confidence}%`, points: 10 },
     ];
+    if (vendors.length) scoreReasons.push({ label: `ATS vendor mentioned in signal: ${vendors.join(", ")} (not verified current ATS)`, points: 0 });
     if (emails[0]) { score += 7; scoreReasons.push({ label: "Work email available", points: 7 }); }
     if (phones[0]) { score += 3; scoreReasons.push({ label: "Phone available", points: 3 }); }
     score = Math.min(100, score);
@@ -246,11 +248,13 @@ export async function POST(request: NextRequest) {
         companyDomain,
         companyLinkedIn: clean(currentRole?.companyUrl, 1000),
         careerPageUrl: "",
-        detectedAts: vendors[0] || "",
-        atsConfidence: vendors.length ? "signal_mention" : "",
+        // A vendor mentioned in a post is a sales signal, not proof of the company's current ATS.
+        // Leave verified ATS fields blank so /api/prospecting/push cannot contaminate HubSpot.
+        detectedAts: "",
+        atsConfidence: "",
         careerConfidence: 0,
         companyEvidenceUrl: postUrl,
-        companyVerificationReason: matchedPhrase || signalLabel,
+        companyVerificationReason: `${matchedPhrase || signalLabel}.${vendorMention}`.trim(),
         hiring: emptyHiring(),
         location,
         email: emails[0] || "",
@@ -261,7 +265,11 @@ export async function POST(request: NextRequest) {
         priority,
         previousTitle: clean(previousRole?.position, 250),
         previousCompany: clean(previousRole?.company, 250),
-        recentSignal: { type: "linkedin_ats_intent", label: matchedPhrase ? `${signalLabel}: ${matchedPhrase}` : signalLabel, ageDays: null },
+        recentSignal: {
+          type: "linkedin_ats_intent",
+          label: `${matchedPhrase ? `${signalLabel}: ${matchedPhrase}` : signalLabel}${vendorMention}`.trim(),
+          ageDays: null,
+        },
         scoreReasons,
       },
       meta: { provider: "Tavily public profile discovery + SignalHire", creditsLeft: resolved.creditsLeft, safeMatchThreshold: 72 },
