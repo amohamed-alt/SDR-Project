@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Flame, ListTodo, PhoneCall, Radar, Search, Sparkles } from "lucide-react";
+import { BrainCircuit, Flame, ListTodo, PhoneCall, Radar, Search, Sparkles } from "lucide-react";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardMotion";
 import { AtsIntentSearch } from "@/components/AtsIntentSearch";
 import { CareerIntelligence } from "@/components/CareerIntelligence";
@@ -49,6 +49,9 @@ export function Dashboard() {
 
   return <div className={styles.shell}>
     <ExistingDashboard/>
+    <Link className={styles.brainLauncher} href="/account-intelligence">
+      <BrainCircuit size={17}/><span>GTM Brain</span><small>Account Intel</small>
+    </Link>
     <Link className={styles.gtmLauncher} href="/gtm-research">
       <Sparkles size={17}/><span>GTM Research</span><small>AI Wizard</small>
     </Link>
