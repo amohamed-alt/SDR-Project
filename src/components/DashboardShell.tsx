@@ -2,8 +2,8 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { BrainCircuit, Building2, Flame, ListTodo, LoaderCircle, PhoneCall, Radar, Search, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { BrainCircuit, Building2, Flame, ListTodo, LoaderCircle, Menu, PhoneCall, Radar, Search, Sparkles, X } from "lucide-react";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardMotion";
 import styles from "@/components/DashboardShell.module.css";
 
@@ -46,6 +46,8 @@ function viewFromUrl(): ShellView {
 
 export function Dashboard() {
   const [view, setView] = useState<ShellView>("core");
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const toolsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const syncFromUrl = () => setView(viewFromUrl());
@@ -54,11 +56,28 @@ export function Dashboard() {
     return () => window.removeEventListener("popstate", syncFromUrl);
   }, []);
 
+  useEffect(() => {
+    if (!toolsOpen) return;
+    const closeOnOutside = (event: PointerEvent) => {
+      if (toolsRef.current && !toolsRef.current.contains(event.target as Node)) setToolsOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setToolsOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [toolsOpen]);
+
   function changeView(next: ShellView) {
     const url = new URL(window.location.href);
     if (next === "core") url.searchParams.delete("view");
     else url.searchParams.set("view", next);
     window.history.pushState({}, "", url);
+    setToolsOpen(false);
     setView(next);
   }
 
@@ -70,32 +89,68 @@ export function Dashboard() {
 
   return <div className={styles.shell}>
     <ExistingDashboard/>
-    <Link className={styles.companyLauncher} href="/company-enrichment">
-      <Building2 size={17}/><span>Company Repair</span><small>HubSpot Enrich</small>
-    </Link>
-    <Link className={styles.brainLauncher} href="/account-intelligence">
-      <BrainCircuit size={17}/><span>GTM Brain</span><small>Account Intel</small>
-    </Link>
-    <Link className={styles.gtmLauncher} href="/gtm-research">
-      <Sparkles size={17}/><span>GTM Research</span><small>AI Wizard</small>
-    </Link>
-    <Link className={styles.salesNavLauncher} href="/salesnav-prospecting">
-      <Radar size={17}/><span>Sales Nav</span><small>Net New</small>
-    </Link>
-    <button className={styles.careerLauncher} type="button" onClick={() => changeView("career")}>
-      <Search size={17}/><span>Career Intelligence</span><small>Career + ATS</small>
-    </button>
-    <button className={styles.priorityLauncher} type="button" onClick={() => changeView("marita-priority")}>
-      <ListTodo size={17}/><span>Marita Priority</span><small>Call Next</small>
-    </button>
-    <button className={styles.hiringLauncher} type="button" onClick={() => changeView("hiring")}>
-      <Flame size={17}/><span>Hiring Signals</span><small>KSA + UAE</small>
-    </button>
-    <Link className={styles.maqsamLauncher} href="/marita-calls">
-      <PhoneCall size={17}/><span>Marita Calls</span><small>Maqsam</small>
-    </Link>
-    <button className={styles.intentLauncher} type="button" onClick={() => changeView("ats-intent")}>
-      <Search size={17}/><span>ATS Intent</span><small>LinkedIn + SignalHire</small>
-    </button>
+
+    <div className={styles.toolsDock} ref={toolsRef}>
+      {toolsOpen ? (
+        <div className={styles.toolsMenu} id="sdr-tools-menu">
+          <div className={styles.toolsHeader}>
+            <div>
+              <span>SDR WORKSPACE</span>
+              <strong>Tools & Intelligence</strong>
+            </div>
+            <button type="button" onClick={() => setToolsOpen(false)} aria-label="Close tools menu"><X size={16}/></button>
+          </div>
+
+          <div className={styles.toolList}>
+            <Link className={styles.toolItem} href="/company-enrichment">
+              <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Building2 size={17}/></span>
+              <span className={styles.toolCopy}><strong>Company Repair</strong><small>HubSpot enrichment & property fixes</small></span>
+            </Link>
+            <Link className={styles.toolItem} href="/account-intelligence">
+              <span className={`${styles.toolIcon} ${styles.brainIcon}`}><BrainCircuit size={17}/></span>
+              <span className={styles.toolCopy}><strong>GTM Brain</strong><small>Account scoring & intelligence</small></span>
+            </Link>
+            <Link className={styles.toolItem} href="/gtm-research">
+              <span className={`${styles.toolIcon} ${styles.gtmIcon}`}><Sparkles size={17}/></span>
+              <span className={styles.toolCopy}><strong>GTM Research</strong><small>AI research workspace</small></span>
+            </Link>
+            <Link className={styles.toolItem} href="/salesnav-prospecting">
+              <span className={`${styles.toolIcon} ${styles.salesIcon}`}><Radar size={17}/></span>
+              <span className={styles.toolCopy}><strong>Sales Nav</strong><small>Net-new prospecting</small></span>
+            </Link>
+            <button className={styles.toolItem} type="button" onClick={() => changeView("career")}>
+              <span className={`${styles.toolIcon} ${styles.careerIcon}`}><Search size={17}/></span>
+              <span className={styles.toolCopy}><strong>Career Intelligence</strong><small>Career pages & ATS detection</small></span>
+            </button>
+            <button className={styles.toolItem} type="button" onClick={() => changeView("marita-priority")}>
+              <span className={`${styles.toolIcon} ${styles.priorityIcon}`}><ListTodo size={17}/></span>
+              <span className={styles.toolCopy}><strong>Marita Priority</strong><small>Call-next queue</small></span>
+            </button>
+            <Link className={styles.toolItem} href="/marita-calls">
+              <span className={`${styles.toolIcon} ${styles.callsIcon}`}><PhoneCall size={17}/></span>
+              <span className={styles.toolCopy}><strong>Marita Calls</strong><small>Maqsam call activity</small></span>
+            </Link>
+            <button className={styles.toolItem} type="button" onClick={() => changeView("hiring")}>
+              <span className={`${styles.toolIcon} ${styles.hiringIcon}`}><Flame size={17}/></span>
+              <span className={styles.toolCopy}><strong>Hiring Signals</strong><small>KSA + UAE hiring activity</small></span>
+            </button>
+            <button className={styles.toolItem} type="button" onClick={() => changeView("ats-intent")}>
+              <span className={`${styles.toolIcon} ${styles.intentIcon}`}><Search size={17}/></span>
+              <span className={styles.toolCopy}><strong>ATS Intent</strong><small>LinkedIn signals + SignalHire</small></span>
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <button
+        className={`${styles.toolsToggle} ${toolsOpen ? styles.toolsToggleOpen : ""}`}
+        type="button"
+        onClick={() => setToolsOpen((current) => !current)}
+        aria-expanded={toolsOpen}
+        aria-controls="sdr-tools-menu"
+      >
+        {toolsOpen ? <X size={18}/> : <Menu size={18}/>}<span>{toolsOpen ? "Close" : "SDR Tools"}</span><small>9</small>
+      </button>
+    </div>
   </div>;
 }
