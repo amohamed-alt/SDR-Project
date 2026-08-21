@@ -126,6 +126,7 @@ export async function getDashboardSnapshot(
 
   let snapshot = snapshots.get(key);
   let cacheStatus: DashboardSnapshotResult["cacheStatus"] = "memory";
+  let loadedFromOriginThisRequest = false;
 
   if (!snapshot) {
     const persisted = await readPersistedDashboardSnapshot(filters);
@@ -151,12 +152,13 @@ export async function getDashboardSnapshot(
     snapshots.set(key, snapshot);
     persistSnapshot(filters, data, refreshedAt);
     cacheStatus = "next-cache";
+    loadedFromOriginThisRequest = true;
   } else {
     snapshot.lastAccessedAt = now;
   }
 
   const stale = now - snapshot.refreshedAt >= SNAPSHOT_FRESH_MS;
-  if (forceRefresh || stale) {
+  if (!loadedFromOriginThisRequest && (forceRefresh || stale)) {
     void startRefresh(key, filters).catch((error) => {
       console.error("Dashboard snapshot refresh failed", error);
     });
