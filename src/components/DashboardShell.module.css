@@ -2,6 +2,30 @@
   min-height: 100vh;
 }
 
+.viewLoading {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: #f6faf8;
+  color: #28453a;
+}
+
+.viewLoading svg {
+  animation: shellSpin 0.85s linear infinite;
+}
+
+.viewLoading strong {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+@keyframes shellSpin {
+  to { transform: rotate(360deg); }
+}
+
 .brainLauncher,
 .gtmLauncher,
 .salesNavLauncher,
