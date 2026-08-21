@@ -26,6 +26,7 @@
   to { transform: rotate(360deg); }
 }
 
+.companyLauncher,
 .brainLauncher,
 .gtmLauncher,
 .salesNavLauncher,
@@ -50,6 +51,12 @@
   text-decoration: none;
   cursor: pointer;
   transition: transform 0.18s ease, filter 0.18s ease;
+}
+
+.companyLauncher {
+  bottom: 484px;
+  background: #2f5f8a;
+  box-shadow: 0 14px 34px rgba(47, 95, 138, 0.3);
 }
 
 .brainLauncher {
@@ -100,6 +107,7 @@
   box-shadow: 0 14px 34px rgba(127, 40, 95, 0.28);
 }
 
+.companyLauncher span,
 .brainLauncher span,
 .gtmLauncher span,
 .salesNavLauncher span,
@@ -111,6 +119,7 @@
   line-height: 1;
 }
 
+.companyLauncher small,
 .brainLauncher small,
 .gtmLauncher small,
 .salesNavLauncher small,
@@ -129,6 +138,7 @@
   text-transform: uppercase;
 }
 
+.companyLauncher:hover,
 .brainLauncher:hover,
 .gtmLauncher:hover,
 .salesNavLauncher:hover,
@@ -142,6 +152,7 @@
 }
 
 @media (max-width: 720px) {
+  .companyLauncher,
   .brainLauncher,
   .gtmLauncher,
   .salesNavLauncher,
@@ -153,6 +164,7 @@
     right: 14px;
   }
 
+  .companyLauncher { bottom: 478px; }
   .brainLauncher { bottom: 420px; }
   .gtmLauncher { bottom: 362px; }
   .salesNavLauncher { bottom: 304px; }
