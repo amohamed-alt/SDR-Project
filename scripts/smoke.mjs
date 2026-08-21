@@ -105,10 +105,10 @@ try {
   if (invalidCountryBatchResponse.status !== 400 || typeof invalidCountryBatch.details !== "string") throw new Error("Task country batch validation is invalid");
   if (!Array.isArray(emptyCountryBatch.tasks) || emptyCountryBatch.tasks.length !== 0) throw new Error("Incremental task country payload is invalid");
   if (gtmResearchHealth.status !== "ok" || !Array.isArray(gtmResearchHealth.stages) || !gtmResearchHealth.stages.includes("company") || !gtmResearchHealth.stages.includes("channels")) throw new Error("GTM research health response is invalid");
-  if (!page.includes("SDR Command Center") || !page.includes("Inbound vs Outbound") || !page.includes("Marita Calls") || !page.includes("GTM Research")) throw new Error("Dashboard analytics entries are missing");
+  if (!page.includes("SDR Command Center") || !page.includes("Inbound vs Outbound") || !page.includes("SDR Tools")) throw new Error("Dashboard analytics entries or compact tools launcher are missing");
   if (!maritaCallsPage.includes("Maqsam Call Intelligence")) throw new Error("Marita calls page is missing");
   if (!gtmResearchPage.includes("GTM Strategy Workspace") || !gtmResearchPage.includes("Company Research") || !gtmResearchPage.includes("Human Overview")) throw new Error("GTM research page is missing");
-  console.log("Smoke tests passed: dashboard snapshots/cache health, GTM research workspace/health, Marita calls route, Maqsam API, separate organizer status, inbound/outbound entry, task-country caching, WhatsApp data, and protected routes are operational.");
+  console.log("Smoke tests passed: dashboard snapshots/cache health, compact SDR tools launcher, GTM research workspace/health, Marita calls route, Maqsam API, separate organizer status, inbound/outbound entry, task-country caching, WhatsApp data, and protected routes are operational.");
 } finally {
   server.kill("SIGTERM");
 }
