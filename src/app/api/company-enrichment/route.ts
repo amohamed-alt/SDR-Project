@@ -130,9 +130,11 @@ async function analyze(domainInput: string, forceRefresh: boolean) {
   const properties = current.properties || {};
   const companyName = clean(properties.name, 250) || domain;
   const currentDomain = normalizeCompanyDomain(clean(properties.domain)) || domain;
-  const currentWebsite = clean(properties.company_website) || `https://${currentDomain}`;
+  const storedWebsite = clean(properties.company_website);
+  const canonicalWebsite = `https://${currentDomain}`;
+  const engineWebsite = storedWebsite && normalizeCompanyDomain(storedWebsite) === currentDomain ? storedWebsite : canonicalWebsite;
   const knownCareerUrl = clean(properties.career_page_url);
-  const engine = await callCareerEngine({ companyName, domain: currentDomain, website: currentWebsite, knownCareerUrl, forceRefresh });
+  const engine = await callCareerEngine({ companyName, domain: currentDomain, website: engineWebsite, knownCareerUrl, forceRefresh });
   const result = engine.result || {};
   const confidence = Math.max(0, Math.min(100, Number(result.career_confidence_score || 0)));
   const careerUrl = clean(result.career_url || knownCareerUrl);
@@ -143,7 +145,7 @@ async function analyze(domainInput: string, forceRefresh: boolean) {
 
   const suggested = {
     domain: currentDomain,
-    company_website: currentWebsite,
+    company_website: canonicalWebsite,
     career_page_url: careerVerified ? careerUrl : "",
     detected_ats: detectedAts,
     ats_status: detectedAts ? "detected" : clean(result.ats_status),
