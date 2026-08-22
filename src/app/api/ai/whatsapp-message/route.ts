@@ -5,11 +5,14 @@ import { batchRead } from "@/lib/hubspot";
 import { openRouterCompletion } from "@/lib/openrouter-low-cost";
 import { originMatchesRequestHosts } from "@/lib/request-origin";
 import {
-  buildWhatsAppUrl,
+  buildWhatsAppMobileUrl,
+  buildWhatsAppWebUrl,
   deterministicWhatsAppMessage,
+  isWhatsAppStyle,
   selectWhatsAppPhone,
-  whatsappStyleForCountry,
+  whatsappFallbackStyle,
   whatsappStyleLabel,
+  type WhatsAppStyle,
 } from "@/lib/whatsapp-outreach";
 
 export const runtime = "nodejs";
@@ -46,6 +49,12 @@ const COMPANY_FIELDS = [
   "career_page_url",
 ] as const;
 
+type AiWhatsAppResult = {
+  message: string;
+  style: WhatsAppStyle;
+  languageReason: string;
+};
+
 function clean(value: unknown, max = 600) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
 }
@@ -71,17 +80,25 @@ function sameOrigin(request: NextRequest) {
   });
 }
 
-function parseMessage(raw: string) {
+function parseAiResult(raw: string): AiWhatsAppResult | null {
   const normalized = raw
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```$/i, "")
     .trim();
+
   try {
     const parsed = JSON.parse(normalized) as Record<string, unknown>;
     const message = clean(parsed.message, 520);
-    return message.length >= 30 ? message : "";
+    const style = parsed.style;
+    const languageReason = clean(parsed.languageReason, 220);
+    if (message.length < 30 || !isWhatsAppStyle(style)) return null;
+    return {
+      message,
+      style,
+      languageReason: languageReason || "AI selected the communication style from the available profile cues.",
+    };
   } catch {
-    return "";
+    return null;
   }
 }
 
@@ -122,7 +139,8 @@ export async function POST(request: NextRequest) {
     const companyCountry = company ? value(company, "gtm_country") || value(company, "country") : "";
     const country = contactCountry || companyCountry;
     const fullName = [value(contact, "firstname"), value(contact, "lastname")].filter(Boolean).join(" ") || "Contact";
-    const style = whatsappStyleForCountry(country);
+    const title = value(contact, "jobtitle");
+    const fallbackStyle = whatsappFallbackStyle({ country, fullName, title });
     const isFollowUp = Boolean(value(contact, "notes_last_contacted"));
 
     let verifiedHiring: { activeJobs: number; newJobs30d: number; hiringScore: number } | null = null;
@@ -145,15 +163,16 @@ export async function POST(request: NextRequest) {
     const fallback = deterministicWhatsAppMessage({
       fullName,
       company: companyName,
-      title: value(contact, "jobtitle"),
-      style,
+      title,
+      style: fallbackStyle,
       verifiedHiring,
     });
 
     const evidence = {
       firstName: value(contact, "firstname"),
+      lastName: value(contact, "lastname"),
       fullName,
-      title: value(contact, "jobtitle"),
+      title,
       persona: value(contact, "gtm_persona"),
       company: companyName,
       country,
@@ -163,26 +182,36 @@ export async function POST(request: NextRequest) {
       verifiedHiring,
       detectedAts: company ? value(company, "detected_ats") : "",
       atsConfidence: company ? value(company, "ats_confidence") : "",
+      fallbackStyle,
     };
 
     const system = [
-      "You write first-touch or follow-up WhatsApp outreach for Talentera SDRs.",
-      `Use ${whatsappStyleLabel(style)}.`,
-      "Use ONLY the supplied evidence. Never invent hiring volume, growth, technology, pain, budget, or intent.",
+      "You write concise WhatsApp outreach for Talentera SDRs and choose the communication language/style.",
+      "Return ONLY valid JSON with exactly these keys: message, style, languageReason.",
+      "style MUST be exactly one of: english, saudi-ar, emirati-ar, gulf-ar.",
+      "Choose style from linguistic cues in the displayed name/title plus market context; do NOT infer or state nationality, ethnicity, religion, or citizenship.",
+      "Country alone is NOT enough to choose Arabic. If the displayed profile is Latin-script/international and there is no strong Arabic-language cue, choose english even when the company is in KSA/UAE.",
+      "If Arabic-language cues are strong: use saudi-ar for Saudi Arabia, emirati-ar for UAE, gulf-ar for Qatar/Kuwait/Bahrain/Oman, otherwise use professional Arabic only when clearly appropriate.",
+      "If you are uncertain about language, choose english.",
+      "For saudi-ar, write natural professional Saudi business Arabic: warm, short, modern, and conversational; avoid formal MSA stiffness and avoid exaggerated slang.",
+      "For emirati-ar, write natural professional UAE/Gulf Arabic; avoid exaggerated slang.",
+      "For gulf-ar, write neutral professional Gulf Arabic.",
+      "For english, write natural concise B2B English.",
+      "Use ONLY the supplied business evidence. Never invent hiring volume, growth, technology, pain, budget, decision makers, or intent.",
       "Mention hiring activity only when verifiedHiring is non-null.",
-      "Do not mention a detected ATS unless it naturally improves the message and atsConfidence is explicitly high; otherwise omit it.",
-      "Keep the message short, natural, professional, and suitable for a real WhatsApp conversation.",
-      "No emojis, no links, no pricing, no exaggerated claims, no long introduction, and no corporate jargon.",
-      "For Saudi Arabic, sound like professional Saudi business communication without caricature or excessive slang.",
-      "For Emirati Arabic, use professional UAE/Gulf business language without caricature or excessive slang.",
-      "For English, use concise natural B2B English.",
-      "If isFollowUp is true, write it as a light follow-up rather than pretending this is the first contact.",
-      "End with one low-friction question asking permission to share a short overview or idea.",
-      "Return ONLY valid JSON with one key: message.",
-      "Keep the final message under 500 characters.",
+      "Do not mention a detected ATS unless atsConfidence is explicitly high and it genuinely improves the opener.",
+      "If isFollowUp is true, make it a light follow-up rather than pretending this is the first contact.",
+      "No emojis, no links, no pricing, no long introduction, no corporate jargon, and no more than one question.",
+      "End with a low-friction CTA asking permission to share a quick idea or short overview.",
+      "Keep the final message under 420 characters.",
+      "languageReason must be short and only explain the linguistic routing, never personal identity attributes.",
     ].join(" ");
 
     let message = fallback;
+    let style: WhatsAppStyle = fallbackStyle;
+    let languageReason = fallbackStyle === "english"
+      ? "No explicit Arabic-script profile cue was available, so the safe fallback is English."
+      : `Arabic-script profile cues were present, routed to ${whatsappStyleLabel(fallbackStyle)}.`;
     let aiGenerated = false;
     let model = "deterministic-fallback";
     let cached = false;
@@ -190,16 +219,18 @@ export async function POST(request: NextRequest) {
     try {
       const fingerprint = JSON.stringify(evidence);
       const completion = await openRouterCompletion({
-        cacheKey: `whatsapp-message:${contact.id}:${fingerprint}`,
+        cacheKey: `whatsapp-message-v2:${contact.id}:${fingerprint}`,
         system,
-        user: `Write the WhatsApp message from this evidence object:\n${JSON.stringify(evidence)}`,
+        user: `Choose the best outreach style and write the WhatsApp message from this evidence object:\n${JSON.stringify(evidence)}`,
         mode: "fast",
-        maxOutputTokens: 180,
-        temperature: 0.2,
+        maxOutputTokens: 220,
+        temperature: 0.15,
       });
-      const parsedMessage = parseMessage(completion.content);
-      if (parsedMessage) {
-        message = parsedMessage;
+      const aiResult = parseAiResult(completion.content);
+      if (aiResult) {
+        message = aiResult.message;
+        style = aiResult.style;
+        languageReason = aiResult.languageReason;
         aiGenerated = true;
         model = completion.model;
         cached = completion.cached;
@@ -224,12 +255,15 @@ export async function POST(request: NextRequest) {
       },
       message,
       style,
-      whatsappUrl: buildWhatsAppUrl(selectedPhone.digits, message),
+      whatsappUrl: buildWhatsAppWebUrl(selectedPhone.digits, message),
+      whatsappWebUrl: buildWhatsAppWebUrl(selectedPhone.digits, message),
+      whatsappMobileUrl: buildWhatsAppMobileUrl(selectedPhone.digits, message),
       generation: {
         aiGenerated,
         model,
         cached,
         evidence: verifiedHiring ? "verified-hiring+crm" : "crm-only",
+        languageReason,
       },
     }, { headers: { "Cache-Control": "private, no-store, max-age=0" } });
   } catch (error) {
