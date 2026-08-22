@@ -536,8 +536,9 @@ export async function POST(request: NextRequest) {
     }
 
     if (parsed.data.action === "enrich_person") {
+      const uid = parsed.data.uid;
       const stored = await listAcquisitionPeople(account.domain);
-      const person = stored.people.find((item) => item.uid === parsed.data.uid);
+      const person = stored.people.find((item) => item.uid === uid);
       if (!person) return NextResponse.json({ error: "Select a person from the account search results first." }, { status: 404 });
       const result = await enrichPerson(account, person);
       return NextResponse.json({ action: "enrich_person", account: { domain: account.domain, name: account.name }, ...result });
