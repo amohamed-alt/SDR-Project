@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   ArrowLeft,
@@ -81,7 +81,7 @@ export function TeamActivity({ onBack }: { onBack: () => void }) {
   const [loading, setLoading] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<number>(0);
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
       const response = await fetch("/api/usage", { cache: "no-store" });
       const payload = await response.json() as UsageSummary;
@@ -92,13 +92,16 @@ export function TeamActivity({ onBack }: { onBack: () => void }) {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
-    void load();
+    const initial = window.setTimeout(() => void load(), 0);
     const timer = window.setInterval(() => void load(), 15_000);
-    return () => window.clearInterval(timer);
-  }, []);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(timer);
+    };
+  }, [load]);
 
   const activeUsers = useMemo(() => data.users.filter((user) => user.active), [data.users]);
 
