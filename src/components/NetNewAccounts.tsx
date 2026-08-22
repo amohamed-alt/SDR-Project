@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft, ArrowUpRight, BadgeCheck, Building2, Check, ChevronRight, CircleAlert,
-  Coins, Database, ExternalLink, Filter, Flame, KeyRound, LoaderCircle, Mail, Phone,
+  Coins, Database, ExternalLink, Filter, KeyRound, LoaderCircle, Mail, Phone,
   RefreshCw, Search, ShieldCheck, Sparkles, Target, UserRoundSearch, UsersRound, X, Zap,
 } from "lucide-react";
 import styles from "./NetNewAccounts.module.css";
@@ -81,6 +81,11 @@ type FilterCountry = "" | "Saudi Arabia" | "United Arab Emirates";
 
 const OWNER_STORAGE_KEY = "sdr-acquisition-owner-token";
 
+function savedOwnerToken() {
+  if (typeof window === "undefined") return "";
+  return window.sessionStorage.getItem(OWNER_STORAGE_KEY) || "";
+}
+
 function number(value: number) {
   return new Intl.NumberFormat("en-US").format(value || 0);
 }
@@ -127,8 +132,8 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
   const [country, setCountry] = useState<FilterCountry>("");
   const [selectedDomain, setSelectedDomain] = useState("");
   const [people, setPeople] = useState<Person[]>([]);
-  const [ownerToken, setOwnerToken] = useState("");
-  const [ownerTokenDraft, setOwnerTokenDraft] = useState("");
+  const [ownerToken, setOwnerToken] = useState(savedOwnerToken);
+  const [ownerTokenDraft, setOwnerTokenDraft] = useState(savedOwnerToken);
   const [pages, setPages] = useState(1);
   const [showExcluded, setShowExcluded] = useState(false);
 
@@ -150,10 +155,8 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
   }, [showExcluded]);
 
   useEffect(() => {
-    const saved = window.sessionStorage.getItem(OWNER_STORAGE_KEY) || "";
-    setOwnerToken(saved);
-    setOwnerTokenDraft(saved);
-    void load();
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
   }, [load]);
 
   const selected = useMemo(
