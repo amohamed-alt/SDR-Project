@@ -76,23 +76,26 @@ export function UsageTracker() {
   }, []);
 
   useEffect(() => {
-    const storedName = (localStorage.getItem(VISITOR_NAME_KEY) || "").trim();
-    let visitorId = localStorage.getItem(VISITOR_ID_KEY) || "";
-    let sessionId = sessionStorage.getItem(SESSION_ID_KEY) || "";
-    if (!visitorId) {
-      visitorId = randomId("visitor");
-      localStorage.setItem(VISITOR_ID_KEY, visitorId);
-    }
-    if (!sessionId) {
-      sessionId = randomId("session");
-      sessionStorage.setItem(SESSION_ID_KEY, sessionId);
-    }
-    if (storedName) {
-      identityRef.current = { visitorId, sessionId, displayName: storedName };
-      setDisplayName(storedName);
-      setDraftName(storedName);
-    }
-    setReady(true);
+    const initialize = window.setTimeout(() => {
+      const storedName = (localStorage.getItem(VISITOR_NAME_KEY) || "").trim();
+      let visitorId = localStorage.getItem(VISITOR_ID_KEY) || "";
+      let sessionId = sessionStorage.getItem(SESSION_ID_KEY) || "";
+      if (!visitorId) {
+        visitorId = randomId("visitor");
+        localStorage.setItem(VISITOR_ID_KEY, visitorId);
+      }
+      if (!sessionId) {
+        sessionId = randomId("session");
+        sessionStorage.setItem(SESSION_ID_KEY, sessionId);
+      }
+      if (storedName) {
+        identityRef.current = { visitorId, sessionId, displayName: storedName };
+        setDisplayName(storedName);
+        setDraftName(storedName);
+      }
+      setReady(true);
+    }, 0);
+    return () => window.clearTimeout(initialize);
   }, []);
 
   useEffect(() => {
