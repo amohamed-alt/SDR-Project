@@ -16,21 +16,25 @@ const eventSchema = z.object({
   meta: z.record(z.string(), z.unknown()).default({}),
 });
 
-function disabled() {
-  return NextResponse.json({
-    tracking: false,
-    database: "disabled",
-    metrics: {
-      activeNow: 0,
-      uniqueUsersToday: 0,
-      sessionsToday: 0,
-      opensToday: 0,
-      eventsToday: 0,
-      avgSessionMinutes: 0,
-    },
-    users: [],
-    topFeatures: [],
-  }, { headers: { "Cache-Control": "private, no-store, max-age=0" } });
+const DISABLED_PAYLOAD = {
+  tracking: false,
+  database: "disabled",
+  metrics: {
+    activeNow: 0,
+    uniqueUsersToday: 0,
+    sessionsToday: 0,
+    opensToday: 0,
+    eventsToday: 0,
+    avgSessionMinutes: 0,
+  },
+  users: [],
+  topFeatures: [],
+};
+
+function disabled(extra: Record<string, unknown> = {}) {
+  return NextResponse.json({ ...DISABLED_PAYLOAD, ...extra }, {
+    headers: { "Cache-Control": "private, no-store, max-age=0" },
+  });
 }
 
 export async function GET() {
@@ -48,10 +52,7 @@ export async function GET() {
     });
   } catch (error) {
     console.warn("Usage analytics summary unavailable", error);
-    return NextResponse.json({ ...await disabled().json(), tracking: false, unavailable: true }, {
-      status: 200,
-      headers: { "Cache-Control": "private, no-store, max-age=0" },
-    });
+    return disabled({ unavailable: true });
   }
 }
 
