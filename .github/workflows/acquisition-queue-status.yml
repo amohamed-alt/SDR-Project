@@ -1,0 +1,61 @@
+name: Report Acquisition Queue Status
+
+on:
+  workflow_run:
+    workflows: ["Bootstrap Approved Net-New Acquisition"]
+    types: [completed]
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read production acquisition queue
+        id: queue
+        env:
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          HTTP_CODE=$(curl --silent --show-error \
+            --connect-timeout 10 \
+            --max-time 30 \
+            --output /tmp/acquisition.json \
+            --write-out '%{http_code}' \
+            'https://sdr.dashboardtalentera.tech/api/acquisition?limit=1000&includeExcluded=1' || true)
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "state=error" >> "$GITHUB_OUTPUT"
+            echo "description=Acquisition queue unavailable (HTTP $HTTP_CODE)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          QUEUE=$(jq -r '(.accounts // []) | length' /tmp/acquisition.json)
+          ELIGIBLE=$(jq -r '[.accounts[]? | select(.exclusionStatus == "eligible")] | length' /tmp/acquisition.json)
+          PEOPLE=$(jq -r '[.accounts[]? | select((.peopleCount // 0) > 0 or .status == "people_ready")] | length' /tmp/acquisition.json)
+          ENRICHED=$(jq -r '[.accounts[]? | select((.enrichedCount // 0) > 0 or .status == "enriched")] | length' /tmp/acquisition.json)
+          PUSHED=$(jq -r '[.accounts[]? | select((.pushCount // 0) > 0 or .status == "pushed")] | length' /tmp/acquisition.json)
+          DESC="queue=$QUEUE eligible=$ELIGIBLE people=$PEOPLE enriched=$ENRICHED pushed=$PUSHED"
+          echo "state=success" >> "$GITHUB_OUTPUT"
+          echo "description=$DESC" >> "$GITHUB_OUTPUT"
+          echo "$DESC"
+
+      - name: Publish queue status
+        uses: actions/github-script@v7
+        env:
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
+          STATE: ${{ steps.queue.outputs.state }}
+          DESCRIPTION: ${{ steps.queue.outputs.description }}
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.TARGET_SHA,
+              state: process.env.STATE === 'success' ? 'success' : 'error',
+              context: 'acquisition/queue',
+              description: process.env.DESCRIPTION.slice(0, 140),
+              target_url: context.payload.workflow_run?.html_url,
+            });
