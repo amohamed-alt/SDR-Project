@@ -35,6 +35,7 @@ export type AcquisitionAccount = {
   evidence: Record<string, unknown>;
   peopleCount?: number;
   enrichedCount?: number;
+  phoneReadyCount?: number;
   pushCount?: number;
   createdAt?: string;
   updatedAt?: string;
