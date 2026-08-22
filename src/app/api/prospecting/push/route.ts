@@ -1,5 +1,8 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { writeAcquisitionPush } from "@/lib/acquisition-data-api";
+import { acquisitionOwners } from "@/lib/acquisition-routing";
 import { batchRead, HubSpotApiError, readAssociations, searchAll } from "@/lib/hubspot";
 import { normalizeCompanyDomain } from "@/lib/prospecting-company-intelligence";
 
@@ -11,8 +14,12 @@ const MARITA_OWNER_NAME = "Marita Chedid";
 const DIRECT_APPLICATION_LABEL = "Direct Application Form";
 
 const prospectSchema = z.object({
-  linkedinUrl: z.string().url().max(1000),
+  linkedinUrl: z.string().trim().max(1000).default(""),
   source: z.string().trim().max(120).default("Sales Navigator"),
+  signalHireUid: z.string().trim().max(160).default(""),
+  assignmentMode: z.enum(["marita", "acquisition"]).default("marita"),
+  ownerId: z.string().trim().max(80).default(""),
+  ownerName: z.string().trim().max(200).default(""),
   fullName: z.string().trim().min(1).max(250),
   title: z.string().trim().max(250).default(""),
   company: z.string().trim().max(250).default(""),
@@ -51,10 +58,32 @@ const prospectSchema = z.object({
 
 type Prospect = z.infer<typeof prospectSchema>;
 
+type Assignment = { id: string; name: string; mode: "marita" | "acquisition" };
+
 function token() {
   const value = String(process.env.HUBSPOT_PRIVATE_APP_TOKEN || "").trim();
   if (!value) throw new Error("HUBSPOT_PRIVATE_APP_TOKEN is not configured.");
   return value;
+}
+
+function safeEqual(left: string, right: string) {
+  const a = Buffer.from(left);
+  const b = Buffer.from(right);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+function acquisitionAuthorized(request: Request) {
+  const expected = String(process.env.ACQUISITION_OWNER_TOKEN || "").trim();
+  const supplied = String(request.headers.get("x-acquisition-owner-token") || "").trim();
+  return Boolean(expected && supplied && safeEqual(expected, supplied));
+}
+
+function requestedAssignment(prospect: Prospect, request: Request): Assignment {
+  if (prospect.assignmentMode !== "acquisition") return { id: MARITA_OWNER_ID, name: MARITA_OWNER_NAME, mode: "marita" };
+  if (!acquisitionAuthorized(request)) throw new Error("Owner authorization is required for acquisition pushes.");
+  const owner = acquisitionOwners().find((item) => item.id === prospect.ownerId);
+  if (!owner) throw new Error("The requested SDR is not enabled for acquisition routing.");
+  return { id: owner.id, name: owner.name, mode: "acquisition" };
 }
 
 async function hubspotRequest<T>(path: string, init: RequestInit) {
@@ -99,36 +128,39 @@ async function findContact(email: string, linkedinUrl: string) {
     const matches = await searchAll("contacts", ["firstname", "lastname", "email"], [{ propertyName: "email", operator: "EQ", value: email.toLowerCase() }]);
     if (matches[0]) return String(matches[0].id);
   }
-  try {
-    const matches = await searchAll("contacts", ["firstname", "lastname", "email", "gtm_linkedin_url"], [{ propertyName: "gtm_linkedin_url", operator: "EQ", value: linkedinUrl }]);
-    if (matches[0]) return String(matches[0].id);
-  } catch (error) {
-    if (!(error instanceof HubSpotApiError) || ![400, 404].includes(error.status)) throw error;
+  if (linkedinUrl) {
+    try {
+      const matches = await searchAll("contacts", ["firstname", "lastname", "email", "gtm_linkedin_url"], [{ propertyName: "gtm_linkedin_url", operator: "EQ", value: linkedinUrl }]);
+      if (matches[0]) return String(matches[0].id);
+    } catch (error) {
+      if (!(error instanceof HubSpotApiError) || ![400, 404].includes(error.status)) throw error;
+    }
   }
   return "";
 }
 
-async function createContact(prospect: Prospect) {
+async function createContact(prospect: Prospect, ownerId: string) {
   const name = splitName(prospect.fullName);
-  const properties: Record<string, string> = { firstname: name.firstname, lastname: name.lastname };
+  const properties: Record<string, string> = { firstname: name.firstname, lastname: name.lastname, hubspot_owner_id: ownerId };
   if (prospect.email) properties.email = prospect.email.toLowerCase();
   if (prospect.phone) properties.phone = prospect.phone;
   if (prospect.title) properties.jobtitle = prospect.title;
   if (prospect.company) properties.company = prospect.company;
   if (prospect.companyWebsite) properties.website = prospect.companyWebsite;
-  if (await contactHasLinkedInProperty()) properties.gtm_linkedin_url = prospect.linkedinUrl;
+  if (prospect.linkedinUrl && await contactHasLinkedInProperty()) properties.gtm_linkedin_url = prospect.linkedinUrl;
   const created = await hubspotRequest<{ id: string }>("/crm/v3/objects/contacts", { method: "POST", body: JSON.stringify({ properties }) });
   return String(created.id);
 }
 
-async function syncMissingContactDetails(contactId: string, prospect: Prospect) {
-  const current = (await batchRead("contacts", [contactId], ["email", "phone", "gtm_linkedin_url", "company", "jobtitle"]))[0];
+async function syncMissingContactDetails(contactId: string, prospect: Prospect, ownerId: string) {
+  const current = (await batchRead("contacts", [contactId], ["email", "phone", "gtm_linkedin_url", "company", "jobtitle", "hubspot_owner_id"]))[0];
   if (!current) return [] as string[];
   const properties: Record<string, string> = {};
   if (prospect.email && !String(current.properties.email || "").trim()) properties.email = prospect.email.toLowerCase();
   if (prospect.phone && !String(current.properties.phone || "").trim()) properties.phone = prospect.phone;
   if (prospect.company && !String(current.properties.company || "").trim()) properties.company = prospect.company;
   if (prospect.title && !String(current.properties.jobtitle || "").trim()) properties.jobtitle = prospect.title;
+  if (!String(current.properties.hubspot_owner_id || "").trim()) properties.hubspot_owner_id = ownerId;
   if (prospect.linkedinUrl && !String(current.properties.gtm_linkedin_url || "").trim() && await contactHasLinkedInProperty()) properties.gtm_linkedin_url = prospect.linkedinUrl;
   const updated = Object.keys(properties);
   if (updated.length) await hubspotRequest(`/crm/v3/objects/contacts/${contactId}`, { method: "PATCH", body: JSON.stringify({ properties }) });
@@ -141,17 +173,18 @@ function companyDomain(prospect: Prospect) {
 
 async function findCompanyId(domain: string) {
   if (!domain) return "";
-  const matches = await searchAll("companies", ["name", "domain"], [{ propertyName: "domain", operator: "EQ", value: domain }]);
+  const matches = await searchAll("companies", ["name", "domain", "hubspot_owner_id"], [{ propertyName: "domain", operator: "EQ", value: domain }]);
   return matches[0] ? String(matches[0].id) : "";
 }
 
-function companyPropertiesFromProspect(prospect: Prospect, includeIdentity = true) {
+function companyPropertiesFromProspect(prospect: Prospect, includeIdentity = true, ownerId = "") {
   const properties: Record<string, string> = {};
   const domain = companyDomain(prospect);
   const directApplication = prospect.detectedAts === DIRECT_APPLICATION_LABEL;
   if (includeIdentity && prospect.company) properties.name = prospect.company;
   if (includeIdentity && domain) properties.domain = domain;
   if (includeIdentity && prospect.companyWebsite) properties.company_website = prospect.companyWebsite;
+  if (includeIdentity && ownerId) properties.hubspot_owner_id = ownerId;
   if (prospect.careerPageUrl) properties.career_page_url = prospect.careerPageUrl;
   if (prospect.detectedAts && !directApplication) {
     properties.detected_ats = prospect.detectedAts;
@@ -163,17 +196,17 @@ function companyPropertiesFromProspect(prospect: Prospect, includeIdentity = tru
   return properties;
 }
 
-async function createCompany(prospect: Prospect) {
-  const properties = companyPropertiesFromProspect(prospect, true);
+async function createCompany(prospect: Prospect, ownerId: string) {
+  const properties = companyPropertiesFromProspect(prospect, true, ownerId);
   if (!properties.name || !properties.domain) return "";
   const created = await hubspotRequest<{ id: string }>("/crm/v3/objects/companies", { method: "POST", body: JSON.stringify({ properties }) });
   return String(created.id);
 }
 
 async function syncCompany(companyId: string, prospect: Prospect) {
-  const fields = ["name", "domain", "company_website", "career_page_url", "detected_ats", "ats_status", "ats_confidence", "ats_evidence_url", "ats_evidence_reason"];
+  const fields = ["name", "domain", "company_website", "career_page_url", "detected_ats", "ats_status", "ats_confidence", "ats_evidence_url", "ats_evidence_reason", "hubspot_owner_id"];
   const current = (await batchRead("companies", [companyId], fields))[0];
-  if (!current) return [] as string[];
+  if (!current) return { fieldsUpdated: [] as string[], existingOwnerId: "" };
   const desired = companyPropertiesFromProspect(prospect, false);
   if (prospect.companyWebsite && !String(current.properties.company_website || "").trim()) desired.company_website = prospect.companyWebsite;
   const properties: Record<string, string> = {};
@@ -182,19 +215,25 @@ async function syncCompany(companyId: string, prospect: Prospect) {
   }
   const updated = Object.keys(properties);
   if (updated.length) await hubspotRequest(`/crm/v3/objects/companies/${companyId}`, { method: "PATCH", body: JSON.stringify({ properties }) });
-  return updated;
+  return { fieldsUpdated: updated, existingOwnerId: String(current.properties.hubspot_owner_id || "").trim() };
 }
 
-async function ensureCompany(prospect: Prospect) {
+async function ensureCompany(prospect: Prospect, requestedOwnerId: string) {
   const domain = companyDomain(prospect);
-  if (!domain) return { companyId: "", created: false, fieldsUpdated: [] as string[] };
+  if (!domain) return { companyId: "", created: false, fieldsUpdated: [] as string[], existingOwnerId: "" };
   let companyId = await findCompanyId(domain);
   if (!companyId) {
-    companyId = await createCompany(prospect);
-    return { companyId, created: Boolean(companyId), fieldsUpdated: [] as string[] };
+    companyId = await createCompany(prospect, requestedOwnerId);
+    return { companyId, created: Boolean(companyId), fieldsUpdated: [] as string[], existingOwnerId: "" };
   }
-  const fieldsUpdated = await syncCompany(companyId, prospect);
-  return { companyId, created: false, fieldsUpdated };
+  const synced = await syncCompany(companyId, prospect);
+  return { companyId, created: false, fieldsUpdated: synced.fieldsUpdated, existingOwnerId: synced.existingOwnerId };
+}
+
+function finalAssignment(requested: Assignment, companyExistingOwnerId: string): Assignment {
+  if (requested.mode !== "acquisition" || !companyExistingOwnerId) return requested;
+  const existing = acquisitionOwners().find((owner) => owner.id === companyExistingOwnerId);
+  return existing ? { id: existing.id, name: existing.name, mode: "acquisition" } : requested;
 }
 
 async function associateContactCompany(contactId: string, companyId: string) {
@@ -213,7 +252,7 @@ async function existingOpenProspectingTask(contactId: string, fullName: string) 
   } catch { return null; }
 }
 
-function taskBody(prospect: Prospect, clickedAt: string) {
+function taskBody(prospect: Prospect, clickedAt: string, ownerName: string) {
   const reasons = prospect.scoreReasons.map((item) => `• ${item.label} (+${item.points})`).join("\n");
   const signal = prospect.recentSignal.label || "No recent role-change signal detected";
   const emails = allEmails(prospect);
@@ -228,6 +267,7 @@ function taskBody(prospect: Prospect, clickedAt: string) {
     "👤 **Contact**", prospect.fullName,
     prospect.title ? `${prospect.title}${prospect.company ? ` · ${prospect.company}` : ""}` : prospect.company,
     prospect.location, "",
+    "👥 **Assigned SDR**", ownerName, "",
     "🎯 **Source**", prospect.source, "",
     "📈 **Person Signal**", signal,
     prospect.previousCompany ? `Previous: ${prospect.previousTitle ? `${prospect.previousTitle} · ` : ""}${prospect.previousCompany}` : "", "",
@@ -244,7 +284,7 @@ function taskBody(prospect: Prospect, clickedAt: string) {
     "⭐ **Priority Score**", `${prospect.score}/100 — ${priorityLabel}`, reasons || "No additional score reasons", "",
     "📱 **Phone Numbers**", ...(phones.length ? phones.map((value, index) => `${index + 1}. ${value}`) : ["Phone not available"]), "",
     "📧 **Email Addresses**", ...(emails.length ? emails.map((value, index) => `${index + 1}. ${value}`) : ["Email not available"]), "",
-    "🔗 **LinkedIn**", prospect.linkedinUrl, "",
+    ...(prospect.linkedinUrl ? ["🔗 **LinkedIn**", prospect.linkedinUrl, ""] : []),
     "🕒 **Queued At**", clickedAt, "",
     "💡 **Suggested Action**",
     prospect.hiring.status === "Hiring Now"
@@ -257,29 +297,83 @@ function taskBody(prospect: Prospect, clickedAt: string) {
   ].filter(Boolean).join("\n");
 }
 
+async function logAcquisitionPush(prospect: Prospect, result: {
+  companyId: string;
+  contactId: string;
+  taskId: string;
+  owner: Assignment;
+  status?: string;
+}) {
+  if (prospect.assignmentMode !== "acquisition") return;
+  const domain = companyDomain(prospect);
+  if (!domain) return;
+  try {
+    await writeAcquisitionPush({
+      accountDomain: domain,
+      personUid: prospect.signalHireUid,
+      hubspotCompanyId: result.companyId,
+      hubspotContactId: result.contactId,
+      hubspotTaskId: result.taskId,
+      ownerId: result.owner.id,
+      ownerName: result.owner.name,
+      status: result.status || "pushed",
+      snapshot: {
+        fullName: prospect.fullName,
+        title: prospect.title,
+        source: prospect.source,
+        score: prospect.score,
+        priority: prospect.priority,
+        phones: allPhones(prospect).length,
+        emails: allEmails(prospect).length,
+      },
+    });
+  } catch (error) {
+    console.warn("Acquisition push audit write failed", error);
+  }
+}
+
 export async function POST(request: Request) {
   const clickedAt = new Date().toISOString();
   try {
     const parsed = prospectSchema.safeParse(await request.json().catch(() => ({})));
-    if (!parsed.success) return NextResponse.json({ error: "Invalid prospect payload." }, { status: 400 });
+    if (!parsed.success) return NextResponse.json({ error: "Invalid prospect payload.", details: parsed.error.flatten() }, { status: 400 });
     const prospect = parsed.data;
+    const requestedOwner = requestedAssignment(prospect, request);
+
+    const company = await ensureCompany(prospect, requestedOwner.id);
+    const owner = finalAssignment(requestedOwner, company.existingOwnerId);
 
     let contactId = await findContact(prospect.email, prospect.linkedinUrl);
     let contactCreated = false;
     let contactFieldsUpdated: string[] = [];
-    if (!contactId) { contactId = await createContact(prospect); contactCreated = true; }
-    else contactFieldsUpdated = await syncMissingContactDetails(contactId, prospect);
+    if (!contactId) {
+      contactId = await createContact(prospect, owner.id);
+      contactCreated = true;
+    } else {
+      contactFieldsUpdated = await syncMissingContactDetails(contactId, prospect, owner.id);
+    }
 
-    const company = await ensureCompany(prospect);
     if (company.companyId) await associateContactCompany(contactId, company.companyId);
 
     const duplicateTask = await existingOpenProspectingTask(contactId, prospect.fullName);
     if (duplicateTask) {
+      const taskId = String(duplicateTask.id);
+      await logAcquisitionPush(prospect, { companyId: company.companyId, contactId, taskId, owner, status: "pushed" });
       return NextResponse.json({
-        pushed: false, duplicate: true, contactId, contactCreated, contactFieldsUpdated,
-        companyId: company.companyId || null, companyCreated: company.created, companyFieldsUpdated: company.fieldsUpdated,
-        taskId: String(duplicateTask.id), ownerId: MARITA_OWNER_ID, ownerName: MARITA_OWNER_NAME, clickedAt,
-        message: "An open Sales Signal task already exists for this contact. Company intelligence was still synced.",
+        pushed: false,
+        duplicate: true,
+        contactId,
+        contactCreated,
+        contactFieldsUpdated,
+        companyId: company.companyId || null,
+        companyCreated: company.created,
+        companyFieldsUpdated: company.fieldsUpdated,
+        taskId,
+        ownerId: owner.id,
+        ownerName: owner.name,
+        ownerPreservedFromCompany: Boolean(company.existingOwnerId && owner.id === company.existingOwnerId),
+        clickedAt,
+        message: "An open Sales Signal task already exists for this contact. Company/contact intelligence was still synced.",
       });
     }
 
@@ -293,9 +387,9 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         properties: {
           hs_timestamp: clickedAt,
-          hubspot_owner_id: MARITA_OWNER_ID,
+          hubspot_owner_id: owner.id,
           hs_task_subject: `🔥 SALES SIGNAL — ${prospect.fullName}`,
-          hs_task_body: taskBody(prospect, clickedAt),
+          hs_task_body: taskBody(prospect, clickedAt, owner.name),
           hs_task_status: "NOT_STARTED",
           hs_task_priority: prospect.priority === "high" ? "HIGH" : "MEDIUM",
           hs_task_type: allPhones(prospect).length ? "CALL" : allEmails(prospect).length ? "EMAIL" : "TODO",
@@ -304,14 +398,29 @@ export async function POST(request: Request) {
       }),
     });
 
+    await logAcquisitionPush(prospect, { companyId: company.companyId, contactId, taskId: String(task.id), owner });
+
     return NextResponse.json({
-      pushed: true, duplicate: false, contactId, contactCreated, contactFieldsUpdated,
-      companyId: company.companyId || null, companyCreated: company.created, companyFieldsUpdated: company.fieldsUpdated,
-      taskId: String(task.id), ownerId: MARITA_OWNER_ID, ownerName: MARITA_OWNER_NAME, clickedAt,
-      phonesStoredInTask: allPhones(prospect).length, emailsStoredInTask: allEmails(prospect).length,
+      pushed: true,
+      duplicate: false,
+      contactId,
+      contactCreated,
+      contactFieldsUpdated,
+      companyId: company.companyId || null,
+      companyCreated: company.created,
+      companyFieldsUpdated: company.fieldsUpdated,
+      taskId: String(task.id),
+      ownerId: owner.id,
+      ownerName: owner.name,
+      ownerPreservedFromCompany: Boolean(company.existingOwnerId && owner.id === company.existingOwnerId),
+      clickedAt,
+      phonesStoredInTask: allPhones(prospect).length,
+      emailsStoredInTask: allEmails(prospect).length,
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    console.error("Push prospect to Marita failed", error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to push prospect to HubSpot." }, { status: 500 });
+    console.error("Push prospect to HubSpot failed", error);
+    const message = error instanceof Error ? error.message : "Unable to push prospect to HubSpot.";
+    const status = /Owner authorization/.test(message) ? 401 : /not enabled for acquisition/.test(message) ? 400 : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }
