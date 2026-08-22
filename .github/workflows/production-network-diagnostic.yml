@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 jobs:
   diagnose:
@@ -15,32 +16,53 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: DNS and TCP diagnostics
+        id: net
         shell: bash
         run: |
           set +e
           HOST=sdr.dashboardtalentera.tech
-          echo "=== Resolver ==="
-          cat /etc/resolv.conf || true
-          echo
-          echo "=== getent IPv4 ==="
-          getent ahostsv4 "$HOST" || true
-          echo
-          echo "=== Cloudflare DNS-over-HTTPS ==="
-          curl -fsS --max-time 10 \
-            -H 'accept: application/dns-json' \
-            "https://cloudflare-dns.com/dns-query?name=${HOST}&type=A" || true
-          echo
-          echo
-          echo "=== TCP 80 ==="
-          timeout 8 bash -c "</dev/tcp/${HOST}/80" && echo "TCP 80 OPEN" || echo "TCP 80 FAILED"
-          echo
-          echo "=== TCP 443 ==="
-          timeout 8 bash -c "</dev/tcp/${HOST}/443" && echo "TCP 443 OPEN" || echo "TCP 443 FAILED"
-          echo
-          echo "=== HTTP ==="
-          curl -v --connect-timeout 5 --max-time 12 "http://${HOST}/api/health" -o /tmp/http-body.txt 2>&1 | tail -n 40 || true
-          head -c 500 /tmp/http-body.txt 2>/dev/null || true
-          echo
-          echo "=== HTTPS ==="
-          curl -vk --connect-timeout 5 --max-time 12 "https://${HOST}/api/health?deep=1" -o /tmp/https-body.txt 2>&1 | tail -n 60 || true
-          head -c 1000 /tmp/https-body.txt 2>/dev/null || true
+          IP=$(getent ahostsv4 "$HOST" | awk 'NR==1{print $1}')
+          [ -n "$IP" ] || IP=unresolved
+
+          if timeout 8 bash -c "</dev/tcp/${HOST}/80" 2>/dev/null; then TCP80=open; else TCP80=failed; fi
+          if timeout 8 bash -c "</dev/tcp/${HOST}/443" 2>/dev/null; then TCP443=open; else TCP443=failed; fi
+
+          HTTP_CODE=$(curl -sS --connect-timeout 5 --max-time 12 -o /tmp/http-body.txt -w '%{http_code}' "http://${HOST}/api/health" 2>/tmp/http.err || true)
+          HTTPS_CODE=$(curl -ksS --connect-timeout 5 --max-time 12 -o /tmp/https-body.txt -w '%{http_code}' "https://${HOST}/api/health?deep=1" 2>/tmp/https.err || true)
+          HTTP_CODE=${HTTP_CODE:-000}
+          HTTPS_CODE=${HTTPS_CODE:-000}
+
+          echo "Resolved IP: $IP"
+          echo "TCP 80: $TCP80"
+          echo "TCP 443: $TCP443"
+          echo "HTTP code: $HTTP_CODE"
+          echo "HTTPS code: $HTTPS_CODE"
+          echo "HTTP stderr:"; tail -n 10 /tmp/http.err 2>/dev/null || true
+          echo "HTTPS stderr:"; tail -n 10 /tmp/https.err 2>/dev/null || true
+
+          echo "ip=$IP" >> "$GITHUB_OUTPUT"
+          echo "tcp80=$TCP80" >> "$GITHUB_OUTPUT"
+          echo "tcp443=$TCP443" >> "$GITHUB_OUTPUT"
+          echo "http_code=$HTTP_CODE" >> "$GITHUB_OUTPUT"
+          echo "https_code=$HTTPS_CODE" >> "$GITHUB_OUTPUT"
+
+      - name: Publish diagnostic status
+        uses: actions/github-script@v7
+        env:
+          IP: ${{ steps.net.outputs.ip }}
+          TCP80: ${{ steps.net.outputs.tcp80 }}
+          TCP443: ${{ steps.net.outputs.tcp443 }}
+          HTTP_CODE: ${{ steps.net.outputs.http_code }}
+          HTTPS_CODE: ${{ steps.net.outputs.https_code }}
+        with:
+          script: |
+            const desc = `ip=${process.env.IP} 80=${process.env.TCP80} 443=${process.env.TCP443} http=${process.env.HTTP_CODE} https=${process.env.HTTPS_CODE}`;
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'success',
+              context: 'production/network-diagnostic',
+              description: desc.slice(0, 140),
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
