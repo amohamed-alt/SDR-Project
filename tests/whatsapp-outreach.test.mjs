@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildWhatsAppMobileUrl,
   buildWhatsAppUrl,
+  buildWhatsAppWebUrl,
   deterministicWhatsAppMessage,
   selectWhatsAppPhone,
+  whatsappFallbackStyle,
   whatsappStyleForCountry,
 } from "../src/lib/whatsapp-outreach.ts";
 
@@ -47,35 +50,57 @@ test("does not guess a country code for an ambiguous local number", () => {
   assert.equal(selected, null);
 });
 
-test("routes KSA and UAE to local professional styles", () => {
+test("routes KSA and UAE market styles correctly", () => {
   assert.equal(whatsappStyleForCountry("KSA"), "saudi-ar");
   assert.equal(whatsappStyleForCountry("United Arab Emirates"), "emirati-ar");
   assert.equal(whatsappStyleForCountry("United Kingdom"), "english");
 });
 
+test("conservative fallback keeps Latin-script profiles in English even in KSA", () => {
+  assert.equal(whatsappFallbackStyle({
+    country: "Saudi Arabia",
+    fullName: "Abdul Rehman",
+    title: "Software Engineering Recruiter",
+  }), "english");
+});
+
+test("conservative fallback uses Saudi Arabic when explicit Arabic script is present", () => {
+  assert.equal(whatsappFallbackStyle({
+    country: "Saudi Arabia",
+    fullName: "محمد القحطاني",
+    title: "مدير استقطاب المواهب",
+  }), "saudi-ar");
+});
+
 test("fallback copy only uses verified hiring as a hiring claim", () => {
   const withoutHiring = deterministicWhatsAppMessage({
-    fullName: "Khalid Ahmed",
+    fullName: "محمد أحمد",
     company: "Example Co",
-    title: "Head of Talent Acquisition",
+    title: "مدير التوظيف",
     style: "saudi-ar",
     verifiedHiring: null,
   });
-  assert.doesNotMatch(withoutHiring, /نشاط واضح بالتوظيف/);
-  assert.match(withoutHiring, /بحكم دورك/);
+  assert.doesNotMatch(withoutHiring, /حركة توظيف الفترة هذي/);
+  assert.match(withoutHiring, /بحكم شغلك/);
 
   const withHiring = deterministicWhatsAppMessage({
-    fullName: "Khalid Ahmed",
+    fullName: "محمد أحمد",
     company: "Example Co",
-    title: "Head of Talent Acquisition",
+    title: "مدير التوظيف",
     style: "saudi-ar",
     verifiedHiring: { activeJobs: 12, newJobs30d: 5 },
   });
-  assert.match(withHiring, /نشاط واضح بالتوظيف/);
+  assert.match(withHiring, /حركة توظيف الفترة هذي/);
 });
 
-test("builds a wa.me link with encoded message text", () => {
-  const url = buildWhatsAppUrl("966551234567", "السلام عليكم");
-  assert.match(url, /^https:\/\/wa\.me\/966551234567\?text=/);
+test("builds a direct WhatsApp Web link with encoded message text", () => {
+  const url = buildWhatsAppWebUrl("966551234567", "السلام عليكم");
+  assert.match(url, /^https:\/\/web\.whatsapp\.com\/send\?phone=966551234567&text=/);
   assert.ok(url.includes(encodeURIComponent("السلام عليكم")));
+  assert.equal(buildWhatsAppUrl("966551234567", "السلام عليكم"), url);
+});
+
+test("builds a wa.me mobile link separately", () => {
+  const url = buildWhatsAppMobileUrl("966551234567", "Hello");
+  assert.match(url, /^https:\/\/wa\.me\/966551234567\?text=/);
 });
