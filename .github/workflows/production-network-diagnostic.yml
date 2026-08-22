@@ -1,0 +1,46 @@
+name: Production Network Diagnostic
+
+on:
+  push:
+    branches: [production-network-diagnostic]
+    paths:
+      - ".github/workflows/production-network-diagnostic.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: DNS and TCP diagnostics
+        shell: bash
+        run: |
+          set +e
+          HOST=sdr.dashboardtalentera.tech
+          echo "=== Resolver ==="
+          cat /etc/resolv.conf || true
+          echo
+          echo "=== getent IPv4 ==="
+          getent ahostsv4 "$HOST" || true
+          echo
+          echo "=== Cloudflare DNS-over-HTTPS ==="
+          curl -fsS --max-time 10 \
+            -H 'accept: application/dns-json' \
+            "https://cloudflare-dns.com/dns-query?name=${HOST}&type=A" || true
+          echo
+          echo
+          echo "=== TCP 80 ==="
+          timeout 8 bash -c "</dev/tcp/${HOST}/80" && echo "TCP 80 OPEN" || echo "TCP 80 FAILED"
+          echo
+          echo "=== TCP 443 ==="
+          timeout 8 bash -c "</dev/tcp/${HOST}/443" && echo "TCP 443 OPEN" || echo "TCP 443 FAILED"
+          echo
+          echo "=== HTTP ==="
+          curl -v --connect-timeout 5 --max-time 12 "http://${HOST}/api/health" -o /tmp/http-body.txt 2>&1 | tail -n 40 || true
+          head -c 500 /tmp/http-body.txt 2>/dev/null || true
+          echo
+          echo "=== HTTPS ==="
+          curl -vk --connect-timeout 5 --max-time 12 "https://${HOST}/api/health?deep=1" -o /tmp/https-body.txt 2>&1 | tail -n 60 || true
+          head -c 1000 /tmp/https-body.txt 2>/dev/null || true
