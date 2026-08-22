@@ -44,12 +44,36 @@ services:
       - sdr_runtime_env:/runtime-env
       - sdr_app_data:/runtime-data
 
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    mem_limit: "768m"
+    cpus: 1.0
+    pids_limit: 128
+    environment:
+      POSTGRES_DB: sdr
+      POSTGRES_USER: sdr
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - sdr_postgres_data:/var/lib/postgresql/data
+    networks:
+      - data_private
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sdr -d sdr"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 10
+
   dashboard-cache-api:
     build:
       context: ./services/dashboard-cache
       dockerfile: Dockerfile
     restart: unless-stopped
-    mem_limit: "512m"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: "768m"
     cpus: 1.0
     pids_limit: 128
     environment:
@@ -57,10 +81,12 @@ services:
       DASHBOARD_CACHE_MAX_ENTRIES: 250
       DASHBOARD_CACHE_RETENTION_SECONDS: 604800
       DASHBOARD_CACHE_MAX_PAYLOAD_BYTES: 16777216
+      USAGE_DATABASE_URL: postgresql://sdr@postgres:5432/sdr
     volumes:
       - sdr_dashboard_cache:/data
     networks:
       - default
+      - data_private
     healthcheck:
       test:
         - CMD
@@ -69,7 +95,7 @@ services:
         - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"
       interval: 20s
       timeout: 5s
-      start_period: 10s
+      start_period: 15s
       retries: 5
 
   sdr-dashboard:
@@ -92,8 +118,6 @@ services:
       GEMINI_CAREER_MODEL: ${GEMINI_CAREER_MODEL:-gemini-2.5-flash-lite}
       CAREER_GENERATION: v3
       SDR_RUNTIME_ENV_FILE: /run/sdr-env/.env
-      GTM_RESEARCH_OPENROUTER_API_KEY: ${GTM_RESEARCH_OPENROUTER_API_KEY:-}
-      GTM_RESEARCH_OPENROUTER_MODEL: ${GTM_RESEARCH_OPENROUTER_MODEL:-openai/gpt-4.1-mini}
       DASHBOARD_CACHE_API_URL: http://dashboard-cache-api:8000
       DASHBOARD_CACHE_READ_TIMEOUT_MS: 700
       DASHBOARD_CACHE_WRITE_TIMEOUT_MS: 2000
@@ -414,12 +438,16 @@ volumes:
     name: sdr_app_data
   sdr_dashboard_cache:
     name: sdr_dashboard_cache
+  sdr_postgres_data:
+    name: sdr_postgres_data
   career_browser_cache:
     name: sdr_career_browser_cache
   career_judge_models:
     name: sdr_career_judge_models
 
 networks:
+  data_private:
+    internal: true
   traefik_proxy:
     external: true
     name: n8n_default
