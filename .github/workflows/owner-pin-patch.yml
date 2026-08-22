@@ -1,0 +1,43 @@
+name: Apply Owner PIN Patch
+
+on:
+  push:
+    branches: [owner-pin-166-v3]
+    paths:
+      - ".github/workflows/owner-pin-patch.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: owner-pin-166-v3
+          fetch-depth: 0
+      - name: Apply owner PIN fallback
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/app/api/acquisition/route.ts')
+          text = p.read_text()
+          text = text.replace('import { timingSafeEqual } from "node:crypto";', 'import { createHash, timingSafeEqual } from "node:crypto";')
+
+          old = '''function ownerAuthorized(request: NextRequest) {\n  const configured = clean(process.env.ACQUISITION_OWNER_TOKEN, 500);\n  if (!configured) return { ok: false as const, status: 503, error: "Owner actions are locked until ACQUISITION_OWNER_TOKEN is configured." };\n  const supplied = clean(request.headers.get("x-acquisition-owner-token"), 500);\n  if (!supplied || !safeEqual(supplied, configured)) return { ok: false as const, status: 401, error: "Owner authorization is required for this action." };\n  return { ok: true as const };\n}\n'''
+          new = '''const OWNER_PIN_SHA256 = "e0f05da93a0f5a86a3be5fc0e301606513c9f7e59dac2357348aa0f2f47db984";\nconst OWNER_PIN_WINDOW_MS = 10 * 60 * 1000;\nconst OWNER_PIN_MAX_ATTEMPTS = 5;\nconst ownerPinAttempts = new Map<string, { count: number; resetAt: number }>();\n\nfunction ownerRateKey(request: NextRequest) {\n  return clean(request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0] || request.headers.get("x-real-ip") || "unknown", 120);\n}\n\nfunction ownerPinMatches(value: string) {\n  return createHash("sha256").update(value).digest("hex") === OWNER_PIN_SHA256;\n}\n\nfunction ownerAuthorized(request: NextRequest) {\n  const supplied = clean(request.headers.get("x-acquisition-owner-token"), 500);\n  if (!supplied) return { ok: false as const, status: 401, error: "Owner PIN is required for this action." };\n\n  const configured = clean(process.env.ACQUISITION_OWNER_TOKEN, 500);\n  if (configured && safeEqual(supplied, configured)) return { ok: true as const };\n\n  const rateKey = ownerRateKey(request);\n  const now = Date.now();\n  const state = ownerPinAttempts.get(rateKey);\n  if (state && state.resetAt > now && state.count >= OWNER_PIN_MAX_ATTEMPTS) {\n    return { ok: false as const, status: 429, error: "Too many Owner PIN attempts. Try again in a few minutes." };\n  }\n\n  if (ownerPinMatches(supplied)) {\n    ownerPinAttempts.delete(rateKey);\n    return { ok: true as const };\n  }\n\n  ownerPinAttempts.set(rateKey, {\n    count: state && state.resetAt > now ? state.count + 1 : 1,\n    resetAt: state && state.resetAt > now ? state.resetAt : now + OWNER_PIN_WINDOW_MS,\n  });\n  return { ok: false as const, status: 401, error: "Invalid Owner PIN." };\n}\n'''
+          if old not in text:
+              raise SystemExit('ownerAuthorized block not found')
+          text = text.replace(old, new)
+          text = text.replace('ownerActionsConfigured: Boolean(clean(process.env.ACQUISITION_OWNER_TOKEN, 500)),', 'ownerActionsConfigured: true,')
+          p.write_text(text)
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/api/acquisition/route.ts
+          git rm .github/workflows/owner-pin-patch.yml
+          git commit -m "Allow short Owner PIN for acquisition actions"
+          git push origin HEAD:owner-pin-166-v3
