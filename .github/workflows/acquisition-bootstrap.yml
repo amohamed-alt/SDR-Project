@@ -5,6 +5,12 @@ on:
     workflows: ["Deploy SDR Dashboard to Hostinger"]
     types: [completed]
   workflow_dispatch:
+  # One-time deterministic kick for the approved 2026-08-22 seed. The endpoint
+  # itself is marker-protected, so later deploy completions remain idempotent.
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/acquisition-bootstrap.yml"
 
 permissions:
   contents: read
@@ -13,6 +19,7 @@ jobs:
   bootstrap:
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
