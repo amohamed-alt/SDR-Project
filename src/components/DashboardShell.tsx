@@ -3,11 +3,11 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { BrainCircuit, Building2, Flame, ListTodo, LoaderCircle, Menu, PhoneCall, Radar, Search, Sparkles, X } from "lucide-react";
+import { Activity, BrainCircuit, Building2, Flame, ListTodo, LoaderCircle, Menu, PhoneCall, Radar, Search, X } from "lucide-react";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardMotion";
 import styles from "@/components/DashboardShell.module.css";
 
-type ShellView = "core" | "maqsam" | "hiring" | "career" | "ats-intent" | "marita-priority";
+type ShellView = "core" | "maqsam" | "hiring" | "career" | "ats-intent" | "marita-priority" | "team-activity";
 
 function ViewLoading() {
   return <main className={styles.viewLoading}><LoaderCircle size={24}/><strong>Loading workspace…</strong></main>;
@@ -33,6 +33,10 @@ const MaritaPriorityQueue = dynamic(
   () => import("@/components/MaritaPriorityQueue").then((module) => module.MaritaPriorityQueue),
   { ssr: false, loading: ViewLoading },
 );
+const TeamActivity = dynamic(
+  () => import("@/components/TeamActivity").then((module) => module.TeamActivity),
+  { ssr: false, loading: ViewLoading },
+);
 
 function viewFromUrl(): ShellView {
   const view = new URLSearchParams(window.location.search).get("view");
@@ -41,7 +45,14 @@ function viewFromUrl(): ShellView {
   if (view === "career") return "career";
   if (view === "ats-intent") return "ats-intent";
   if (view === "marita-priority") return "marita-priority";
+  if (view === "team-activity") return "team-activity";
   return "core";
+}
+
+function trackFeature(feature: string) {
+  window.dispatchEvent(new CustomEvent("sdr:usage", {
+    detail: { eventType: "feature_open", feature },
+  }));
 }
 
 export function Dashboard() {
@@ -79,6 +90,7 @@ export function Dashboard() {
     window.history.pushState({}, "", url);
     setToolsOpen(false);
     setView(next);
+    trackFeature(next === "core" ? "dashboard" : next);
   }
 
   if (view === "maqsam") return <MaqsamCallsDashboard onBack={() => changeView("core")}/>;
@@ -86,6 +98,7 @@ export function Dashboard() {
   if (view === "career") return <CareerIntelligence onBack={() => changeView("core")}/>;
   if (view === "ats-intent") return <AtsIntentSearch onBack={() => changeView("core")}/>;
   if (view === "marita-priority") return <MaritaPriorityQueue onBack={() => changeView("core")}/>;
+  if (view === "team-activity") return <TeamActivity onBack={() => changeView("core")}/>;
 
   return <div className={styles.shell}>
     <ExistingDashboard/>
@@ -102,19 +115,19 @@ export function Dashboard() {
           </div>
 
           <div className={styles.toolList}>
-            <Link className={styles.toolItem} href="/company-enrichment">
+            <Link className={styles.toolItem} href="/company-enrichment" onClick={() => trackFeature("company-repair")}>
               <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Building2 size={17}/></span>
               <span className={styles.toolCopy}><strong>Company Repair</strong><small>HubSpot enrichment & property fixes</small></span>
             </Link>
-            <Link className={styles.toolItem} href="/account-intelligence">
+            <Link className={styles.toolItem} href="/account-intelligence" onClick={() => trackFeature("gtm-brain")}>
               <span className={`${styles.toolIcon} ${styles.brainIcon}`}><BrainCircuit size={17}/></span>
               <span className={styles.toolCopy}><strong>GTM Brain</strong><small>Account scoring & intelligence</small></span>
             </Link>
-            <Link className={styles.toolItem} href="/gtm-research">
-              <span className={`${styles.toolIcon} ${styles.gtmIcon}`}><Sparkles size={17}/></span>
-              <span className={styles.toolCopy}><strong>GTM Research</strong><small>AI research workspace</small></span>
-            </Link>
-            <Link className={styles.toolItem} href="/salesnav-prospecting">
+            <button className={styles.toolItem} type="button" onClick={() => changeView("team-activity")}>
+              <span className={`${styles.toolIcon} ${styles.gtmIcon}`}><Activity size={17}/></span>
+              <span className={styles.toolCopy}><strong>Team Activity</strong><small>Live users & workspace adoption</small></span>
+            </button>
+            <Link className={styles.toolItem} href="/salesnav-prospecting" onClick={() => trackFeature("sales-nav")}>
               <span className={`${styles.toolIcon} ${styles.salesIcon}`}><Radar size={17}/></span>
               <span className={styles.toolCopy}><strong>Sales Nav</strong><small>Net-new prospecting</small></span>
             </Link>
@@ -126,7 +139,7 @@ export function Dashboard() {
               <span className={`${styles.toolIcon} ${styles.priorityIcon}`}><ListTodo size={17}/></span>
               <span className={styles.toolCopy}><strong>Marita Priority</strong><small>Call-next queue</small></span>
             </button>
-            <Link className={styles.toolItem} href="/marita-calls">
+            <Link className={styles.toolItem} href="/marita-calls" onClick={() => trackFeature("marita-calls")}>
               <span className={`${styles.toolIcon} ${styles.callsIcon}`}><PhoneCall size={17}/></span>
               <span className={styles.toolCopy}><strong>Marita Calls</strong><small>Maqsam call activity</small></span>
             </Link>

@@ -1,0 +1,133 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 20% 15%, rgba(23, 92, 211, 0.14), transparent 34%),
+    radial-gradient(circle at 82% 75%, rgba(11, 142, 132, 0.12), transparent 30%),
+    rgba(247, 249, 252, 0.96);
+  backdrop-filter: blur(18px);
+}
+
+.card {
+  width: min(100%, 470px);
+  padding: 34px;
+  border: 1px solid rgba(21, 41, 72, 0.1);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 30px 90px rgba(14, 31, 58, 0.16);
+}
+
+.mark {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  margin-bottom: 22px;
+  border: 1px solid rgba(25, 83, 184, 0.14);
+  border-radius: 13px;
+  color: #174c9f;
+  background: #f2f7ff;
+}
+
+.eyebrow {
+  margin-bottom: 8px;
+  color: #66768d;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+}
+
+.card h1 {
+  margin: 0;
+  color: #102038;
+  font-size: clamp(26px, 4vw, 34px);
+  font-weight: 760;
+  letter-spacing: -0.035em;
+}
+
+.card p {
+  margin: 12px 0 24px;
+  color: #66768d;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.card label {
+  display: grid;
+  gap: 8px;
+  color: #263b57;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.card input {
+  width: 100%;
+  height: 50px;
+  padding: 0 15px;
+  border: 1px solid #d7deea;
+  border-radius: 12px;
+  outline: none;
+  color: #142944;
+  background: #fff;
+  font: inherit;
+  font-size: 15px;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.card input:focus {
+  border-color: #3975ce;
+  box-shadow: 0 0 0 4px rgba(57, 117, 206, 0.1);
+}
+
+.card button {
+  display: inline-flex;
+  width: 100%;
+  height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+  border: 0;
+  border-radius: 12px;
+  color: #fff;
+  background: #153f78;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 750;
+  cursor: pointer;
+  transition: transform 150ms ease, background 150ms ease, opacity 150ms ease;
+}
+
+.card button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: #0f356b;
+}
+
+.card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.privacy {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 18px;
+  color: #7a8799;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.privacy svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+@media (max-width: 560px) {
+  .backdrop { padding: 14px; }
+  .card { padding: 26px 22px; border-radius: 20px; }
+}

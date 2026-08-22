@@ -35,10 +35,9 @@ try {
     rejectedMeetingResponse,
     invalidCountryBatchResponse,
     emptyCountryBatchResponse,
-    gtmResearchHealthResponse,
+    usageResponse,
     pageResponse,
     maritaCallsPageResponse,
-    gtmResearchPageResponse,
   ] = await Promise.all([
     fetch(`http://127.0.0.1:${port}/api/health`),
     fetch(`http://127.0.0.1:${port}/api/dashboard?from=2026-07-01&to=2026-07-19&ownerId=31644369`),
@@ -71,12 +70,11 @@ try {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tasks: [] }),
     }),
-    fetch(`http://127.0.0.1:${port}/api/gtm-research/analyze`),
+    fetch(`http://127.0.0.1:${port}/api/usage`),
     fetch(`http://127.0.0.1:${port}/`),
     fetch(`http://127.0.0.1:${port}/marita-calls`),
-    fetch(`http://127.0.0.1:${port}/gtm-research`),
   ]);
-  if (!healthResponse.ok || !dashboardResponse.ok || !cacheHealthResponse.ok || !maqsamCallsResponse.ok || !calendarStatusResponse.ok || !abdullahCalendarStatusResponse.ok || !emptyCountryBatchResponse.ok || !gtmResearchHealthResponse.ok || !pageResponse.ok || !maritaCallsPageResponse.ok || !gtmResearchPageResponse.ok) throw new Error("One or more smoke-test routes returned an error");
+  if (!healthResponse.ok || !dashboardResponse.ok || !cacheHealthResponse.ok || !maqsamCallsResponse.ok || !calendarStatusResponse.ok || !abdullahCalendarStatusResponse.ok || !emptyCountryBatchResponse.ok || !usageResponse.ok || !pageResponse.ok || !maritaCallsPageResponse.ok) throw new Error("One or more smoke-test routes returned an error");
   const health = await healthResponse.json();
   const dashboard = await dashboardResponse.json();
   const cacheHealth = await cacheHealthResponse.json();
@@ -85,10 +83,9 @@ try {
   const abdullahCalendarStatus = await abdullahCalendarStatusResponse.json();
   const invalidCountryBatch = await invalidCountryBatchResponse.json();
   const emptyCountryBatch = await emptyCountryBatchResponse.json();
-  const gtmResearchHealth = await gtmResearchHealthResponse.json();
+  const usage = await usageResponse.json();
   const page = await pageResponse.text();
   const maritaCallsPage = await maritaCallsPageResponse.text();
-  const gtmResearchPage = await gtmResearchPageResponse.text();
   if (health.status !== "ok") throw new Error("Health response is invalid");
   if (!dashboard.kpis || dashboard.meta?.isDemo !== true) throw new Error("Dashboard response is invalid");
   if (dashboardResponse.headers.get("x-dashboard-cache-version") !== "v7-fastapi-persistent") throw new Error("Dashboard snapshot cache headers are missing");
@@ -104,11 +101,10 @@ try {
   if (rejectedMeetingResponse.status !== 403) throw new Error("Calendar booking origin protection is invalid");
   if (invalidCountryBatchResponse.status !== 400 || typeof invalidCountryBatch.details !== "string") throw new Error("Task country batch validation is invalid");
   if (!Array.isArray(emptyCountryBatch.tasks) || emptyCountryBatch.tasks.length !== 0) throw new Error("Incremental task country payload is invalid");
-  if (gtmResearchHealth.status !== "ok" || !Array.isArray(gtmResearchHealth.stages) || !gtmResearchHealth.stages.includes("company") || !gtmResearchHealth.stages.includes("channels")) throw new Error("GTM research health response is invalid");
+  if (usage.tracking !== false || !Array.isArray(usage.users) || !Array.isArray(usage.topFeatures)) throw new Error("Usage analytics smoke fallback is invalid");
   if (!page.includes("SDR Command Center") || !page.includes("Inbound vs Outbound") || !page.includes("SDR Tools")) throw new Error("Dashboard analytics entries or compact tools launcher are missing");
   if (!maritaCallsPage.includes("Maqsam Call Intelligence")) throw new Error("Marita calls page is missing");
-  if (!gtmResearchPage.includes("GTM Strategy Workspace") || !gtmResearchPage.includes("Company Research") || !gtmResearchPage.includes("Human Overview")) throw new Error("GTM research page is missing");
-  console.log("Smoke tests passed: dashboard snapshots/cache health, compact SDR tools launcher, GTM research workspace/health, Marita calls route, Maqsam API, separate organizer status, inbound/outbound entry, task-country caching, WhatsApp data, and protected routes are operational.");
+  console.log("Smoke tests passed: dashboard snapshots/cache health, Dashboard V2 usage endpoint, compact SDR tools launcher, Marita calls route, Maqsam API, separate organizer status, inbound/outbound entry, task-country caching, WhatsApp data, and protected routes are operational.");
 } finally {
   server.kill("SIGTERM");
 }
