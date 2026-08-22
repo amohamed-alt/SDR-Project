@@ -11,8 +11,7 @@ fi
 # Deployment-injected credentials are kept separately before loading the
 # persistent runtime file. This lets GitHub Actions secrets safely override an
 # older VPS env file without changing or exposing that file.
-DEPLOY_GTM_OPENROUTER_API_KEY="${GTM_RESEARCH_OPENROUTER_API_KEY:-${OPENROUTER_API_KEY:-}}"
-DEPLOY_GTM_OPENROUTER_MODEL="${GTM_RESEARCH_OPENROUTER_MODEL:-}"
+DEPLOY_OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-${GTM_RESEARCH_OPENROUTER_API_KEY:-}}"
 DEPLOY_SIGNALHIRE_API_KEY="${SIGNALHIRE_API_KEY:-}"
 
 set -a
@@ -20,27 +19,33 @@ set -a
 . "$RUNTIME_ENV_FILE"
 set +a
 
-if [ -n "$DEPLOY_GTM_OPENROUTER_API_KEY" ]; then
-  GTM_RESEARCH_OPENROUTER_API_KEY="$DEPLOY_GTM_OPENROUTER_API_KEY"
+if [ -n "$DEPLOY_OPENROUTER_API_KEY" ]; then
+  OPENROUTER_API_KEY="$DEPLOY_OPENROUTER_API_KEY"
+elif [ -z "${OPENROUTER_API_KEY:-}" ] && [ -n "${GTM_RESEARCH_OPENROUTER_API_KEY:-}" ]; then
+  # Backward-compatible migration from the retired GTM Research secret name.
+  OPENROUTER_API_KEY="$GTM_RESEARCH_OPENROUTER_API_KEY"
+fi
+export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
+
+# Keep the old name populated for any older local code during the transition.
+if [ -n "${OPENROUTER_API_KEY:-}" ]; then
+  GTM_RESEARCH_OPENROUTER_API_KEY="$OPENROUTER_API_KEY"
   export GTM_RESEARCH_OPENROUTER_API_KEY
 fi
 
-if [ -n "$DEPLOY_GTM_OPENROUTER_MODEL" ]; then
-  GTM_RESEARCH_OPENROUTER_MODEL="$DEPLOY_GTM_OPENROUTER_MODEL"
-else
-  GTM_RESEARCH_OPENROUTER_MODEL="${GTM_RESEARCH_OPENROUTER_MODEL:-openai/gpt-4.1-mini}"
-fi
-export GTM_RESEARCH_OPENROUTER_MODEL
+OPENROUTER_FAST_MODEL="${OPENROUTER_FAST_MODEL:-openai/gpt-4.1-nano}"
+OPENROUTER_DEEP_MODEL="${OPENROUTER_DEEP_MODEL:-openai/gpt-4.1-mini}"
+export OPENROUTER_FAST_MODEL OPENROUTER_DEEP_MODEL
 
 if [ -n "$DEPLOY_SIGNALHIRE_API_KEY" ]; then
   SIGNALHIRE_API_KEY="$DEPLOY_SIGNALHIRE_API_KEY"
   export SIGNALHIRE_API_KEY
 fi
 
-if [ -n "${GTM_RESEARCH_OPENROUTER_API_KEY:-${OPENROUTER_API_KEY:-}}" ]; then
-  echo "GTM OpenRouter: configured; premium model=${GTM_RESEARCH_OPENROUTER_MODEL}"
+if [ -n "${OPENROUTER_API_KEY:-}" ]; then
+  echo "OpenRouter gateway: configured; fast=${OPENROUTER_FAST_MODEL}; deep=${OPENROUTER_DEEP_MODEL}"
 else
-  echo "GTM OpenRouter: NOT configured; premium stages will fall back to local Ollama"
+  echo "OpenRouter gateway: NOT configured; paid AI features are disabled"
 fi
 
 if [ -n "${SIGNALHIRE_API_KEY:-}" ]; then
