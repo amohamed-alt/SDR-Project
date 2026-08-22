@@ -96,16 +96,6 @@ jobs:
             jq -r '.results[]?.url // empty' /tmp/tavily-career-test.json | head -5
           fi
 
-      - name: Validate GTM premium AI configuration
-        env:
-          GTM_OPENROUTER_KEY: ${{ secrets.GTM_RESEARCH_OPENROUTER_API_KEY || secrets.OPENROUTER_API_KEY }}
-        run: |
-          test -n "$GTM_OPENROUTER_KEY" || {
-            echo "::error::GTM_RESEARCH_OPENROUTER_API_KEY (or OPENROUTER_API_KEY) must be configured for TAM, ICP and Personas."
-            exit 1
-          }
-          echo "GTM OpenRouter deployment secret: configured"
-
       - name: Deploy Docker Compose
         uses: hostinger/deploy-on-vps@v2
         with:
@@ -117,10 +107,8 @@ jobs:
             SDR_BUILD_REF=${{ env.DEPLOY_SHA }}
             SIGNALHIRE_API_KEY=${{ secrets.SIGNALHIRE_API_KEY }}
             TAVILY_API_KEY=${{ secrets.TAVILY_API_KEY }}
-            GTM_RESEARCH_OPENROUTER_API_KEY=${{ secrets.GTM_RESEARCH_OPENROUTER_API_KEY || secrets.OPENROUTER_API_KEY }}
-            GTM_RESEARCH_OPENROUTER_MODEL=openai/gpt-4.1-mini
 
-      - name: Verify exact deployed build, Career ATS V3, and GTM workspace health
+      - name: Verify exact deployed build, Career ATS V3, and Dashboard V2 health
         run: |
           set -euo pipefail
           READY=false
@@ -156,30 +144,22 @@ jobs:
             exit 1
           fi
 
-          GTM_PAGE_CODE=$(curl --silent --show-error \
+          USAGE_CODE=$(curl --silent --show-error \
             --connect-timeout 5 \
             --max-time 15 \
-            --output /tmp/gtm-research.html \
+            --output /tmp/usage.json \
             --write-out '%{http_code}' \
-            'https://sdr.dashboardtalentera.tech/gtm-research' || true)
-          GTM_HEALTH=$(curl --silent --show-error \
-            --connect-timeout 5 \
-            --max-time 15 \
-            'https://sdr.dashboardtalentera.tech/api/gtm-research/analyze' || true)
-          GTM_STATUS=$(printf '%s' "$GTM_HEALTH" | jq -r '.status // ""' 2>/dev/null || true)
-          GTM_AI_READY=$(printf '%s' "$GTM_HEALTH" | jq -r '.aiReady // false' 2>/dev/null || true)
-          GTM_OPENROUTER=$(printf '%s' "$GTM_HEALTH" | jq -r '.openRouterConfigured // false' 2>/dev/null || true)
-          GTM_PREMIUM_MODEL=$(printf '%s' "$GTM_HEALTH" | jq -r '.premiumModel // "unknown"' 2>/dev/null || true)
+            'https://sdr.dashboardtalentera.tech/api/usage' || true)
+          TRACKING=$(jq -r '.tracking // false' /tmp/usage.json 2>/dev/null || echo false)
+          DATABASE=$(jq -r '.database // "unknown"' /tmp/usage.json 2>/dev/null || echo unknown)
 
-          echo "GTM production gate: page_http=${GTM_PAGE_CODE:-none} api_status=${GTM_STATUS:-none} local_ai_ready=${GTM_AI_READY:-false} openrouter_configured=${GTM_OPENROUTER:-false} premium_model=${GTM_PREMIUM_MODEL:-unknown}"
+          echo "Dashboard V2 usage gate: http=${USAGE_CODE:-none} tracking=${TRACKING:-false} database=${DATABASE:-unknown}"
 
-          if [ "$GTM_PAGE_CODE" != "200" ] \
-            || [ "$GTM_STATUS" != "ok" ] \
-            || [ "$GTM_AI_READY" != "true" ] \
-            || [ "$GTM_OPENROUTER" != "true" ] \
-            || [ "$GTM_PREMIUM_MODEL" != "openai/gpt-4.1-mini" ] \
-            || ! grep -q 'GTM Strategy Workspace' /tmp/gtm-research.html; then
-            echo "::error::GTM Research workspace is not fully production-ready with OpenRouter GPT-4.1 Mini."
+          if [ "$USAGE_CODE" != "200" ] \
+            || [ "$TRACKING" != "true" ] \
+            || [ "$DATABASE" != "postgresql" ]; then
+            echo "::error::Dashboard V2 PostgreSQL usage tracking is not production-ready."
+            cat /tmp/usage.json || true
             exit 1
           fi
 
@@ -196,7 +176,7 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'success',
               context: 'hostinger/deploy',
-              description: 'Exact SDR build, Career ATS V3, Tavily fallback, and GTM validation are live',
+              description: 'Exact SDR build, Career ATS V3, Tavily fallback, and Dashboard V2 tracking are live',
               target_url: process.env.DEPLOY_URL,
             });
 
@@ -213,6 +193,6 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'failure',
               context: 'hostinger/deploy',
-              description: 'SDR production build/version/Tavily/GTM gate failed',
+              description: 'SDR production build/version/Tavily/Dashboard V2 gate failed',
               target_url: process.env.DEPLOY_URL,
             });
