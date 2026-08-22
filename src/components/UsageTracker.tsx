@@ -25,6 +25,15 @@ function featureFromPath(pathname: string) {
   return pathname.replace(/^\//, "").replace(/\//g, "-") || "dashboard";
 }
 
+function featureFromLocation() {
+  const pathname = window.location.pathname;
+  if (pathname === "/") {
+    const view = new URLSearchParams(window.location.search).get("view");
+    if (view) return view;
+  }
+  return featureFromPath(pathname);
+}
+
 type UsageDetail = {
   eventType?: string;
   feature?: string;
@@ -51,7 +60,7 @@ export function UsageTracker() {
       displayName: identity.displayName,
       eventType: detail.eventType || "action",
       path: detail.path || window.location.pathname + window.location.search,
-      feature: detail.feature || featureFromPath(window.location.pathname),
+      feature: detail.feature || featureFromLocation(),
       meta: detail.meta || {},
     };
     try {
@@ -131,7 +140,7 @@ export function UsageTracker() {
         displayName: identity.displayName,
         eventType: "session_end",
         path: window.location.pathname + window.location.search,
-        feature: featureFromPath(window.location.pathname),
+        feature: featureFromLocation(),
         meta: {},
       });
       navigator.sendBeacon?.("/api/usage", new Blob([payload], { type: "application/json" }));
