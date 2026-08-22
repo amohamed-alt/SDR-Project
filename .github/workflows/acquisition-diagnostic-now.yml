@@ -19,6 +19,7 @@ jobs:
         id: queue
         run: |
           set -euo pipefail
+          # Read-only snapshot 2. This workflow never invokes Apollo or SignalHire.
           HTTP_CODE=$(curl --silent --show-error --connect-timeout 10 --max-time 30 \
             --output /tmp/acquisition.json --write-out '%{http_code}' \
             'https://sdr.dashboardtalentera.tech/api/acquisition?limit=1000&includeExcluded=1' || true)
