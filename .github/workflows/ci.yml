@@ -6,6 +6,43 @@ on:
   pull_request:
 
 jobs:
+  openrouter-smoke:
+    runs-on: ubuntu-latest
+    env:
+      OPENROUTER_KEY: ${{ secrets.GTM_RESEARCH_OPENROUTER_API_KEY || secrets.OPENROUTER_API_KEY }}
+    steps:
+      - name: Validate OpenRouter key with a tiny completion
+        run: |
+          set -euo pipefail
+          test -n "$OPENROUTER_KEY" || {
+            echo "::error::No OpenRouter repository secret is configured under GTM_RESEARCH_OPENROUTER_API_KEY or OPENROUTER_API_KEY."
+            exit 1
+          }
+
+          HTTP_CODE=$(curl --silent --show-error \
+            --connect-timeout 10 \
+            --max-time 45 \
+            --output /tmp/openrouter-test.json \
+            --write-out '%{http_code}' \
+            'https://openrouter.ai/api/v1/chat/completions' \
+            -H "Authorization: Bearer $OPENROUTER_KEY" \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"openai/gpt-4.1-mini","messages":[{"role":"user","content":"Reply with exactly OK"}],"max_tokens":8,"temperature":0}' || true)
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            ERROR=$(jq -r '.error.message // .message // "unknown OpenRouter error"' /tmp/openrouter-test.json 2>/dev/null || echo 'unknown OpenRouter error')
+            echo "::error::OpenRouter test failed with HTTP $HTTP_CODE: $ERROR"
+            exit 1
+          fi
+
+          CONTENT=$(jq -r '.choices[0].message.content // empty' /tmp/openrouter-test.json 2>/dev/null || true)
+          MODEL=$(jq -r '.model // "unknown"' /tmp/openrouter-test.json 2>/dev/null || echo unknown)
+          test -n "$CONTENT" || {
+            echo "::error::OpenRouter authenticated, but the completion response was empty."
+            exit 1
+          }
+          echo "OpenRouter test passed. Authenticated completion received from model: $MODEL"
+
   verify:
     runs-on: ubuntu-latest
     env:
