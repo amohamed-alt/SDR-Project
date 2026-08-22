@@ -6,6 +6,7 @@ import {
   LoaderCircle, Mail, MapPin, Phone, Plus, Sparkles, Target, UserRound, Users, Video, X,
 } from "lucide-react";
 import type { Drilldown } from "@/components/DrilldownDrawer";
+import { WhatsAppQuickAction } from "@/components/WhatsAppQuickAction";
 import styles from "@/components/MaritaWorkspace.module.css";
 import {
   BASSAM_OWNER_ID,
@@ -619,7 +620,7 @@ function TaskQueueItem({ row, timezone }: { row: ActivityRow; timezone: string }
 }
 
 function LeadQueueItem({ row, timezone }: { row: ContactRow; timezone: string }) {
-  return <article className="queue-item"><div className="queue-avatar">{row.name.split(" ").map((part) => part[0]).join("").slice(0,2).toUpperCase()}</div><div className="queue-item-main"><strong>{row.name}</strong><span>{row.company || "No company"} · {row.originalSource} · Added {shortDate(row.createdAt, timezone)}</span></div><span className="queue-status score-pill">{row.lastContacted ? "Follow up" : "New"}</span><div className="queue-quick-actions">{row.phone && <a href={"tel:" + row.phone} aria-label="Call"><Phone size={13}/></a>}{row.email && <a href={"mailto:" + row.email} aria-label="Email"><Mail size={13}/></a>}<HubSpotButton href={row.url} label="Lead"/></div></article>;
+  return <article className="queue-item"><div className="queue-avatar">{row.name.split(" ").map((part) => part[0]).join("").slice(0,2).toUpperCase()}</div><div className="queue-item-main"><strong>{row.name}</strong><span>{row.company || "No company"} · {row.originalSource} · Added {shortDate(row.createdAt, timezone)}</span></div><span className="queue-status score-pill">{row.lastContacted ? "Follow up" : "New"}</span><div className="queue-quick-actions">{row.phone && <a href={"tel:" + row.phone} aria-label="Call"><Phone size={13}/></a>}{row.phone && <WhatsAppQuickAction contactId={row.id}/>} {row.email && <a href={"mailto:" + row.email} aria-label="Email"><Mail size={13}/></a>}<HubSpotButton href={row.url} label="Lead"/></div></article>;
 }
 
 function MeetingQueueItem({ row, timezone }: { row: ActivityRow; timezone: string }) {
