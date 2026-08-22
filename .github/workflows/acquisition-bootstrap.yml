@@ -15,7 +15,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 55
     steps:
       - name: Validate worker credential
         env:
@@ -83,3 +83,57 @@ jobs:
             echo "::error::Acquisition recovery V2 returned unexpected status: $STATUS"
             exit 1
           fi
+
+      - name: Populate missing people for the net-new queue
+        env:
+          WORKER_KEY: ${{ secrets.SIGNALHIRE_API_KEY }}
+        run: |
+          set -euo pipefail
+          TOTAL_SELECTED=0
+          TOTAL_READY=0
+          TOTAL_PEOPLE=0
+          TOTAL_EMPTY=0
+          TOTAL_FAILED=0
+
+          # 5 x 12 covers the 61-account approved queue while skipping accounts
+          # that already have people. This uses SignalHire Search only: no Apollo
+          # requests and no SignalHire Person enrichment calls are made here.
+          for PASS in 1 2 3 4 5; do
+            OUT="/tmp/acquisition-people-scan-${PASS}.json"
+            HTTP_CODE=$(curl --silent --show-error \
+              --connect-timeout 10 \
+              --max-time 720 \
+              --output "$OUT" \
+              --write-out '%{http_code}' \
+              -X POST 'https://sdr.dashboardtalentera.tech/api/acquisition/people-scan' \
+              -H 'Content-Type: application/json' \
+              -H "x-acquisition-worker-key: $WORKER_KEY" \
+              -d '{"limit":12,"retryEmpty":false}' || true)
+
+            echo "People scan pass ${PASS} HTTP: ${HTTP_CODE:-none}"
+            jq '{status, version, selected, accountsWithPeople, peopleStored, empty, failed, costGuard}' "$OUT" || cat "$OUT"
+
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "::error::Net-new people scan pass ${PASS} failed."
+              exit 1
+            fi
+
+            SELECTED=$(jq -r '.selected // 0' "$OUT")
+            READY=$(jq -r '.accountsWithPeople // 0' "$OUT")
+            PEOPLE=$(jq -r '.peopleStored // 0' "$OUT")
+            EMPTY=$(jq -r '.empty // 0' "$OUT")
+            FAILED=$(jq -r '.failed // 0' "$OUT")
+
+            TOTAL_SELECTED=$((TOTAL_SELECTED + SELECTED))
+            TOTAL_READY=$((TOTAL_READY + READY))
+            TOTAL_PEOPLE=$((TOTAL_PEOPLE + PEOPLE))
+            TOTAL_EMPTY=$((TOTAL_EMPTY + EMPTY))
+            TOTAL_FAILED=$((TOTAL_FAILED + FAILED))
+
+            if [ "$SELECTED" -eq 0 ]; then
+              break
+            fi
+            sleep 2
+          done
+
+          echo "People scan total: selected=$TOTAL_SELECTED ready=$TOTAL_READY people=$TOTAL_PEOPLE empty=$TOTAL_EMPTY failed=$TOTAL_FAILED"
