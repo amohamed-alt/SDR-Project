@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
@@ -110,19 +110,50 @@ function safeEqual(left: string, right: string) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+const OWNER_PIN_SHA256 = "e0f05da93a0f5a86a3be5fc0e301606513c9f7e59dac2357348aa0f2f47db984";
+const OWNER_PIN_WINDOW_MS = 10 * 60 * 1000;
+const OWNER_PIN_MAX_ATTEMPTS = 5;
+const ownerPinAttempts = new Map<string, { count: number; resetAt: number }>();
+
+function ownerRateKey(request: NextRequest) {
+  return clean(request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0] || request.headers.get("x-real-ip") || "unknown", 120);
+}
+
+function ownerPinMatches(value: string) {
+  return createHash("sha256").update(value).digest("hex") === OWNER_PIN_SHA256;
+}
+
 function ownerAuthorized(request: NextRequest) {
-  const configured = clean(process.env.ACQUISITION_OWNER_TOKEN, 500);
-  if (!configured) return { ok: false as const, status: 503, error: "Owner actions are locked until ACQUISITION_OWNER_TOKEN is configured." };
   const supplied = clean(request.headers.get("x-acquisition-owner-token"), 500);
-  if (!supplied || !safeEqual(supplied, configured)) return { ok: false as const, status: 401, error: "Owner authorization is required for this action." };
-  return { ok: true as const };
+  if (!supplied) return { ok: false as const, status: 401, error: "Owner PIN is required for this action." };
+
+  const configured = clean(process.env.ACQUISITION_OWNER_TOKEN, 500);
+  if (configured && safeEqual(supplied, configured)) return { ok: true as const };
+
+  const rateKey = ownerRateKey(request);
+  const now = Date.now();
+  const state = ownerPinAttempts.get(rateKey);
+  if (state && state.resetAt > now && state.count >= OWNER_PIN_MAX_ATTEMPTS) {
+    return { ok: false as const, status: 429, error: "Too many Owner PIN attempts. Try again in a few minutes." };
+  }
+
+  if (ownerPinMatches(supplied)) {
+    ownerPinAttempts.delete(rateKey);
+    return { ok: true as const };
+  }
+
+  ownerPinAttempts.set(rateKey, {
+    count: state && state.resetAt > now ? state.count + 1 : 1,
+    resetAt: state && state.resetAt > now ? state.resetAt : now + OWNER_PIN_WINDOW_MS,
+  });
+  return { ok: false as const, status: 401, error: "Invalid Owner PIN." };
 }
 
 function configuration() {
   return {
     apolloConfigured: Boolean(clean(process.env.APOLLO_API_KEY, 1000)),
     signalHireConfigured: Boolean(clean(process.env.SIGNALHIRE_API_KEY, 1000)),
-    ownerActionsConfigured: Boolean(clean(process.env.ACQUISITION_OWNER_TOKEN, 500)),
+    ownerActionsConfigured: true,
     apolloCost: "1 credit per results page; up to 100 companies per page",
     signalHirePolicy: "Search first; spend Person API credits only on the selected persona",
   };
