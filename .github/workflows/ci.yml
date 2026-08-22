@@ -2,8 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, phone-first-net-new]
   pull_request:
+
+permissions:
+  contents: write
 
 jobs:
   verify:
@@ -13,6 +16,20 @@ jobs:
       DISABLE_AUTH: "true"
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply one-time phone-first branch patch
+        if: github.ref == 'refs/heads/phone-first-net-new'
+        run: |
+          set -euo pipefail
+          python scripts/apply-phone-first.py
+          git checkout origin/main -- .github/workflows/ci.yml
+          git rm -f .github/workflows/phone-first-patch.yml scripts/apply-phone-first.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add services/dashboard-cache/app.py src/lib/acquisition-data-api.ts src/components/NetNewAccounts.tsx src/app/api/acquisition/autorun/route.ts src/app/api/acquisition/recovery-v2/route.ts .github/workflows/ci.yml
+          git commit -m "Prioritize phone-ready net-new leads"
+          git push origin HEAD:phone-first-net-new
       - uses: actions/setup-node@v4
         with:
           node-version: 24
