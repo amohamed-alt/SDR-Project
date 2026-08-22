@@ -36,6 +36,7 @@ try {
     invalidCountryBatchResponse,
     emptyCountryBatchResponse,
     usageResponse,
+    acquisitionOwnerGateResponse,
     pageResponse,
     maritaCallsPageResponse,
   ] = await Promise.all([
@@ -71,6 +72,11 @@ try {
       body: JSON.stringify({ tasks: [] }),
     }),
     fetch(`http://127.0.0.1:${port}/api/usage`),
+    fetch(`http://127.0.0.1:${port}/api/acquisition`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "discover", pages: 1, confirmCredits: true }),
+    }),
     fetch(`http://127.0.0.1:${port}/`),
     fetch(`http://127.0.0.1:${port}/marita-calls`),
   ]);
@@ -84,6 +90,7 @@ try {
   const invalidCountryBatch = await invalidCountryBatchResponse.json();
   const emptyCountryBatch = await emptyCountryBatchResponse.json();
   const usage = await usageResponse.json();
+  const acquisitionOwnerGate = await acquisitionOwnerGateResponse.json();
   const page = await pageResponse.text();
   const maritaCallsPage = await maritaCallsPageResponse.text();
   if (health.status !== "ok") throw new Error("Health response is invalid");
@@ -102,9 +109,10 @@ try {
   if (invalidCountryBatchResponse.status !== 400 || typeof invalidCountryBatch.details !== "string") throw new Error("Task country batch validation is invalid");
   if (!Array.isArray(emptyCountryBatch.tasks) || emptyCountryBatch.tasks.length !== 0) throw new Error("Incremental task country payload is invalid");
   if (usage.tracking !== false || !Array.isArray(usage.users) || !Array.isArray(usage.topFeatures)) throw new Error("Usage analytics smoke fallback is invalid");
+  if (acquisitionOwnerGateResponse.status !== 503 || acquisitionOwnerGate.ownerSetupRequired !== true) throw new Error("Net-new acquisition owner gate is not fail-closed when the owner secret is missing");
   if (!page.includes("SDR Command Center") || !page.includes("Inbound vs Outbound") || !page.includes("SDR Tools")) throw new Error("Dashboard analytics entries or compact tools launcher are missing");
   if (!maritaCallsPage.includes("Maqsam Call Intelligence")) throw new Error("Marita calls page is missing");
-  console.log("Smoke tests passed: dashboard snapshots/cache health, Dashboard V2 usage endpoint, compact SDR tools launcher, Marita calls route, Maqsam API, separate organizer status, inbound/outbound entry, task-country caching, WhatsApp data, and protected routes are operational.");
+  console.log("Smoke tests passed: dashboard snapshots/cache health, Dashboard V2 usage endpoint, acquisition owner gate, compact SDR tools launcher, Marita calls route, Maqsam API, separate organizer status, inbound/outbound entry, task-country caching, WhatsApp data, and protected routes are operational.");
 } finally {
   server.kill("SIGTERM");
 }
