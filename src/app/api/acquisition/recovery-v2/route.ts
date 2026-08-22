@@ -288,6 +288,10 @@ function hasReachable(person: AcquisitionPerson) {
   return person.enrichmentStatus === "enriched" && Boolean(person.emails.length || person.phones.length);
 }
 
+function contactPriority(person: AcquisitionPerson) {
+  return (person.phones.length ? 1000 : 0) + (person.emails.length ? 100 : 0) + person.rankScore;
+}
+
 async function stillNetNew(account: AcquisitionAccount) {
   const matches = await searchAll("companies", ["name", "domain", "hubspot_owner_id"], [
     { propertyName: "domain", operator: "EQ", value: account.domain },
@@ -322,8 +326,9 @@ async function openTaskCounts() {
 function accountPriority(account: AcquisitionAccount) {
   const recoveryIndex = RECOVERY_DOMAINS.indexOf(account.domain as typeof RECOVERY_DOMAINS[number]);
   const recoveryBoost = recoveryIndex >= 0 ? 2000 - recoveryIndex * 100 : 0;
+  const phoneBoost = Number(account.phoneReadyCount || 0) > 0 ? 1200 : 0;
   const tier = account.gtmTier === "A" ? 400 : account.gtmTier === "B" ? 300 : account.gtmTier === "C" ? 200 : 100;
-  return recoveryBoost + tier + account.gtmScore * 2 + Math.max(-20, Math.min(40, account.headcountGrowth));
+  return recoveryBoost + phoneBoost + tier + account.gtmScore * 2 + Math.max(-20, Math.min(40, account.headcountGrowth));
 }
 
 async function pushPerson(
@@ -374,7 +379,7 @@ async function pushPerson(
       phone: person.phones[0] || "",
       phones: person.phones,
       score: account.gtmScore,
-      priority: account.gtmTier === "A" ? "high" : account.gtmTier === "B" ? "medium" : "normal",
+      priority: person.phones.length ? "high" : account.gtmTier === "A" ? "high" : account.gtmTier === "B" ? "medium" : "normal",
       previousTitle: "",
       previousCompany: "",
       recentSignal: { type: "", label: account.strongestSignal },
@@ -423,11 +428,11 @@ export async function POST(request: NextRequest) {
         }
 
         let people = (await listAcquisitionPeople(account.domain)).people;
-        let reachable = people.filter(hasReachable).sort((a, b) => b.rankScore - a.rankScore)[0];
+        let reachable = people.filter(hasReachable).sort((a, b) => contactPriority(b) - contactPriority(a))[0];
         if (!reachable && people.filter((person) => person.enrichmentStatus === "search_only").length < 2) {
           await discoverPeople(account, apiKey);
           people = (await listAcquisitionPeople(account.domain)).people;
-          reachable = people.filter(hasReachable).sort((a, b) => b.rankScore - a.rankScore)[0];
+          reachable = people.filter(hasReachable).sort((a, b) => contactPriority(b) - contactPriority(a))[0];
         }
 
         if (!reachable) {
@@ -451,6 +456,7 @@ export async function POST(request: NextRequest) {
         outcomes.push({
           domain: account.domain,
           account: account.name,
+          channel: reachable.phones.length ? "phone" : "email",
           status: pushed.result.duplicate ? "duplicate_task" : "pushed",
           ownerId: pushed.owner.id,
           ownerName: pushed.owner.name,

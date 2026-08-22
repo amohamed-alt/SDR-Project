@@ -686,18 +686,25 @@ def acquisition_accounts(
             SELECT a.*,
                    COALESCE(p.people_count, 0) AS people_count,
                    COALESCE(p.enriched_count, 0) AS enriched_count,
+                   COALESCE(p.phone_ready_count, 0) AS phone_ready_count,
                    COALESCE(push.push_count, 0) AS push_count
             FROM acquisition_accounts a
             LEFT JOIN LATERAL (
                 SELECT COUNT(*) AS people_count,
-                       COUNT(*) FILTER (WHERE enrichment_status = 'enriched') AS enriched_count
+                       COUNT(*) FILTER (WHERE enrichment_status = 'enriched') AS enriched_count,
+                       COUNT(*) FILTER (
+                           WHERE enrichment_status = 'enriched'
+                             AND jsonb_array_length(phones) > 0
+                       ) AS phone_ready_count
                 FROM acquisition_people ap WHERE ap.account_domain = a.domain
             ) p ON TRUE
             LEFT JOIN LATERAL (
                 SELECT COUNT(*) AS push_count FROM acquisition_pushes x WHERE x.account_domain = a.domain
             ) push ON TRUE
             {where}
-            ORDER BY a.gtm_score DESC, a.intent_score DESC, a.active_jobs DESC, a.name ASC
+            ORDER BY
+                CASE WHEN COALESCE(p.phone_ready_count, 0) > 0 THEN 1 ELSE 0 END DESC,
+                a.gtm_score DESC, a.intent_score DESC, a.active_jobs DESC, a.name ASC
             LIMIT %s
             """,
             (*params, limit),
@@ -708,6 +715,12 @@ def acquisition_accounts(
                 COUNT(*) FILTER (WHERE exclusion_status='eligible') AS eligible,
                 COUNT(*) FILTER (WHERE exclusion_status='eligible' AND gtm_tier='A') AS tier_a,
                 COUNT(*) FILTER (WHERE exclusion_status='eligible' AND status IN ('people_ready','enriched')) AS people_ready,
+                (SELECT COUNT(DISTINCT ap.account_domain)
+                   FROM acquisition_people ap
+                   JOIN acquisition_accounts aa ON aa.domain = ap.account_domain
+                  WHERE aa.exclusion_status='eligible'
+                    AND ap.enrichment_status='enriched'
+                    AND jsonb_array_length(ap.phones) > 0) AS phone_ready,
                 COUNT(*) FILTER (WHERE exclusion_status='eligible' AND status='enriched') AS enriched,
                 COUNT(*) FILTER (WHERE status='pushed') AS pushed,
                 COUNT(*) FILTER (WHERE exclusion_status<>'eligible') AS excluded
@@ -730,7 +743,8 @@ def acquisition_accounts(
             "strongestSignal": row["strongest_signal"], "recommendedAngle": row["recommended_angle"],
             "assignedOwnerId": row["assigned_owner_id"], "assignedOwnerName": row["assigned_owner_name"],
             "evidence": row.get("evidence") or {}, "peopleCount": int(row.get("people_count") or 0),
-            "enrichedCount": int(row.get("enriched_count") or 0), "pushCount": int(row.get("push_count") or 0),
+            "enrichedCount": int(row.get("enriched_count") or 0),
+            "phoneReadyCount": int(row.get("phone_ready_count") or 0), "pushCount": int(row.get("push_count") or 0),
             "createdAt": iso(row["created_at"]), "updatedAt": iso(row["updated_at"]),
         }
 

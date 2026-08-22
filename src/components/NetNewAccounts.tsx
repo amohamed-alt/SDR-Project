@@ -41,6 +41,7 @@ type Account = {
   evidence: Record<string, unknown>;
   peopleCount: number;
   enrichedCount: number;
+  phoneReadyCount: number;
   pushCount: number;
 };
 
@@ -96,7 +97,8 @@ function track(feature: string, meta: Record<string, unknown> = {}) {
 
 function statusLabel(account: Account) {
   if (account.status === "pushed") return "In HubSpot";
-  if (account.status === "enriched") return "Contact ready";
+  if (account.phoneReadyCount > 0) return "Phone ready";
+  if (account.status === "enriched") return "Email ready";
   if (account.status === "people_ready") return "People found";
   if (account.exclusionStatus === "review") return "Review";
   return "Qualified";
@@ -172,6 +174,10 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
       if (!query) return true;
       return [account.name, account.domain, account.industry, account.detectedAts, account.primaryPersona, account.strongestSignal]
         .join(" ").toLowerCase().includes(query);
+    }).sort((a, b) => {
+      const phoneDelta = Number(b.phoneReadyCount > 0) - Number(a.phoneReadyCount > 0);
+      if (phoneDelta) return phoneDelta;
+      return b.gtmScore - a.gtmScore || b.intentScore - a.intentScore || b.activeJobs - a.activeJobs || a.name.localeCompare(b.name);
     });
   }, [country, payload, search, tier]);
 
@@ -179,7 +185,13 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
     const response = await fetch(`/api/acquisition?domain=${encodeURIComponent(domain)}`, { cache: "no-store" });
     const data = await response.json() as { people?: Person[]; error?: string };
     if (!response.ok) throw new Error(data.error || "Unable to load people.");
-    setPeople(data.people || []);
+    setPeople([...(data.people || [])].sort((a, b) => {
+      const phoneDelta = Number(b.phones.length > 0) - Number(a.phones.length > 0);
+      if (phoneDelta) return phoneDelta;
+      const emailDelta = Number(b.emails.length > 0) - Number(a.emails.length > 0);
+      if (emailDelta) return emailDelta;
+      return b.rankScore - a.rankScore;
+    }));
   }
 
   async function openAccount(account: Account) {
@@ -315,7 +327,7 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
           phone: first(person.phones) || "",
           phones: person.phones,
           score: selected.gtmScore,
-          priority: selected.gtmTier === "A" ? "high" : selected.gtmTier === "B" ? "medium" : "normal",
+          priority: person.phones.length ? "high" : selected.gtmTier === "A" ? "high" : selected.gtmTier === "B" ? "medium" : "normal",
           previousTitle: "",
           previousCompany: "",
           recentSignal: { type: "", label: selected.strongestSignal },
@@ -323,6 +335,7 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
             { label: `GTM Tier ${selected.gtmTier}`, points: Math.min(100, selected.gtmScore) },
             { label: "Intent score", points: Math.min(100, selected.intentScore) },
             { label: "Persona match", points: Math.min(100, person.rankScore) },
+            { label: person.phones.length ? "Verified phone available" : "Email-only contact", points: person.phones.length ? 100 : 30 },
           ],
         }),
       });
@@ -359,7 +372,7 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
     <section className={styles.heroStrip}>
       <div><ShieldCheck size={17}/><span><strong>Hard exclusions</strong> Government · semi-government · ATS/HRTech competitors · existing HubSpot companies</span></div>
       <div><Target size={17}/><span><strong>Core ICP</strong> KSA + UAE · 201–2,000 employees · 5+ active jobs</span></div>
-      <div><Coins size={17}/><span><strong>Cost control</strong> Search people first; enrich only the selected persona</span></div>
+      <div><Coins size={17}/><span><strong>Phone-first</strong> Verified phone leads are routed and pushed before email-only contacts</span></div>
     </section>
 
     {error ? <div className={styles.error}><CircleAlert size={18}/><span>{error}</span><button onClick={() => setError("")}><X size={14}/></button></div> : null}
@@ -369,7 +382,7 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
       <div><span>Eligible</span><strong>{number(summary.eligible || 0)}</strong><small>Net-new after exclusions</small></div>
       <div className={styles.metricHot}><span>Tier A</span><strong>{number(summary.tier_a || 0)}</strong><small>Highest priority</small></div>
       <div><span>People ready</span><strong>{number(summary.people_ready || 0)}</strong><small>Persona search completed</small></div>
-      <div><span>Enriched</span><strong>{number(summary.enriched || 0)}</strong><small>Email / phone available</small></div>
+      <div className={styles.metricHot}><span>Phone ready</span><strong>{number(summary.phone_ready || 0)}</strong><small>Verified phone available</small></div>
       <div><span>Pushed</span><strong>{number(summary.pushed || 0)}</strong><small>Company + contact + task</small></div>
       <div><span>Excluded</span><strong>{number(summary.excluded || 0)}</strong><small>Kept out of SDR queue</small></div>
     </section>
@@ -460,7 +473,7 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
             {people.map((person, index) => <div className={`${styles.personCard} ${person.enrichmentStatus === "enriched" ? styles.personEnriched : ""}`} key={person.uid}>
               <div className={styles.personRank}>{index + 1}</div>
               <div className={styles.personMain}>
-                <div><strong>{person.fullName}</strong>{person.enrichmentStatus === "enriched" ? <span className={styles.verified}><BadgeCheck size={12}/> Enriched</span> : null}</div>
+                <div><strong>{person.fullName}</strong>{person.enrichmentStatus === "enriched" ? <span className={styles.verified}>{person.phones.length ? <Phone size={12}/> : <BadgeCheck size={12}/>} {person.phones.length ? "Phone ready" : "Email ready"}</span> : null}</div>
                 <p>{person.title || "Role unavailable"}</p>
                 <small>{person.currentCompany || "Company pending"}{person.location ? ` · ${person.location}` : ""}</small>
                 <em>{person.fitReason}</em>

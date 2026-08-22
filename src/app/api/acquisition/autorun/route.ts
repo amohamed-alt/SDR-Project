@@ -63,12 +63,17 @@ function first<T>(values: T[] | undefined) {
 }
 
 function accountPriority(account: AcquisitionAccount) {
+  const phoneBoost = Number(account.phoneReadyCount || 0) > 0 ? 1200 : 0;
   const tier = account.gtmTier === "A" ? 400 : account.gtmTier === "B" ? 300 : account.gtmTier === "C" ? 200 : 100;
-  return tier + account.gtmScore * 2 + Math.max(-20, Math.min(40, account.headcountGrowth));
+  return phoneBoost + tier + account.gtmScore * 2 + Math.max(-20, Math.min(40, account.headcountGrowth));
 }
 
 function hasReachableContact(person: AcquisitionPerson) {
   return person.enrichmentStatus === "enriched" && Boolean(person.emails.length || person.phones.length);
+}
+
+function contactPriority(person: AcquisitionPerson) {
+  return (person.phones.length ? 1000 : 0) + (person.emails.length ? 100 : 0) + person.rankScore;
 }
 
 async function latestAccount(domain: string) {
@@ -128,7 +133,7 @@ async function pushBestPerson(
       phone: first(person.phones) || "",
       phones: person.phones,
       score: current.gtmScore,
-      priority: current.gtmTier === "A" ? "high" : current.gtmTier === "B" ? "medium" : "normal",
+      priority: person.phones.length ? "high" : current.gtmTier === "A" ? "high" : current.gtmTier === "B" ? "medium" : "normal",
       previousTitle: "",
       previousCompany: "",
       recentSignal: { type: "", label: current.strongestSignal },
@@ -175,7 +180,7 @@ export async function POST(request: NextRequest) {
           people = (await listAcquisitionPeople(account.domain)).people;
         }
 
-        const ranked = [...people].sort((a, b) => b.rankScore - a.rankScore);
+        const ranked = [...people].sort((a, b) => contactPriority(b) - contactPriority(a));
         let person = ranked.find(hasReachableContact) || ranked[0];
         if (!person) {
           outcomes.push({ domain: account.domain, status: "no_person_found" });
@@ -186,7 +191,7 @@ export async function POST(request: NextRequest) {
           // One paid SignalHire Person API attempt per account per autorun keeps the batch cost bounded.
           await acquisitionAction(origin, ownerKey, { action: "enrich_person", domain: account.domain, uid: person.uid });
           const refreshed = (await listAcquisitionPeople(account.domain)).people;
-          person = refreshed.find((item) => item.uid === person?.uid) || refreshed.sort((a, b) => b.rankScore - a.rankScore)[0];
+          person = refreshed.find((item) => item.uid === person?.uid) || refreshed.sort((a, b) => contactPriority(b) - contactPriority(a))[0];
         }
 
         if (!person || !hasReachableContact(person)) {
@@ -200,6 +205,7 @@ export async function POST(request: NextRequest) {
           account: account.name,
           person: person.fullName,
           title: person.title,
+          channel: person.phones.length ? "phone" : "email",
           status: pushed.result.duplicate ? "duplicate_task" : "pushed",
           ownerId: pushed.assignment.ownerId,
           ownerName: pushed.assignment.ownerName,
