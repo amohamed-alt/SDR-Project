@@ -159,12 +159,55 @@ jobs:
       - name: Verify exact deployed build, Career ATS V3, Dashboard V2, AI gateway, and acquisition data health
         run: |
           set -euo pipefail
+          HOST='sdr.dashboardtalentera.tech'
+
+          # Phase 1: use the cheap shallow endpoint to wait for the exact build.
+          # This avoids repeatedly running deep internal checks while the VPS/Traefik
+          # is still converging after a Docker Compose replacement.
+          APP_UP=false
+          for ATTEMPT in $(seq 1 22); do
+            BODY=$(curl --silent --show-error \
+              --connect-timeout 4 \
+              --max-time 8 \
+              "https://${HOST}/api/health" || true)
+
+            BUILD_REF=$(printf '%s' "$BODY" | jq -r '.buildRef // ""' 2>/dev/null || true)
+            GENERATION=$(printf '%s' "$BODY" | jq -r '.careerGeneration // ""' 2>/dev/null || true)
+            RESOLVED_IP=$(getent ahostsv4 "$HOST" | awk 'NR==1{print $1}' || true)
+
+            echo "Shallow production gate ${ATTEMPT}/22: ip=${RESOLVED_IP:-unresolved} build=${BUILD_REF:-none} generation=${GENERATION:-none}"
+
+            if [ "$BUILD_REF" = "$DEPLOY_SHA" ] && [ "$GENERATION" = "v3" ]; then
+              APP_UP=true
+              break
+            fi
+
+            if [ "$ATTEMPT" -lt 22 ]; then
+              if [ "$ATTEMPT" -le 5 ]; then
+                WAIT_SECONDS=15
+              elif [ "$ATTEMPT" -le 10 ]; then
+                WAIT_SECONDS=30
+              else
+                WAIT_SECONDS=60
+              fi
+              echo "Production is not on the exact build yet; waiting ${WAIT_SECONDS}s before retry."
+              sleep "$WAIT_SECONDS"
+            fi
+          done
+
+          if [ "$APP_UP" != "true" ]; then
+            echo "::error::Production never exposed the exact commit $DEPLOY_SHA on the shallow health endpoint within the bounded deployment window."
+            exit 1
+          fi
+
+          # Phase 2: once the app is reachable on the exact build, perform the
+          # expensive deep readiness check only a small bounded number of times.
           READY=false
-          for ATTEMPT in $(seq 1 120); do
+          for ATTEMPT in $(seq 1 6); do
             BODY=$(curl --silent --show-error \
               --connect-timeout 5 \
-              --max-time 15 \
-              'https://sdr.dashboardtalentera.tech/api/health?deep=1' || true)
+              --max-time 12 \
+              "https://${HOST}/api/health?deep=1" || true)
 
             BUILD_REF=$(printf '%s' "$BODY" | jq -r '.buildRef // ""' 2>/dev/null || true)
             GENERATION=$(printf '%s' "$BODY" | jq -r '.careerGeneration // ""' 2>/dev/null || true)
@@ -174,7 +217,7 @@ jobs:
             STORED=$(printf '%s' "$BODY" | jq -r '.careerValidationProgress.stored // 0' 2>/dev/null || true)
             HAS_ATS_CAPABILITY=$(printf '%s' "$BODY" | jq -r '(.careerEngineCapabilities // []) | index("ats-detect") != null' 2>/dev/null || true)
 
-            echo "Production gate ${ATTEMPT}/120: build=${BUILD_REF:-none} generation=${GENERATION:-none} engine=${ENGINE_VERSION:-none} ats_capability=${HAS_ATS_CAPABILITY:-false} ready=${IS_READY:-false} validation=${VALIDATION_STATE:-unknown} stored=${STORED:-0}"
+            echo "Deep production gate ${ATTEMPT}/6: build=${BUILD_REF:-none} generation=${GENERATION:-none} engine=${ENGINE_VERSION:-none} ats_capability=${HAS_ATS_CAPABILITY:-false} ready=${IS_READY:-false} validation=${VALIDATION_STATE:-unknown} stored=${STORED:-0}"
 
             if [ "$BUILD_REF" = "$DEPLOY_SHA" ] \
               && [ "$GENERATION" = "v3" ] \
@@ -184,11 +227,12 @@ jobs:
               READY=true
               break
             fi
-            sleep 10
+
+            if [ "$ATTEMPT" -lt 6 ]; then sleep 20; fi
           done
 
           if [ "$READY" != "true" ]; then
-            echo "::error::Production never exposed the exact commit $DEPLOY_SHA with ready Career + ATS Intelligence V3 within the bounded deployment window."
+            echo "::error::Exact build is reachable, but Career + ATS Intelligence V3 never became deep-ready."
             exit 1
           fi
 
@@ -197,7 +241,7 @@ jobs:
             --max-time 15 \
             --output /tmp/usage.json \
             --write-out '%{http_code}' \
-            'https://sdr.dashboardtalentera.tech/api/usage' || true)
+            "https://${HOST}/api/usage" || true)
           TRACKING=$(jq -r '.tracking // false' /tmp/usage.json 2>/dev/null || echo false)
           DATABASE=$(jq -r '.database // "unknown"' /tmp/usage.json 2>/dev/null || echo unknown)
 
@@ -216,7 +260,7 @@ jobs:
             --max-time 20 \
             --output /tmp/acquisition.json \
             --write-out '%{http_code}' \
-            'https://sdr.dashboardtalentera.tech/api/acquisition?limit=1' || true)
+            "https://${HOST}/api/acquisition?limit=1" || true)
           ACQ_DB=$(jq -r '.database // "unknown"' /tmp/acquisition.json 2>/dev/null || echo unknown)
           SIGNALHIRE_READY=$(jq -r '.configuration.signalHireConfigured // false' /tmp/acquisition.json 2>/dev/null || echo false)
           APOLLO_READY=$(jq -r '.configuration.apolloConfigured // false' /tmp/acquisition.json 2>/dev/null || echo false)
@@ -234,7 +278,7 @@ jobs:
             --max-time 15 \
             --output /tmp/openrouter-health.json \
             --write-out '%{http_code}' \
-            'https://sdr.dashboardtalentera.tech/api/ai/account-brief' || true)
+            "https://${HOST}/api/ai/account-brief" || true)
           AI_CONFIGURED=$(jq -r '.configured // false' /tmp/openrouter-health.json 2>/dev/null || echo false)
           AI_FAST_MODEL=$(jq -r '.fastModel // ""' /tmp/openrouter-health.json 2>/dev/null || true)
           AI_POLICY=$(jq -r '.policy // ""' /tmp/openrouter-health.json 2>/dev/null || true)
