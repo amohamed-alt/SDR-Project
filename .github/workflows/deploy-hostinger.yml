@@ -64,6 +64,22 @@ jobs:
           }
           echo "SignalHire deployment secret: configured"
 
+      - name: Report net-new acquisition configuration
+        env:
+          APOLLO_KEY: ${{ secrets.APOLLO_API_KEY }}
+          OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN }}
+        run: |
+          if [ -n "$APOLLO_KEY" ]; then
+            echo "Apollo net-new discovery: configured"
+          else
+            echo "::warning::APOLLO_API_KEY is not configured yet; Net-New Accounts will deploy read-only with Apollo discovery disabled."
+          fi
+          if [ -n "$OWNER_TOKEN" ]; then
+            echo "Acquisition Owner actions: configured"
+          else
+            echo "::warning::ACQUISITION_OWNER_TOKEN is not configured yet; enrichment and HubSpot write controls will stay locked."
+          fi
+
       - name: Validate Tavily career fallback
         env:
           TAVILY_KEY: ${{ secrets.TAVILY_API_KEY }}
@@ -133,11 +149,14 @@ jobs:
             SDR_BUILD_REF=${{ env.DEPLOY_SHA }}
             SIGNALHIRE_API_KEY=${{ secrets.SIGNALHIRE_API_KEY }}
             TAVILY_API_KEY=${{ secrets.TAVILY_API_KEY }}
+            APOLLO_API_KEY=${{ secrets.APOLLO_API_KEY }}
+            ACQUISITION_OWNER_TOKEN=${{ secrets.ACQUISITION_OWNER_TOKEN }}
+            ACQUISITION_OWNER_IDS=31644369,76369997,31558980,76370000,76369995,76369998
             OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY || secrets.GTM_RESEARCH_OPENROUTER_API_KEY }}
             OPENROUTER_FAST_MODEL=openai/gpt-4.1-nano
             OPENROUTER_DEEP_MODEL=openai/gpt-4.1-mini
 
-      - name: Verify exact deployed build, Career ATS V3, Dashboard V2, and AI gateway health
+      - name: Verify exact deployed build, Career ATS V3, Dashboard V2, AI gateway, and acquisition data health
         run: |
           set -euo pipefail
           READY=false
@@ -192,6 +211,24 @@ jobs:
             exit 1
           fi
 
+          ACQ_CODE=$(curl --silent --show-error \
+            --connect-timeout 5 \
+            --max-time 20 \
+            --output /tmp/acquisition.json \
+            --write-out '%{http_code}' \
+            'https://sdr.dashboardtalentera.tech/api/acquisition?limit=1' || true)
+          ACQ_DB=$(jq -r '.database // "unknown"' /tmp/acquisition.json 2>/dev/null || echo unknown)
+          SIGNALHIRE_READY=$(jq -r '.configuration.signalHireConfigured // false' /tmp/acquisition.json 2>/dev/null || echo false)
+          APOLLO_READY=$(jq -r '.configuration.apolloConfigured // false' /tmp/acquisition.json 2>/dev/null || echo false)
+          OWNER_READY=$(jq -r '.configuration.ownerActionsConfigured // false' /tmp/acquisition.json 2>/dev/null || echo false)
+
+          echo "Net-New acquisition gate: http=${ACQ_CODE:-none} db=${ACQ_DB:-unknown} signalhire=${SIGNALHIRE_READY:-false} apollo=${APOLLO_READY:-false} owner_gate=${OWNER_READY:-false}"
+          if [ "$ACQ_CODE" != "200" ] || [ "$ACQ_DB" != "postgresql" ] || [ "$SIGNALHIRE_READY" != "true" ]; then
+            echo "::error::Net-New acquisition queue / SignalHire foundation is not production-ready."
+            cat /tmp/acquisition.json || true
+            exit 1
+          fi
+
           AI_CODE=$(curl --silent --show-error \
             --connect-timeout 5 \
             --max-time 15 \
@@ -226,7 +263,7 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'success',
               context: 'hostinger/deploy',
-              description: 'Exact SDR build, Career ATS V3, Dashboard V2, and low-cost OpenRouter are live',
+              description: 'SDR V2, acquisition, Career ATS, and low-cost AI are live',
               target_url: process.env.DEPLOY_URL,
             });
 
@@ -243,6 +280,6 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'failure',
               context: 'hostinger/deploy',
-              description: 'SDR production build/version/Tavily/Dashboard V2/OpenRouter gate failed',
+              description: 'SDR production acquisition/build health gate failed',
               target_url: process.env.DEPLOY_URL,
             });
