@@ -41,6 +41,31 @@ function ownerAuthorized(request: NextRequest) {
   return { ok: true as const };
 }
 
+function lightweightHealthPayload() {
+  return {
+    generatedAt: new Date().toISOString(),
+    buildRef: clean(process.env.SDR_BUILD_REF) || "unknown",
+    configuration: {
+      apiConfigured: Boolean(clean(process.env.SMARTLEAD_API_KEY)),
+      openRouterConfigured: Boolean(clean(process.env.OPENROUTER_API_KEY)),
+      ownerActionsConfigured: Boolean(clean(process.env.ACQUISITION_OWNER_TOKEN)),
+      maritaOwnerId: "31644369",
+      globalDailyNewTarget: Number(process.env.SMARTLEAD_DAILY_NEW_LEADS || 75),
+      minTimeBetweenEmails: Math.max(15, Number(process.env.SMARTLEAD_MIN_TIME_BETWEEN_EMAILS || 15) || 15),
+      maxCampaignEmailsPerMailbox: 20,
+      autopilotEnabled: process.env.SMARTLEAD_AUTOPILOT_ENABLED !== "false",
+    },
+    safety: {
+      healthy: false,
+      recentSalesActivities: 0,
+      blockedContacts: 0,
+      blockedCompanies: 0,
+      warnings: ["Lightweight runtime health only; live Sales safety is evaluated by the full command center and again before every automatic queue."],
+    },
+    healthOnly: true,
+  };
+}
+
 function degradedPayload(error: unknown) {
   const details = error instanceof Error ? error.message : "Unknown refresh error";
   const emptySequence = { subject1: "", touch1: "", subject2: "", touch2: "", subject3: "", touch3: "" };
@@ -106,6 +131,14 @@ function degradedPayload(error: unknown) {
 }
 
 export async function GET(request: NextRequest) {
+  const browserRequest = Boolean(request.headers.get("sec-fetch-site"));
+  const fullRequested = request.nextUrl.searchParams.get("view") === "full" || browserRequest;
+  if (!fullRequested) {
+    return NextResponse.json(lightweightHealthPayload(), {
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
+
   try {
     const payload = await getSmartleadV2(request.nextUrl.searchParams.get("refresh") === "1");
     return NextResponse.json(payload, { headers: { "Cache-Control": "private, max-age=0, must-revalidate, stale-while-revalidate=30" } });
