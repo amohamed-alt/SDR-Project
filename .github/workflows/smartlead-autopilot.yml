@@ -46,6 +46,29 @@ jobs:
             exit 1
           }
 
+      - name: Validate MillionVerifier without spending a verification credit
+        env:
+          MILLIONVERIFIER_API_KEY: ${{ secrets.MILLIONVERIFIER_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$MILLIONVERIFIER_API_KEY" || {
+            echo "::error::MILLIONVERIFIER_API_KEY repository secret is required."
+            exit 1
+          }
+          HTTP_CODE=$(curl --silent --show-error \
+            --connect-timeout 10 \
+            --max-time 30 \
+            --output /tmp/millionverifier-credits.json \
+            --write-out '%{http_code}' \
+            "https://api.millionverifier.com/api/v3/credits?api=${MILLIONVERIFIER_API_KEY}" || true)
+          CREDITS=$(jq -r '.credits // empty' /tmp/millionverifier-credits.json 2>/dev/null || true)
+          if [ "$HTTP_CODE" != "200" ] || ! [[ "$CREDITS" =~ ^[0-9]+$ ]]; then
+            ERROR=$(jq -r '.error // .message // "unknown MillionVerifier error"' /tmp/millionverifier-credits.json 2>/dev/null || true)
+            echo "::error::MillionVerifier validation failed (HTTP $HTTP_CODE): $ERROR"
+            exit 1
+          fi
+          echo "MillionVerifier API: configured and responding; verification balance is available."
+
       - name: Resolve safe execution mode
         id: mode
         env:
@@ -65,6 +88,7 @@ jobs:
       - name: Sync Smartlead campaigns or run daily batch
         env:
           SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
+          MILLIONVERIFIER_API_KEY: ${{ secrets.MILLIONVERIFIER_API_KEY }}
           MODE: ${{ steps.mode.outputs.mode }}
         run: |
           set -euo pipefail
@@ -75,10 +99,11 @@ jobs:
             --write-out '%{http_code}' \
             -X POST 'https://sdr.dashboardtalentera.tech/api/smartlead/orchestrator-compat' \
             -H "Authorization: Bearer ${SMARTLEAD_API_KEY}" \
+            -H "X-MillionVerifier-API-Key: ${MILLIONVERIFIER_API_KEY}" \
             -H 'Content-Type: application/json' \
             -d "{\"mode\":\"${MODE}\"}")
 
-          jq '{ok, mode, skipped, blocked, reason, activated, queued, campaigns, sequence, sendWindow, senders, capacity, analytics, state}' /tmp/smartlead-orchestrator.json || cat /tmp/smartlead-orchestrator.json
+          jq '{ok, mode, skipped, blocked, reason, activated, queued, campaigns, sequence, sendWindow, senders, capacity, analytics, verification, state}' /tmp/smartlead-orchestrator.json || cat /tmp/smartlead-orchestrator.json
 
           if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
             echo "::error::Smartlead orchestrator returned HTTP $HTTP_CODE."
@@ -104,7 +129,7 @@ jobs:
               context: mode === 'setup' ? 'smartlead/setup' : 'smartlead/autopilot',
               description: mode === 'setup'
                 ? 'Smartlead campaigns, sequences and sender pools synced'
-                : 'Smartlead daily safe batch processed',
+                : 'Verified Smartlead daily batch processed',
               target_url: process.env.RUN_URL,
             });
 
@@ -126,6 +151,6 @@ jobs:
               context: mode === 'setup' ? 'smartlead/setup' : 'smartlead/autopilot',
               description: mode === 'setup'
                 ? 'Smartlead setup sync failed'
-                : 'Smartlead daily safe batch failed',
+                : 'Verified Smartlead daily batch failed',
               target_url: process.env.RUN_URL,
             });
