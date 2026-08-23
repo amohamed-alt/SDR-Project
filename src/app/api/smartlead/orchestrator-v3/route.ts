@@ -12,6 +12,7 @@ import {
 } from "@/lib/recipient-language-routing";
 import { getSmartleadSalesSafetySnapshot, getSmartleadV2, type V2Lead } from "@/lib/smartlead-v2";
 import { sanitizeOutreachText } from "@/lib/smartlead-policy";
+import { checkPrimeforgeInfrastructure } from "@/lib/primeforge-health";
 import {
   VISIBLE_SEQUENCE_LANES,
   laneFor,
@@ -397,6 +398,11 @@ function leadPayload(lead: PreparedLead) {
 
 async function setupOnly() {
   const killSwitchPaused = autopilotEnabled() ? 0 : await pauseManagedCampaigns();
+  const primeforge = await checkPrimeforgeInfrastructure();
+  if (!primeforge.healthy) {
+    if (autopilotEnabled()) await pauseManagedCampaigns();
+    throw new Error(`Primeforge infrastructure is not safe: ${primeforge.warnings.join(" ")}`);
+  }
   const senders = (await listEmailAccounts()).map(parseSender).filter((item): item is Sender => Boolean(item));
   const inventory = validateApprovedSenderInventory(senders);
   if (!inventory.healthy) throw new Error(`Approved sender inventory is not safe: ${inventory.warnings.join(" ")}`);
@@ -414,6 +420,7 @@ async function setupOnly() {
     sendWindow: { timezone: "Asia/Riyadh", days: "Sunday-Thursday", hours: "09:30-16:30", minimumGapMinutes: MIN_GAP_MINUTES },
     senders: senderSync.attached,
     inventory,
+    primeforge,
     killSwitchPaused,
     capacity,
     legacyWarnings,
@@ -451,14 +458,16 @@ async function autopilot(millionVerifierApiKey = "") {
       if (analytics[lane].sent >= BOUNCE_GUARD_MIN_SENT && analytics[lane].spamRate >= SPAM_GUARD_RATE) reputationWarnings.push(`${VISIBLE_SEQUENCE_LANES[lane].label} spam complaint rate is ${(analytics[lane].spamRate * 100).toFixed(2)}% after ${analytics[lane].sent} sends (0.3% guardrail).`);
     }
     if (reputationWarnings.length) {
+      const pausedCampaigns = await pauseManagedCampaigns();
       const state: AutopilotState = { ...EMPTY_STATE, status: "blocked", riyadhDate: clock.date, startedAt, finishedAt: new Date().toISOString(), lastSuccessfulDate: previous.lastSuccessfulDate, message: "Reputation guard blocked new outreach.", warnings: reputationWarnings };
-      await writeJson(STATE_PATH, state); return { ok: true, blocked: true, state, warnings: reputationWarnings };
+      await writeJson(STATE_PATH, state); return { ok: true, blocked: true, pausedCampaigns, state, warnings: reputationWarnings };
     }
 
     let snapshot = await getSmartleadV2(true);
     if (!snapshot.safety.healthy) {
+      const pausedCampaigns = await pauseManagedCampaigns();
       const state: AutopilotState = { ...EMPTY_STATE, status: "blocked", riyadhDate: clock.date, startedAt, finishedAt: new Date().toISOString(), lastSuccessfulDate: previous.lastSuccessfulDate, message: "HubSpot Sales safety is not healthy; no lead was queued.", warnings: snapshot.safety.warnings };
-      await writeJson(STATE_PATH, state); return { ok: true, blocked: true, state, warnings: snapshot.safety.warnings };
+      await writeJson(STATE_PATH, state); return { ok: true, blocked: true, pausedCampaigns, state, warnings: snapshot.safety.warnings };
     }
     if (!snapshot.configuration.openRouterConfigured) throw new Error("OpenRouter is not configured in production.");
 
@@ -504,7 +513,8 @@ async function autopilot(millionVerifierApiKey = "") {
     await writeJson(STATE_PATH, state);
     return { ok: true, mode: "autopilot", state, capacity, analytics, verification, laneCounts, salesActivitySync, sequenceTiming: setup.sequenceTiming };
   } catch (error) {
-    const state: AutopilotState = { ...EMPTY_STATE, status: "failed", riyadhDate: clock.date, startedAt, finishedAt: new Date().toISOString(), lastSuccessfulDate: previous.lastSuccessfulDate, message: error instanceof Error ? error.message : "Unknown visible-sequence orchestrator error", warnings: ["No successful daily completion was recorded; the next morning retry may run again."] };
+    const pausedCampaigns = await pauseManagedCampaigns().catch(() => 0);
+    const state: AutopilotState = { ...EMPTY_STATE, status: "failed", riyadhDate: clock.date, startedAt, finishedAt: new Date().toISOString(), lastSuccessfulDate: previous.lastSuccessfulDate, message: error instanceof Error ? error.message : "Unknown visible-sequence orchestrator error", warnings: [`Managed campaigns paused after failure: ${pausedCampaigns}.`, "No successful daily completion was recorded; the next morning retry may run again."] };
     await writeJson(STATE_PATH, state); throw error;
   }
 }
@@ -512,6 +522,7 @@ async function autopilot(millionVerifierApiKey = "") {
 export async function GET() {
   return NextResponse.json({
     configured: Boolean(apiKey()),
+    primeforgeConfigured: Boolean(clean(process.env.PRIMEFORGE_API_KEY, 8_000)),
     autopilotEnabled: autopilotEnabled(),
     dailyNewLeadTarget: GLOBAL_NEW_LEADS_PER_DAY,
     verification: { provider: "MillionVerifier", fallback: "SignalHire", buffer: VERIFICATION_BUFFER, policy: "Only verified current or verified recovered emails may enter Smartlead." },
