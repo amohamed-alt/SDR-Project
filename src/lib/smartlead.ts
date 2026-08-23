@@ -3,13 +3,18 @@ import path from "node:path";
 import { batchRead, readAssociations, searchAll } from "@/lib/hubspot";
 import { getMaritaPriorityQueue, type MaritaPriorityCompany } from "@/lib/marita-priority";
 import { openRouterCompletion } from "@/lib/openrouter-low-cost";
+import { decideRecipientLanguage, senderBrand, type SenderBrand } from "@/lib/recipient-language-routing";
 import { SALES_REP_OWNER_IDS } from "@/lib/sales-reps";
+import {
+  calculateReputationPlan,
+  isSafeTalenteraSender,
+  reputationHealth,
+} from "@/lib/smartlead-reputation";
 import {
   calculateCoverage,
   emailStatusIsSafe,
   industryBucket,
   isValidBusinessEmail,
-  localeForCountry,
   personaBucket,
   renderOutreachTemplate,
   sanitizeOutreachText,
@@ -22,6 +27,9 @@ const MARITA_OWNER_ID = "31644369";
 const CACHE_TTL_MS = 2 * 60 * 1000;
 const PREPARED_PATH = process.env.SMARTLEAD_PREPARED_PATH || "/app/data/smartlead-prepared.json";
 const CAMPAIGN_NAME = process.env.SMARTLEAD_CAMPAIGN_NAME || "Talentera | Marita SDR | Localized 3-Touch";
+const TOUCH_COUNT = 3;
+const DEFAULT_MIN_GAP_MINUTES = 15;
+const MIN_ARABIC_LANGUAGE_CONFIDENCE = 0.95;
 
 const CONTACT_PROPERTIES = [
   "firstname", "lastname", "email", "jobtitle", "country", "gtm_email_status", "gtm_persona", "gtm_linkedin_url",
@@ -52,13 +60,17 @@ export type SmartleadSender = {
   fromName: string;
   maxPerDay: number;
   warmupEnabled: boolean;
+  warmupKnown: boolean;
   assigned: boolean;
+  brand: SenderBrand;
+  eligibleForCampaign: boolean;
 };
 
 export type SmartleadQueueLead = {
   contactId: string;
   companyId: string;
   firstName: string;
+  greetingName: string;
   lastName: string;
   fullName: string;
   email: string;
@@ -70,6 +82,9 @@ export type SmartleadQueueLead = {
   industryBucket: string;
   persona: string;
   locale: OutreachLocale;
+  languageConfidence: number;
+  languageReason: string;
+  nameTranslated: boolean;
   detectedAts: string;
   atsAngle: "replace" | "modernize" | "consolidate";
   linkedinUrl: string;
@@ -123,6 +138,8 @@ export type SmartleadCommandCenterPayload = {
     maritaOwnerId: string;
     campaignName: string;
     salesLookbackDays: number;
+    sequenceMode: "fixed" | "ai-segment";
+    minTimeBetweenEmails: number;
   };
   safety: {
     healthy: boolean;
@@ -130,6 +147,15 @@ export type SmartleadCommandCenterPayload = {
     blockedContacts: number;
     blockedCompanies: number;
     warnings: string[];
+  };
+  reputation: {
+    healthy: boolean;
+    bounceRate: number;
+    eligibleTalenteraSenders: number;
+    assignedTalenteraSenders: number;
+    senderDailyCapacity: number;
+    safeNewLeadCap: number;
+    maxCampaignEmailsPerMailbox: number;
   };
   campaign: SmartleadCampaign | null;
   analytics: {
@@ -183,6 +209,21 @@ function salesLookbackDays() {
   return positiveInt(process.env.SMARTLEAD_SALES_ACTIVITY_LOOKBACK_DAYS, 45, 1, 365);
 }
 
+function maxCampaignEmailsPerMailbox() {
+  return positiveInt(process.env.SMARTLEAD_MAX_CAMPAIGN_EMAILS_PER_MAILBOX, 20, 5, 30);
+}
+
+function minTimeBetweenEmails() {
+  return Math.max(
+    DEFAULT_MIN_GAP_MINUTES,
+    positiveInt(process.env.SMARTLEAD_MIN_TIME_BETWEEN_EMAILS, DEFAULT_MIN_GAP_MINUTES, 1, 240),
+  );
+}
+
+function fixedSequenceEnabled() {
+  return String(process.env.SMARTLEAD_FIXED_SEQUENCE || "true").trim().toLowerCase() !== "false";
+}
+
 function unique(values: string[]) {
   return [...new Set(values.map((value) => clean(value)).filter(Boolean))];
 }
@@ -207,6 +248,12 @@ function numberFrom(value: unknown, keys: string[]) {
     if (Number.isFinite(parsed)) return parsed;
   }
   return 0;
+}
+
+function boolLike(value: unknown) {
+  if (value === true || value === 1 || String(value).toLowerCase() === "true") return true;
+  if (value === false || value === 0 || String(value).toLowerCase() === "false") return false;
+  return null;
 }
 
 function getSmartleadApiKey() {
@@ -281,14 +328,23 @@ function parseSender(value: unknown, assignedIds: Set<number>): SmartleadSender 
   const id = Number(item.id ?? item.email_account_id);
   if (!Number.isFinite(id)) return null;
   const warmup = object(item.warmup_details || item.warmup);
-  return {
+  const email = clean(item.from_email || item.email || item.username);
+  const rawWarmup = item.warmup_enabled ?? warmup.enabled ?? warmup.warmup_enabled;
+  const parsedWarmup = boolLike(rawWarmup);
+  const brand = senderBrand(email);
+  const sender: SmartleadSender = {
     id,
-    email: clean(item.from_email || item.email || item.username),
+    email,
     fromName: clean(item.from_name || item.name),
     maxPerDay: numberFrom(item, ["max_email_per_day", "daily_limit", "max_emails_per_day"]),
-    warmupEnabled: Boolean(item.warmup_enabled ?? warmup.enabled ?? warmup.warmup_enabled),
+    warmupEnabled: parsedWarmup === true,
+    warmupKnown: parsedWarmup !== null,
     assigned: assignedIds.has(id),
+    brand,
+    eligibleForCampaign: false,
   };
+  sender.eligibleForCampaign = isSafeTalenteraSender(sender);
+  return sender;
 }
 
 async function listAllEmailAccounts() {
@@ -338,6 +394,13 @@ async function campaignAnalytics(campaign: SmartleadCampaign | null, leads: Json
     unsubscribed: numberFrom(payload, ["unsubscribe_count", "unsubscribed", "total_unsubscribed"]),
     activeLeads: leads.filter((lead) => !Boolean(lead.is_unsubscribed) && !/(?:completed|stopped|paused)/i.test(clean(lead.status))).length,
   };
+}
+
+function reputationPlanForSenders(senders: SmartleadSender[]) {
+  return calculateReputationPlan(senders, dailyNewCap(), {
+    maxCampaignEmailsPerMailbox: maxCampaignEmailsPerMailbox(),
+    touches: TOUCH_COUNT,
+  });
 }
 
 async function scanSalesActivities(type: SalesActivityType, cutoff: string) {
@@ -462,6 +525,8 @@ async function buildQueue(forceRefresh: boolean) {
     const industry = text(company, "gtm_industry") || text(company, "industry");
     const title = text(contact, "jobtitle") || contactSummary.contactTitle;
     const names = splitName(contact, contactSummary.contactName);
+    const fullName = clean(`${names.firstName} ${names.lastName}`) || contactSummary.contactName;
+    const language = decideRecipientLanguage({ firstName: names.firstName, fullName, country });
     let blockReason = "";
 
     if (!salesSafety.healthy) blockReason = "Sales safety scan unavailable";
@@ -471,14 +536,16 @@ async function buildQueue(forceRefresh: boolean) {
     else if (salesSafety.blockedContactIds.has(contactSummary.contactId)) blockReason = "Recent Sales activity with contact";
     else if (existingEmails.has(email)) blockReason = "Already in Talentera Smartlead campaign";
     else if (usedEmails.has(email)) blockReason = "Duplicate email in Marita queue";
+    else if (language.locale !== "en" && language.confidence < MIN_ARABIC_LANGUAGE_CONFIDENCE) blockReason = "Arabic language confidence below safety threshold";
 
     usedEmails.add(email);
     queue.push({
       contactId: contactSummary.contactId,
       companyId: item.companyId,
       firstName: names.firstName,
+      greetingName: language.greetingName,
       lastName: names.lastName,
-      fullName: clean(`${names.firstName} ${names.lastName}`) || contactSummary.contactName,
+      fullName,
       email,
       title,
       companyName: text(company, "name") || item.companyName,
@@ -487,7 +554,10 @@ async function buildQueue(forceRefresh: boolean) {
       industry,
       industryBucket: industryBucket(industry),
       persona: text(contact, "gtm_persona") || personaBucket(title),
-      locale: localeForCountry(country),
+      locale: language.locale as OutreachLocale,
+      languageConfidence: language.confidence,
+      languageReason: language.reason,
+      nameTranslated: language.translated,
       detectedAts: text(company, "detected_ats") || item.detectedAts,
       atsAngle: atsAngle(text(company, "detected_ats") || item.detectedAts),
       linkedinUrl: text(contact, "gtm_linkedin_url"),
@@ -534,21 +604,21 @@ function fallbackTemplate(locale: OutreachLocale): SequenceTemplate {
   if (locale === "ar-SA") {
     return {
       subject1: "سؤال سريع عن التوظيف في {company_name}",
-      touch1: "هلا {first_name}، لفتني حجم التوظيف عند {company_name}. عادةً مع {industry_pain} يصير جزء كبير من وقت الفريق في المتابعة بين الفرز والمقابلات والموافقات. Talentera يجمع الرحلة في مكان واحد ويخفف الشغل اليدوي على فريق التوظيف. هل تحسين هالجزء ضمن أولوياتكم هالفترة؟",
+      touch1: "هلا {first_name}، عادةً مع {industry_pain} يصير جزء كبير من وقت فريق التوظيف في المتابعة بين الفرز والمقابلات والموافقات. Talentera تجمع رحلة التوظيف في مكان واحد وتخفف الشغل اليدوي. هل هالجانب ضمن أولوياتكم في {company_name} هالفترة؟",
       subject2: "بخصوص رحلة التوظيف في {company_name}",
-      touch2: "{first_name}، سبب تواصلي إن كثير من فرق التوظيف يكون عندها نظام قائم لكن تظل بعض الخطوات موزعة بين أدوات ومتابعات يدوية. Talentera يساعد في ربط الفرز والمقابلات والموافقات والعروض في مسار أوضح. يستاهل نشارككم الفكرة بشكل سريع؟",
-      subject3: "أقفل الموضوع؟",
+      touch2: "{first_name}، سبب تواصلي إن كثير من فرق التوظيف يكون عندها نظام قائم لكن تظل بعض الخطوات موزعة بين أدوات ومتابعات يدوية. Talentera تساعد في ربط الفرز والمقابلات والموافقات والعروض في مسار أوضح. يستاهل نشارككم الفكرة بشكل سريع؟",
+      subject3: "أقفل الموضوع من جهتي؟",
       touch3: "{first_name}، ما ودي أثقل عليك. إذا تطوير تجربة التوظيف مو أولوية الآن أقفل الموضوع من جهتي، وإذا مناسب أشاركك الفكرة باختصار.",
     };
   }
   if (locale === "ar-GCC") {
     return {
       subject1: "سؤال سريع عن التوظيف في {company_name}",
-      touch1: "أهلًا {first_name}، مع {industry_pain} عادةً تزيد المتابعة اليدوية بين الفرز والمقابلات والموافقات. Talentera يساعد فريق التوظيف يجمع الرحلة في مكان واحد ويكون عنده رؤية أوضح على المرشحين. هل تحسين هذا التدفق ضمن أولوياتكم حاليًا؟",
+      touch1: "أهلًا {first_name}، مع {industry_pain} عادةً تزيد المتابعة اليدوية بين الفرز والمقابلات والموافقات. Talentera تساعد فريق التوظيف يجمع الرحلة في مكان واحد ويكون عنده رؤية أوضح على المرشحين. هل تطوير هالجانب ضمن أولوياتكم في {company_name} حاليًا؟",
       subject2: "رحلة التوظيف في {company_name}",
-      touch2: "{first_name}، سبب تواصلي أن وجود ATS لا يعني دائمًا أن كل خطوات التوظيف مترابطة. Talentera يربط الفرز والمقابلات والموافقات والعروض ويخفف المتابعة اليدوية. مناسب نشارككم الفكرة بشكل سريع؟",
-      subject3: "أقفل الموضوع؟",
-      touch3: "{first_name}، إذا تطوير عملية التوظيف مو ضمن الأولويات الآن أقفل الموضوع، وإذا مناسب يسعدني أشاركك الفكرة باختصار.",
+      touch2: "{first_name}، سبب تواصلي إن وجود ATS ما يعني دائمًا إن كل خطوات التوظيف مترابطة. Talentera تربط الفرز والمقابلات والموافقات والعروض وتخفف المتابعة اليدوية. مناسب نشارككم الفكرة بشكل سريع؟",
+      subject3: "أقفل الموضوع من جهتي؟",
+      touch3: "{first_name}، إذا تطوير عملية التوظيف مو ضمن الأولويات الآن أقفل الموضوع من جهتي، وإذا مناسب يسعدني أشاركك الفكرة باختصار.",
     };
   }
   return {
@@ -588,17 +658,17 @@ async function generateSegmentTemplate(lead: SmartleadQueueLead): Promise<Sequen
   const fallback = fallbackTemplate(lead.locale);
   try {
     const result = await openRouterCompletion({
-      cacheKey: `smartlead-copy-v1:${lead.locale}:${lead.industryBucket}:${lead.persona}:${lead.atsAngle}`,
+      cacheKey: `smartlead-copy-v2:${lead.locale}:${lead.industryBucket}:${lead.persona}:${lead.atsAngle}`,
       mode: "fast",
       maxOutputTokens: 520,
-      temperature: 0.35,
+      temperature: 0.25,
       system: [
         "You are a senior B2B cold-email copywriter for Talentera, an applicant tracking and recruitment platform.",
         "Return ONLY one JSON object with keys subject1,touch1,subject2,touch2,subject3,touch3.",
         "Use only these literal placeholders when useful: {first_name}, {company_name}, {industry_pain}.",
         "Never claim you researched, saw, noticed or verified something unless it is provided. No fake compliments, no links, no emojis, no hype, no spammy urgency.",
         "Touch 1: relevance + operational pain + one soft reply CTA, <= 75 words. Touch 2: new angle, never say just following up, <= 60 words. Touch 3: polite close-the-loop, <= 38 words.",
-        "If locale is ar-SA, write natural professional Saudi business Arabic: warm and light, not exaggerated slang, not formal fusha. If ar-GCC, use neutral Gulf Arabic. If en, concise natural English.",
+        "If locale is ar-SA, write natural professional Saudi business Arabic: warm and light, gender-neutral, not exaggerated slang, not formal fusha. If ar-GCC, use neutral Gulf Arabic. If en, concise natural English.",
         "Do not attack or name the prospect's current ATS. If an ATS exists, position Talentera around workflow improvement and recruiter efficiency.",
       ].join(" "),
       user: JSON.stringify({
@@ -618,7 +688,7 @@ async function generateSegmentTemplate(lead: SmartleadQueueLead): Promise<Sequen
 
 function renderedLead(lead: SmartleadQueueLead, template: SequenceTemplate): PreparedSmartleadLead {
   const values = {
-    first_name: lead.firstName || lead.fullName || "",
+    first_name: lead.greetingName || lead.firstName || lead.fullName || "",
     company_name: lead.companyName,
     industry_pain: industryPain(lead.industryBucket, lead.locale),
   };
@@ -633,6 +703,25 @@ function renderedLead(lead: SmartleadQueueLead, template: SequenceTemplate): Pre
   };
 }
 
+function emptyCoverage(ready: number) {
+  return { dailyNewCap: 0, ready, today: 0, tomorrow: 0, next48Hours: 0, coverageDays: 0 };
+}
+
+async function safeSchedule(campaignId: number, safeNewLeadCap: number) {
+  if (safeNewLeadCap < 1) throw new Error("No safe Talentera sender capacity is available. Attach warmed Talentera inboxes first.");
+  await smartleadRequest(`/campaigns/${campaignId}/schedule`, {
+    method: "POST",
+    body: JSON.stringify({
+      timezone: "Asia/Riyadh",
+      days_of_the_week: [0, 1, 2, 3, 4],
+      start_hour: process.env.SMARTLEAD_START_HOUR || "09:30",
+      end_hour: process.env.SMARTLEAD_END_HOUR || "16:30",
+      min_time_btw_emails: minTimeBetweenEmails(),
+      max_leads_per_day: safeNewLeadCap,
+    }),
+  });
+}
+
 export async function getSmartleadCommandCenter(forceRefresh = false): Promise<SmartleadCommandCenterPayload> {
   if (!forceRefresh && cache && cache.expiresAt > Date.now()) return cache.payload;
   const apiConfigured = Boolean(getSmartleadApiKey());
@@ -642,9 +731,17 @@ export async function getSmartleadCommandCenter(forceRefresh = false): Promise<S
     readPreparedBatch(),
   ]);
   const analytics = apiConfigured ? await campaignAnalytics(built.campaign, built.campaignLeads) : { sent: 0, replies: 0, bounces: 0, unsubscribed: 0, activeLeads: 0 };
+  const reputation = reputationPlanForSenders(senders);
+  const reputationState = reputationHealth(analytics.sent, analytics.bounces);
   const ready = built.queue.filter((lead) => lead.eligible).length;
-  const configuredCap = built.campaign?.maxLeadsPerDay ? Math.min(dailyNewCap(), built.campaign.maxLeadsPerDay) : dailyNewCap();
-  const coverage = calculateCoverage(ready, configuredCap);
+  const configuredCap = reputation.safeNewLeadCap > 0
+    ? Math.min(reputation.safeNewLeadCap, built.campaign?.maxLeadsPerDay || reputation.safeNewLeadCap)
+    : 0;
+  const coverage = configuredCap > 0 ? calculateCoverage(ready, configuredCap) : emptyCoverage(ready);
+  const safetyWarnings = [...built.salesSafety.warnings];
+  if (!reputationState.healthy) safetyWarnings.push(reputationState.reason);
+  if (!reputation.assignedEligibleSenders) safetyWarnings.push("No warmed Talentera sender is currently assigned to this campaign.");
+  const safetyHealthy = built.salesSafety.healthy && reputationState.healthy;
   const summary = {
     maritaCompanies: built.priority.companies.length,
     emailCandidates: built.queue.length,
@@ -669,13 +766,24 @@ export async function getSmartleadCommandCenter(forceRefresh = false): Promise<S
       maritaOwnerId: MARITA_OWNER_ID,
       campaignName: CAMPAIGN_NAME,
       salesLookbackDays: salesLookbackDays(),
+      sequenceMode: fixedSequenceEnabled() ? "fixed" : "ai-segment",
+      minTimeBetweenEmails: minTimeBetweenEmails(),
     },
     safety: {
-      healthy: built.salesSafety.healthy,
+      healthy: safetyHealthy,
       recentSalesActivities: built.salesSafety.activityCount,
       blockedContacts: built.salesSafety.blockedContactIds.size,
       blockedCompanies: built.salesSafety.blockedCompanyIds.size,
-      warnings: built.salesSafety.warnings,
+      warnings: safetyWarnings,
+    },
+    reputation: {
+      healthy: reputationState.healthy,
+      bounceRate: reputationState.bounceRate,
+      eligibleTalenteraSenders: reputation.eligibleSenders,
+      assignedTalenteraSenders: reputation.assignedEligibleSenders,
+      senderDailyCapacity: reputation.senderDailyCapacity,
+      safeNewLeadCap: reputation.safeNewLeadCap,
+      maxCampaignEmailsPerMailbox: reputation.maxCampaignEmailsPerMailbox,
     },
     campaign: built.campaign,
     analytics,
@@ -691,19 +799,36 @@ export async function getSmartleadCommandCenter(forceRefresh = false): Promise<S
 export async function prepareSmartleadBatch(limit?: number) {
   const built = await buildQueue(true);
   if (!built.salesSafety.healthy) throw new Error("Sales safety scan is not healthy. No Smartlead batch was prepared.");
-  const cap = Math.min(150, positiveInt(limit, dailyNewCap(), 1, 150), dailyNewCap());
+  const senders = await smartleadSenders(built.campaign);
+  const reputation = reputationPlanForSenders(senders);
+  const analytics = await campaignAnalytics(built.campaign, built.campaignLeads);
+  const reputationState = reputationHealth(analytics.sent, analytics.bounces);
+  if (!reputationState.healthy) throw new Error(`${reputationState.reason}. Prepare is locked until deliverability is reviewed.`);
+  if (!reputation.assignedEligibleSenders || reputation.safeNewLeadCap < 1) {
+    throw new Error("Attach warmed Talentera sender accounts before preparing a batch. Evalify inboxes are never used for Talentera outreach.");
+  }
+  const cap = Math.min(
+    150,
+    positiveInt(limit, reputation.safeNewLeadCap, 1, 150),
+    dailyNewCap(),
+    reputation.safeNewLeadCap,
+  );
   const leads = built.queue.filter((lead) => lead.eligible).slice(0, cap);
   if (!leads.length) throw new Error("No Marita leads are currently eligible for Smartlead.");
 
   const templates = new Map<string, SequenceTemplate>();
-  for (const lead of leads) {
-    const key = `${lead.locale}|${lead.industryBucket}|${lead.persona}|${lead.atsAngle}`;
-    if (!templates.has(key)) templates.set(key, await generateSegmentTemplate(lead));
+  if (!fixedSequenceEnabled()) {
+    for (const lead of leads) {
+      const key = `${lead.locale}|${lead.industryBucket}|${lead.persona}|${lead.atsAngle}`;
+      if (!templates.has(key)) templates.set(key, await generateSegmentTemplate(lead));
+    }
   }
   const preparedLeads = leads.map((lead) => {
+    if (fixedSequenceEnabled()) return renderedLead(lead, fallbackTemplate(lead.locale));
     const key = `${lead.locale}|${lead.industryBucket}|${lead.persona}|${lead.atsAngle}`;
     return renderedLead(lead, templates.get(key) ?? fallbackTemplate(lead.locale));
   });
+  const segmentCount = new Set(preparedLeads.map((lead) => `${lead.locale}|${lead.industryBucket}|${lead.persona}`)).size;
   const batch: PreparedBatch = {
     version: 1,
     createdAt: new Date().toISOString(),
@@ -713,7 +838,13 @@ export async function prepareSmartleadBatch(limit?: number) {
   };
   await writePreparedBatch(batch);
   cache = null;
-  return { prepared: preparedLeads.length, segments: templates.size, samples: preparedLeads.slice(0, 5) };
+  return {
+    prepared: preparedLeads.length,
+    segments: segmentCount,
+    sequenceMode: fixedSequenceEnabled() ? "fixed" : "ai-segment",
+    safeNewLeadCap: reputation.safeNewLeadCap,
+    samples: preparedLeads.slice(0, 5),
+  };
 }
 
 function campaignSequencePayload() {
@@ -770,8 +901,8 @@ export async function bootstrapSmartleadCampaign() {
       days_of_the_week: [0, 1, 2, 3, 4],
       start_hour: process.env.SMARTLEAD_START_HOUR || "09:30",
       end_hour: process.env.SMARTLEAD_END_HOUR || "16:30",
-      min_time_btw_emails: positiveInt(process.env.SMARTLEAD_MIN_TIME_BETWEEN_EMAILS, 5, 1, 240),
-      max_leads_per_day: dailyNewCap(),
+      min_time_btw_emails: minTimeBetweenEmails(),
+      max_leads_per_day: Math.min(dailyNewCap(), 25),
     }),
   });
   await smartleadRequest(`/campaigns/${campaign.id}/sequences`, {
@@ -779,29 +910,71 @@ export async function bootstrapSmartleadCampaign() {
     body: JSON.stringify(campaignSequencePayload()),
   });
   cache = null;
-  return { campaign: await resolveCampaign(), configured: true, activated: false };
+  return { campaign: await resolveCampaign(), configured: true, activated: false, sequenceMode: fixedSequenceEnabled() ? "fixed" : "ai-segment" };
 }
 
 export async function attachSmartleadSenders(senderIds: number[]) {
   const campaign = await resolveCampaign();
   if (!campaign) throw new Error("Create the Talentera Smartlead campaign first.");
-  const validIds = new Set((await smartleadSenders(campaign)).map((sender) => sender.id));
-  const selected = [...new Set(senderIds)].filter((id) => validIds.has(id)).slice(0, 50);
-  if (!selected.length) throw new Error("No valid Smartlead sender accounts were selected.");
-  await smartleadRequest(`/campaigns/${campaign.id}/email-accounts`, {
-    method: "POST",
-    body: JSON.stringify({ email_account_ids: selected }),
-  });
+  const senders = await smartleadSenders(campaign);
+  const byId = new Map(senders.map((sender) => [sender.id, sender]));
+  const selected = [...new Set(senderIds)]
+    .map((id) => byId.get(id))
+    .filter((sender): sender is SmartleadSender => Boolean(sender) && Boolean(sender?.eligibleForCampaign))
+    .slice(0, 50);
+  if (!selected.length) throw new Error("Select at least one warmed Talentera sender. Evalify, unknown-brand, and explicitly cold inboxes are blocked.");
+
+  const desiredIds = new Set(selected.map((sender) => sender.id));
+  const currentIds = new Set(senders.filter((sender) => sender.assigned).map((sender) => sender.id));
+  const toRemove = [...currentIds].filter((id) => !desiredIds.has(id));
+  const toAdd = [...desiredIds].filter((id) => !currentIds.has(id));
+  if (toRemove.length) {
+    const currentLeads = await campaignLeadRows(campaign);
+    const currentAnalytics = await campaignAnalytics(campaign, currentLeads);
+    if (currentAnalytics.activeLeads > 0) {
+      throw new Error("Sender removal is blocked while campaign leads are active because Smartlead can stop follow-ups tied to removed inboxes. Finish or pause/reassign active leads first.");
+    }
+    await smartleadRequest(`/campaigns/${campaign.id}/email-accounts`, {
+      method: "DELETE",
+      body: JSON.stringify({ email_account_ids: toRemove }),
+    });
+  }
+  if (toAdd.length) {
+    await smartleadRequest(`/campaigns/${campaign.id}/email-accounts`, {
+      method: "POST",
+      body: JSON.stringify({ email_account_ids: toAdd }),
+    });
+  }
+
+  const refreshedSenders = await smartleadSenders(campaign);
+  const reputation = reputationPlanForSenders(refreshedSenders);
+  await safeSchedule(campaign.id, reputation.safeNewLeadCap);
   cache = null;
-  return { attached: selected.length, senderIds: selected };
+  return {
+    attached: reputation.assignedEligibleSenders,
+    senderIds: refreshedSenders.filter((sender) => sender.assigned && sender.eligibleForCampaign).map((sender) => sender.id),
+    removed: toRemove.length,
+    rejected: senderIds.length - selected.length,
+    safeNewLeadCap: reputation.safeNewLeadCap,
+  };
 }
 
 export async function setSmartleadCampaignStatus(status: "START" | "PAUSED") {
   const campaign = await resolveCampaign();
   if (!campaign) throw new Error("Create the Talentera Smartlead campaign first.");
   if (status === "START") {
-    const assigned = await campaignAssignedSenderIds(campaign);
-    if (!assigned.size) throw new Error("Attach at least one sender before starting the campaign.");
+    const [senders, leads] = await Promise.all([smartleadSenders(campaign), campaignLeadRows(campaign)]);
+    const assigned = senders.filter((sender) => sender.assigned);
+    const unsafeAssigned = assigned.filter((sender) => !sender.eligibleForCampaign);
+    if (unsafeAssigned.length) {
+      throw new Error(`Start blocked: ${unsafeAssigned.length} assigned sender(s) are Evalify, unknown-brand, or explicitly not warmed. Sync Talentera senders first.`);
+    }
+    const reputation = reputationPlanForSenders(senders);
+    if (!reputation.assignedEligibleSenders || reputation.safeNewLeadCap < 1) throw new Error("Attach warmed Talentera senders before starting the campaign.");
+    const analytics = await campaignAnalytics(campaign, leads);
+    const health = reputationHealth(analytics.sent, analytics.bounces);
+    if (!health.healthy) throw new Error(`${health.reason}. Start is locked until deliverability is reviewed.`);
+    await safeSchedule(campaign.id, reputation.safeNewLeadCap);
   }
   await smartleadRequest(`/campaigns/${campaign.id}/status`, {
     method: "PATCH",
@@ -829,6 +1002,12 @@ function smartleadLeadPayload(lead: PreparedSmartleadLead) {
       sl_subject_3: lead.subject3,
       sl_touch_3: lead.touch3,
       sdr_owner: "Marita",
+      outreach_product: "Talentera",
+      greeting_name: lead.greetingName,
+      original_first_name: lead.firstName,
+      language_confidence: lead.languageConfidence.toFixed(2),
+      language_reason: lead.languageReason,
+      name_translated: lead.nameTranslated ? "yes" : "no",
       hubspot_contact_id: lead.contactId,
       hubspot_company_id: lead.companyId,
       locale: lead.locale,
@@ -844,18 +1023,30 @@ export async function launchPreparedSmartleadBatch() {
   if (!prepared?.leads.length) throw new Error("Prepare a Smartlead batch first.");
   const campaign = await resolveCampaign();
   if (!campaign) throw new Error("Create the Talentera Smartlead campaign first.");
-  const assigned = await campaignAssignedSenderIds(campaign);
-  if (!assigned.size) throw new Error("Attach sender accounts before sending leads to Smartlead.");
+  const senders = await smartleadSenders(campaign);
+  const assigned = senders.filter((sender) => sender.assigned);
+  const unsafeAssigned = assigned.filter((sender) => !sender.eligibleForCampaign);
+  if (unsafeAssigned.length) throw new Error("Queue blocked because non-Talentera or explicitly non-warmed sender accounts are assigned to the campaign.");
+  const reputation = reputationPlanForSenders(senders);
+  if (!reputation.assignedEligibleSenders || reputation.safeNewLeadCap < 1) throw new Error("Attach warmed Talentera sender accounts before sending leads to Smartlead.");
 
   const fresh = await buildQueue(true);
   if (!fresh.salesSafety.healthy) throw new Error("Sales safety scan is not healthy. Launch blocked.");
+  const analytics = await campaignAnalytics(campaign, fresh.campaignLeads);
+  const health = reputationHealth(analytics.sent, analytics.bounces);
+  if (!health.healthy) throw new Error(`${health.reason}. Queue is locked until deliverability is reviewed.`);
   const eligible = new Map(fresh.queue.filter((lead) => lead.eligible).map((lead) => [lead.email.toLowerCase(), lead]));
   const safeLeads = prepared.leads.filter((lead) => {
     const current = eligible.get(lead.email.toLowerCase());
-    return current && current.contactId === lead.contactId && current.companyId === lead.companyId;
-  });
+    return current
+      && current.contactId === lead.contactId
+      && current.companyId === lead.companyId
+      && current.locale === lead.locale
+      && current.greetingName === lead.greetingName;
+  }).slice(0, reputation.safeNewLeadCap);
   if (!safeLeads.length) throw new Error("Every prepared lead was removed by the fresh safety check. Nothing was sent to Smartlead.");
 
+  await safeSchedule(campaign.id, reputation.safeNewLeadCap);
   const responses: unknown[] = [];
   for (let index = 0; index < safeLeads.length; index += 400) {
     const chunk = safeLeads.slice(index, index + 400);
@@ -882,6 +1073,7 @@ export async function launchPreparedSmartleadBatch() {
     skippedByFreshSafetyCheck: prepared.leads.length - safeLeads.length,
     campaignId: campaign.id,
     campaignStatus: campaign.status,
+    safeNewLeadCap: reputation.safeNewLeadCap,
     responses,
   };
 }
