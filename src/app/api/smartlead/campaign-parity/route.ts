@@ -99,7 +99,8 @@ function normalizeCampaign(row: JsonObject, sequencePayload: unknown): CampaignA
     settings: {
       plainText: boolValue(row.send_as_plain_text),
       forcePlainText: boolValue(row.force_plain_text),
-      trackingOff: track.includes("DONT_TRACK_EMAIL_OPEN") && track.includes("DONT_TRACK_LINK_CLICK"),
+      trackingOff: (track.includes("DONT_TRACK_EMAIL_OPEN") || track.includes("DONT_EMAIL_OPEN"))
+        && (track.includes("DONT_TRACK_LINK_CLICK") || track.includes("DONT_LINK_CLICK")),
       stopOnReply: clean(row.stop_lead_settings).toUpperCase() === "REPLY_TO_AN_EMAIL",
       pauseDomainOnReply: boolValue(row.auto_pause_domain_leads_on_reply),
       respectMailboxLimit: !boolValue(row.ignore_ss_mailbox_sending_limit),
@@ -167,8 +168,14 @@ async function audit() {
       continue;
     }
     const id = numberValue(row.id);
-    const sequencePayload = await smartleadRequest<unknown>(`/campaigns/${id}/sequences`);
-    const normalized = normalizeCampaign(row, sequencePayload);
+    const [detailPayload, sequencePayload] = await Promise.all([
+      smartleadRequest<unknown>(`/campaigns/${id}`),
+      smartleadRequest<unknown>(`/campaigns/${id}/sequences`),
+    ]);
+    const detailRoot = object(detailPayload);
+    const nestedDetail = object(detailRoot.data);
+    const detail = Object.keys(nestedDetail).length ? nestedDetail : detailRoot;
+    const normalized = normalizeCampaign({ ...row, ...detail }, sequencePayload);
     audits[lane] = normalized;
     if (!expectedSettings(lane, normalized.settings)) issues.push(`${definition.label}: non-copy settings are not canonical`);
     if (!expectedSequence(normalized.sequence)) issues.push(`${definition.label}: sequence structure is not canonical/threaded`);
