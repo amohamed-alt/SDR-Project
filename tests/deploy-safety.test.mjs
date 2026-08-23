@@ -143,3 +143,10 @@ test("manual Smartlead dry-run reports masked routing without campaign writes", 
   assert.match(dryRun, /maskedEmail\(lead\.email\)/);
   assert.match(dryRun, /VISIBLE_SEQUENCE_LANES\[lane\]\.campaignName/);
 });
+
+test("Smartlead pauses on the first recorded spam complaint", async () => {
+  const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
+  assert.match(orchestrator, /analytics\[lane\]\.spamComplaints > 0/);
+  assert.match(orchestrator, /zero-complaint guardrail engaged/);
+  assert.doesNotMatch(orchestrator, /SPAM_GUARD_RATE/);
+});
