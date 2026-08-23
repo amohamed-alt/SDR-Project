@@ -13,6 +13,7 @@ type FetchLike = typeof fetch;
 
 type PrimeforgeDomain = {
   id: string;
+  workspaceId: string;
   domain: string;
   status: string;
   platform: string;
@@ -20,6 +21,7 @@ type PrimeforgeDomain = {
 };
 
 type PrimeforgeMailbox = {
+  id: string;
   domain: string;
   status: string;
   ready: boolean;
@@ -120,7 +122,18 @@ function statusIsBad(status: string) {
   return /(?:fail|error|invalid|suspend|cancel|delete|block|disconnect|expired)/.test(status);
 }
 
-function parseDomain(value: unknown): PrimeforgeDomain | null {
+function workspaceIdFrom(value: unknown) {
+  const item = object(value);
+  const workspace = object(item.workspace);
+  return clean(item.workspaceId || item.workspace_id || workspace.id);
+}
+
+function workspaceRecordId(value: unknown) {
+  const item = object(value);
+  return clean(item.id || item.workspaceId || item.workspace_id);
+}
+
+function parseDomain(value: unknown, fallbackWorkspaceId = ""): PrimeforgeDomain | null {
   const item = object(value);
   const domain = domainNameFrom(item);
   if (!domain) return null;
@@ -128,6 +141,7 @@ function parseDomain(value: unknown): PrimeforgeDomain | null {
   const failedReason = clean(item.failedReason || item.failed_reason);
   return {
     id: clean(item.id || item.domainId || item.domain_id),
+    workspaceId: workspaceIdFrom(item) || fallbackWorkspaceId,
     domain,
     status,
     platform: normalized(item.platform || item.provider),
@@ -144,7 +158,12 @@ function parseMailbox(value: unknown): PrimeforgeMailbox | null {
   const status = resourceStatus(item);
   const deleted = boolLike(item.deleted || item.isDeleted || item.is_deleted) === true
     || /(?:deleted|deleting)/.test(normalized(item.deletionState || item.deletion_state));
-  return { domain, status, ready: statusIsReady(status) && !statusIsBad(status) && !deleted };
+  return {
+    id: clean(item.id || item.mailboxId || item.mailbox_id || email),
+    domain,
+    status,
+    ready: statusIsReady(status) && !statusIsBad(status) && !deleted,
+  };
 }
 
 function dnsFlags(value: unknown) {
@@ -190,11 +209,21 @@ async function primeforgeRequest(fetchImpl: FetchLike, apiKey: string, endpoint:
   throw lastError instanceof Error ? lastError : new Error("Primeforge read-only API request failed.");
 }
 
-async function listAll(fetchImpl: FetchLike, apiKey: string, endpoint: string, keys: string[]) {
+async function listAll(
+  fetchImpl: FetchLike,
+  apiKey: string,
+  endpoint: string,
+  keys: string[],
+  query: Record<string, string> = {},
+) {
   const all: unknown[] = [];
   for (let page = 0; page < MAX_PAGES; page += 1) {
     const offset = page * PAGE_SIZE;
-    const payload = await primeforgeRequest(fetchImpl, apiKey, endpoint, { limit: String(PAGE_SIZE), offset: String(offset) });
+    const payload = await primeforgeRequest(fetchImpl, apiKey, endpoint, {
+      ...query,
+      limit: String(PAGE_SIZE),
+      offset: String(offset),
+    });
     const batch = rows(payload, keys);
     all.push(...batch);
     const total = paginationTotal(payload);
@@ -207,6 +236,7 @@ export async function checkPrimeforgeInfrastructure(options: { apiKey?: string; 
   const apiKey = clean(options.apiKey || process.env.PRIMEFORGE_API_KEY, 8_000);
   const checkedAt = new Date().toISOString();
   const approvedDomains = [...APPROVED_SENDING_DOMAINS.talentera, ...APPROVED_SENDING_DOMAINS.evalify];
+  const approvedDomainSet = new Set<string>(approvedDomains);
   if (!apiKey) {
     return {
       configured: false,
@@ -222,19 +252,43 @@ export async function checkPrimeforgeInfrastructure(options: { apiKey?: string; 
   }
 
   const fetchImpl = options.fetchImpl || fetch;
-  const [workspaceRows, domainRows, mailboxRows] = await Promise.all([
-    listAll(fetchImpl, apiKey, "/workspaces", ["results", "workspaces", "items"]),
-    listAll(fetchImpl, apiKey, "/domains", ["results", "domains", "items"]),
-    listAll(fetchImpl, apiKey, "/mailboxes", ["results", "mailboxes", "items"]),
-  ]);
-  const parsedDomains = domainRows.map(parseDomain).filter((item): item is PrimeforgeDomain => Boolean(item));
+  const workspaceRows = await listAll(fetchImpl, apiKey, "/workspaces", ["results", "workspaces", "items"]);
+  const workspaceIds = [...new Set(workspaceRows.map(workspaceRecordId).filter(Boolean))];
+
+  // Primeforge scopes inventory endpoints by workspace. An authenticated unscoped
+  // request may return an empty list even when the workspace contains resources.
+  const domainRowsByWorkspace = await Promise.all(workspaceIds.map(async (workspaceId) => ({
+    workspaceId,
+    rows: await listAll(
+      fetchImpl,
+      apiKey,
+      "/domains",
+      ["results", "domains", "items"],
+      { workspaceId },
+    ),
+  })));
+  const parsedDomains = domainRowsByWorkspace.flatMap(({ workspaceId, rows: domainRows }) => (
+    domainRows
+      .map((row) => parseDomain(row, workspaceId))
+      .filter((item): item is PrimeforgeDomain => Boolean(item))
+  ));
+
+  const approvedDomainResources = parsedDomains.filter((item) => approvedDomainSet.has(item.domain));
+  const mailboxRows = (await Promise.all(approvedDomainResources.map((domain) => listAll(
+    fetchImpl,
+    apiKey,
+    "/mailboxes",
+    ["results", "mailboxes", "items"],
+    { workspaceId: domain.workspaceId, domainId: domain.id },
+  )))).flat();
   const parsedMailboxes = mailboxRows.map(parseMailbox).filter((item): item is PrimeforgeMailbox => Boolean(item));
+  const uniqueMailboxes = [...new Map(parsedMailboxes.map((item) => [item.id || `${item.domain}:${item.status}`, item])).values()];
   const domains: PrimeforgeDomainHealth[] = [];
 
   for (const domain of approvedDomains) {
     const matches = parsedDomains.filter((item) => item.domain === domain);
     const resource = matches[0];
-    const mailboxes = parsedMailboxes.filter((item) => item.domain === domain);
+    const mailboxes = uniqueMailboxes.filter((item) => item.domain === domain);
     const readyMailboxes = mailboxes.filter((item) => item.ready).length;
     const warnings: string[] = [];
     let dns = { spf: false, dkim: false, dmarc: false };
@@ -246,7 +300,12 @@ export async function checkPrimeforgeInfrastructure(options: { apiKey?: string; 
       if (!resource.id) warnings.push("Domain ID is missing, so DNS cannot be verified.");
       else {
         try {
-          dns = dnsFlags(await primeforgeRequest(fetchImpl, apiKey, `/domains/${encodeURIComponent(resource.id)}/dns`));
+          dns = dnsFlags(await primeforgeRequest(
+            fetchImpl,
+            apiKey,
+            `/domains/${encodeURIComponent(resource.id)}/dns`,
+            { workspaceId: resource.workspaceId },
+          ));
         } catch (error) {
           warnings.push(error instanceof Error ? error.message : "Primeforge DNS read failed.");
         }
@@ -275,6 +334,7 @@ export async function checkPrimeforgeInfrastructure(options: { apiKey?: string; 
   const warnings = domains.flatMap((item) => item.warnings.map((warning) => `${item.domain}: ${warning}`));
   const readyMailboxes = domains.reduce((sum, item) => sum + item.readyMailboxes, 0);
   if (!workspaceRows.length) warnings.push("Primeforge returned no accessible workspaces.");
+  else if (!workspaceIds.length) warnings.push("Primeforge workspaces are missing IDs, so scoped inventory cannot be verified.");
   if (readyMailboxes !== EXPECTED_SENDING_MAILBOXES) warnings.push(`Primeforge ready mailbox inventory is ${readyMailboxes}/${EXPECTED_SENDING_MAILBOXES}.`);
 
   return {
