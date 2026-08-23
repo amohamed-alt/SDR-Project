@@ -37,7 +37,7 @@ services:
           chown 1001:1001 "$$DATA_MARKER"
           echo "Persistent SDR data volume initialized."
         else
-          echo "Persistent SDR data volume already initialized."
+          echo "Persistent SDR data volume already initialized; preserving existing secrets."
         fi
     volumes:
       - /root/SDR-Project:/legacy:ro
@@ -122,13 +122,16 @@ services:
       OPENROUTER_FAST_MODEL: ${OPENROUTER_FAST_MODEL:-openai/gpt-4.1-nano}
       OPENROUTER_DEEP_MODEL: ${OPENROUTER_DEEP_MODEL:-openai/gpt-4.1-mini}
       SMARTLEAD_API_KEY: ${SMARTLEAD_API_KEY:-}
+      MILLIONVERIFIER_API_KEY: ${MILLIONVERIFIER_API_KEY:-}
+      SMARTLEAD_V2_INTELLIGENCE_PATH: /app/data/smartlead-v2-intelligence-v3.json
+      SMARTLEAD_INTERNAL_BASE_URL: http://127.0.0.1:3000
       SMARTLEAD_CAMPAIGN_ID: ${SMARTLEAD_CAMPAIGN_ID:-}
       SMARTLEAD_CAMPAIGN_NAME: "${SMARTLEAD_CAMPAIGN_NAME:-Talentera | Marita SDR | Localized 3-Touch}"
-      SMARTLEAD_DAILY_NEW_LEADS: ${SMARTLEAD_DAILY_NEW_LEADS:-75}
+      SMARTLEAD_DAILY_NEW_LEADS: ${SMARTLEAD_DAILY_NEW_LEADS:-50}
       SMARTLEAD_SALES_ACTIVITY_LOOKBACK_DAYS: ${SMARTLEAD_SALES_ACTIVITY_LOOKBACK_DAYS:-45}
       SMARTLEAD_START_HOUR: ${SMARTLEAD_START_HOUR:-09:30}
       SMARTLEAD_END_HOUR: ${SMARTLEAD_END_HOUR:-16:30}
-      SMARTLEAD_MIN_TIME_BETWEEN_EMAILS: ${SMARTLEAD_MIN_TIME_BETWEEN_EMAILS:-5}
+      SMARTLEAD_MIN_TIME_BETWEEN_EMAILS: ${SMARTLEAD_MIN_TIME_BETWEEN_EMAILS:-15}
       SMARTLEAD_PREPARED_PATH: /app/data/smartlead-prepared.json
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_CAREER_MODEL: ${GEMINI_CAREER_MODEL:-gemini-2.5-flash-lite}
