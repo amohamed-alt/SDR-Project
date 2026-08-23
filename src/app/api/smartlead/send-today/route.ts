@@ -66,6 +66,7 @@ export async function GET() {
     smartleadConfigured,
     millionVerifierConfigured,
     signalHireConfigured: Boolean(clean(process.env.SIGNALHIRE_API_KEY)),
+    primeforgeConfigured: Boolean(clean(process.env.PRIMEFORGE_API_KEY)),
     ownerActionsConfigured: smartleadActionAuthConfigured(),
     autopilotEnabled: process.env.SMARTLEAD_AUTOPILOT_ENABLED === "true",
     languagePolicy: "Deterministic English fallback wins; Arabic requires an Arabic-script greeting and a safe GCC Arabic-name decision.",
