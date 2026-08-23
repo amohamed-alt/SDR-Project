@@ -87,3 +87,11 @@ test("Primeforge remains read-only and advisory while Smartlead safety stays enf
   assert.match(primeforge, /method: "GET"/);
   assert.doesNotMatch(primeforge, /method: "(?:POST|PUT|PATCH|DELETE)"/);
 });
+
+test("Smartlead campaign parity audits the detailed campaign response", async () => {
+  const parity = await read("src/app/api/smartlead/campaign-parity/route.ts");
+  assert.match(parity, /smartleadRequest<unknown>\(`\/campaigns\/\$\{id\}`\)/);
+  assert.match(parity, /object\(detailRoot\.data\)/);
+  assert.match(parity, /DONT_EMAIL_OPEN/);
+  assert.match(parity, /DONT_LINK_CLICK/);
+});
