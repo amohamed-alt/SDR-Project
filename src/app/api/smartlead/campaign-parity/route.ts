@@ -17,14 +17,14 @@ type CampaignAudit = {
   status: string;
   settings: {
     plainText: boolean;
-    forcePlainText: boolean;
+    forcePlainText: boolean | null;
     trackingOff: boolean;
     stopOnReply: boolean;
-    pauseDomainOnReply: boolean;
-    respectMailboxLimit: boolean;
-    bounceAutopauseThreshold: number;
-    domainRateLimit: boolean;
-    unsubscribeTag: boolean;
+    pauseDomainOnReply: boolean | null;
+    respectMailboxLimit: boolean | null;
+    bounceAutopauseThreshold: number | null;
+    domainRateLimit: boolean | null;
+    unsubscribeTag: boolean | null;
     followUpPercentage: number;
     espMatching: boolean;
     timezone: string;
@@ -47,6 +47,12 @@ function object(value: unknown): JsonObject { return value && typeof value === "
 function list(value: unknown, keys: string[] = []) { if (Array.isArray(value)) return value; const item = object(value); for (const key of keys) if (Array.isArray(item[key])) return item[key] as unknown[]; return [] as unknown[]; }
 function numberValue(value: unknown) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 0; }
 function boolValue(value: unknown) { return value === true || value === 1 || String(value).toLowerCase() === "true"; }
+function optionalBool(row: JsonObject, key: string) {
+  return Object.prototype.hasOwnProperty.call(row, key) ? boolValue(row[key]) : null;
+}
+function optionalNumber(row: JsonObject, key: string) {
+  return Object.prototype.hasOwnProperty.call(row, key) ? numberValue(row[key]) : null;
+}
 function safeEqual(left: string, right: string) { const a = Buffer.from(left); const b = Buffer.from(right); return a.length === b.length && timingSafeEqual(a, b); }
 function apiKey() { return clean(process.env.SMARTLEAD_API_KEY, 8_000); }
 function authorized(request: NextRequest) { const supplied = clean(request.headers.get("authorization"), 8_000).replace(/^Bearer\s+/i, ""); const expected = apiKey(); return Boolean(expected && supplied && safeEqual(supplied, expected)); }
@@ -98,15 +104,17 @@ function normalizeCampaign(row: JsonObject, sequencePayload: unknown): CampaignA
     status: clean(row.status),
     settings: {
       plainText: boolValue(row.send_as_plain_text),
-      forcePlainText: boolValue(row.force_plain_text),
+      forcePlainText: optionalBool(row, "force_plain_text"),
       trackingOff: (track.includes("DONT_TRACK_EMAIL_OPEN") || track.includes("DONT_EMAIL_OPEN"))
         && (track.includes("DONT_TRACK_LINK_CLICK") || track.includes("DONT_LINK_CLICK")),
       stopOnReply: clean(row.stop_lead_settings).toUpperCase() === "REPLY_TO_AN_EMAIL",
-      pauseDomainOnReply: boolValue(row.auto_pause_domain_leads_on_reply),
-      respectMailboxLimit: !boolValue(row.ignore_ss_mailbox_sending_limit),
-      bounceAutopauseThreshold: numberValue(row.bounce_autopause_threshold),
-      domainRateLimit: boolValue(row.domain_level_rate_limit),
-      unsubscribeTag: boolValue(row.add_unsubscribe_tag),
+      pauseDomainOnReply: optionalBool(row, "auto_pause_domain_leads_on_reply"),
+      respectMailboxLimit: Object.prototype.hasOwnProperty.call(row, "ignore_ss_mailbox_sending_limit")
+        ? !boolValue(row.ignore_ss_mailbox_sending_limit)
+        : null,
+      bounceAutopauseThreshold: optionalNumber(row, "bounce_autopause_threshold"),
+      domainRateLimit: optionalBool(row, "domain_level_rate_limit"),
+      unsubscribeTag: optionalBool(row, "add_unsubscribe_tag"),
       followUpPercentage: numberValue(row.follow_up_percentage),
       espMatching: boolValue(row.enable_ai_esp_matching),
       timezone: clean(schedule.tz || schedule.timezone),
@@ -128,14 +136,14 @@ function normalizeCampaign(row: JsonObject, sequencePayload: unknown): CampaignA
 function expectedSettings(lane: OutreachLane, settings: CampaignAudit["settings"]) {
   const dailyCap = lane.startsWith("talentera") ? 15 : 10;
   return settings.plainText === true
-    && settings.forcePlainText === true
+    && settings.forcePlainText !== false
     && settings.trackingOff === true
     && settings.stopOnReply === true
-    && settings.pauseDomainOnReply === true
-    && settings.respectMailboxLimit === true
-    && settings.bounceAutopauseThreshold === 2
-    && settings.domainRateLimit === true
-    && settings.unsubscribeTag === true
+    && settings.pauseDomainOnReply !== false
+    && settings.respectMailboxLimit !== false
+    && (settings.bounceAutopauseThreshold === null || settings.bounceAutopauseThreshold === 2)
+    && settings.domainRateLimit !== false
+    && settings.unsubscribeTag !== false
     && settings.followUpPercentage === 100
     && settings.espMatching === true
     && settings.timezone === "Asia/Riyadh"
