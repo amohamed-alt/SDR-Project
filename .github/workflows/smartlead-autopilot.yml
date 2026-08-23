@@ -152,6 +152,27 @@ jobs:
             exit 1
           fi
 
+      - name: Retire non-canonical Marita Smartlead campaigns
+        if: steps.mode.outputs.mode == 'setup'
+        env:
+          SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
+        run: |
+          set -euo pipefail
+          HTTP_CODE=$(curl --silent --show-error \
+            --connect-timeout 10 \
+            --max-time 180 \
+            --output /tmp/smartlead-legacy.json \
+            --write-out '%{http_code}' \
+            -X POST 'https://sdr.dashboardtalentera.tech/api/smartlead/legacy-reconcile' \
+            -H "Authorization: Bearer ${SMARTLEAD_API_KEY}" \
+            -H 'Content-Type: application/json')
+          jq '{ok, policy, managedCampaigns, legacyCampaigns, retired}' /tmp/smartlead-legacy.json || cat /tmp/smartlead-legacy.json
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo "::error::Legacy Smartlead campaign reconciliation failed (HTTP $HTTP_CODE)."
+            cat /tmp/smartlead-legacy.json || true
+            exit 1
+          fi
+
       - name: Verify all four Smartlead campaigns are structurally identical
         env:
           SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
@@ -195,7 +216,7 @@ jobs:
               state: 'success',
               context: mode === 'setup' ? 'smartlead/setup' : 'smartlead/autopilot',
               description: mode === 'setup'
-                ? 'Sequences, sender pools and campaign parity verified'
+                ? 'Four lanes, senders, parity and legacy retirement verified'
                 : 'Language-safe verified Smartlead daily batch processed',
               target_url: process.env.RUN_URL,
             });
@@ -217,7 +238,7 @@ jobs:
               state: 'failure',
               context: mode === 'setup' ? 'smartlead/setup' : 'smartlead/autopilot',
               description: mode === 'setup'
-                ? 'Smartlead setup, sender routing or parity failed'
+                ? 'Smartlead canonical setup or legacy retirement failed'
                 : 'Language-safe verified Smartlead daily batch failed',
               target_url: process.env.RUN_URL,
             });
