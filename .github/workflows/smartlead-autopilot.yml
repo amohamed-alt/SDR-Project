@@ -111,6 +111,33 @@ jobs:
             exit 1
           fi
 
+      - name: Reconcile sender brands and Google Microsoft pools
+        env:
+          SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
+        run: |
+          set -euo pipefail
+          HTTP_CODE=$(curl --silent --show-error \
+            --connect-timeout 10 \
+            --max-time 180 \
+            --output /tmp/smartlead-senders.json \
+            --write-out '%{http_code}' \
+            -X POST 'https://sdr.dashboardtalentera.tech/api/smartlead/sender-reconcile' \
+            -H "Authorization: Bearer ${SMARTLEAD_API_KEY}" \
+            -H 'Content-Type: application/json')
+
+          jq '{ok, blocked, policy, providerMatching, lanes, providers, inventory, unclassified, warnings}' /tmp/smartlead-senders.json || cat /tmp/smartlead-senders.json
+
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo "::error::Smartlead sender reconciliation returned HTTP $HTTP_CODE."
+            cat /tmp/smartlead-senders.json || true
+            exit 1
+          fi
+          if [ "$(jq -r '.blocked // false' /tmp/smartlead-senders.json)" = "true" ]; then
+            echo "::error::Brand-safe sender reconciliation is blocked."
+            cat /tmp/smartlead-senders.json || true
+            exit 1
+          fi
+
       - name: Mark Smartlead execution successful
         if: success()
         uses: actions/github-script@v7
@@ -128,7 +155,7 @@ jobs:
               state: 'success',
               context: mode === 'setup' ? 'smartlead/setup' : 'smartlead/autopilot',
               description: mode === 'setup'
-                ? 'Visible Smartlead sequences and sender pools synced'
+                ? 'Sequences and brand-safe sender pools synced'
                 : 'Verified Smartlead daily batch processed',
               target_url: process.env.RUN_URL,
             });
@@ -150,7 +177,7 @@ jobs:
               state: 'failure',
               context: mode === 'setup' ? 'smartlead/setup' : 'smartlead/autopilot',
               description: mode === 'setup'
-                ? 'Visible Smartlead setup sync failed'
+                ? 'Smartlead setup or sender routing failed'
                 : 'Verified Smartlead daily batch failed',
               target_url: process.env.RUN_URL,
             });
