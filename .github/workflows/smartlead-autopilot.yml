@@ -23,6 +23,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   group: smartlead-orchestrator-production
@@ -84,3 +85,47 @@ jobs:
             cat /tmp/smartlead-orchestrator.json || true
             exit 1
           fi
+
+      - name: Mark Smartlead execution successful
+        if: success()
+        uses: actions/github-script@v7
+        env:
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          MODE: ${{ steps.mode.outputs.mode }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const mode = process.env.MODE || 'setup';
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.TARGET_SHA,
+              state: 'success',
+              context: mode === 'setup' ? 'smartlead/setup' : 'smartlead/autopilot',
+              description: mode === 'setup'
+                ? 'Smartlead campaigns, sequences and sender pools synced'
+                : 'Smartlead daily safe batch processed',
+              target_url: process.env.RUN_URL,
+            });
+
+      - name: Mark Smartlead execution failed
+        if: failure()
+        uses: actions/github-script@v7
+        env:
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          MODE: ${{ steps.mode.outputs.mode }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const mode = process.env.MODE || 'setup';
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.TARGET_SHA,
+              state: 'failure',
+              context: mode === 'setup' ? 'smartlead/setup' : 'smartlead/autopilot',
+              description: mode === 'setup'
+                ? 'Smartlead setup sync failed'
+                : 'Smartlead daily safe batch failed',
+              target_url: process.env.RUN_URL,
+            });
