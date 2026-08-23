@@ -8,16 +8,43 @@ if [ ! -s "$RUNTIME_ENV_FILE" ]; then
   exit 78
 fi
 
-# Deployment-injected credentials are kept separately before loading the
-# persistent runtime file. This lets GitHub Actions secrets safely override an
-# older VPS env file without changing or exposing that file.
+# Values injected by Docker Compose / GitHub Actions are authoritative for a
+# deployment. Keep them before sourcing the persistent VPS env because a stale
+# key in that file must never roll production back to an older build or secret.
+DEPLOY_SDR_BUILD_REF="${SDR_BUILD_REF:-}"
+DEPLOY_CAREER_GENERATION="${CAREER_GENERATION:-}"
 DEPLOY_OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-${GTM_RESEARCH_OPENROUTER_API_KEY:-}}"
+DEPLOY_OPENROUTER_FAST_MODEL="${OPENROUTER_FAST_MODEL:-}"
+DEPLOY_OPENROUTER_DEEP_MODEL="${OPENROUTER_DEEP_MODEL:-}"
 DEPLOY_SIGNALHIRE_API_KEY="${SIGNALHIRE_API_KEY:-}"
+DEPLOY_TAVILY_API_KEY="${TAVILY_API_KEY:-}"
+DEPLOY_APOLLO_API_KEY="${APOLLO_API_KEY:-}"
+DEPLOY_ACQUISITION_OWNER_TOKEN="${ACQUISITION_OWNER_TOKEN:-}"
+DEPLOY_ACQUISITION_OWNER_IDS="${ACQUISITION_OWNER_IDS:-}"
 
 set -a
 # shellcheck disable=SC1090
 . "$RUNTIME_ENV_FILE"
 set +a
+
+# Restore non-empty deployment values after the persistent env has loaded.
+# Runtime-only values that are not injected by deployment still come from the
+# persistent env as before.
+if [ -n "$DEPLOY_SDR_BUILD_REF" ]; then SDR_BUILD_REF="$DEPLOY_SDR_BUILD_REF"; fi
+if [ -n "$DEPLOY_CAREER_GENERATION" ]; then CAREER_GENERATION="$DEPLOY_CAREER_GENERATION"; fi
+if [ -n "$DEPLOY_SIGNALHIRE_API_KEY" ]; then SIGNALHIRE_API_KEY="$DEPLOY_SIGNALHIRE_API_KEY"; fi
+if [ -n "$DEPLOY_TAVILY_API_KEY" ]; then TAVILY_API_KEY="$DEPLOY_TAVILY_API_KEY"; fi
+if [ -n "$DEPLOY_APOLLO_API_KEY" ]; then APOLLO_API_KEY="$DEPLOY_APOLLO_API_KEY"; fi
+if [ -n "$DEPLOY_ACQUISITION_OWNER_TOKEN" ]; then ACQUISITION_OWNER_TOKEN="$DEPLOY_ACQUISITION_OWNER_TOKEN"; fi
+if [ -n "$DEPLOY_ACQUISITION_OWNER_IDS" ]; then ACQUISITION_OWNER_IDS="$DEPLOY_ACQUISITION_OWNER_IDS"; fi
+
+export SDR_BUILD_REF="${SDR_BUILD_REF:-unknown}"
+export CAREER_GENERATION="${CAREER_GENERATION:-v3}"
+export SIGNALHIRE_API_KEY="${SIGNALHIRE_API_KEY:-}"
+export TAVILY_API_KEY="${TAVILY_API_KEY:-}"
+export APOLLO_API_KEY="${APOLLO_API_KEY:-}"
+export ACQUISITION_OWNER_TOKEN="${ACQUISITION_OWNER_TOKEN:-}"
+export ACQUISITION_OWNER_IDS="${ACQUISITION_OWNER_IDS:-}"
 
 if [ -n "$DEPLOY_OPENROUTER_API_KEY" ]; then
   OPENROUTER_API_KEY="$DEPLOY_OPENROUTER_API_KEY"
@@ -33,14 +60,11 @@ if [ -n "${OPENROUTER_API_KEY:-}" ]; then
   export GTM_RESEARCH_OPENROUTER_API_KEY
 fi
 
+if [ -n "$DEPLOY_OPENROUTER_FAST_MODEL" ]; then OPENROUTER_FAST_MODEL="$DEPLOY_OPENROUTER_FAST_MODEL"; fi
+if [ -n "$DEPLOY_OPENROUTER_DEEP_MODEL" ]; then OPENROUTER_DEEP_MODEL="$DEPLOY_OPENROUTER_DEEP_MODEL"; fi
 OPENROUTER_FAST_MODEL="${OPENROUTER_FAST_MODEL:-openai/gpt-4.1-nano}"
 OPENROUTER_DEEP_MODEL="${OPENROUTER_DEEP_MODEL:-openai/gpt-4.1-mini}"
 export OPENROUTER_FAST_MODEL OPENROUTER_DEEP_MODEL
-
-if [ -n "$DEPLOY_SIGNALHIRE_API_KEY" ]; then
-  SIGNALHIRE_API_KEY="$DEPLOY_SIGNALHIRE_API_KEY"
-  export SIGNALHIRE_API_KEY
-fi
 
 if [ -n "${OPENROUTER_API_KEY:-}" ]; then
   echo "OpenRouter gateway: configured; fast=${OPENROUTER_FAST_MODEL}; deep=${OPENROUTER_DEEP_MODEL}"
@@ -53,5 +77,7 @@ if [ -n "${SIGNALHIRE_API_KEY:-}" ]; then
 else
   echo "Prospecting SignalHire: NOT configured"
 fi
+
+echo "SDR runtime: build=${SDR_BUILD_REF}; careerGeneration=${CAREER_GENERATION}"
 
 exec node server.js

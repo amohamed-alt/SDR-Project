@@ -11,8 +11,9 @@ permissions:
 
 jobs:
   report:
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - name: Read production acquisition queue
         id: queue
@@ -20,15 +21,28 @@ jobs:
           TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          HTTP_CODE=$(curl --silent --show-error \
-            --connect-timeout 10 \
-            --max-time 30 \
-            --output /tmp/acquisition.json \
-            --write-out '%{http_code}' \
-            'https://sdr.dashboardtalentera.tech/api/acquisition?limit=1000&includeExcluded=1' || true)
+          HTTP_CODE=""
+
+          for ATTEMPT in 1 2 3 4 5; do
+            HTTP_CODE=$(curl --silent --show-error \
+              --connect-timeout 10 \
+              --max-time 30 \
+              --output /tmp/acquisition.json \
+              --write-out '%{http_code}' \
+              -H 'Cache-Control: no-cache' \
+              "https://sdr.dashboardtalentera.tech/api/acquisition?limit=1000&includeExcluded=1&statusCheck=${TARGET_SHA}&attempt=${ATTEMPT}" || true)
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              break
+            fi
+
+            echo "Acquisition queue status attempt ${ATTEMPT}/5 returned HTTP ${HTTP_CODE:-none}."
+            if [ "$ATTEMPT" -lt 5 ]; then sleep $((ATTEMPT * 5)); fi
+          done
+
           if [ "$HTTP_CODE" != "200" ]; then
             echo "state=error" >> "$GITHUB_OUTPUT"
-            echo "description=Acquisition queue unavailable (HTTP $HTTP_CODE)" >> "$GITHUB_OUTPUT"
+            echo "description=Acquisition queue unavailable after retries (HTTP ${HTTP_CODE:-none})" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -49,6 +63,7 @@ jobs:
           STATE: ${{ steps.queue.outputs.state }}
           DESCRIPTION: ${{ steps.queue.outputs.description }}
         with:
+          retries: 3
           script: |
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,

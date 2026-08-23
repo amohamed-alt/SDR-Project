@@ -147,6 +147,7 @@ export interface ActivityRow {
   relatedContactId?: string;
   relatedContactName?: string;
   relatedContactUrl?: string;
+  relatedContactHasPhone?: boolean;
   url: string;
 }
 
