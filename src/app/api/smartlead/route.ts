@@ -38,7 +38,7 @@ function lightweightHealthPayload() {
       globalDailyNewTarget: Number(process.env.SMARTLEAD_DAILY_NEW_LEADS || 50),
       minTimeBetweenEmails: Math.max(15, Number(process.env.SMARTLEAD_MIN_TIME_BETWEEN_EMAILS || 15) || 15),
       maxCampaignEmailsPerMailbox: 20,
-      autopilotEnabled: process.env.SMARTLEAD_AUTOPILOT_ENABLED !== "false",
+      autopilotEnabled: process.env.SMARTLEAD_AUTOPILOT_ENABLED === "true",
     },
     safety: {
       healthy: false,

@@ -3,13 +3,14 @@ import path from "node:path";
 import { batchRead, readAssociations, searchAll } from "@/lib/hubspot";
 import { getMaritaPriorityQueue, type MaritaPriorityCompany } from "@/lib/marita-priority";
 import { openRouterCompletion } from "@/lib/openrouter-low-cost";
-import { decideRecipientLanguage, senderBrand, type SenderBrand } from "@/lib/recipient-language-routing";
+import { decideRecipientLanguage, type SenderBrand } from "@/lib/recipient-language-routing";
 import { SALES_REP_OWNER_IDS } from "@/lib/sales-reps";
 import {
   calculateReputationPlan,
   isSafeTalenteraSender,
   reputationHealth,
 } from "@/lib/smartlead-reputation";
+import { inspectSenderAccount } from "@/lib/smartlead-sender-routing";
 import {
   calculateCoverage,
   emailStatusIsSafe,
@@ -250,11 +251,6 @@ function numberFrom(value: unknown, keys: string[]) {
   return 0;
 }
 
-function boolLike(value: unknown) {
-  if (value === true || value === 1 || String(value).toLowerCase() === "true") return true;
-  if (value === false || value === 0 || String(value).toLowerCase() === "false") return false;
-  return null;
-}
 
 function getSmartleadApiKey() {
   return clean(process.env.SMARTLEAD_API_KEY, 2_000);
@@ -327,23 +323,19 @@ function parseSender(value: unknown, assignedIds: Set<number>): SmartleadSender 
   const item = object(value);
   const id = Number(item.id ?? item.email_account_id);
   if (!Number.isFinite(id)) return null;
-  const warmup = object(item.warmup_details || item.warmup);
-  const email = clean(item.from_email || item.email || item.username);
-  const rawWarmup = item.warmup_enabled ?? warmup.enabled ?? warmup.warmup_enabled;
-  const parsedWarmup = boolLike(rawWarmup);
-  const brand = senderBrand(email);
+  const safety = inspectSenderAccount(item, 20);
   const sender: SmartleadSender = {
     id,
-    email,
+    email: safety.email,
     fromName: clean(item.from_name || item.name),
-    maxPerDay: numberFrom(item, ["max_email_per_day", "daily_limit", "max_emails_per_day"]),
-    warmupEnabled: parsedWarmup === true,
-    warmupKnown: parsedWarmup !== null,
+    maxPerDay: safety.dailyLimit,
+    warmupEnabled: safety.warmupEnabled,
+    warmupKnown: safety.warmupKnown,
     assigned: assignedIds.has(id),
-    brand,
+    brand: safety.brand,
     eligibleForCampaign: false,
   };
-  sender.eligibleForCampaign = isSafeTalenteraSender(sender);
+  sender.eligibleForCampaign = safety.eligible && isSafeTalenteraSender(sender);
   return sender;
 }
 
@@ -857,13 +849,13 @@ function campaignSequencePayload() {
     },
     {
       seq_number: 2,
-      seq_delay_details: { delay_in_days: 3 },
+      seq_delay_details: { delay_in_days: 4 },
       variant_distribution_type: "MANUALLY_EQUAL",
       variants: [{ subject: "{{sl_subject_2}}", email_body: "{{sl_touch_2}}", variant_label: "A" }],
     },
     {
       seq_number: 3,
-      seq_delay_details: { delay_in_days: 4 },
+      seq_delay_details: { delay_in_days: 6 },
       variant_distribution_type: "MANUALLY_EQUAL",
       variants: [{ subject: "{{sl_subject_3}}", email_body: "{{sl_touch_3}}", variant_label: "A" }],
     },
@@ -885,12 +877,18 @@ export async function bootstrapSmartleadCampaign() {
   await smartleadRequest(`/campaigns/${campaign.id}/settings`, {
     method: "POST",
     body: JSON.stringify({
-      track_settings: ["DONT_EMAIL_OPEN", "DONT_LINK_CLICK"],
+      track_settings: ["DONT_TRACK_EMAIL_OPEN", "DONT_TRACK_LINK_CLICK"],
       stop_lead_settings: "REPLY_TO_AN_EMAIL",
       unsubscribe_text: "Not relevant? Reply no and I won't follow up.",
       send_as_plain_text: true,
+      force_plain_text: true,
       follow_up_percentage: 100,
       enable_ai_esp_matching: true,
+      auto_pause_domain_leads_on_reply: true,
+      ignore_ss_mailbox_sending_limit: false,
+      bounce_autopause_threshold: "2",
+      domain_level_rate_limit: true,
+      add_unsubscribe_tag: true,
       client_id: null,
     }),
   });
@@ -963,6 +961,7 @@ export async function setSmartleadCampaignStatus(status: "START" | "PAUSED") {
   const campaign = await resolveCampaign();
   if (!campaign) throw new Error("Create the Talentera Smartlead campaign first.");
   if (status === "START") {
+    if (process.env.SMARTLEAD_LEGACY_SEND_ENABLED !== "true") throw new Error("Legacy campaign starts are disabled; use the MillionVerifier-gated orchestrator-v3 path.");
     const [senders, leads] = await Promise.all([smartleadSenders(campaign), campaignLeadRows(campaign)]);
     const assigned = senders.filter((sender) => sender.assigned);
     const unsafeAssigned = assigned.filter((sender) => !sender.eligibleForCampaign);
@@ -977,7 +976,7 @@ export async function setSmartleadCampaignStatus(status: "START" | "PAUSED") {
     await safeSchedule(campaign.id, reputation.safeNewLeadCap);
   }
   await smartleadRequest(`/campaigns/${campaign.id}/status`, {
-    method: "PATCH",
+    method: "POST",
     body: JSON.stringify({ status }),
   });
   cache = null;
@@ -1019,6 +1018,7 @@ function smartleadLeadPayload(lead: PreparedSmartleadLead) {
 }
 
 export async function launchPreparedSmartleadBatch() {
+  if (process.env.SMARTLEAD_LEGACY_SEND_ENABLED !== "true") throw new Error("Legacy batch launch is disabled; use the MillionVerifier-gated orchestrator-v3 path.");
   const prepared = await readPreparedBatch();
   if (!prepared?.leads.length) throw new Error("Prepare a Smartlead batch first.");
   const campaign = await resolveCampaign();

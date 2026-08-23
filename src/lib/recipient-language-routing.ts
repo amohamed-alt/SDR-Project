@@ -1,3 +1,5 @@
+import { senderBrandForDomain } from "./smartlead-sender-routing.ts";
+
 export type RecipientLocale = "ar-SA" | "ar-GCC" | "en";
 export type OutreachProduct = "talentera" | "evalify";
 export type SenderBrand = OutreachProduct | "unknown";
@@ -112,16 +114,10 @@ export function decideRecipientLanguage(input: RecipientLanguageInput): Recipien
   };
 }
 
-export function senderBrand(email: string): SenderBrand {
-  const value = clean(email).toLowerCase();
-  const domain = value.includes("@") ? value.split("@").pop() ?? "" : value;
-  if (/talentera/.test(domain)) return "talentera";
-  if (/evalufy|evalify/.test(domain)) return "evalify";
-  return "unknown";
-}
+export { senderBrandForDomain as senderBrand } from "./smartlead-sender-routing.ts";
 
 export function canUseSenderForProduct(email: string, product: OutreachProduct) {
-  return senderBrand(email) === product;
+  return senderBrandForDomain(email) === product;
 }
 
 export function recommendedProduct(input: { explicitProduct?: OutreachProduct | ""; assessmentSignal?: boolean; atsOpportunity?: boolean; }): { product: OutreachProduct; confidence: number; reason: string } {

@@ -49,9 +49,9 @@ test("Arabic and English campaign bodies stay in their intended script", () => {
   }
 });
 
-test("all four lanes keep the same threaded Day 0, Day 3, Day 7 structure", () => {
+test("all four lanes keep the same threaded Day 1, Day 5, Day 11 structure", () => {
   for (const lane of Object.values(VISIBLE_SEQUENCE_LANES)) {
-    assert.deepEqual(lane.touches.map((touch) => touch.delayDays), [0, 3, 4], lane.lane);
+    assert.deepEqual(lane.touches.map((touch) => touch.delayDays), [0, 4, 6], lane.lane);
     assert.ok(lane.touches[0].subject.length > 0, lane.lane);
     assert.equal(lane.touches[1].subject, "", lane.lane);
     assert.equal(lane.touches[2].subject, "", lane.lane);

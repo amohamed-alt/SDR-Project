@@ -7,11 +7,11 @@ import {
   decideRecipientLanguage,
   isGccCountry,
   isKsaCountry,
-  senderBrand,
   type OutreachProduct,
   type RecipientLocale,
   type SenderBrand,
 } from "@/lib/recipient-language-routing";
+import { inspectSenderAccount, validateApprovedSenderInventory } from "@/lib/smartlead-sender-routing";
 import { SALES_REP_OWNER_IDS } from "@/lib/sales-reps";
 import { emailStatusIsSafe, industryBucket, isValidBusinessEmail, personaBucket, renderOutreachTemplate, sanitizeOutreachText } from "@/lib/smartlead-policy";
 import type { HubSpotRecord } from "@/lib/types";
@@ -22,7 +22,7 @@ const CACHE_TTL_MS = 2 * 60 * 1000;
 const TOUCH_COUNT = 3;
 const MIN_GAP_MINUTES = 15;
 const AI_ARABIC_CONFIDENCE = 0.97;
-const GLOBAL_DAILY_NEW_DEFAULT = 75;
+const GLOBAL_DAILY_NEW_DEFAULT = 50;
 const MAX_CAMPAIGN_EMAILS_PER_MAILBOX = 20;
 
 const PRODUCT_CONFIG: Record<OutreachProduct, { name: string; brandLabel: string }> = {
@@ -56,6 +56,7 @@ export type V2Sender = {
   brand: SenderBrand;
   assignedProducts: OutreachProduct[];
   eligible: boolean;
+  safetyReasons: string[];
 };
 
 export type V2Lead = {
@@ -248,16 +249,15 @@ async function listAllEmailAccounts() {
   }
   return rows;
 }
-function boolLike(value: unknown) { if (value === true || value === 1 || String(value).toLowerCase() === "true") return true; if (value === false || value === 0 || String(value).toLowerCase() === "false") return false; return null; }
 function parseSender(value: unknown, assigned: Record<OutreachProduct, Set<number>>): V2Sender | null {
   const item = object(value); const id = Number(item.id ?? item.email_account_id); if (!Number.isFinite(id)) return null;
-  const warmup = object(item.warmup_details || item.warmup); const rawWarmup = item.warmup_enabled ?? warmup.enabled ?? warmup.warmup_enabled; const parsed = boolLike(rawWarmup);
-  const email = clean(item.from_email || item.email || item.username); const brand = senderBrand(email);
+  const safety = inspectSenderAccount(item, MAX_CAMPAIGN_EMAILS_PER_MAILBOX);
   return {
-    id, email, fromName: clean(item.from_name || item.name), maxPerDay: numberFrom(item, ["max_email_per_day", "daily_limit", "max_emails_per_day"]),
-    warmupEnabled: parsed === true, warmupKnown: parsed !== null, brand,
+    id, email: safety.email, fromName: clean(item.from_name || item.name), maxPerDay: safety.dailyLimit,
+    warmupEnabled: safety.warmupEnabled, warmupKnown: safety.warmupKnown, brand: safety.brand,
     assignedProducts: (["talentera", "evalify"] as OutreachProduct[]).filter((product) => assigned[product].has(id)),
-    eligible: brand !== "unknown" && (parsed === null || parsed === true),
+    eligible: safety.eligible,
+    safetyReasons: safety.reasons,
   };
 }
 async function getSenders(campaigns: Record<OutreachProduct, V2Campaign | null>) {
@@ -297,6 +297,17 @@ async function recentSalesSafety(): Promise<SalesSafety> {
   for (const scan of scans) { activityCount += scan.activities.length; for (const activity of scan.activities) { for (const id of scan.contacts.get(activity.id) ?? []) { blockedContactIds.add(id); salesContactIds.add(id); } for (const id of scan.companies.get(activity.id) ?? []) blockedCompanyIds.add(id); } }
   if (salesContactIds.size) try { const associations = await readAssociations("contacts", "companies", [...salesContactIds]); for (const companyIds of associations.values()) for (const id of companyIds) blockedCompanyIds.add(id); } catch (error) { warnings.push(error instanceof Error ? error.message : "Contact-company sales association check failed"); }
   return { healthy: warnings.length === 0, blockedContactIds, blockedCompanyIds, activityCount, warnings };
+}
+
+export async function getSmartleadSalesSafetySnapshot() {
+  const safety = await recentSalesSafety();
+  return {
+    healthy: safety.healthy,
+    blockedContactIds: [...safety.blockedContactIds],
+    blockedCompanyIds: [...safety.blockedCompanyIds],
+    activityCount: safety.activityCount,
+    warnings: safety.warnings,
+  };
 }
 
 function bestEmailContact(company: MaritaPriorityCompany) { return company.contacts.find((contact) => isValidBusinessEmail(contact.email)) ?? null; }
@@ -377,8 +388,10 @@ async function buildQueue(forceRefresh: boolean) {
   return { priority, queue, salesSafety, campaigns, managedRows, executions, ledger, intelligence };
 }
 
-function senderCapacity(sender: V2Sender) { const accountLimit = sender.maxPerDay > 0 ? sender.maxPerDay : MAX_CAMPAIGN_EMAILS_PER_MAILBOX; return Math.min(accountLimit, MAX_CAMPAIGN_EMAILS_PER_MAILBOX); }
+function senderCapacity(sender: V2Sender) { return Math.min(Math.max(0, sender.maxPerDay), MAX_CAMPAIGN_EMAILS_PER_MAILBOX); }
 function capacityPlan(senders: V2Sender[]) {
+  const inventory = validateApprovedSenderInventory(senders);
+  if (!inventory.healthy) return { totalInboxes: senders.length, eligibleInboxes: 0, assignedInboxes: 0, potentialCampaignEmailsPerDay: 0, liveCampaignEmailsPerDay: 0, potentialNewLeadsPerDay: 0, liveNewLeadsPerDay: 0, productLiveNewCaps: { talentera: 0, evalify: 0 } };
   const eligible = senders.filter((sender) => sender.eligible); const assigned = eligible.filter((sender) => sender.assignedProducts.includes(sender.brand as OutreachProduct));
   const potentialCampaignEmailsPerDay = eligible.reduce((sum, sender) => sum + senderCapacity(sender), 0); const liveCampaignEmailsPerDay = assigned.reduce((sum, sender) => sum + senderCapacity(sender), 0);
   const potentialNew = Math.floor(potentialCampaignEmailsPerDay / TOUCH_COUNT); const liveNew = Math.floor(liveCampaignEmailsPerDay / TOUCH_COUNT); const global = globalDailyTarget();
@@ -485,12 +498,12 @@ function renderPrepared(lead: V2Lead, intelligence: IntelligenceEntry): Prepared
 
 function sequencePayload() { return [
   { seq_number: 1, seq_delay_details: { delay_in_days: 0 }, variant_distribution_type: "MANUALLY_EQUAL", variants: [{ subject: "{{sl_subject_1}}", email_body: "{{sl_touch_1}}", variant_label: "A" }] },
-  { seq_number: 2, seq_delay_details: { delay_in_days: 3 }, variant_distribution_type: "MANUALLY_EQUAL", variants: [{ subject: "{{sl_subject_2}}", email_body: "{{sl_touch_2}}", variant_label: "A" }] },
-  { seq_number: 3, seq_delay_details: { delay_in_days: 4 }, variant_distribution_type: "MANUALLY_EQUAL", variants: [{ subject: "{{sl_subject_3}}", email_body: "{{sl_touch_3}}", variant_label: "A" }] },
+  { seq_number: 2, seq_delay_details: { delay_in_days: 4 }, variant_distribution_type: "MANUALLY_EQUAL", variants: [{ subject: "{{sl_subject_2}}", email_body: "{{sl_touch_2}}", variant_label: "A" }] },
+  { seq_number: 3, seq_delay_details: { delay_in_days: 6 }, variant_distribution_type: "MANUALLY_EQUAL", variants: [{ subject: "{{sl_subject_3}}", email_body: "{{sl_touch_3}}", variant_label: "A" }] },
 ]; }
 async function configureCampaign(campaign: V2Campaign) {
-  await smartleadRequest(`/campaigns/${campaign.id}/settings`, { method: "POST", body: JSON.stringify({ track_settings: ["DONT_EMAIL_OPEN", "DONT_LINK_CLICK"], stop_lead_settings: "REPLY_TO_AN_EMAIL", unsubscribe_text: "Not relevant? Reply no / غير مناسب؟ رد لا", send_as_plain_text: true, follow_up_percentage: 100, enable_ai_esp_matching: false, client_id: null }) });
-  await smartleadRequest(`/campaigns/${campaign.id}/schedule`, { method: "POST", body: JSON.stringify({ timezone: "Asia/Riyadh", days_of_the_week: [0, 1, 2, 3, 4], start_hour: process.env.SMARTLEAD_START_HOUR || "09:30", end_hour: process.env.SMARTLEAD_END_HOUR || "16:30", min_time_btw_emails: Math.max(MIN_GAP_MINUTES, positiveInt(process.env.SMARTLEAD_MIN_TIME_BETWEEN_EMAILS, MIN_GAP_MINUTES, 1, 240)), max_leads_per_day: globalDailyTarget() }) });
+  await smartleadRequest(`/campaigns/${campaign.id}/settings`, { method: "POST", body: JSON.stringify({ track_settings: ["DONT_TRACK_EMAIL_OPEN", "DONT_TRACK_LINK_CLICK"], stop_lead_settings: "REPLY_TO_AN_EMAIL", unsubscribe_text: "Not relevant? Reply no / غير مناسب؟ رد لا", send_as_plain_text: true, force_plain_text: true, follow_up_percentage: 100, enable_ai_esp_matching: true, auto_pause_domain_leads_on_reply: true, ignore_ss_mailbox_sending_limit: false, bounce_autopause_threshold: "2", domain_level_rate_limit: true, add_unsubscribe_tag: true, out_of_office_detection_settings: { ignoreOOOasReply: false, autoReactivateOOO: false, reactivateOOOwithDelay: 0, autoCategorizeOOO: true }, client_id: null }) });
+  await smartleadRequest(`/campaigns/${campaign.id}/schedule`, { method: "POST", body: JSON.stringify({ timezone: "Asia/Riyadh", days_of_the_week: [0, 1, 2, 3, 4], start_hour: process.env.SMARTLEAD_START_HOUR || "09:30", end_hour: process.env.SMARTLEAD_END_HOUR || "16:30", min_time_btw_emails: Math.max(MIN_GAP_MINUTES, positiveInt(process.env.SMARTLEAD_MIN_TIME_BETWEEN_EMAILS, MIN_GAP_MINUTES, 1, 240)), max_new_leads_per_day: campaign.product === "talentera" ? 30 : 20 }) });
   await smartleadRequest(`/campaigns/${campaign.id}/sequences`, { method: "POST", body: JSON.stringify(sequencePayload()) });
 }
 async function ensureCampaign(product: OutreachProduct) {
@@ -510,10 +523,10 @@ export async function getSmartleadV2(forceRefresh = false): Promise<SmartleadV2P
   const currentRows: Record<OutreachProduct, JsonObject[]> = { talentera: [], evalify: [] };
   for (const product of ["talentera", "evalify"] as OutreachProduct[]) currentRows[product] = built.campaigns[product] ? await campaignLeadRows(built.campaigns[product]) : [];
   const [talenteraAnalytics, evalifyAnalytics, prepared] = await Promise.all([analytics(built.campaigns.talentera, currentRows.talentera), analytics(built.campaigns.evalify, currentRows.evalify), readPrepared()]);
-  const capacity = capacityPlan(senders); const ready = built.queue.filter((lead) => lead.eligible); const liveCap = capacity.liveNewLeadsPerDay; const coverageDays = liveCap ? Math.ceil(ready.length / liveCap * 10) / 10 : 0;
+  const approvedInventory = validateApprovedSenderInventory(senders); const capacity = capacityPlan(senders); const ready = built.queue.filter((lead) => lead.eligible); const liveCap = capacity.liveNewLeadsPerDay; const coverageDays = liveCap ? Math.ceil(ready.length / liveCap * 10) / 10 : 0;
   const payload: SmartleadV2Payload = {
     generatedAt: new Date().toISOString(), configuration: { apiConfigured: Boolean(getApiKey()), openRouterConfigured: aiConfigured(), ownerActionsConfigured: Boolean(clean(process.env.ACQUISITION_OWNER_TOKEN)), maritaOwnerId: MARITA_OWNER_ID, globalDailyNewTarget: globalDailyTarget(), minTimeBetweenEmails: Math.max(MIN_GAP_MINUTES, positiveInt(process.env.SMARTLEAD_MIN_TIME_BETWEEN_EMAILS, MIN_GAP_MINUTES, 1, 240)), maxCampaignEmailsPerMailbox: MAX_CAMPAIGN_EMAILS_PER_MAILBOX },
-    safety: { healthy: built.salesSafety.healthy, recentSalesActivities: built.salesSafety.activityCount, blockedContacts: built.salesSafety.blockedContactIds.size, blockedCompanies: built.salesSafety.blockedCompanyIds.size, warnings: built.salesSafety.warnings },
+    safety: { healthy: built.salesSafety.healthy && approvedInventory.healthy, recentSalesActivities: built.salesSafety.activityCount, blockedContacts: built.salesSafety.blockedContactIds.size, blockedCompanies: built.salesSafety.blockedCompanyIds.size, warnings: [...built.salesSafety.warnings, ...approvedInventory.warnings] },
     campaigns: built.campaigns, analytics: { talentera: talenteraAnalytics, evalify: evalifyAnalytics }, senders, capacity,
     summary: { maritaCompanies: built.priority.companies.length, emailCandidates: built.queue.length, ready: ready.length, talenteraReady: ready.filter((lead) => lead.product === "talentera").length, evalifyReady: ready.filter((lead) => lead.product === "evalify").length, blockedBySales: built.queue.filter((lead) => /Sales activity/i.test(lead.blockReason)).length, blockedEmail: built.queue.filter((lead) => /email/i.test(lead.blockReason)).length, alreadyEntered: built.queue.filter((lead) => /Already entered/i.test(lead.blockReason)).length, prepared: prepared?.leads.length ?? 0, today: Math.min(ready.length, liveCap), tomorrow: Math.min(Math.max(0, ready.length - liveCap), liveCap), next48Hours: Math.min(ready.length, liveCap * 2), coverageDays },
     queue: built.queue.slice(0, 1_000), preparedSamples: (prepared?.leads ?? []).slice(0, 8), executions: built.executions.slice(0, 500), sequenceCatalog: { talentera: { arSA: sequenceTemplate("talentera", "ar-SA"), en: sequenceTemplate("talentera", "en") }, evalify: { arSA: sequenceTemplate("evalify", "ar-SA"), en: sequenceTemplate("evalify", "en") } },
@@ -525,12 +538,13 @@ export async function bootstrapSmartleadV2() { const [talentera, evalify] = awai
 
 export async function syncSmartleadV2Senders() {
   const campaigns: Record<OutreachProduct, V2Campaign> = { talentera: await ensureCampaign("talentera"), evalify: await ensureCampaign("evalify") }; const all = await getSenders(campaigns);
+  const inventory = validateApprovedSenderInventory(all); if (!inventory.healthy) throw new Error(`Approved sender inventory is not safe: ${inventory.warnings.join(" ")}`);
   const result: Record<OutreachProduct, number> = { talentera: 0, evalify: 0 };
   for (const product of ["talentera", "evalify"] as OutreachProduct[]) {
     const ids = all.filter((sender) => sender.eligible && sender.brand === product).map((sender) => sender.id); if (!ids.length) continue;
     await smartleadRequest(`/campaigns/${campaigns[product].id}/email-accounts`, { method: "POST", body: JSON.stringify({ email_account_ids: ids }) }); result[product] = ids.length;
   }
-  cache = null; return { attached: result, note: "Only brand-matched warmed/unknown-warmup senders were attached. Existing V2 campaigns are isolated by product." };
+  cache = null; return { attached: result, inventory, note: "Only exact-domain, explicitly connected and warmed senders were attached. Existing V2 campaigns are isolated by product." };
 }
 
 export async function analyzeRecipientNames(limit = 100) {
@@ -540,7 +554,7 @@ export async function analyzeRecipientNames(limit = 100) {
 
 export async function prepareSmartleadV2(limit?: number) {
   const built = await buildQueue(true); if (!built.salesSafety.healthy) throw new Error("Sales safety scan is not healthy. Prepare is locked.");
-  const senders = await getSenders(built.campaigns); const capacity = capacityPlan(senders); if (capacity.liveNewLeadsPerDay < 1) throw new Error("No live sender capacity. Bootstrap campaigns and Sync senders first.");
+  const senders = await getSenders(built.campaigns); const inventory = validateApprovedSenderInventory(senders); if (!inventory.healthy) throw new Error(`Approved sender inventory is not safe: ${inventory.warnings.join(" ")}`); const capacity = capacityPlan(senders); if (capacity.liveNewLeadsPerDay < 1) throw new Error("No live sender capacity. Bootstrap campaigns and Sync senders first.");
   const cap = Math.min(capacity.liveNewLeadsPerDay, Math.max(1, positiveInt(limit, capacity.liveNewLeadsPerDay, 1, 150)));
   const productCount: Record<OutreachProduct, number> = { talentera: 0, evalify: 0 }; const selected: V2Lead[] = [];
   for (const lead of built.queue) { if (!lead.eligible) continue; const productCap = capacity.productLiveNewCaps[lead.product]; if (productCount[lead.product] >= productCap) continue; selected.push(lead); productCount[lead.product] += 1; if (selected.length >= cap) break; }
@@ -551,8 +565,9 @@ export async function prepareSmartleadV2(limit?: number) {
 }
 
 export async function launchPreparedSmartleadV2() {
+  if (process.env.SMARTLEAD_AUTOPILOT_ENABLED !== "true") throw new Error("Sending is locked until SMARTLEAD_AUTOPILOT_ENABLED=true is set after the launch checklist.");
   const prepared = await readPrepared(); if (!prepared?.leads.length) throw new Error("Prepare a V2 batch first."); const built = await buildQueue(true); if (!built.salesSafety.healthy) throw new Error("Sales safety scan is unhealthy. Queue blocked.");
-  const campaigns = built.campaigns; const senders = await getSenders(campaigns); const capacity = capacityPlan(senders); if (capacity.liveNewLeadsPerDay < 1) throw new Error("No safe sender capacity.");
+  const campaigns = built.campaigns; const senders = await getSenders(campaigns); const inventory = validateApprovedSenderInventory(senders); if (!inventory.healthy) throw new Error(`Approved sender inventory is not safe: ${inventory.warnings.join(" ")}`); const capacity = capacityPlan(senders); if (capacity.liveNewLeadsPerDay < 1) throw new Error("No safe sender capacity.");
   const fresh = new Map(built.queue.filter((lead) => lead.eligible).map((lead) => [lead.email.toLowerCase(), lead])); const safe = prepared.leads.filter((lead) => { const current = fresh.get(lead.email.toLowerCase()); return current && current.contactId === lead.contactId && current.companyId === lead.companyId && current.product === lead.product; }).slice(0, capacity.liveNewLeadsPerDay);
   if (!safe.length) throw new Error("Every prepared lead failed the fresh safety/product check.");
   const ledger = await readLedger(); const existingLedger = new Set(ledger.entries.map((entry) => entry.email.toLowerCase())); const newLedger: LedgerEntry[] = []; const results: Record<OutreachProduct, unknown[]> = { talentera: [], evalify: [] };
@@ -569,7 +584,10 @@ export async function launchPreparedSmartleadV2() {
 }
 
 export async function setSmartleadV2Status(product: OutreachProduct | "all", status: "START" | "PAUSED") {
+  if (status === "START" && process.env.SMARTLEAD_AUTOPILOT_ENABLED !== "true") throw new Error("Starting campaigns is locked until SMARTLEAD_AUTOPILOT_ENABLED=true is set after the launch checklist.");
   const campaigns = await listCampaigns(); const products: OutreachProduct[] = product === "all" ? ["talentera", "evalify"] : [product]; const updated: Record<string, string> = {};
-  for (const key of products) { const campaign = currentProductCampaign(key, campaigns); if (!campaign) throw new Error(`${PRODUCT_CONFIG[key].brandLabel} V2 campaign is missing.`); if (status === "START") { const ids = await campaignSenderIds(campaign); if (!ids.size) throw new Error(`${PRODUCT_CONFIG[key].brandLabel} has no senders attached.`); } await smartleadRequest(`/campaigns/${campaign.id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }); updated[key] = status; }
+  const senders = status === "START" ? await getSenders({ talentera: currentProductCampaign("talentera", campaigns), evalify: currentProductCampaign("evalify", campaigns) }) : [];
+  if (status === "START") { const inventory = validateApprovedSenderInventory(senders); if (!inventory.healthy) throw new Error(`Approved sender inventory is not safe: ${inventory.warnings.join(" ")}`); }
+  for (const key of products) { const campaign = currentProductCampaign(key, campaigns); if (!campaign) throw new Error(`${PRODUCT_CONFIG[key].brandLabel} V2 campaign is missing.`); if (status === "START") { const ids = await campaignSenderIds(campaign); const safeIds = new Set(senders.filter((sender) => sender.eligible && sender.brand === key).map((sender) => sender.id)); if (ids.size !== safeIds.size || [...ids].some((id) => !safeIds.has(id))) throw new Error(`${PRODUCT_CONFIG[key].brandLabel} has a missing or unsafe sender attachment.`); } await smartleadRequest(`/campaigns/${campaign.id}/status`, { method: "POST", body: JSON.stringify({ status }) }); updated[key] = status; }
   cache = null; return { updated };
 }

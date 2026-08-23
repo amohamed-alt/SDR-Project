@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { type OutreachProduct } from "@/lib/recipient-language-routing";
-import { senderInventory, senderRoute, type SenderProvider } from "@/lib/smartlead-sender-routing";
+import { inspectSenderAccount, senderInventory, validateApprovedSenderInventory, type SenderProvider } from "@/lib/smartlead-sender-routing";
 import { VISIBLE_SEQUENCE_LANES, type OutreachLane } from "@/lib/smartlead-visible-sequences";
 
 export const runtime = "nodejs";
@@ -22,13 +22,12 @@ type Sender = {
   provider: SenderProvider;
   eligible: boolean;
   capacity: number;
+  reasons: string[];
 };
 
 function clean(value: unknown, max = 4_000) { return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max); }
 function object(value: unknown): JsonObject { return value && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : {}; }
 function list(value: unknown, keys: string[] = []) { if (Array.isArray(value)) return value; const item = object(value); for (const key of keys) if (Array.isArray(item[key])) return item[key] as unknown[]; return [] as unknown[]; }
-function numberFrom(value: unknown, keys: string[]) { const item = object(value); for (const key of keys) { const parsed = Number(item[key]); if (Number.isFinite(parsed)) return parsed; } return 0; }
-function boolLike(value: unknown) { if (value === true || value === 1 || String(value).toLowerCase() === "true") return true; if (value === false || value === 0 || String(value).toLowerCase() === "false") return false; return null; }
 function apiKey() { return clean(process.env.SMARTLEAD_API_KEY, 8_000); }
 function safeEqual(left: string, right: string) { const a = Buffer.from(left); const b = Buffer.from(right); return a.length === b.length && timingSafeEqual(a, b); }
 function authorized(request: NextRequest) { const supplied = clean(request.headers.get("authorization"), 8_000).replace(/^Bearer\s+/i, ""); const expected = apiKey(); return Boolean(expected && supplied && safeEqual(supplied, expected)); }
@@ -81,14 +80,8 @@ async function listEmailAccounts() {
 
 function parseSender(value: unknown): Sender | null {
   const item = object(value); const id = Number(item.id ?? item.email_account_id); if (!Number.isFinite(id)) return null;
-  const route = senderRoute(item);
-  const warmup = object(item.warmup_details || item.warmup); const warmupFlag = boolLike(item.warmup_enabled ?? warmup.enabled ?? warmup.warmup_enabled); const warmupStatus = clean(warmup.status || item.warmup_status).toLowerCase();
-  const accountStatus = clean(item.status || item.connection_status || item.smtp_status).toLowerCase();
-  const disconnected = /disconnect|failed|error|invalid|suspend/.test(accountStatus);
-  const warmEnough = warmupFlag !== false || /complete|ready|active|warm/.test(warmupStatus);
-  const rawLimit = numberFrom(item, ["max_email_per_day", "daily_limit", "max_emails_per_day"]);
-  const capacity = Math.min(rawLimit > 0 ? rawLimit : MAX_CAMPAIGN_EMAILS_PER_MAILBOX, MAX_CAMPAIGN_EMAILS_PER_MAILBOX);
-  return { id, ...route, eligible: route.brand !== "unknown" && !disconnected && warmEnough && capacity > 0, capacity };
+  const safety = inspectSenderAccount(item, MAX_CAMPAIGN_EMAILS_PER_MAILBOX);
+  return { id, email: safety.email, domain: safety.domain, brand: safety.brand, provider: safety.provider, eligible: safety.eligible, capacity: safety.capacity, reasons: safety.reasons };
 }
 
 async function campaignSenderIds(campaign: Campaign) {
@@ -115,12 +108,19 @@ async function configureEspMatching(lane: OutreachLane, campaign: Campaign) {
   await smartleadRequest(`/campaigns/${campaign.id}/settings`, {
     method: "POST",
     body: JSON.stringify({
-      track_settings: ["DONT_EMAIL_OPEN", "DONT_LINK_CLICK"],
+      track_settings: ["DONT_TRACK_EMAIL_OPEN", "DONT_TRACK_LINK_CLICK"],
       stop_lead_settings: "REPLY_TO_AN_EMAIL",
       unsubscribe_text: language === "ar" ? "غير مناسب؟ رد لا" : "Not relevant? Reply no",
       send_as_plain_text: true,
+      force_plain_text: true,
       follow_up_percentage: 100,
       enable_ai_esp_matching: true,
+      auto_pause_domain_leads_on_reply: true,
+      ignore_ss_mailbox_sending_limit: false,
+      bounce_autopause_threshold: "2",
+      domain_level_rate_limit: true,
+      add_unsubscribe_tag: true,
+      out_of_office_detection_settings: { ignoreOOOasReply: false, autoReactivateOOO: false, reactivateOOOwithDelay: 0, autoCategorizeOOO: true },
       client_id: null,
     }),
   });
@@ -138,6 +138,8 @@ function providerCounts(senders: Sender[], product: OutreachProduct) {
 async function reconcile() {
   const [campaignRows, rawAccounts] = await Promise.all([listCampaigns(), listEmailAccounts()]);
   const senders = rawAccounts.map(parseSender).filter((item): item is Sender => Boolean(item));
+  const approvedInventory = validateApprovedSenderInventory(senders);
+  if (!approvedInventory.healthy) throw new Error(`Approved sender inventory is not safe: ${approvedInventory.warnings.join(" ")}`);
   const campaignByName = new Map(campaignRows.map((campaign) => [campaign.name, campaign]));
   const laneResult = {} as Record<OutreachLane, { campaignId: number; desired: number; added: number; removed: number; current: number; product: OutreachProduct }>;
   const warnings: string[] = [];
@@ -193,6 +195,7 @@ async function reconcile() {
       evalufy: providerCounts(senders, "evalify"),
     },
     inventory: senderInventory(rawAccounts.map((row) => object(row))),
+    approvedInventory,
     unclassified: senders.filter((sender) => sender.brand === "unknown").map((sender) => ({ domain: sender.domain, provider: sender.provider, eligible: sender.eligible })),
     warnings,
   };

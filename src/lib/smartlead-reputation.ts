@@ -17,7 +17,7 @@ export type ReputationPlan = {
 };
 
 export function isSafeTalenteraSender(sender: ReputationSender) {
-  return sender.brand === "talentera" && (!sender.warmupKnown || sender.warmupEnabled);
+  return sender.brand === "talentera" && sender.warmupKnown && sender.warmupEnabled;
 }
 
 export function calculateReputationPlan(
@@ -51,14 +51,20 @@ export function bounceRate(sent: number, bounces: number) {
   return Math.max(0, Number(bounces) || 0) / deliveredBase;
 }
 
-export function reputationHealth(sent: number, bounces: number) {
+export function reputationHealth(sent: number, bounces: number, spamComplaints = 0) {
   const rate = bounceRate(sent, bounces);
+  const spamRate = bounceRate(sent, spamComplaints);
   const enoughVolume = sent >= 50;
+  const bounceUnsafe = enoughVolume && rate >= 0.02;
+  const spamUnsafe = enoughVolume && spamRate >= 0.003;
   return {
     bounceRate: rate,
-    healthy: !enoughVolume || rate < 0.03,
-    reason: enoughVolume && rate >= 0.03
-      ? `Bounce rate ${(rate * 100).toFixed(1)}% is at or above the 3% safety threshold`
-      : "Bounce rate is within the configured safety threshold",
+    spamRate,
+    healthy: !bounceUnsafe && !spamUnsafe,
+    reason: bounceUnsafe
+      ? `Bounce rate ${(rate * 100).toFixed(1)}% is at or above the 2% safety threshold`
+      : spamUnsafe
+        ? `Spam complaint rate ${(spamRate * 100).toFixed(2)}% is at or above the 0.3% safety threshold`
+        : "Bounce and spam complaint rates are within the configured safety thresholds",
   };
 }

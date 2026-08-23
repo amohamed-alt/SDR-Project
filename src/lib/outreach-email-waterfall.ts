@@ -5,7 +5,12 @@ const MILLIONVERIFIER_URL = "https://api.millionverifier.com/api/v3/";
 const SIGNALHIRE_URL = "https://www.signalhire.com/api/v1/candidate/search";
 const HUBSPOT_API = "https://api.hubapi.com";
 const CACHE_PATH = process.env.MILLIONVERIFIER_CACHE_PATH || "/app/data/millionverifier-cache.json";
-const CACHE_TTL_MS = 30 * 86_400_000;
+const CACHE_TTL_MS: Record<VerificationStatus, number> = {
+  valid: 14 * 86_400_000,
+  catch_all: 24 * 60 * 60 * 1000,
+  invalid: 30 * 86_400_000,
+  unknown: 24 * 60 * 60 * 1000,
+};
 const MAX_SIGNALHIRE_EMAILS_TO_VERIFY = 3;
 
 type VerificationStatus = "valid" | "catch_all" | "invalid" | "unknown";
@@ -127,7 +132,7 @@ async function writeCache(store: CacheStore) {
 }
 
 function freshEntry(entry: CacheEntry | undefined) {
-  return Boolean(entry && Date.now() - new Date(entry.checkedAt).getTime() < CACHE_TTL_MS);
+  return Boolean(entry && Date.now() - new Date(entry.checkedAt).getTime() < CACHE_TTL_MS[entry.status]);
 }
 
 async function verifyEmail(email: string, apiKey: string, store: CacheStore) {
@@ -280,13 +285,14 @@ export async function runOutreachEmailWaterfall(
     }
 
     const alternatives = rankedSignalHireEmails(fallback.candidate, currentEmail);
-    let replacement: { email: string; type: "work" | "personal" } | null = null;
+    let replacement: { email: string; type: "work" } | null = null;
     for (const alternative of alternatives) {
+      if (alternative.type !== "work") continue;
       const verified = await verifyEmail(alternative.email, millionVerifierApiKey, cache);
       if (verified.cacheHit) millionVerifierCacheHits += 1; else millionVerifierChecks += 1;
       if (verified.creditsLeft !== null) millionVerifierCreditsLeft = verified.creditsLeft;
       if (verified.entry.status === "valid") {
-        replacement = { email: alternative.email, type: alternative.type };
+        replacement = { email: alternative.email, type: "work" };
         break;
       }
     }
@@ -306,13 +312,13 @@ export async function runOutreachEmailWaterfall(
       email: replacement.email,
       gtm_email_status: "valid",
       gtm_email_type: replacement.type,
-      email_enrichment_status: replacement.type === "work" ? "work_email_found" : "personal_only",
+      email_enrichment_status: "work_email_found",
       signalhire_match_status: "success",
       signalhire_uid: clean(fallback.candidate.uid, 160),
       signalhire_last_enriched_at: dateOnly(),
       gtm_last_enriched_at: dateOnly(),
     };
-    if (replacement.type === "work") properties.work_email = replacement.email;
+    properties.work_email = replacement.email;
     await updateHubSpotContact(lead.contactId, properties);
     replacements += 1;
     sendableEmails.push(replacement.email);
