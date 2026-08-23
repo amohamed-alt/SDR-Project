@@ -11,16 +11,40 @@ import type { OutreachProduct } from "@/lib/recipient-language-routing";
 
 const OWNER_STORAGE_KEY = "sdr-acquisition-owner-token";
 type QueueFilter = "ready" | "blocked" | "all" | "talentera" | "evalify" | "entered";
+type AutopilotPayload = {
+  enabled: boolean;
+  timezone: string;
+  businessDays: string;
+  queueAttemptsRiyadh: string[];
+  smartleadSendWindowRiyadh: string;
+  starterDailyNewLeadTarget: number;
+  state: {
+    status: string;
+    riyadhDate: string;
+    startedAt: string;
+    finishedAt: string;
+    lastSuccessfulDate: string;
+    prepared: number;
+    queued: number;
+    talentera: number;
+    evalufy: number;
+    message: string;
+    warnings: string[];
+  };
+};
 
 function savedOwnerToken() { if (typeof window === "undefined") return ""; return window.sessionStorage.getItem(OWNER_STORAGE_KEY) || ""; }
 function number(value: number | undefined) { return new Intl.NumberFormat("en-US").format(value || 0); }
 function percent(value: number | undefined) { return `${((value || 0) * 100).toFixed(1)}%`; }
 function formatGeneratedAt(value: string | undefined) { if (!value) return "—"; try { return new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Riyadh", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value)); } catch { return value; } }
 function warmupLabel(sender: V2Sender) { if (!sender.warmupKnown) return "warmup status unavailable"; return sender.warmupEnabled ? "warmup on" : "warmup off"; }
-function productLabel(product: OutreachProduct) { return product === "talentera" ? "Talentera" : "Evalify"; }
+function productLabel(product: OutreachProduct) { return product === "talentera" ? "Talentera" : "Evalufy"; }
+function senderBrandLabel(brand: V2Sender["brand"]) { return brand === "unknown" ? "UNKNOWN" : productLabel(brand); }
+function visibleCampaignName(value: string) { return value.replace(/Evalify/gi, "Evalufy"); }
 
 export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
   const [data, setData] = useState<SmartleadV2Payload | null>(null);
+  const [autopilot, setAutopilot] = useState<AutopilotPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -33,10 +57,14 @@ export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
   const load = useCallback(async (force = false) => {
     setLoading(true); setError("");
     try {
-      const response = await fetch(`/api/smartlead${force ? "?refresh=1" : ""}`, { cache: "no-store" });
-      const payload = await response.json() as SmartleadV2Payload & { error?: string; details?: string };
-      if (!response.ok) throw new Error(payload.details || payload.error || "Unable to load Smartlead.");
+      const [smartleadResponse, autopilotResponse] = await Promise.all([
+        fetch(`/api/smartlead${force ? "?refresh=1" : ""}`, { cache: "no-store" }),
+        fetch("/api/smartlead/autopilot", { cache: "no-store" }).catch(() => null),
+      ]);
+      const payload = await smartleadResponse.json() as SmartleadV2Payload & { error?: string; details?: string };
+      if (!smartleadResponse.ok) throw new Error(payload.details || payload.error || "Unable to load Smartlead.");
       setData(payload);
+      if (autopilotResponse?.ok) setAutopilot(await autopilotResponse.json() as AutopilotPayload);
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Unable to load Smartlead."); }
     finally { setLoading(false); }
   }, []);
@@ -62,13 +90,13 @@ export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
   }
 
   async function bootstrap() {
-    if (!window.confirm("Create/refresh the isolated Talentera + Evalify V2 campaigns? This configures sequences but does NOT start sending.")) return;
+    if (!window.confirm("Create/refresh the isolated Talentera + Evalufy V2 campaigns? This configures sequences but does NOT start sending.")) return;
     const result = await action({ action: "bootstrap" }, "bootstrap");
     if (result) setNotice("Both V2 campaigns are configured: fixed 3-touch, plain text, tracking off, stop on reply, Riyadh schedule. Nothing was started.");
   }
   async function syncSenders() {
     const result = await action({ action: "sync_senders" }, "senders");
-    if (result) setNotice("Sender pools synced automatically by brand: Talentera inboxes → Talentera, Evalify inboxes → Evalify.");
+    if (result) setNotice("Sender pools synced automatically by brand: Talentera inboxes → Talentera, Evalufy inboxes → Evalufy.");
   }
   async function analyzeNames() {
     const result = await action({ action: "analyze_names", limit: 150 }, "names");
@@ -78,13 +106,13 @@ export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
     const cap = data?.capacity.liveNewLeadsPerDay || 0;
     if (!cap) { setError("No live sender capacity yet. Bootstrap + Sync senders first."); return; }
     const result = await action({ action: "prepare", limit: cap }, "prepare");
-    if (result) setNotice(`Prepared ${String(result.prepared || 0)} leads: ${String(result.talentera || 0)} Talentera + ${String(result.evalify || 0)} Evalify. No email was sent.`);
+    if (result) setNotice(`Prepared ${String(result.prepared || 0)} leads: ${String(result.talentera || 0)} Talentera + ${String(result.evalify || 0)} Evalufy. No email was sent.`);
   }
   async function launch() {
     const prepared = data?.summary.prepared || 0; if (!prepared) { setError("Prepare today's batch first."); return; }
     if (!window.confirm(`Queue ${prepared} prepared contacts? Fresh Sales, dedupe, product, language and sender checks run again immediately before upload.`)) return;
     const result = await action({ action: "launch", confirm: "QUEUE_MARITA_BATCH" }, "launch");
-    if (result) setNotice(`Queued ${String(result.queued || 0)} total: ${String(result.talentera || 0)} Talentera + ${String(result.evalify || 0)} Evalify. ${String(result.skippedByFreshSafetyOrDedupe || 0)} skipped.`);
+    if (result) setNotice(`Queued ${String(result.queued || 0)} total: ${String(result.talentera || 0)} Talentera + ${String(result.evalify || 0)} Evalufy. ${String(result.skippedByFreshSafetyOrDedupe || 0)} skipped.`);
   }
   async function changeStatus(product: OutreachProduct | "all", status: "START" | "PAUSED") {
     const label = product === "all" ? "both V2 campaigns" : `${productLabel(product)} V2`;
@@ -109,11 +137,12 @@ export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
   const safetyHealthy = Boolean(data?.safety.healthy);
   const tCampaign = data?.campaigns.talentera;
   const eCampaign = data?.campaigns.evalify;
+  const autopilotHealthy = Boolean(autopilot?.enabled && !["blocked", "failed"].includes(autopilot.state.status));
 
   return <main className={styles.page}>
     <header className={styles.header}>
       <button type="button" className={styles.back} onClick={onBack}><ArrowLeft size={16}/> SDR Dashboard</button>
-      <div className={styles.title}><span><Mail size={15}/>SMARTLEAD OUTREACH V2</span><h1>Marita dual-product execution</h1><p>ATS-aware product routing · Arabic/English recipient intelligence · dedupe ledger · fixed sequences · Smartlead execution.</p></div>
+      <div className={styles.title}><span><Mail size={15}/>SMARTLEAD OUTREACH V2</span><h1>Marita dual-product execution</h1><p>Daily autopilot · ATS-aware product routing · Arabic/English recipient intelligence · dedupe ledger · fixed sequences · Smartlead execution.</p></div>
       <button type="button" className={styles.refresh} onClick={() => void load(true)} disabled={loading}><RefreshCw size={15} className={loading ? styles.spin : ""}/>{loading ? "Refreshing" : "Refresh"}</button>
     </header>
 
@@ -124,13 +153,23 @@ export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
       <span data-ok={data?.configuration.apiConfigured}><Database size={14}/> Smartlead {data?.configuration.apiConfigured ? "connected" : "missing"}</span>
       <span data-ok={data?.configuration.openRouterConfigured}><Sparkles size={14}/> OpenRouter {data?.configuration.openRouterConfigured ? "ready" : "missing"}</span>
       <span data-ok={safetyHealthy}><ShieldCheck size={14}/> Sales safety {safetyHealthy ? "healthy" : "blocked"}</span>
+      <span data-ok={autopilotHealthy}><Clock3 size={14}/> Autopilot {autopilot?.enabled ? autopilot.state.status.toUpperCase() : "OFF"}</span>
       <span data-ok={Boolean(tCampaign)}>Talentera {tCampaign?.status || "NOT CREATED"}</span>
-      <span data-ok={Boolean(eCampaign)}>Evalify {eCampaign?.status || "NOT CREATED"}</span>
+      <span data-ok={Boolean(eCampaign)}>Evalufy {eCampaign?.status || "NOT CREATED"}</span>
       <small>Updated {formatGeneratedAt(data?.generatedAt)} Riyadh</small>
     </section>
 
+    <section className={styles.healthGrid}>
+      <article><strong>Daily autopilot</strong><span>{autopilot?.enabled ? "ON · Sunday-Thursday" : "Not active yet"}</span><small>Queue attempts {autopilot?.queueAttemptsRiyadh?.join(" · ") || "08:45 · 09:05 · 09:25"} Riyadh · first success wins</small></article>
+      <article><strong>Last automatic run</strong><span>{autopilot?.state.status?.toUpperCase() || "NEVER"}</span><small>{autopilot?.state.finishedAt ? formatGeneratedAt(autopilot.state.finishedAt) : "No run recorded yet"} · {autopilot?.state.message || "Waiting for first scheduled run"}</small></article>
+      <article><strong>Last queued</strong><span>{number(autopilot?.state.queued)} contacts</span><small>{number(autopilot?.state.talentera)} Talentera · {number(autopilot?.state.evalufy)} Evalufy · once entered, never re-entered</small></article>
+      <article><strong>Smartlead send window</strong><span>{autopilot?.smartleadSendWindowRiyadh || "09:30-16:30"} Riyadh</span><small>Smartlead owns Day 0 → Day 3 → Day 7; stop on reply stays enabled</small></article>
+    </section>
+
+    {Boolean(autopilot?.state.warnings?.length) && <section className={styles.warningPanel}><ShieldCheck size={18}/><div><strong>Autopilot is fail-closed</strong><p>No automatic batch is queued while these checks are unresolved.</p>{autopilot?.state.warnings.map((warning) => <small key={warning}>{warning}</small>)}</div></section>}
+
     <section className={styles.metrics}>
-      <article><BadgeCheck size={18}/><span>Ready</span><strong>{number(data?.summary.ready)}</strong><small>{number(data?.summary.talenteraReady)} Talentera · {number(data?.summary.evalifyReady)} Evalify</small></article>
+      <article><BadgeCheck size={18}/><span>Ready</span><strong>{number(data?.summary.ready)}</strong><small>{number(data?.summary.talenteraReady)} Talentera · {number(data?.summary.evalifyReady)} Evalufy</small></article>
       <article><Send size={18}/><span>Today</span><strong>{number(data?.summary.today)}</strong><small>safe new leads across both products</small></article>
       <article><CalendarClock size={18}/><span>Tomorrow</span><strong>{number(data?.summary.tomorrow)}</strong><small>new leads available</small></article>
       <article><Clock3 size={18}/><span>Next 48h</span><strong>{number(data?.summary.next48Hours)}</strong><small>combined safe coverage</small></article>
@@ -140,7 +179,7 @@ export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
 
     <section className={styles.executionPanel}>
       <div className={styles.executionIntro}>
-        <div><strong>Execution controls</strong><p>Recommended order: Bootstrap → Sync senders → AI name QA → Prepare → review copy → Queue → Start. All writes require the Owner key.</p></div>
+        <div><strong>Manual / emergency controls</strong><p>Daily execution is automated. Use these controls only for initial setup, QA, or an intentional manual intervention.</p></div>
         <div className={styles.ownerKey}><KeyRound size={15}/><input type="password" value={ownerTokenDraft} onChange={(event) => setOwnerTokenDraft(event.target.value)} placeholder="Owner key"/><button type="button" onClick={saveOwnerToken}>Save</button></div>
       </div>
       <div className={styles.actions}>
@@ -159,15 +198,15 @@ export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
     <section className={styles.healthGrid}>
       <article><strong>15-inbox capacity model</strong><span>{number(data?.capacity.liveCampaignEmailsPerDay)} live campaign emails/day</span><small>{number(data?.capacity.assignedInboxes)} assigned · {number(data?.capacity.eligibleInboxes)} eligible · max {number(data?.configuration.maxCampaignEmailsPerMailbox)}/mailbox · {number(data?.configuration.minTimeBetweenEmails)}m gap</small></article>
       <article><strong>Talentera route</strong><span>{number(data?.summary.talenteraReady)} ready · cap {number(data?.capacity.productLiveNewCaps.talentera)}/day</span><small>No verified ATS visible → sell Talentera ATS/recruitment workflow</small></article>
-      <article><strong>Evalify route</strong><span>{number(data?.summary.evalifyReady)} ready · cap {number(data?.capacity.productLiveNewCaps.evalify)}/day</span><small>Existing/custom ATS detected → sell assessments/screening without replacing ATS</small></article>
-      <article><strong>Deliverability</strong><span>Talentera {percent(data?.analytics.talentera.bounceRate)} · Evalify {percent(data?.analytics.evalify.bounceRate)} bounce</span><small>Plain text · open/click tracking off · stop on reply · global block/unsubscribe lists respected</small></article>
+      <article><strong>Evalufy route</strong><span>{number(data?.summary.evalifyReady)} ready · cap {number(data?.capacity.productLiveNewCaps.evalify)}/day</span><small>Existing/custom ATS detected → sell assessments/screening without replacing ATS</small></article>
+      <article><strong>Deliverability</strong><span>Talentera {percent(data?.analytics.talentera.bounceRate)} · Evalufy {percent(data?.analytics.evalify.bounceRate)} bounce</span><small>Plain text · open/click tracking off · stop on reply · global block/unsubscribe lists respected</small></article>
     </section>
 
     <section className={styles.sendersPanel}>
-      <div className={styles.sectionHeader}><div><h2>Sender pools</h2><p>Automatic brand isolation. Evalify addresses never send Talentera copy and vice versa.</p></div></div>
+      <div className={styles.sectionHeader}><div><h2>Sender pools</h2><p>Automatic brand isolation. Evalufy addresses never send Talentera copy and vice versa.</p></div></div>
       <div className={styles.senderGrid}>
         {(data?.senders || []).map((sender) => <div key={sender.id} className={styles.senderCard} data-selected={sender.assignedProducts.includes(sender.brand as OutreachProduct)}>
-          <span>{sender.eligible ? "✓" : "!"}</span><div><strong>{sender.email}</strong><small>{sender.brand.toUpperCase()} · {sender.assignedProducts.length ? `assigned ${sender.assignedProducts.join(", ")}` : "not assigned"} · limit {sender.maxPerDay || "—"}/day · {warmupLabel(sender)}</small></div>
+          <span>{sender.eligible ? "✓" : "!"}</span><div><strong>{sender.email}</strong><small>{senderBrandLabel(sender.brand)} · {sender.assignedProducts.length ? `assigned ${sender.assignedProducts.map(productLabel).join(", ")}` : "not assigned"} · limit {sender.maxPerDay || "—"}/day · {warmupLabel(sender)}</small></div>
         </div>)}
       </div>
     </section>
@@ -175,18 +214,19 @@ export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
     <section className={styles.previewPanel}>
       <div className={styles.sectionHeader}><div><h2>Sequence studio</h2><p>Fixed copy is the source of truth. OpenRouter only improves recipient language/greeting and one safe contextual opening line.</p></div></div>
       <div className={styles.previewGrid}>
-        {(["talentera", "evalify"] as OutreachProduct[]).map((product) => {
-          const seq = data?.sequenceCatalog[product].arSA;
-          return <article key={product}><strong>{productLabel(product)} · Saudi Arabic · Day 0 → 3 → 7</strong><small>{product === "talentera" ? "No verified ATS" : "Existing ATS detected"}</small>
-            <b>1. {seq?.subject1}</b><p>{seq?.touch1}</p><b>2. {seq?.subject2}</b><p>{seq?.touch2}</p><b>3. {seq?.subject3}</b><p>{seq?.touch3}</p>
+        {(["talentera", "evalify"] as OutreachProduct[]).flatMap((product) => (["arSA", "en"] as const).map((language) => {
+          const seq = data?.sequenceCatalog[product][language];
+          const languageLabel = language === "arSA" ? "Saudi Arabic" : "English";
+          return <article key={`${product}:${language}`}><strong>{productLabel(product)} · {languageLabel} · Day 0 → 3 → 7</strong><small>{product === "talentera" ? "No verified ATS" : "Existing ATS detected"}</small>
+            <b>1. {visibleCampaignName(seq?.subject1 || "")}</b><p>{visibleCampaignName(seq?.touch1 || "")}</p><b>2. {visibleCampaignName(seq?.subject2 || "")}</b><p>{visibleCampaignName(seq?.touch2 || "")}</p><b>3. {visibleCampaignName(seq?.subject3 || "")}</b><p>{visibleCampaignName(seq?.touch3 || "")}</p>
           </article>;
-        })}
+        }))}
       </div>
     </section>
 
     {Boolean(data?.preparedSamples.length) && <section className={styles.previewPanel}>
       <div className={styles.sectionHeader}><div><h2>Prepared copy preview</h2><p>Final rendered copy after OpenRouter recipient QA. Review this before Queue.</p></div></div>
-      <div className={styles.previewGrid}>{data?.preparedSamples.map((lead) => <article key={lead.contactId}><strong>{lead.greetingName} · {lead.companyName} · {productLabel(lead.product)}</strong><small>{lead.locale} · confidence {percent(lead.languageConfidence)} · {lead.languageReason}</small><b>{lead.subject1}</b><p>{lead.touch1}</p></article>)}</div>
+      <div className={styles.previewGrid}>{data?.preparedSamples.map((lead) => <article key={lead.contactId}><strong>{lead.greetingName} · {lead.companyName} · {productLabel(lead.product)}</strong><small>{lead.locale} · confidence {percent(lead.languageConfidence)} · {lead.languageReason}</small><b>{visibleCampaignName(lead.subject1)}</b><p>{visibleCampaignName(lead.touch1)}</p></article>)}</div>
     </section>}
 
     <section className={styles.queuePanel}>
@@ -195,7 +235,7 @@ export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
         <div>
           <button type="button" data-active={filter === "ready"} onClick={() => setFilter("ready")}>Ready</button>
           <button type="button" data-active={filter === "talentera"} onClick={() => setFilter("talentera")}>Talentera</button>
-          <button type="button" data-active={filter === "evalify"} onClick={() => setFilter("evalify")}>Evalify</button>
+          <button type="button" data-active={filter === "evalify"} onClick={() => setFilter("evalify")}>Evalufy</button>
           <button type="button" data-active={filter === "entered"} onClick={() => setFilter("entered")}>Already entered</button>
           <button type="button" data-active={filter === "blocked"} onClick={() => setFilter("blocked")}>Blocked</button>
           <button type="button" data-active={filter === "all"} onClick={() => setFilter("all")}>All</button>
@@ -208,7 +248,7 @@ export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
           <td><strong>{lead.fullName}</strong><small>{lead.title}</small><small>{lead.email}</small></td>
           <td><strong>{lead.companyName}</strong><small>{lead.country}</small></td>
           <td><strong>{lead.locale} · {lead.greetingName || lead.firstName}</strong><small>{percent(lead.languageConfidence)} · {lead.nameTranslated ? "Arabic greeting" : "original name"}</small><small>{lead.languageReason}</small></td>
-          <td><strong>{productLabel(lead.product)}</strong><small>{lead.productReason}</small></td>
+          <td><strong>{productLabel(lead.product)}</strong><small>{visibleCampaignName(lead.productReason)}</small></td>
           <td><strong>{lead.detectedAts || "No Visible ATS"}</strong><small>{lead.atsStatus || "—"}</small></td>
           <td><small>{lead.blockReason || `${lead.priority} · score ${lead.priorityScore}`}</small></td>
         </tr>)}
@@ -218,7 +258,7 @@ export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
     <section className={styles.queuePanel}>
       <div className={styles.sectionHeader}><div><h2>Execution ledger</h2><p>Smartlead status + persistent local ledger. Queued contacts remain excluded even after completion.</p></div><span>{number(data?.executions.length)} recent</span></div>
       <div className={styles.tableWrap}><table><thead><tr><th>Contact</th><th>Product</th><th>Campaign</th><th>Status</th><th>Sequence step</th><th>Queued</th></tr></thead><tbody>
-        {(data?.executions || []).slice(0, 250).map((row) => <tr key={`${row.email}:${row.campaignName}`}><td><strong>{row.email}</strong><small>{row.contactId || "—"}</small></td><td><strong>{productLabel(row.product)}</strong></td><td><small>{row.campaignName}</small></td><td><strong>{row.status}</strong></td><td>{row.sequenceStep || "—"}</td><td><small>{formatGeneratedAt(row.queuedAt)}</small></td></tr>)}
+        {(data?.executions || []).slice(0, 250).map((row) => <tr key={`${row.email}:${row.campaignName}`}><td><strong>{row.email}</strong><small>{row.contactId || "—"}</small></td><td><strong>{productLabel(row.product)}</strong></td><td><small>{visibleCampaignName(row.campaignName)}</small></td><td><strong>{row.status}</strong></td><td>{row.sequenceStep || "—"}</td><td><small>{formatGeneratedAt(row.queuedAt)}</small></td></tr>)}
       </tbody></table></div>
     </section>
   </main>;

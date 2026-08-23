@@ -1,0 +1,53 @@
+name: Smartlead Autopilot
+
+on:
+  schedule:
+    # Asia/Riyadh is UTC+3 year-round. Three idempotent attempts make transient
+    # HubSpot/API failures safe without ever queueing the same day twice.
+    - cron: "45 5 * * 0-4" # 08:45 Riyadh, Sunday-Thursday
+    - cron: "5 6 * * 0-4"  # 09:05 Riyadh, Sunday-Thursday
+    - cron: "25 6 * * 0-4" # 09:25 Riyadh, Sunday-Thursday
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smartlead-autopilot-production
+  cancel-in-progress: false
+
+jobs:
+  queue-daily-marita-batch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Validate Smartlead automation secret
+        env:
+          SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
+        run: |
+          test -n "$SMARTLEAD_API_KEY" || {
+            echo "::error::SMARTLEAD_API_KEY repository secret is required."
+            exit 1
+          }
+
+      - name: Run fail-closed SDR autopilot
+        env:
+          SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
+        run: |
+          set -euo pipefail
+          HTTP_CODE=$(curl --silent --show-error \
+            --connect-timeout 10 \
+            --max-time 240 \
+            --output /tmp/autopilot.json \
+            --write-out '%{http_code}' \
+            -X POST 'https://sdr.dashboardtalentera.tech/api/smartlead/autopilot' \
+            -H "Authorization: Bearer ${SMARTLEAD_API_KEY}" \
+            -H 'Content-Type: application/json' \
+            -d '{}')
+
+          jq '{ok, skipped, blocked, reason, enabled, timezone, businessDays, queueAttemptsRiyadh, smartleadSendWindowRiyadh, state}' /tmp/autopilot.json || cat /tmp/autopilot.json
+
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo "::error::Smartlead autopilot returned HTTP $HTTP_CODE. A later scheduled attempt may retry if today has not completed successfully."
+            exit 1
+          fi
