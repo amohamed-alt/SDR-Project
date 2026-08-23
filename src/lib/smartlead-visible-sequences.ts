@@ -39,10 +39,10 @@ Talentera تجمع الفرز والمقابلات والموافقات والع
     step: 2,
     delayDays: 3,
     framework: "PAS",
-    subject: "بس أوضح قصدي",
+    subject: "",
     body: `هلا {{first_name}},
 
-حبيت أرجع لك لأن الفكرة مو إنكم تغيرون كل شيء عندكم.
+بس أوضح قصدي: الفكرة مو إنكم تغيرون كل شيء عندكم.
 
 المقصود إن فريق التوظيف يكون عنده flow أوضح من أول التقديم لحد العرض، بدل المتابعة بين أكثر من خطوة ومكان.
 
@@ -52,7 +52,7 @@ Talentera تجمع الفرز والمقابلات والموافقات والع
     step: 3,
     delayDays: 4,
     framework: "Breakup",
-    subject: "أقفلها من جهتي؟",
+    subject: "",
     body: `هلا {{first_name}},
 
 ما ودي أزعجك بكثرة المتابعة.
@@ -83,10 +83,10 @@ If that sounds close to what you deal with, worth a 10-minute look?`,
     step: 2,
     delayDays: 3,
     framework: "PAS",
-    subject: "Just to clarify",
+    subject: "",
     body: `Hi {{first_name}},
 
-I wanted to clarify one thing: the idea is not to make you change everything you already use.
+Just to clarify one thing: the idea is not to make you change everything you already use.
 
 It is about giving the recruitment team a cleaner flow from application through screening, interviews, approvals and offers.
 
@@ -96,7 +96,7 @@ If that is relevant on your side, worth 10 minutes?`,
     step: 3,
     delayDays: 4,
     framework: "Breakup",
-    subject: "Should I close this?",
+    subject: "",
     body: `Hi {{first_name}},
 
 I do not want to keep filling your inbox.
@@ -112,7 +112,7 @@ const EVALUFY_AR: VisibleSequenceTouch[] = [
     step: 1,
     delayDays: 0,
     framework: "AIDA",
-    subject: "سؤال سريع عن المقابلات",
+    subject: "سؤال سريع يا {{first_name}}",
     body: `هلا {{first_name}},
 
 {{opening_line}}
@@ -127,7 +127,7 @@ Evalufy تضيف assessments وscreening فوق الـATS الحالي بدون 
     step: 2,
     delayDays: 3,
     framework: "PAS",
-    subject: "قصدي قبل المقابلة",
+    subject: "",
     body: `هلا {{first_name}},
 
 بس أوضح قصدي: الـATS يفضل مثل ما هو، وEvalufy تضيف طبقة تقييم وفرز قبل المقابلات.
@@ -140,7 +140,7 @@ Evalufy تضيف assessments وscreening فوق الـATS الحالي بدون 
     step: 3,
     delayDays: 4,
     framework: "Breakup",
-    subject: "أقفلها من جهتي؟",
+    subject: "",
     body: `هلا {{first_name}},
 
 ما ودي أزعجك بكثرة المتابعة.
@@ -156,7 +156,7 @@ const EVALUFY_EN: VisibleSequenceTouch[] = [
     step: 1,
     delayDays: 0,
     framework: "AIDA",
-    subject: "Quick question on interviews",
+    subject: "Quick question, {{first_name}}",
     body: `Hi {{first_name}},
 
 {{opening_line}}
@@ -171,7 +171,7 @@ If that is relevant, worth a 10-minute look?`,
     step: 2,
     delayDays: 3,
     framework: "PAS",
-    subject: "What I meant",
+    subject: "",
     body: `Hi {{first_name}},
 
 Just to clarify: your ATS stays where it is. Evalufy adds an assessment and screening layer before interviews.
@@ -184,7 +184,7 @@ If that is a problem you are trying to improve, worth 10 minutes?`,
     step: 3,
     delayDays: 4,
     framework: "Breakup",
-    subject: "Should I close this?",
+    subject: "",
     body: `Hi {{first_name}},
 
 I do not want to keep filling your inbox.
@@ -196,38 +196,10 @@ If it is worth a quick look, reply "yes" and I will arrange it with you.`,
 ];
 
 export const VISIBLE_SEQUENCE_LANES: Record<OutreachLane, VisibleSequenceLane> = {
-  talentera_ar: {
-    lane: "talentera_ar",
-    product: "talentera",
-    language: "ar",
-    campaignName: "Talentera | Marita SDR | Arabic KSA-GCC | V1",
-    label: "Talentera Arabic",
-    touches: TALENTERA_AR,
-  },
-  talentera_en: {
-    lane: "talentera_en",
-    product: "talentera",
-    language: "en",
-    campaignName: "Talentera | Marita SDR | English | V1",
-    label: "Talentera English",
-    touches: TALENTERA_EN,
-  },
-  evalufy_ar: {
-    lane: "evalufy_ar",
-    product: "evalify",
-    language: "ar",
-    campaignName: "Evalufy | Marita SDR | Arabic KSA-GCC | V1",
-    label: "Evalufy Arabic",
-    touches: EVALUFY_AR,
-  },
-  evalufy_en: {
-    lane: "evalufy_en",
-    product: "evalify",
-    language: "en",
-    campaignName: "Evalufy | Marita SDR | English | V1",
-    label: "Evalufy English",
-    touches: EVALUFY_EN,
-  },
+  talentera_ar: { lane: "talentera_ar", product: "talentera", language: "ar", campaignName: "Talentera | Marita SDR | Arabic KSA-GCC | V1", label: "Talentera Arabic", touches: TALENTERA_AR },
+  talentera_en: { lane: "talentera_en", product: "talentera", language: "en", campaignName: "Talentera | Marita SDR | English | V1", label: "Talentera English", touches: TALENTERA_EN },
+  evalufy_ar: { lane: "evalufy_ar", product: "evalify", language: "ar", campaignName: "Evalufy | Marita SDR | Arabic KSA-GCC | V1", label: "Evalufy Arabic", touches: EVALUFY_AR },
+  evalufy_en: { lane: "evalufy_en", product: "evalify", language: "en", campaignName: "Evalufy | Marita SDR | English | V1", label: "Evalufy English", touches: EVALUFY_EN },
 };
 
 export function laneFor(product: OutreachProduct, locale: RecipientLocale): OutreachLane {
