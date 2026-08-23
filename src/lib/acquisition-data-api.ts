@@ -59,6 +59,23 @@ export type AcquisitionPerson = {
   updatedAt?: string;
 };
 
+export function acquisitionAccountWritePayload(account: AcquisitionAccount) {
+  const writePayload = { ...account };
+  delete writePayload.peopleCount;
+  delete writePayload.enrichedCount;
+  delete writePayload.phoneReadyCount;
+  delete writePayload.pushCount;
+  delete writePayload.createdAt;
+  delete writePayload.updatedAt;
+  return writePayload;
+}
+
+export function acquisitionPersonWritePayload(person: AcquisitionPerson) {
+  const writePayload = { ...person };
+  delete writePayload.updatedAt;
+  return writePayload;
+}
+
 function assertConfigured() {
   if (!DATA_API_URL) throw new Error("Dashboard data API is not configured.");
 }
@@ -103,7 +120,7 @@ export async function upsertAcquisitionAccounts(accounts: AcquisitionAccount[]) 
   if (!accounts.length) return { status: "stored", accounts: 0 };
   return request<{ status: string; accounts: number }>("/v1/acquisition/accounts", {
     method: "PUT",
-    body: JSON.stringify({ accounts }),
+    body: JSON.stringify({ accounts: accounts.map(acquisitionAccountWritePayload) }),
   }, Math.max(WRITE_TIMEOUT_MS, 10_000));
 }
 
@@ -117,7 +134,7 @@ export async function upsertAcquisitionPeople(people: AcquisitionPerson[]) {
   if (!people.length) return { status: "stored", people: 0 };
   return request<{ status: string; people: number }>("/v1/acquisition/people", {
     method: "PUT",
-    body: JSON.stringify({ people }),
+    body: JSON.stringify({ people: people.map(acquisitionPersonWritePayload) }),
   }, Math.max(WRITE_TIMEOUT_MS, 10_000));
 }
 
