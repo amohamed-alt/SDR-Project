@@ -167,50 +167,50 @@ export function deterministicWhatsAppMessage(input: {
     : null;
 
   if (input.style === "saudi-ar") {
-    const greeting = name ? `السلام عليكم أستاذ ${name}، يعطيك العافية.` : "السلام عليكم، يعطيك العافية.";
-    const context = hiring
-      ? ` شفت إن عندكم حركة توظيف الفترة هذي${company ? ` في ${company}` : ""}،`
+    const greeting = name ? `السلام عليكم أستاذ ${name} يعطيك العافية` : "السلام عليكم يعطيك العافية";
+    const opener = hiring
+      ? `شفت عندكم توظيف شغال هالفترة${company ? ` في ${company}` : ""} وبغيت أعرف هل الفرز والمتابعة مع المتقدمين ياخذ من الفريق وقت كثير؟`
       : role
-        ? ` بحكم شغلك في ${role}${company ? ` في ${company}` : ""}،`
+        ? `بغيت أسألك بحكم شغلك في ${role}${company ? ` في ${company}` : ""} هل الفرز والمتابعة للحين فيها شغل يدوي كثير؟`
         : company
-          ? ` حبيت أتواصل معك بخصوص التوظيف في ${company}،`
-          : " حبيت أتواصل معك بخصوص التوظيف،";
-    return `${greeting}${context} Talentera تساعد فرق التوظيف ترتب الفرز والمتابعة وتخفف الشغل اليدوي. إذا مناسب، أرسل لك فكرة سريعة؟`;
+          ? `بغيت أعرف كيف ماشي عندكم موضوع الفرز والمتابعة في التوظيف بـ${company}؟`
+          : "بغيت أعرف كيف ماشي عندكم موضوع الفرز والمتابعة مع المرشحين؟";
+    return `${greeting}\n${opener}\nأسأل لأن عندنا في Talentera طريقة تختصر هالجزء على فريق التوظيف إذا ودك أرسل لك الفكرة باختصار`;
   }
 
   if (input.style === "emirati-ar") {
-    const greeting = name ? `مرحبا أستاذ ${name}، يعطيك العافية.` : "مرحبا، يعطيك العافية.";
-    const context = hiring
-      ? ` لاحظت عندكم حركة توظيف واضحة${company ? ` في ${company}` : ""}،`
+    const greeting = name ? `مرحبا أستاذ ${name} يعطيك العافية` : "مرحبا يعطيك العافية";
+    const opener = hiring
+      ? `شفت عندكم توظيف شغال هالفترة${company ? ` في ${company}` : ""} وحبيت أعرف هل الفرز والمتابعة ياخذ من الفريق وقت كثير؟`
       : role
-        ? ` بحكم دورك في ${role}${company ? ` في ${company}` : ""}،`
+        ? `حبيت أسألك بحكم دورك في ${role}${company ? ` في ${company}` : ""} هل عندكم جزء كبير من الفرز والمتابعة للحين يدوي؟`
         : company
-          ? ` حبيت أتواصل معك بخصوص التوظيف في ${company}،`
-          : " حبيت أتواصل معك بخصوص التوظيف،";
-    return `${greeting}${context} Talentera تساعد فرق التوظيف ترتب الفرز والمتابعة وتخفف الشغل اليدوي. إذا مناسب، أشاركك فكرة سريعة؟`;
+          ? `حبيت أعرف كيف ماشي عندكم موضوع الفرز والمتابعة في التوظيف في ${company}؟`
+          : "حبيت أعرف كيف ماشي عندكم موضوع الفرز والمتابعة مع المرشحين؟";
+    return `${greeting}\n${opener}\nأسأل لأن عندنا في Talentera طريقة تخفف هالجزء على فريق التوظيف إذا مناسب أرسل لك الفكرة بسرعة`;
   }
 
   if (input.style === "gulf-ar") {
-    const greeting = name ? `السلام عليكم أستاذ ${name}، يعطيك العافية.` : "السلام عليكم، يعطيك العافية.";
-    const context = hiring
-      ? ` لاحظت عندكم نشاط واضح في التوظيف${company ? ` في ${company}` : ""}،`
+    const greeting = name ? `السلام عليكم أستاذ ${name} يعطيك العافية` : "السلام عليكم يعطيك العافية";
+    const opener = hiring
+      ? `شفت عندكم نشاط بالتوظيف هالفترة${company ? ` في ${company}` : ""} وحبيت أسأل هل الفرز والمتابعة ياخذ من الفريق وقت كثير؟`
       : role
-        ? ` بحكم دورك في ${role}${company ? ` في ${company}` : ""}،`
+        ? `حبيت أسألك بحكم دورك في ${role}${company ? ` في ${company}` : ""} هل عندكم جزء كبير من الفرز والمتابعة للحين يدوي؟`
         : company
-          ? ` حبيت أتواصل معك بخصوص التوظيف في ${company}،`
-          : " حبيت أتواصل معك بخصوص التوظيف،";
-    return `${greeting}${context} Talentera تساعد فرق التوظيف ترتب الفرز والمتابعة وتخفف الشغل اليدوي. إذا مناسب، أشاركك فكرة سريعة؟`;
+          ? `حبيت أعرف كيف ماشي عندكم موضوع الفرز والمتابعة في التوظيف في ${company}؟`
+          : "حبيت أعرف كيف ماشي عندكم موضوع الفرز والمتابعة مع المرشحين؟";
+    return `${greeting}\n${opener}\nأسأل لأن Talentera تختصر هالجزء على فرق التوظيف إذا مناسب أرسل لك الفكرة باختصار`;
   }
 
-  const greeting = name ? `Hi ${name}, hope you're well.` : "Hi, hope you're well.";
-  const context = hiring
-    ? ` I noticed ${company || "your team"} is actively hiring,`
+  const greeting = name ? `Hi ${name} — quick question.` : "Hi — quick question.";
+  const opener = hiring
+    ? `I saw ${company || "your team"} is hiring right now. Is screening and candidate follow-up taking a lot of manual time?`
     : role
-      ? ` Reaching out because of your role in ${role}${company ? ` at ${company}` : ""}.`
+      ? `Given your role in ${role}${company ? ` at ${company}` : ""}, is screening and candidate follow-up still fairly manual for the team?`
       : company
-        ? ` I wanted to reach out regarding recruitment at ${company}.`
-        : " I wanted to reach out regarding your recruitment process.";
-  return `${greeting}${context} Talentera helps recruitment teams streamline screening and follow-up while reducing manual work. If relevant, I can send you a quick idea.`;
+        ? `How are you handling screening and candidate follow-up at ${company} today — still fairly manual?`
+        : "Is screening and candidate follow-up still fairly manual for your team?";
+  return `${greeting}\n${opener}\nAsking because Talentera can take a lot of that admin off the team. Worth sending you a very quick overview?`;
 }
 
 export function buildWhatsAppWebUrl(digits: string, message: string) {
