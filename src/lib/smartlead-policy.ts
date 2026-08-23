@@ -46,9 +46,11 @@ export function personaBucket(title: string) {
   const value = String(title || "").trim().toLowerCase();
   if (/talent acquisition|recruit/.test(value) && /(head|director|vp|vice president|chief)/.test(value)) return "ta-leader";
   if (/talent acquisition|recruit/.test(value)) return "ta";
-  if (/chief.*human|chief.*people|\bchro\b|vp.*human|vp.*people/.test(value)) return "hr-executive";
-  if (/(head|director).*\bhr\b|(head|director).*human resources|(head|director).*people/.test(value)) return "hr-leader";
-  if (/\bhr\b|human resources|people/.test(value)) return "hr";
+  if (/chief.*human|chief.*people|\bchro\b|vp.*human|vp.*people|human.*vp|people.*vp/.test(value)) return "hr-executive";
+  const leadership = /head|director/.test(value);
+  const hrFunction = /\bhr\b|human resources|people/.test(value);
+  if (leadership && hrFunction) return "hr-leader";
+  if (hrFunction) return "hr";
   return "other";
 }
 
