@@ -34,6 +34,21 @@ function clean(value: unknown, max = 300) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
+export function humanizeWhatsAppMessage(value: unknown, max = 520) {
+  return String(value || "")
+    .replace(/\r/g, "")
+    .replace(/[—–]/g, " ")
+    .replace(/[،,.;؛:!…]/g, " ")
+    .replace(/([?؟])\1+/g, "$1")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 4)
+    .join("\n")
+    .trim()
+    .slice(0, max);
+}
+
 function countryCode(country: string) {
   const normalized = clean(country, 120);
   return COUNTRY_CODES.find((item) => item.pattern.test(normalized))?.code || "";
@@ -175,7 +190,7 @@ export function deterministicWhatsAppMessage(input: {
         : company
           ? `بغيت أعرف كيف ماشي عندكم موضوع الفرز والمتابعة في التوظيف بـ${company}؟`
           : "بغيت أعرف كيف ماشي عندكم موضوع الفرز والمتابعة مع المرشحين؟";
-    return `${greeting}\n${opener}\nأسأل لأن عندنا في Talentera طريقة تختصر هالجزء على فريق التوظيف إذا ودك أرسل لك الفكرة باختصار`;
+    return humanizeWhatsAppMessage(`${greeting}\n${opener}\nأسأل لأن عندنا في Talentera طريقة تختصر هالجزء على فريق التوظيف إذا ودك أرسل لك الفكرة باختصار`);
   }
 
   if (input.style === "emirati-ar") {
@@ -187,7 +202,7 @@ export function deterministicWhatsAppMessage(input: {
         : company
           ? `حبيت أعرف كيف ماشي عندكم موضوع الفرز والمتابعة في التوظيف في ${company}؟`
           : "حبيت أعرف كيف ماشي عندكم موضوع الفرز والمتابعة مع المرشحين؟";
-    return `${greeting}\n${opener}\nأسأل لأن عندنا في Talentera طريقة تخفف هالجزء على فريق التوظيف إذا مناسب أرسل لك الفكرة بسرعة`;
+    return humanizeWhatsAppMessage(`${greeting}\n${opener}\nأسأل لأن عندنا في Talentera طريقة تخفف هالجزء على فريق التوظيف إذا مناسب أرسل لك الفكرة بسرعة`);
   }
 
   if (input.style === "gulf-ar") {
@@ -199,18 +214,18 @@ export function deterministicWhatsAppMessage(input: {
         : company
           ? `حبيت أعرف كيف ماشي عندكم موضوع الفرز والمتابعة في التوظيف في ${company}؟`
           : "حبيت أعرف كيف ماشي عندكم موضوع الفرز والمتابعة مع المرشحين؟";
-    return `${greeting}\n${opener}\nأسأل لأن Talentera تختصر هالجزء على فرق التوظيف إذا مناسب أرسل لك الفكرة باختصار`;
+    return humanizeWhatsAppMessage(`${greeting}\n${opener}\nأسأل لأن Talentera تختصر هالجزء على فرق التوظيف إذا مناسب أرسل لك الفكرة باختصار`);
   }
 
-  const greeting = name ? `Hi ${name} — quick question.` : "Hi — quick question.";
+  const greeting = name ? `Hi ${name} quick question` : "Hi quick question";
   const opener = hiring
-    ? `I saw ${company || "your team"} is hiring right now. Is screening and candidate follow-up taking a lot of manual time?`
+    ? `I saw ${company || "your team"} is hiring right now is screening and candidate follow-up taking a lot of manual time?`
     : role
-      ? `Given your role in ${role}${company ? ` at ${company}` : ""}, is screening and candidate follow-up still fairly manual for the team?`
+      ? `Given your role in ${role}${company ? ` at ${company}` : ""} is screening and candidate follow-up still fairly manual for the team?`
       : company
-        ? `How are you handling screening and candidate follow-up at ${company} today — still fairly manual?`
+        ? `How are you handling screening and candidate follow-up at ${company} today still fairly manual?`
         : "Is screening and candidate follow-up still fairly manual for your team?";
-  return `${greeting}\n${opener}\nAsking because Talentera can take a lot of that admin off the team. Worth sending you a very quick overview?`;
+  return humanizeWhatsAppMessage(`${greeting}\n${opener}\nAsking because Talentera can take a lot of that admin off the team worth sending you a very quick overview?`);
 }
 
 export function buildWhatsAppWebUrl(digits: string, message: string) {
