@@ -25,23 +25,48 @@ type WhatsAppPayload = {
 };
 
 const requestCache = new Map<string, Promise<WhatsAppPayload>>();
+const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function requestWhatsAppPayload(contactId: string, attempt = 0): Promise<WhatsAppPayload> {
+  const response = await fetch("/api/ai/whatsapp-message", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contactId }),
+    cache: "no-store",
+  });
+
+  const raw = await response.text();
+  let payload: WhatsAppPayload = {};
+  if (raw) {
+    try {
+      payload = JSON.parse(raw) as WhatsAppPayload;
+    } catch {
+      payload = {};
+    }
+  }
+
+  if (attempt === 0 && RETRYABLE_STATUS.has(response.status)) {
+    await wait(450);
+    return requestWhatsAppPayload(contactId, 1);
+  }
+
+  if (!response.ok || (!payload.whatsappWebUrl && !payload.whatsappUrl)) {
+    const fallbackError = `WhatsApp preparation failed (HTTP ${response.status})`;
+    throw new Error(payload.error || fallbackError);
+  }
+
+  return payload;
+}
 
 function whatsappPayload(contactId: string) {
   const cached = requestCache.get(contactId);
   if (cached) return cached;
 
-  const request = fetch("/api/ai/whatsapp-message", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contactId }),
-    cache: "no-store",
-  }).then(async (response) => {
-    const payload = await response.json().catch(() => ({})) as WhatsAppPayload;
-    if (!response.ok || (!payload.whatsappWebUrl && !payload.whatsappUrl)) {
-      throw new Error(payload.error || "Unable to prepare WhatsApp message");
-    }
-    return payload;
-  }).catch((error) => {
+  const request = requestWhatsAppPayload(contactId).catch((error) => {
     requestCache.delete(contactId);
     throw error;
   });
