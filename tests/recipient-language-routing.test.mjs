@@ -23,6 +23,25 @@ test("high-confidence Arabic Latin name is safely mapped in KSA", () => {
   assert.ok(result.confidence >= 0.95);
 });
 
+test("common Saudi/Gulf Latin transliterations from the live queue map safely", () => {
+  const samples = {
+    Maher: "ماهر",
+    Tamim: "تميم",
+    Hattan: "هتان",
+    Hisham: "هشام",
+    Hesham: "هشام",
+    Ammar: "عمار",
+    Nabil: "نبيل",
+    Mohamed: "محمد",
+  };
+  for (const [firstName, expected] of Object.entries(samples)) {
+    const result = decideRecipientLanguage({ firstName, country: "Saudi Arabia" });
+    assert.equal(result.locale, "ar-SA", firstName);
+    assert.equal(result.greetingName, expected, firstName);
+    assert.ok(result.confidence >= 0.95, firstName);
+  }
+});
+
 test("Mohammed in UAE gets Gulf Arabic and Arabic greeting name", () => {
   const result = decideRecipientLanguage({ firstName: "Mohammed", country: "United Arab Emirates" });
   assert.equal(result.locale, "ar-GCC");
@@ -43,9 +62,11 @@ test("South Asian Latin name in KSA is not incorrectly Arabized", () => {
 });
 
 test("ambiguous international name is deliberately not in the Arabic map", () => {
-  const result = decideRecipientLanguage({ firstName: "Sarah", country: "Saudi Arabia" });
-  assert.equal(result.locale, "en");
-  assert.equal(result.greetingName, "Sarah");
+  for (const firstName of ["Sarah", "Adam", "Sam", "Maya", "George"]) {
+    const result = decideRecipientLanguage({ firstName, country: "Saudi Arabia" });
+    assert.equal(result.locale, "en", firstName);
+    assert.equal(result.greetingName, firstName);
+  }
 });
 
 test("explicit English always wins even for an Arabic-script name", () => {
@@ -58,7 +79,7 @@ test("explicit Arabic with an ambiguous Latin name fails safe to English", () =>
   const result = decideRecipientLanguage({ firstName: "Alex", country: "Saudi Arabia", explicitLanguage: "ar" });
   assert.equal(result.locale, "en");
   assert.equal(result.greetingName, "Alex");
-  assert.ok(result.reason.includes("safe fallback"));
+  assert.ok(result.reason.includes("safe English fallback"));
 });
 
 test("missing first name never invents an Arabic name", () => {
