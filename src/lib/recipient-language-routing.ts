@@ -23,8 +23,9 @@ const KSA = /saudi|ksa|kingdom of saudi/i;
 const GCC = /saudi|ksa|kingdom of saudi|united arab emirates|\buae\b|dubai|abu dhabi|qatar|kuwait|bahrain|oman/i;
 
 // Conservative deterministic layer. Ambiguous international names such as Adam,
-// Sarah, George, Sam and Maya intentionally stay out and can be reviewed by the
-// AI recipient-intelligence layer instead of being force-transliterated.
+// Sarah, George, Sam and Maya intentionally stay out and fall back to English.
+// OpenRouter may personalize the opening line, but language changes are disabled
+// by default so an AI response can never move an English recipient into Arabic.
 const HIGH_CONFIDENCE_ARABIC_FIRST_NAMES: Record<string, string> = {
   abdallah: "عبدالله", abdullah: "عبدالله", abdulla: "عبدالله",
   abdulaziz: "عبدالعزيز", "abdul-aziz": "عبدالعزيز", abdulrahman: "عبدالرحمن", "abdul-rahman": "عبدالرحمن",
@@ -76,7 +77,9 @@ function arabicLocale(country: string): RecipientLocale {
 }
 
 export function isGccCountry(country: string) {
-  return GCC.test(clean(country));
+  // This exported helper is used only as the AI-language-upgrade gate in the
+  // outreach engine. Keep upgrades disabled unless explicitly enabled after QA.
+  return process.env.SMARTLEAD_AI_LANGUAGE_UPGRADE === "true" && GCC.test(clean(country));
 }
 
 export function isKsaCountry(country: string) {
@@ -124,5 +127,5 @@ export function canUseSenderForProduct(email: string, product: OutreachProduct) 
 export function recommendedProduct(input: { explicitProduct?: OutreachProduct | ""; assessmentSignal?: boolean; atsOpportunity?: boolean; }): { product: OutreachProduct; confidence: number; reason: string } {
   if (input.explicitProduct) return { product: input.explicitProduct, confidence: 1, reason: "Explicit product selection" };
   if (input.assessmentSignal) return { product: "evalify", confidence: 0.95, reason: "Verified assessment/screening signal" };
-  return { product: "talentera", confidence: input.atsOpportunity ? 0.95 : 0.8, reason: input.atsOpportunity ? "ATS/recruitment workflow opportunity" : "Default product until an Evalify assessment signal is verified" };
+  return { product: "talentera", confidence: input.atsOpportunity ? 0.95 : 0.8, reason: input.atsOpportunity ? "ATS/recruitment workflow opportunity" : "Default product until an Evalufy assessment signal is verified" };
 }

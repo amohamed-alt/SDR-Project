@@ -29,11 +29,13 @@ const TALENTERA_AR: VisibleSequenceTouch[] = [
 
 {{opening_line}}
 
-كنت حابة أسألك عن نقطة صغيرة. مع {{industry_pain}} غالبا المشكلة مو في خطوة واحدة، قد ما هي في تنقل المرشح بين المراحل وكثرة المتابعة على الفريق.
+كنت حابة أسألك عن نقطة في التوظيف عندكم.
 
-Talentera تجمع الفرز والمقابلات والموافقات والعروض في مسار واحد وتخفف الشغل اليدوي.
+مع {{industry_pain}}، اللي يستهلك وقت الفريق غالبا هو متابعة المرشح بين الفرز والمقابلات والموافقات والعرض.
 
-إذا هذا قريب من اللي عندكم، يناسبك أوريك الفكرة في 10 دقايق؟`,
+Talentera تجمع رحلة التوظيف في مكان واحد وتخفف المتابعة اليدوية على الفريق.
+
+إذا هذا قريب من اللي عندكم، يناسبك أعرض لك الفكرة في 10 دقايق؟`,
   },
   {
     step: 2,
@@ -42,11 +44,11 @@ Talentera تجمع الفرز والمقابلات والموافقات والع
     subject: "",
     body: `هلا {{first_name}},
 
-بس أوضح قصدي: الفكرة مو إنكم تغيرون كل شيء عندكم.
+بس أوضح قصدي: مو المقصود إنكم تغيرون طريقتكم بالكامل.
 
-المقصود إن فريق التوظيف يكون عنده flow أوضح من أول التقديم لحد العرض، بدل المتابعة بين أكثر من خطوة ومكان.
+الفكرة إن رحلة المرشح تكون أوضح للفريق من أول التقديم لحد العرض، بدل المتابعة بين أكثر من مكان.
 
-إذا تشوفونها قريبة من احتياج عندكم، نرتب 10 دقايق؟`,
+إذا هذا شيء تبغون تحسنونه، نرتب 10 دقايق؟`,
   },
   {
     step: 3,
@@ -57,7 +59,7 @@ Talentera تجمع الفرز والمقابلات والموافقات والع
 
 ما ودي أزعجك بكثرة المتابعة.
 
-إذا الموضوع مو ضمن الأولويات حاليا أقفله من جهتي.
+إذا تطوير رحلة التوظيف مو ضمن الأولويات حاليا أقفلها من جهتي.
 
 وإذا يستاهل نظرة سريعة، رد بكلمة "مناسب" وأنا أرتبها معك.`,
   },
@@ -73,11 +75,13 @@ const TALENTERA_EN: VisibleSequenceTouch[] = [
 
 {{opening_line}}
 
-I wanted to ask you something small. With {{industry_pain}}, the friction is often not one step but the handoffs between screening, interviews, approvals and offers.
+I wanted to ask you about one part of the hiring process.
 
-Talentera brings that journey into one recruitment flow and reduces manual follow-up for the team.
+With {{industry_pain}}, a lot of recruiter time can disappear in the handoffs between screening, interviews, approvals and offers.
 
-If that sounds close to what you deal with, worth a 10-minute look?`,
+Talentera brings that journey into one recruitment flow and reduces the manual follow-up around it.
+
+If that sounds relevant, worth a quick 10-minute look?`,
   },
   {
     step: 2,
@@ -86,11 +90,11 @@ If that sounds close to what you deal with, worth a 10-minute look?`,
     subject: "",
     body: `Hi {{first_name}},
 
-Just to clarify one thing: the idea is not to make you change everything you already use.
+Just to clarify: I am not suggesting you change everything you already do.
 
-It is about giving the recruitment team a cleaner flow from application through screening, interviews, approvals and offers.
+The idea is simply to give the recruitment team a cleaner path from application through offer, with fewer manual handoffs.
 
-If that is relevant on your side, worth 10 minutes?`,
+If that is something you are looking to improve, worth 10 minutes?`,
   },
   {
     step: 3,
@@ -101,7 +105,7 @@ If that is relevant on your side, worth 10 minutes?`,
 
 I do not want to keep filling your inbox.
 
-If this is not a priority right now, I will close it on my side.
+If improving the hiring flow is not a priority right now, I will close this on my side.
 
 If it is worth a quick look, reply "yes" and I will arrange it with you.`,
   },
@@ -117,11 +121,13 @@ const EVALUFY_AR: VisibleSequenceTouch[] = [
 
 {{opening_line}}
 
-كنت حابة أسألك عن نقطة قبل المقابلات. بما إن عندكم نظام توظيف قائم، الفرصة غالبا تكون في {{industry_pain}} قبل ما يستهلك الفريق وقته في المقابلات.
+كنت حابة أسألك عن خطوة قبل المقابلات.
 
-Evalufy تضيف assessments وscreening فوق الـATS الحالي بدون ما تحتاجون تغيرونه.
+بما إن عندكم نظام توظيف قائم، غالبا الفرصة تكون في {{industry_pain}} قبل ما يستهلك الفريق وقته في المقابلات.
 
-إذا الفكرة تهمكم، يناسبك أوريكها في 10 دقايق؟`,
+Evalufy تضيف التقييم والفرز قبل المقابلات فوق نظام التوظيف الحالي بدون ما تحتاجون تغيرونه.
+
+إذا الفكرة قريبة من احتياجكم، يناسبك أعرضها لك في 10 دقايق؟`,
   },
   {
     step: 2,
@@ -130,9 +136,9 @@ Evalufy تضيف assessments وscreening فوق الـATS الحالي بدون 
     subject: "",
     body: `هلا {{first_name}},
 
-بس أوضح قصدي: الـATS يفضل مثل ما هو، وEvalufy تضيف طبقة تقييم وفرز قبل المقابلات.
+بس أوضح قصدي: نظام التوظيف الحالي يظل مثل ما هو.
 
-الفكرة إن وقت الفريق يروح على shortlist أنسب بدل ما يبدأ التقييم داخل المقابلة نفسها.
+Evalufy تضيف طبقة تقييم وفرز قبل المقابلات، بحيث وقت الفريق يروح على قائمة مرشحين أنسب بدل ما يبدأ التقييم داخل المقابلة نفسها.
 
 إذا هذا تحدي عندكم، نرتب 10 دقايق؟`,
   },
@@ -161,11 +167,13 @@ const EVALUFY_EN: VisibleSequenceTouch[] = [
 
 {{opening_line}}
 
-I wanted to ask about one step before interviews. Since you already have a recruitment system, the opportunity is often in {{industry_pain}} before interview time is used.
+I wanted to ask about one step before interviews.
 
-Evalufy adds assessments and screening on top of the current ATS without replacing it.
+Since you already have a recruitment system in place, the opportunity is often in {{industry_pain}} before interview time is used.
 
-If that is relevant, worth a 10-minute look?`,
+Evalufy adds assessment and screening before interviews without replacing your current recruitment system.
+
+If that sounds relevant, worth a quick 10-minute look?`,
   },
   {
     step: 2,
@@ -174,11 +182,11 @@ If that is relevant, worth a 10-minute look?`,
     subject: "",
     body: `Hi {{first_name}},
 
-Just to clarify: your ATS stays where it is. Evalufy adds an assessment and screening layer before interviews.
+Just to clarify: your current recruitment system stays where it is.
 
-The idea is simply to spend recruiter and hiring-manager time on a stronger shortlist.
+Evalufy adds an assessment and screening layer before interviews, so recruiter and hiring-manager time goes to a stronger shortlist.
 
-If that is a problem you are trying to improve, worth 10 minutes?`,
+If that is something you are trying to improve, worth 10 minutes?`,
   },
   {
     step: 3,

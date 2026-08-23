@@ -37,6 +37,10 @@ const SmartleadCommandCenter = dynamic(
   () => import("@/components/SmartleadCommandCenter").then((module) => module.SmartleadCommandCenter),
   { ssr: false, loading: ViewLoading },
 );
+const SmartleadDailySendBar = dynamic(
+  () => import("@/components/SmartleadDailySendBar").then((module) => module.SmartleadDailySendBar),
+  { ssr: false },
+);
 const TeamActivity = dynamic(
   () => import("@/components/TeamActivity").then((module) => module.TeamActivity),
   { ssr: false, loading: ViewLoading },
@@ -108,7 +112,7 @@ export function Dashboard() {
   if (view === "career") return <CareerIntelligence onBack={() => changeView("core")}/>;
   if (view === "ats-intent") return <AtsIntentSearch onBack={() => changeView("core")}/>;
   if (view === "marita-priority") return <MaritaPriorityQueue onBack={() => changeView("core")}/>;
-  if (view === "smartlead") return <SmartleadCommandCenter onBack={() => changeView("core")}/>;
+  if (view === "smartlead") return <><SmartleadDailySendBar/><SmartleadCommandCenter onBack={() => changeView("core")}/></>;
   if (view === "team-activity") return <TeamActivity onBack={() => changeView("core")}/>;
   if (view === "net-new") return <NetNewAccounts onBack={() => changeView("core")}/>;
 
@@ -157,7 +161,7 @@ export function Dashboard() {
             </button>
             <button className={styles.toolItem} type="button" onClick={() => changeView("smartlead")}>
               <span className={`${styles.toolIcon} ${styles.priorityIcon}`}><MailCheck size={17}/></span>
-              <span className={styles.toolCopy}><strong>Smartlead Outreach</strong><small>Marita email queue & execution</small></span>
+              <span className={styles.toolCopy}><strong>Smartlead Outreach</strong><small>Verified daily send + live execution</small></span>
             </button>
             <Link className={styles.toolItem} href="/marita-calls" onClick={() => trackFeature("marita-calls")}>
               <span className={`${styles.toolIcon} ${styles.callsIcon}`}><PhoneCall size={17}/></span>
