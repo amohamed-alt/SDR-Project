@@ -37,17 +37,17 @@ function sha256(value: string) {
 }
 
 async function atomicWrite(path: string, payload: string) {
-  await mkdir(dirname(path), { recursive: true });
+  await mkdir(/* turbopackIgnore: true */ dirname(path), { recursive: true });
   const temp = `${path}.tmp`;
-  await writeFile(temp, payload, { encoding: "utf8", mode: 0o600 });
+  await writeFile(/* turbopackIgnore: true */ temp, payload, { encoding: "utf8", mode: 0o600 });
   await chmod(temp, 0o600);
-  await rename(temp, path);
+  await rename(/* turbopackIgnore: true */ temp, /* turbopackIgnore: true */ path);
   await chmod(path, 0o600);
 }
 
 async function readPairingStore(): Promise<PairingStore | null> {
   try {
-    const parsed = JSON.parse(await readFile(PAIRING_STORE, "utf8")) as Partial<PairingStore>;
+    const parsed = JSON.parse(await readFile(/* turbopackIgnore: true */ PAIRING_STORE, "utf8")) as Partial<PairingStore>;
     if (!parsed.tokenHash) return null;
     return {
       tokenHash: String(parsed.tokenHash),
@@ -99,7 +99,7 @@ export async function saveCompanionBatch(batch: CompanionBatch) {
 
 export async function getLatestCompanionBatch(): Promise<CompanionBatch | null> {
   try {
-    const parsed = JSON.parse(await readFile(LATEST_BATCH_STORE, "utf8")) as CompanionBatch;
+    const parsed = JSON.parse(await readFile(/* turbopackIgnore: true */ LATEST_BATCH_STORE, "utf8")) as CompanionBatch;
     if (!parsed?.id || !Array.isArray(parsed.leads)) return null;
     return parsed;
   } catch {

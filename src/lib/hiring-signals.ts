@@ -245,7 +245,7 @@ function emptyStore(): HiringStore {
 
 export async function getHiringStore(): Promise<HiringStore> {
   try {
-    const raw = await readFile(storePath(), "utf8");
+    const raw = await readFile(/* turbopackIgnore: true */ storePath(), "utf8");
     const parsed = JSON.parse(raw) as HiringStore;
     if (parsed.version !== STORE_VERSION || !Array.isArray(parsed.companies)) return emptyStore();
     return parsed;
@@ -256,10 +256,10 @@ export async function getHiringStore(): Promise<HiringStore> {
 
 async function persistStore(store: HiringStore) {
   const target = storePath();
-  await mkdir(path.dirname(target), { recursive: true });
+  await mkdir(/* turbopackIgnore: true */ path.dirname(target), { recursive: true });
   const temp = `${target}.tmp`;
-  await writeFile(temp, JSON.stringify(store, null, 2), "utf8");
-  await rename(temp, target);
+  await writeFile(/* turbopackIgnore: true */ temp, JSON.stringify(store, null, 2), "utf8");
+  await rename(/* turbopackIgnore: true */ temp, /* turbopackIgnore: true */ target);
 }
 
 async function fetchText(url: string) {

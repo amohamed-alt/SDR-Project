@@ -44,7 +44,7 @@ async function languagePreflight() {
   let staleIntelligenceReset = false;
 
   if (issues.length) {
-    await fs.rm(INTELLIGENCE_PATH, { force: true }).catch(() => undefined);
+    await fs.rm(/* turbopackIgnore: true */ INTELLIGENCE_PATH, { force: true }).catch(() => undefined);
     staleIntelligenceReset = true;
     snapshot = await getSmartleadV2(true);
     issues = languageIssues(snapshot.queue);

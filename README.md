@@ -30,7 +30,7 @@ For a detailed Arabic walkthrough of every dashboard tab, KPI, filter, HubSpot f
 - Google refresh tokens are encrypted with AES-256-GCM, stored separately per organizer, and persisted only in the Docker data volume.
 - A booking requires an explicit preview and browser confirmation before invitations are sent.
 - The selected Sales Rep must return an explicit Google Free/Busy result. Busy or inaccessible calendars are never treated as available, and availability is checked again immediately before event creation.
-- Production requests require HTTP Basic Auth unless platform-level authentication is used and `DISABLE_AUTH=true` is deliberately set.
+- Production requests require HTTP Basic Auth unless platform-level authentication is used and `DISABLE_AUTH=true` is deliberately set. During migration, `ACQUISITION_OWNER_TOKEN` is used when `DASHBOARD_PASSWORD` is empty.
 - No CRM data, API token, or generated HubSpot snapshot is committed to Git.
 - The repository may remain public only while it contains code and synthetic demo data. Make it private before adding exports, logs, screenshots, or CRM snapshots.
 

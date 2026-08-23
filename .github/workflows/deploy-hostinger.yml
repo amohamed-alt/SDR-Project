@@ -125,6 +125,22 @@ jobs:
           else
             echo "::warning::APOLLO_API_KEY is not configured yet; Net-New Accounts will deploy read-only with Apollo discovery disabled."
           fi
+
+      - name: Validate dashboard authentication
+        env:
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+          OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN }}
+        run: |
+          if [ -z "$DASHBOARD_PASSWORD" ] && [ -z "$OWNER_TOKEN" ]; then
+            echo "::error::Configure DASHBOARD_PASSWORD or ACQUISITION_OWNER_TOKEN before deploying the CRM dashboard."
+            exit 1
+          fi
+          echo "Dashboard authentication: configured"
+
+      - name: Report optional owner action configuration
+        env:
+          OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN }}
+        run: |
           if [ -n "$OWNER_TOKEN" ]; then
             echo "Acquisition Owner actions: configured"
           else
@@ -260,6 +276,9 @@ jobs:
             TAVILY_API_KEY=${{ secrets.TAVILY_API_KEY }}
             APOLLO_API_KEY=${{ secrets.APOLLO_API_KEY }}
             ACQUISITION_OWNER_TOKEN=${{ secrets.ACQUISITION_OWNER_TOKEN }}
+            DASHBOARD_USERNAME=${{ secrets.DASHBOARD_USERNAME || 'talentera' }}
+            DASHBOARD_PASSWORD=${{ secrets.DASHBOARD_PASSWORD }}
+            DISABLE_AUTH=false
             ACQUISITION_OWNER_IDS=31644369,76369997,31558980,76370000,76369995,76369998
             OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY || secrets.GTM_RESEARCH_OPENROUTER_API_KEY }}
             OPENROUTER_FAST_MODEL=openai/gpt-4.1-nano
@@ -274,6 +293,9 @@ jobs:
             SMARTLEAD_MIN_TIME_BETWEEN_EMAILS=15
 
       - name: Verify exact deployed build, Career ATS V3, Dashboard V2, AI gateway, acquisition, and Smartlead health
+        env:
+          DASHBOARD_USERNAME: ${{ secrets.DASHBOARD_USERNAME || 'talentera' }}
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
         run: |
           set -euo pipefail
           HOST='sdr.dashboardtalentera.tech'
@@ -351,6 +373,7 @@ jobs:
           fi
 
           USAGE_CODE=$(curl --silent --show-error \
+            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
             --connect-timeout 5 \
             --max-time 15 \
             --output /tmp/usage.json \
@@ -370,6 +393,7 @@ jobs:
           fi
 
           ACQ_CODE=$(curl --silent --show-error \
+            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
             --connect-timeout 5 \
             --max-time 20 \
             --output /tmp/acquisition.json \
@@ -388,6 +412,7 @@ jobs:
           fi
 
           AI_CODE=$(curl --silent --show-error \
+            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
             --connect-timeout 5 \
             --max-time 15 \
             --output /tmp/openrouter-health.json \
@@ -409,6 +434,7 @@ jobs:
           fi
 
           SMARTLEAD_CODE=$(curl --silent --show-error \
+            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
             --connect-timeout 5 \
             --max-time 90 \
             --output /tmp/smartlead-health.json \
@@ -428,6 +454,7 @@ jobs:
           fi
 
           SEND_HEALTH_CODE=$(curl --silent --show-error \
+            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
             --connect-timeout 5 \
             --max-time 20 \
             --output /tmp/smartlead-send-health.json \

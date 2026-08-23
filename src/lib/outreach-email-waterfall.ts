@@ -113,17 +113,17 @@ function mapMillionVerifierResult(result: unknown): VerificationStatus {
 
 async function readCache() {
   try {
-    return JSON.parse(await fs.readFile(CACHE_PATH, "utf8")) as CacheStore;
+    return JSON.parse(await fs.readFile(/* turbopackIgnore: true */ CACHE_PATH, "utf8")) as CacheStore;
   } catch {
     return { version: 1 as const, entries: [] };
   }
 }
 
 async function writeCache(store: CacheStore) {
-  await fs.mkdir(path.dirname(CACHE_PATH), { recursive: true });
+  await fs.mkdir(/* turbopackIgnore: true */ path.dirname(CACHE_PATH), { recursive: true });
   const tmp = `${CACHE_PATH}.tmp-${process.pid}`;
-  await fs.writeFile(tmp, JSON.stringify(store), { encoding: "utf8", mode: 0o600 });
-  await fs.rename(tmp, CACHE_PATH);
+  await fs.writeFile(/* turbopackIgnore: true */ tmp, JSON.stringify(store), { encoding: "utf8", mode: 0o600 });
+  await fs.rename(/* turbopackIgnore: true */ tmp, /* turbopackIgnore: true */ CACHE_PATH);
 }
 
 function freshEntry(entry: CacheEntry | undefined) {

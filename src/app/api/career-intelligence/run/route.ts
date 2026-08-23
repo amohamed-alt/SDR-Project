@@ -10,7 +10,7 @@ let activeBatch: Promise<Awaited<ReturnType<typeof runCareerBatch>>> | null = nu
 async function recoverInterruptedProcessingRecords() {
   const storePath = process.env.CAREER_INTELLIGENCE_STORE_PATH || "/app/data/career-intelligence.json";
   try {
-    const raw = await fs.readFile(storePath, "utf8");
+    const raw = await fs.readFile(/* turbopackIgnore: true */ storePath, "utf8");
     const store = JSON.parse(raw) as {
       updatedAt?: string;
       records?: Record<string, {
@@ -33,8 +33,8 @@ async function recoverInterruptedProcessingRecords() {
     if (!changed) return;
     store.updatedAt = timestamp;
     const temp = `${storePath}.recovery.tmp`;
-    await fs.writeFile(temp, JSON.stringify(store, null, 2), "utf8");
-    await fs.rename(temp, storePath);
+    await fs.writeFile(/* turbopackIgnore: true */ temp, JSON.stringify(store, null, 2), "utf8");
+    await fs.rename(/* turbopackIgnore: true */ temp, /* turbopackIgnore: true */ storePath);
   } catch {
     // Missing/empty store is normal on the first run. A malformed store will be
     // surfaced by the regular portfolio load rather than blocking the endpoint here.

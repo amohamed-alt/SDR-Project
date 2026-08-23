@@ -1,8 +1,7 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { originMatchesRequestHosts } from "@/lib/request-origin";
 
-const OWNER_PIN_SHA256 = "e0f05da93a0f5a86a3be5fc0e301606513c9f7e59dac2357348aa0f2f47db984";
 const OWNER_PIN_WINDOW_MS = 10 * 60 * 1000;
 const OWNER_PIN_MAX_ATTEMPTS = 5;
 const attempts = new Map<string, { count: number; resetAt: number }>();
@@ -15,10 +14,6 @@ function safeEqual(left: string, right: string) {
   const a = Buffer.from(left);
   const b = Buffer.from(right);
   return a.length === b.length && timingSafeEqual(a, b);
-}
-
-function pinMatches(value: string) {
-  return createHash("sha256").update(value).digest("hex") === OWNER_PIN_SHA256;
 }
 
 function rateKey(request: NextRequest) {
@@ -64,11 +59,6 @@ export function smartleadActionAuthorized(request: NextRequest) {
     return { ok: false as const, status: 429, error: "Too many Owner PIN attempts. Try again in a few minutes." };
   }
 
-  if (pinMatches(supplied)) {
-    attempts.delete(key);
-    return { ok: true as const, mode: "owner" as const };
-  }
-
   attempts.set(key, {
     count: state && state.resetAt > now ? state.count + 1 : 1,
     resetAt: state && state.resetAt > now ? state.resetAt : now + OWNER_PIN_WINDOW_MS,
@@ -77,7 +67,5 @@ export function smartleadActionAuthorized(request: NextRequest) {
 }
 
 export function smartleadActionAuthConfigured() {
-  // Owner PIN fallback is always available; ACQUISITION_OWNER_TOKEN remains an
-  // optional override and SMARTLEAD_API_KEY supports trusted scheduled jobs.
-  return true;
+  return Boolean(clean(process.env.ACQUISITION_OWNER_TOKEN, 500) || clean(process.env.SMARTLEAD_API_KEY, 2_000));
 }

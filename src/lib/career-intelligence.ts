@@ -235,7 +235,7 @@ function demoCompanies(): CareerCompany[] {
 
 async function loadStore(): Promise<CareerStore> {
   try {
-    const parsed = JSON.parse(await fs.readFile(STORE_PATH, "utf8")) as CareerStore;
+    const parsed = JSON.parse(await fs.readFile(/* turbopackIgnore: true */ STORE_PATH, "utf8")) as CareerStore;
     if (parsed?.version === 1 && parsed.records && typeof parsed.records === "object") return parsed;
   } catch {
     // First run or an empty volume is expected.
@@ -244,10 +244,10 @@ async function loadStore(): Promise<CareerStore> {
 }
 
 async function writeStore(store: CareerStore) {
-  await fs.mkdir(path.dirname(STORE_PATH), { recursive: true });
+  await fs.mkdir(/* turbopackIgnore: true */ path.dirname(STORE_PATH), { recursive: true });
   const temp = `${STORE_PATH}.tmp`;
-  await fs.writeFile(temp, JSON.stringify(store, null, 2), "utf8");
-  await fs.rename(temp, STORE_PATH);
+  await fs.writeFile(/* turbopackIgnore: true */ temp, JSON.stringify(store, null, 2), "utf8");
+  await fs.rename(/* turbopackIgnore: true */ temp, /* turbopackIgnore: true */ STORE_PATH);
 }
 
 async function saveCompany(company: CareerCompany) {

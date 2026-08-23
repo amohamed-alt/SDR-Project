@@ -179,8 +179,8 @@ function unique(values: string[]) { return [...new Set(values.map((value) => cle
 function getApiKey() { return clean(process.env.SMARTLEAD_API_KEY); }
 function aiConfigured() { return Boolean(clean(process.env.OPENROUTER_API_KEY)); }
 
-async function readJsonFile<T>(file: string, fallback: T): Promise<T> { try { return JSON.parse(await fs.readFile(file, "utf8")) as T; } catch { return fallback; } }
-async function writeJsonFile(file: string, value: unknown) { await fs.mkdir(path.dirname(file), { recursive: true }); const tmp = `${file}.tmp-${process.pid}`; await fs.writeFile(tmp, JSON.stringify(value), { encoding: "utf8", mode: 0o600 }); await fs.rename(tmp, file); }
+async function readJsonFile<T>(file: string, fallback: T): Promise<T> { try { return JSON.parse(await fs.readFile(/* turbopackIgnore: true */ file, "utf8")) as T; } catch { return fallback; } }
+async function writeJsonFile(file: string, value: unknown) { await fs.mkdir(/* turbopackIgnore: true */ path.dirname(file), { recursive: true }); const tmp = `${file}.tmp-${process.pid}`; await fs.writeFile(/* turbopackIgnore: true */ tmp, JSON.stringify(value), { encoding: "utf8", mode: 0o600 }); await fs.rename(/* turbopackIgnore: true */ tmp, /* turbopackIgnore: true */ file); }
 async function readPrepared() { return readJsonFile<PreparedBatch | null>(PREPARED_PATH, null); }
 async function readLedger() { return readJsonFile<Ledger>(LEDGER_PATH, { version: 1, entries: [] }); }
 async function readIntelligence() { return readJsonFile<IntelligenceStore>(INTELLIGENCE_PATH, { version: 1, entries: [] }); }

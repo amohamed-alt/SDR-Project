@@ -10,7 +10,7 @@ const MARKER_PATH = process.env.ACQUISITION_BOOTSTRAP_MARKER_PATH || "/app/data/
 
 async function completedMarker() {
   try {
-    const raw = await readFile(MARKER_PATH, "utf8");
+    const raw = await readFile(/* turbopackIgnore: true */ MARKER_PATH, "utf8");
     return JSON.parse(raw) as Record<string, unknown>;
   } catch {
     return null;
@@ -30,8 +30,8 @@ export async function POST(request: NextRequest) {
   if (!response.ok) return response;
 
   const snapshot = await response.clone().json() as Record<string, unknown>;
-  await mkdir(dirname(MARKER_PATH), { recursive: true });
-  await writeFile(MARKER_PATH, JSON.stringify({
+  await mkdir(/* turbopackIgnore: true */ dirname(MARKER_PATH), { recursive: true });
+  await writeFile(/* turbopackIgnore: true */ MARKER_PATH, JSON.stringify({
     version: "approved-apollo-seed-2026-08-22-v1",
     completedAt: new Date().toISOString(),
     result: snapshot,

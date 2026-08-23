@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
+import { dashboardAuthConfig } from "@/lib/dashboard-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,7 +32,7 @@ async function fileExists(filePath: string) {
 
 async function readValidationState() {
   try {
-    return (await fs.readFile(VALIDATION_STATE, "utf8")).trim().slice(0, 120);
+    return (await fs.readFile(/* turbopackIgnore: true */ VALIDATION_STATE, "utf8")).trim().slice(0, 120);
   } catch {
     return "not_started";
   }
@@ -39,7 +40,7 @@ async function readValidationState() {
 
 async function readValidationProgress() {
   try {
-    const parsed = JSON.parse(await fs.readFile(CAREER_STORE, "utf8")) as {
+    const parsed = JSON.parse(await fs.readFile(/* turbopackIgnore: true */ CAREER_STORE, "utf8")) as {
       records?: Record<string, { status?: string; lastCheckedAt?: string }>;
     };
     const records = Object.values(parsed.records || {});
@@ -82,17 +83,19 @@ async function careerEngineState() {
 }
 
 function runtimeConfigState() {
+  const auth = dashboardAuthConfig();
   const checks = {
     hubspot: Boolean(process.env.HUBSPOT_PRIVATE_APP_TOKEN),
     googleClientId: Boolean(process.env.GOOGLE_CLIENT_ID),
     googleClientSecret: Boolean(process.env.GOOGLE_CLIENT_SECRET),
     googleEncryptionKey: Boolean(process.env.GOOGLE_TOKEN_ENCRYPTION_KEY),
     googleRedirectUri: Boolean(process.env.GOOGLE_REDIRECT_URI),
+    dashboardAuth: auth.mode !== "missing",
   };
   return {
     ready: Object.values(checks).every(Boolean),
     checks,
-    authMode: "open",
+    authMode: auth.mode,
     demoMode: process.env.DEMO_MODE === "true",
   };
 }

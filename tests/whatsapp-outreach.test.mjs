@@ -23,6 +23,18 @@ test("prefers a Saudi mobilephone over a landline phone", () => {
   assert.equal(selected?.alternatePhone, "+966112345678");
 });
 
+test("prefers an explicit HubSpot WhatsApp number over mobile and phone", () => {
+  const selected = selectWhatsAppPhone({
+    whatsappNumber: "+966 55 987 6543",
+    mobilephone: "+966 55 123 4567",
+    phone: "+966 11 555 1234",
+    country: "Saudi Arabia",
+  });
+  assert.equal(selected?.source, "whatsapp_number");
+  assert.equal(selected?.digits, "966559876543");
+  assert.equal(selected?.alternatePhone, "+966551234567");
+});
+
 test("falls back to phone when mobilephone is missing", () => {
   const selected = selectWhatsAppPhone({
     country: "United Arab Emirates",

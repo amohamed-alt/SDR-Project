@@ -94,8 +94,8 @@ function riyadhClock(now = new Date()) {
   return { date: `${value("year")}-${value("month")}-${value("day")}`, weekday: value("weekday") };
 }
 
-async function readJson<T>(file: string, fallback: T): Promise<T> { try { return JSON.parse(await fs.readFile(file, "utf8")) as T; } catch { return fallback; } }
-async function writeJson(file: string, value: unknown) { await fs.mkdir(path.dirname(file), { recursive: true }); const tmp = `${file}.tmp-${process.pid}`; await fs.writeFile(tmp, JSON.stringify(value), { encoding: "utf8", mode: 0o600 }); await fs.rename(tmp, file); }
+async function readJson<T>(file: string, fallback: T): Promise<T> { try { return JSON.parse(await fs.readFile(/* turbopackIgnore: true */ file, "utf8")) as T; } catch { return fallback; } }
+async function writeJson(file: string, value: unknown) { await fs.mkdir(/* turbopackIgnore: true */ path.dirname(file), { recursive: true }); const tmp = `${file}.tmp-${process.pid}`; await fs.writeFile(/* turbopackIgnore: true */ tmp, JSON.stringify(value), { encoding: "utf8", mode: 0o600 }); await fs.rename(/* turbopackIgnore: true */ tmp, /* turbopackIgnore: true */ file); }
 async function readState() { return readJson<AutopilotState>(STATE_PATH, { ...EMPTY_STATE }); }
 async function readLedger() { return readJson<Ledger>(LEDGER_PATH, { version: 1, entries: [] }); }
 

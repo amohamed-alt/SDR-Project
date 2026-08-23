@@ -480,7 +480,7 @@ function splitName(record: HubSpotRecord | undefined, fallback: string) {
 
 async function readPreparedBatch(): Promise<PreparedBatch | null> {
   try {
-    const parsed = JSON.parse(await fs.readFile(PREPARED_PATH, "utf8")) as PreparedBatch;
+    const parsed = JSON.parse(await fs.readFile(/* turbopackIgnore: true */ PREPARED_PATH, "utf8")) as PreparedBatch;
     if (parsed?.version !== 1 || !Array.isArray(parsed.leads)) return null;
     return parsed;
   } catch {
@@ -489,10 +489,10 @@ async function readPreparedBatch(): Promise<PreparedBatch | null> {
 }
 
 async function writePreparedBatch(batch: PreparedBatch) {
-  await fs.mkdir(path.dirname(PREPARED_PATH), { recursive: true });
+  await fs.mkdir(/* turbopackIgnore: true */ path.dirname(PREPARED_PATH), { recursive: true });
   const temp = `${PREPARED_PATH}.tmp-${process.pid}`;
-  await fs.writeFile(temp, JSON.stringify(batch), { encoding: "utf8", mode: 0o600 });
-  await fs.rename(temp, PREPARED_PATH);
+  await fs.writeFile(/* turbopackIgnore: true */ temp, JSON.stringify(batch), { encoding: "utf8", mode: 0o600 });
+  await fs.rename(/* turbopackIgnore: true */ temp, /* turbopackIgnore: true */ PREPARED_PATH);
 }
 
 async function buildQueue(forceRefresh: boolean) {

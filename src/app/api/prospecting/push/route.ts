@@ -5,6 +5,7 @@ import { writeAcquisitionPush } from "@/lib/acquisition-data-api";
 import { acquisitionOwners } from "@/lib/acquisition-routing";
 import { batchRead, HubSpotApiError, readAssociations, searchAll } from "@/lib/hubspot";
 import { normalizeCompanyDomain } from "@/lib/prospecting-company-intelligence";
+import { compatibleCompanyIdentity, normalizedCompanyName } from "@/lib/company-dedupe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -123,8 +124,8 @@ async function contactHasLinkedInProperty() {
   } catch { return false; }
 }
 
-async function findContact(email: string, linkedinUrl: string) {
-  if (email) {
+async function findContact(emails: string[], linkedinUrl: string) {
+  for (const email of uniqueValues(emails).slice(0, 5)) {
     const matches = await searchAll("contacts", ["firstname", "lastname", "email"], [{ propertyName: "email", operator: "EQ", value: email.toLowerCase() }]);
     if (matches[0]) return String(matches[0].id);
   }
@@ -171,10 +172,39 @@ function companyDomain(prospect: Prospect) {
   return normalizeCompanyDomain(prospect.companyDomain || prospect.companyWebsite);
 }
 
-async function findCompanyId(domain: string) {
-  if (!domain) return "";
-  const matches = await searchAll("companies", ["name", "domain", "hubspot_owner_id"], [{ propertyName: "domain", operator: "EQ", value: domain }]);
-  return matches[0] ? String(matches[0].id) : "";
+async function findCompanyId(prospect: Prospect) {
+  const domain = companyDomain(prospect);
+  if (domain) {
+    const matches = await searchAll("companies", ["name", "domain", "hubspot_owner_id"], [{ propertyName: "domain", operator: "EQ", value: domain }]);
+    if (matches[0]) return String(matches[0].id);
+  }
+
+  if (!prospect.company) return "";
+  const exactNameMatches = await searchAll("companies", ["name", "domain", "hubspot_owner_id"], [{ propertyName: "name", operator: "EQ", value: prospect.company }]);
+  let compatible = exactNameMatches.find((match) => compatibleCompanyIdentity({
+    requestedName: prospect.company,
+    requestedDomain: domain,
+    existingName: String(match.properties.name || ""),
+    existingDomain: String(match.properties.domain || ""),
+  }));
+  if (compatible) return String(compatible.id);
+
+  // HubSpot's exact name search will not match harmless suffix differences
+  // such as "Acme" vs "Acme LLC". Search one distinctive token, then apply
+  // the strict normalized-name/domain compatibility check before reusing it.
+  const nameToken = normalizedCompanyName(prospect.company)
+    .split(" ")
+    .filter((token) => token.length >= 3)
+    .sort((left, right) => right.length - left.length)[0];
+  if (!nameToken) return "";
+  const tokenMatches = await searchAll("companies", ["name", "domain", "hubspot_owner_id"], [{ propertyName: "name", operator: "CONTAINS_TOKEN", value: nameToken }]);
+  compatible = tokenMatches.find((match) => compatibleCompanyIdentity({
+    requestedName: prospect.company,
+    requestedDomain: domain,
+    existingName: String(match.properties.name || ""),
+    existingDomain: String(match.properties.domain || ""),
+  }));
+  return compatible ? String(compatible.id) : "";
 }
 
 function companyPropertiesFromProspect(prospect: Prospect, includeIdentity = true, ownerId = "") {
@@ -220,9 +250,9 @@ async function syncCompany(companyId: string, prospect: Prospect) {
 
 async function ensureCompany(prospect: Prospect, requestedOwnerId: string) {
   const domain = companyDomain(prospect);
-  if (!domain) return { companyId: "", created: false, fieldsUpdated: [] as string[], existingOwnerId: "" };
-  let companyId = await findCompanyId(domain);
+  let companyId = await findCompanyId(prospect);
   if (!companyId) {
+    if (!domain) return { companyId: "", created: false, fieldsUpdated: [] as string[], existingOwnerId: "" };
     companyId = await createCompany(prospect, requestedOwnerId);
     return { companyId, created: Boolean(companyId), fieldsUpdated: [] as string[], existingOwnerId: "" };
   }
@@ -343,7 +373,7 @@ export async function POST(request: Request) {
     const company = await ensureCompany(prospect, requestedOwner.id);
     const owner = finalAssignment(requestedOwner, company.existingOwnerId);
 
-    let contactId = await findContact(prospect.email, prospect.linkedinUrl);
+    let contactId = await findContact(allEmails(prospect), prospect.linkedinUrl);
     let contactCreated = false;
     let contactFieldsUpdated: string[] = [];
     if (!contactId) {

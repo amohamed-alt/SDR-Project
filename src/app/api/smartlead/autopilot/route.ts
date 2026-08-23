@@ -93,7 +93,7 @@ function riyadhClock(now = new Date()) {
 
 async function readState(): Promise<AutopilotState> {
   try {
-    const parsed = JSON.parse(await fs.readFile(STATE_PATH, "utf8")) as Partial<AutopilotState>;
+    const parsed = JSON.parse(await fs.readFile(/* turbopackIgnore: true */ STATE_PATH, "utf8")) as Partial<AutopilotState>;
     return { ...EMPTY_STATE, ...parsed, version: 1 };
   } catch {
     return { ...EMPTY_STATE };
@@ -101,17 +101,17 @@ async function readState(): Promise<AutopilotState> {
 }
 
 async function writeState(state: AutopilotState) {
-  await fs.mkdir(path.dirname(STATE_PATH), { recursive: true });
+  await fs.mkdir(/* turbopackIgnore: true */ path.dirname(STATE_PATH), { recursive: true });
   const tmp = `${STATE_PATH}.tmp-${process.pid}`;
-  await fs.writeFile(tmp, JSON.stringify(state), { encoding: "utf8", mode: 0o600 });
-  await fs.rename(tmp, STATE_PATH);
+  await fs.writeFile(/* turbopackIgnore: true */ tmp, JSON.stringify(state), { encoding: "utf8", mode: 0o600 });
+  await fs.rename(/* turbopackIgnore: true */ tmp, /* turbopackIgnore: true */ STATE_PATH);
 }
 
 async function normalizeEvalufyPreparedCopy() {
   try {
-    const raw = await fs.readFile(PREPARED_PATH, "utf8");
+    const raw = await fs.readFile(/* turbopackIgnore: true */ PREPARED_PATH, "utf8");
     const normalized = raw.replace(/Evalify/g, "Evalufy");
-    if (normalized !== raw) await fs.writeFile(PREPARED_PATH, normalized, { encoding: "utf8", mode: 0o600 });
+    if (normalized !== raw) await fs.writeFile(/* turbopackIgnore: true */ PREPARED_PATH, normalized, { encoding: "utf8", mode: 0o600 });
   } catch {
     // Prepare may legitimately produce no file when there is no eligible capacity.
   }

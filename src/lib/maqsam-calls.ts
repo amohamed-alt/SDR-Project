@@ -32,7 +32,7 @@ function recordTime(record: MaqsamCallRecord) {
 
 async function readStoreUnsafe(): Promise<MaqsamStore> {
   try {
-    const raw = await readFile(STORE_PATH, "utf8");
+    const raw = await readFile(/* turbopackIgnore: true */ STORE_PATH, "utf8");
     const parsed = JSON.parse(raw) as Partial<MaqsamStore>;
     if (parsed.version !== 1 || !parsed.calls || typeof parsed.calls !== "object") return emptyStore();
     return {
@@ -49,10 +49,10 @@ async function readStoreUnsafe(): Promise<MaqsamStore> {
 
 async function writeStoreUnsafe(store: MaqsamStore) {
   const directory = path.dirname(STORE_PATH);
-  await mkdir(directory, { recursive: true });
+  await mkdir(/* turbopackIgnore: true */ directory, { recursive: true });
   const temporaryPath = `${STORE_PATH}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(temporaryPath, `${JSON.stringify(store, null, 2)}\n`, "utf8");
-  await rename(temporaryPath, STORE_PATH);
+  await writeFile(/* turbopackIgnore: true */ temporaryPath, `${JSON.stringify(store, null, 2)}\n`, "utf8");
+  await rename(/* turbopackIgnore: true */ temporaryPath, /* turbopackIgnore: true */ STORE_PATH);
 }
 
 function prune(store: MaqsamStore) {
