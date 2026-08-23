@@ -82,6 +82,18 @@ async function languagePreflight() {
   };
 }
 
+export async function GET() {
+  return NextResponse.json({
+    configured: Boolean(clean(process.env.SMARTLEAD_API_KEY)) && Boolean(clean(process.env.ACQUISITION_OWNER_TOKEN)),
+    smartleadConfigured: Boolean(clean(process.env.SMARTLEAD_API_KEY)),
+    millionVerifierConfigured: Boolean(clean(process.env.MILLIONVERIFIER_API_KEY)),
+    signalHireConfigured: Boolean(clean(process.env.SIGNALHIRE_API_KEY)),
+    ownerActionsConfigured: Boolean(clean(process.env.ACQUISITION_OWNER_TOKEN)),
+    languagePolicy: "Deterministic English fallback wins; Arabic requires an Arabic-script greeting and a safe GCC Arabic-name decision.",
+    dailyTarget: 50,
+  }, { headers: { "Cache-Control": "no-store" } });
+}
+
 export async function POST(request: NextRequest) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Cross-origin Smartlead daily-send actions are blocked." }, { status: 403 });
   const auth = ownerAuthorized(request);
