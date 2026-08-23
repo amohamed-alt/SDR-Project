@@ -82,3 +82,16 @@ export function sanitizeOutreachText(value: string, maxChars: number) {
     .trim()
     .slice(0, maxChars);
 }
+
+export function safeOpeningLineForLocale(value: string, locale: OutreachLocale, maxChars = 220) {
+  const sanitized = sanitizeOutreachText(value, maxChars);
+  if (!sanitized) return "";
+  const hasArabic = /[\u0600-\u06FF]/.test(sanitized);
+  const hasLatin = /[A-Za-z]/.test(sanitized);
+
+  // An AI-generated line is optional enrichment, never a reason to mix scripts
+  // inside a recipient's sequence. Rejecting it produces a clean blank line and
+  // leaves the deterministic campaign copy untouched.
+  if (locale === "en") return hasArabic ? "" : sanitized;
+  return hasArabic && !hasLatin ? sanitized : "";
+}

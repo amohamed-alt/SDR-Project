@@ -11,8 +11,14 @@ import {
   type RecipientLocale,
 } from "@/lib/recipient-language-routing";
 import { getSmartleadSalesSafetySnapshot, getSmartleadV2, type V2Lead } from "@/lib/smartlead-v2";
-import { sanitizeOutreachText } from "@/lib/smartlead-policy";
+import { safeOpeningLineForLocale } from "@/lib/smartlead-policy";
 import { checkPrimeforgeInfrastructure } from "@/lib/primeforge-health";
+import {
+  buildDailyLaneTargets,
+  DAILY_LANE_NEW_CAPS,
+  selectVerifiedDailyBatch,
+  verificationCandidatesForLane,
+} from "@/lib/smartlead-daily-routing";
 import {
   VISIBLE_SEQUENCE_LANES,
   laneFor,
@@ -40,19 +46,11 @@ const BOUNCE_GUARD_MIN_SENT = 50;
 const BOUNCE_GUARD_RATE = 0.02;
 const SPAM_GUARD_RATE = 0.003;
 const LANES = Object.keys(VISIBLE_SEQUENCE_LANES) as OutreachLane[];
-const CAMPAIGN_DAILY_NEW_CAPS: Record<OutreachLane, number> = {
-  talentera_ar: 15,
-  talentera_en: 15,
-  evalufy_ar: 10,
-  evalufy_en: 10,
-};
-const LEGACY_CAMPAIGNS = new Set([
-  "Talentera | Marita SDR | KSA-GCC | V1",
-  "Evalufy | Marita SDR | Existing ATS | V1",
-]);
+const MANAGED_CAMPAIGN_NAMES = new Set(LANES.map((lane) => VISIBLE_SEQUENCE_LANES[lane].campaignName));
 
 type JsonObject = Record<string, unknown>;
 type Campaign = { id: number; name: string; status: string };
+type LegacyCampaign = Campaign & { activeLeads: number; action: "blocked_active" | "paused" | "already_paused" | "pause_failed" };
 type Sender = { id: number; email: string; brand: OutreachProduct | "unknown"; capacity: number; eligible: boolean; reasons: string[] };
 type LedgerEntry = { email: string; contactId: string; companyId: string; product: OutreachProduct; campaignId: number; queuedAt: string; lastKnownStatus: string };
 type Ledger = { version: 1; entries: LedgerEntry[] };
@@ -143,9 +141,12 @@ async function listCampaigns() {
   return list(payload, ["campaigns", "data"]).map(parseCampaign).filter((item): item is Campaign => Boolean(item));
 }
 
+function isMaritaOutreachCampaignName(name: string) {
+  return /Marita\s+SDR/i.test(name) && /Talentera|Eval(?:u|i)?fy/i.test(name);
+}
+
 async function pauseManagedCampaigns() {
-  const managedNames = new Set([...LANES.map((lane) => VISIBLE_SEQUENCE_LANES[lane].campaignName), ...LEGACY_CAMPAIGNS]);
-  const campaigns = (await listCampaigns()).filter((campaign) => managedNames.has(campaign.name));
+  const campaigns = (await listCampaigns()).filter((campaign) => isMaritaOutreachCampaignName(campaign.name));
   let paused = 0;
   for (const campaign of campaigns) {
     if (/pause|stop/i.test(campaign.status)) continue;
@@ -189,7 +190,7 @@ async function configureCampaign(lane: OutreachLane, campaign: Campaign) {
       start_hour: "09:30",
       end_hour: "16:30",
       min_time_btw_emails: MIN_GAP_MINUTES,
-      max_new_leads_per_day: CAMPAIGN_DAILY_NEW_CAPS[lane],
+      max_new_leads_per_day: DAILY_LANE_NEW_CAPS[lane],
     }),
   });
   await smartleadRequest(`/campaigns/${campaign.id}/sequences`, {
@@ -275,8 +276,8 @@ async function campaignLeadRows(campaign: Campaign) {
   return rows;
 }
 
-async function activeCampaignLeads(campaign: Campaign) {
-  return (await campaignLeadRows(campaign)).some((row) => !inactiveLead(row));
+async function activeCampaignLeadCount(campaign: Campaign) {
+  return (await campaignLeadRows(campaign)).filter((row) => !inactiveLead(row)).length;
 }
 
 async function pauseSalesProtectedLeads(campaigns: Record<OutreachLane, Campaign>) {
@@ -315,22 +316,34 @@ async function pauseSalesProtectedLeads(campaigns: Record<OutreachLane, Campaign
 }
 
 async function legacySafety() {
-  const all = await listCampaigns(); const warnings: string[] = [];
-  for (const campaign of all.filter((item) => LEGACY_CAMPAIGNS.has(item.name))) {
-    if (await activeCampaignLeads(campaign)) {
-      warnings.push(`${campaign.name} still contains an active lead; visible-sequence autopilot is locked to avoid double sending.`);
-    } else if (!/pause/i.test(campaign.status)) {
-      await smartleadRequest(`/campaigns/${campaign.id}/status`, { method: "POST", body: JSON.stringify({ status: "PAUSED" }) }).catch(() => undefined);
+  const all = await listCampaigns(); const warnings: string[] = []; const campaigns: LegacyCampaign[] = [];
+  for (const campaign of all.filter((item) => isMaritaOutreachCampaignName(item.name) && !MANAGED_CAMPAIGN_NAMES.has(item.name))) {
+    const activeLeads = await activeCampaignLeadCount(campaign);
+    if (activeLeads > 0) {
+      warnings.push(`${campaign.name} contains ${activeLeads} active lead(s); visible-sequence autopilot is locked to avoid double sending.`);
+      campaigns.push({ ...campaign, activeLeads, action: "blocked_active" });
+      continue;
+    }
+    if (/pause|stop/i.test(campaign.status)) {
+      campaigns.push({ ...campaign, activeLeads, action: "already_paused" });
+      continue;
+    }
+    try {
+      await smartleadRequest(`/campaigns/${campaign.id}/status`, { method: "POST", body: JSON.stringify({ status: "PAUSED" }) });
+      campaigns.push({ ...campaign, status: "PAUSED", activeLeads, action: "paused" });
+    } catch {
+      warnings.push(`${campaign.name} has no active leads but could not be paused; autopilot remains locked.`);
+      campaigns.push({ ...campaign, activeLeads, action: "pause_failed" });
     }
   }
-  return warnings;
+  return { warnings, campaigns };
 }
 
 function painFor(lead: V2Lead, locale: RecipientLocale) {
   const ar = locale !== "en"; const bucket = lead.industryBucket;
   if (lead.product === "evalify") {
     const en: Record<string, string> = { healthcare: "screening clinical and non-clinical candidates consistently", retail: "screening high applicant volumes", logistics: "assessing operational candidates consistently", "financial-services": "standardising assessments and shortlisting", education: "screening applicants across departments", hospitality: "assessing high-volume operational applicants", technology: "validating specialist skills before interviews", other: "screening and assessing candidates before interviews", unknown: "screening and assessing candidates before interviews" };
-    const arMap: Record<string, string> = { healthcare: "فرز وتقييم المرشحين للوظائف الطبية والإدارية", retail: "فرز أعداد كبيرة من المتقدمين", logistics: "تقييم المرشحين للوظائف التشغيلية", "financial-services": "توحيد التقييم والـshortlisting", education: "تقييم المتقدمين بين الأقسام", hospitality: "فرز وتقييم المرشحين للوظائف التشغيلية", technology: "التحقق من مهارات المرشحين قبل المقابلات", other: "فرز وتقييم المرشحين قبل المقابلات", unknown: "فرز وتقييم المرشحين قبل المقابلات" };
+    const arMap: Record<string, string> = { healthcare: "فرز وتقييم المرشحين للوظائف الطبية والإدارية", retail: "فرز أعداد كبيرة من المتقدمين", logistics: "تقييم المرشحين للوظائف التشغيلية", "financial-services": "توحيد التقييم وإعداد القائمة المختصرة", education: "تقييم المتقدمين بين الأقسام", hospitality: "فرز وتقييم المرشحين للوظائف التشغيلية", technology: "التحقق من مهارات المرشحين قبل المقابلات", other: "فرز وتقييم المرشحين قبل المقابلات", unknown: "فرز وتقييم المرشحين قبل المقابلات" };
     return (ar ? arMap : en)[bucket] || (ar ? arMap.other : en.other);
   }
   const en: Record<string, string> = { healthcare: "clinical and non-clinical hiring across teams", retail: "high-volume frontline hiring across locations", logistics: "operational and warehouse hiring", "financial-services": "structured hiring with multiple approvals", education: "seasonal hiring across departments", hospitality: "high-volume operational hiring across locations", technology: "specialist hiring with less recruiter admin", other: "screening, interviews, approvals and offers", unknown: "screening, interviews, approvals and offers" };
@@ -359,7 +372,7 @@ async function personalizeLead(lead: V2Lead): Promise<PreparedLead> {
     const data = parseAiJson(result.content); const requestedLocale = clean(data.locale) as RecipientLocale; const confidence = Number(data.nameConfidence); const candidateName = clean(data.greetingName, 60);
     const safeArabic = isGccCountry(lead.country) && (requestedLocale === "ar-SA" || requestedLocale === "ar-GCC") && Number.isFinite(confidence) && confidence >= AI_ARABIC_CONFIDENCE && /[\u0600-\u06FF]/.test(candidateName);
     if (safeArabic) { locale = isKsaCountry(lead.country) ? "ar-SA" : "ar-GCC"; greetingName = candidateName; }
-    openingLine = sanitizeOutreachText(clean(data.openingLine, 220), 220);
+    openingLine = safeOpeningLineForLocale(clean(data.openingLine, 220), locale);
   } catch { openingLine = ""; }
   return { ...lead, locale, greetingName, nameTranslated: greetingName !== lead.firstName, openingLine };
 }
@@ -411,16 +424,18 @@ async function setupOnly() {
   if (!inventory.healthy) throw new Error(`Approved sender inventory is not safe: ${inventory.warnings.join(" ")}`);
   const pairs = await Promise.all(LANES.map(async (lane) => [lane, await ensureCampaign(lane)] as const));
   const campaigns = Object.fromEntries(pairs) as Record<OutreachLane, Campaign>;
-  const senderSync = await syncSenders(campaigns, senders); const capacity = capacityPlan(senderSync.senders); const legacyWarnings = await legacySafety();
+  const senderSync = await syncSenders(campaigns, senders); const capacity = capacityPlan(senderSync.senders); const legacy = await legacySafety();
   return {
     ok: true,
     mode: "setup",
     activated: false,
     queued: 0,
-    campaigns: Object.fromEntries(LANES.map((lane) => [lane, { id: campaigns[lane].id, name: campaigns[lane].name }])),
+    campaigns: Object.fromEntries(LANES.map((lane) => [lane, { id: campaigns[lane].id, name: campaigns[lane].name, status: campaigns[lane].status }])),
+    campaignTopology: { managedVisible: LANES.length, legacyDetected: legacy.campaigns.length, totalMaritaOutreach: LANES.length + legacy.campaigns.length },
     sequences: Object.fromEntries(LANES.map((lane) => [lane, VISIBLE_SEQUENCE_LANES[lane].touches])),
     sequenceTiming: { touch1: "Day 1", touch2: "+4 days", touch3: "+6 days after Touch 2 (~Day 11)", stopOnReply: true, plainText: true, tracking: "off" },
     sendWindow: { timezone: "Asia/Riyadh", days: "Sunday-Thursday", hours: "09:30-16:30", minimumGapMinutes: MIN_GAP_MINUTES },
+    dailyLaneNewCaps: DAILY_LANE_NEW_CAPS,
     senders: senderSync.attached,
     inventory,
     primeforge,
@@ -428,7 +443,8 @@ async function setupOnly() {
     primeforgeWarnings,
     killSwitchPaused,
     capacity,
-    legacyWarnings,
+    legacyWarnings: legacy.warnings,
+    legacyCampaigns: legacy.campaigns,
   };
 }
 
@@ -474,21 +490,49 @@ async function autopilot(millionVerifierApiKey = "") {
       const state: AutopilotState = { ...EMPTY_STATE, status: "blocked", riyadhDate: clock.date, startedAt, finishedAt: new Date().toISOString(), lastSuccessfulDate: previous.lastSuccessfulDate, message: "HubSpot Sales safety is not healthy; no lead was queued.", warnings: snapshot.safety.warnings };
       await writeJson(STATE_PATH, state); return { ok: true, blocked: true, pausedCampaigns, state, warnings: snapshot.safety.warnings };
     }
-    if (!snapshot.configuration.openRouterConfigured) throw new Error("OpenRouter is not configured in production.");
-
-    const verificationCandidates = snapshot.queue.filter((lead) => !/(?:Sales activity|Already entered|Duplicate email)/i.test(lead.blockReason || "")).slice(0, capacity.globalSafeNew + VERIFICATION_BUFFER);
-    const verification = await runOutreachEmailWaterfall(verificationCandidates, capacity.globalSafeNew, { millionVerifierApiKey, buffer: VERIFICATION_BUFFER });
-    const verifiedEmails = new Set(verification.sendableEmails.map((email) => email.toLowerCase()));
+    const laneTargets = buildDailyLaneTargets(capacity.globalSafeNew, capacity.productCaps, DAILY_LANE_NEW_CAPS);
+    const targetTotal = LANES.reduce((sum, lane) => sum + laneTargets[lane], 0);
+    type VerificationResult = Awaited<ReturnType<typeof runOutreachEmailWaterfall>>;
+    const verificationByLane: Partial<Record<OutreachLane, VerificationResult>> = {};
+    const verifiedEmails = new Set<string>();
+    for (const lane of LANES) {
+      const target = laneTargets[lane];
+      if (target < 1) continue;
+      const laneBuffer = Math.max(2, Math.ceil(VERIFICATION_BUFFER * target / Math.max(1, targetTotal)));
+      const candidates = verificationCandidatesForLane(snapshot.queue, lane);
+      const result = await runOutreachEmailWaterfall(candidates, target, { millionVerifierApiKey, buffer: laneBuffer });
+      verificationByLane[lane] = result;
+      for (const email of result.sendableEmails) verifiedEmails.add(email.toLowerCase());
+    }
+    const verificationResults = Object.values(verificationByLane);
+    const verification = {
+      provider: "MillionVerifier",
+      fallback: "SignalHire work email, re-verified by MillionVerifier",
+      policy: "valid-only",
+      target: targetTotal,
+      considered: verificationResults.reduce((sum, result) => sum + result.considered, 0),
+      millionVerifierChecks: verificationResults.reduce((sum, result) => sum + result.millionVerifierChecks, 0),
+      millionVerifierCacheHits: verificationResults.reduce((sum, result) => sum + result.millionVerifierCacheHits, 0),
+      signalHireLookups: verificationResults.reduce((sum, result) => sum + result.signalHireLookups, 0),
+      replacements: verificationResults.reduce((sum, result) => sum + result.replacements, 0),
+      validCurrent: verificationResults.reduce((sum, result) => sum + result.validCurrent, 0),
+      noValidEmail: verificationResults.reduce((sum, result) => sum + result.noValidEmail, 0),
+      sendable: verifiedEmails.size,
+      lanes: Object.fromEntries(LANES.map((lane) => [lane, {
+        target: laneTargets[lane],
+        considered: verificationByLane[lane]?.considered || 0,
+        sendable: verificationByLane[lane]?.sendableEmails.length || 0,
+      }])),
+    };
 
     snapshot = await getSmartleadV2(true);
     if (!snapshot.safety.healthy) throw new Error("Fresh Sales safety changed during email verification; queue aborted.");
-    const productCount: Record<OutreachProduct, number> = { talentera: 0, evalify: 0 }; const selected: V2Lead[] = [];
-    for (const lead of snapshot.queue) {
-      if (!lead.eligible || !verifiedEmails.has(lead.email.toLowerCase())) continue;
-      if (productCount[lead.product] >= capacity.productCaps[lead.product]) continue;
-      selected.push(lead); productCount[lead.product] += 1;
-      if (selected.length >= capacity.globalSafeNew) break;
-    }
+    const selection = selectVerifiedDailyBatch(snapshot.queue, verifiedEmails, {
+      globalLimit: capacity.globalSafeNew,
+      productLimits: capacity.productCaps,
+      laneLimits: laneTargets,
+    });
+    const selected = selection.selected;
     if (!selected.length) {
       const state: AutopilotState = { ...EMPTY_STATE, status: "noop", riyadhDate: clock.date, startedAt, finishedAt: new Date().toISOString(), lastSuccessfulDate: clock.date, message: "No MillionVerifier-valid Marita leads fit today's safe capacity." };
       await writeJson(STATE_PATH, state); return { ok: true, state, capacity, verification };
@@ -497,14 +541,30 @@ async function autopilot(millionVerifierApiKey = "") {
     const prepared = await personalizeBatch(selected);
     snapshot = await getSmartleadV2(true);
     if (!snapshot.safety.healthy) throw new Error("Fresh Sales safety changed during personalization; queue aborted.");
-    const fresh = new Map(snapshot.queue.filter((lead) => lead.eligible && verifiedEmails.has(lead.email.toLowerCase())).map((lead) => [lead.email.toLowerCase(), lead]));
-    const safe = prepared.filter((lead) => { const current = fresh.get(lead.email.toLowerCase()); return current && current.contactId === lead.contactId && current.companyId === lead.companyId && current.product === lead.product; });
+    const finalSelection = selectVerifiedDailyBatch(snapshot.queue, verifiedEmails, {
+      globalLimit: capacity.globalSafeNew,
+      productLimits: capacity.productCaps,
+      laneLimits: laneTargets,
+    });
+    const preparedByEmail = new Map(prepared.map((lead) => [lead.email.toLowerCase(), lead]));
+    const safe: PreparedLead[] = [];
+    for (const current of finalSelection.selected) {
+      const personalized = preparedByEmail.get(current.email.toLowerCase());
+      if (!personalized || personalized.contactId !== current.contactId || personalized.companyId !== current.companyId || personalized.product !== current.product) continue;
+      safe.push({
+        ...personalized,
+        locale: current.locale,
+        greetingName: current.greetingName,
+        nameTranslated: current.nameTranslated,
+        openingLine: safeOpeningLineForLocale(personalized.openingLine, current.locale),
+      });
+    }
 
     const ledger = await readLedger(); const ledgerEmails = new Set(ledger.entries.map((entry) => entry.email.toLowerCase())); const newEntries: LedgerEntry[] = [];
     const laneCounts = Object.fromEntries(LANES.map((lane) => [lane, 0])) as Record<OutreachLane, number>;
     for (const lane of LANES) {
       const definition = VISIBLE_SEQUENCE_LANES[lane];
-      const leads = safe.filter((lead) => laneFor(lead.product, lead.locale) === lane && !ledgerEmails.has(lead.email.toLowerCase()));
+      const leads = safe.filter((lead) => laneFor(lead.product, lead.locale) === lane && !ledgerEmails.has(lead.email.toLowerCase())).slice(0, laneTargets[lane]);
       for (let index = 0; index < leads.length; index += 400) {
         const chunk = leads.slice(index, index + 400);
         await smartleadRequest(`/campaigns/${campaigns[lane].id}/leads`, { method: "POST", body: JSON.stringify({ lead_list: chunk.map(leadPayload), settings: { ignore_global_block_list: false, ignore_unsubscribe_list: false, ignore_community_bounce_list: false, ignore_duplicate_leads_in_other_campaign: false } }) });
@@ -516,7 +576,7 @@ async function autopilot(millionVerifierApiKey = "") {
     await writeJson(LEDGER_PATH, { version: 1, entries: [...ledger.entries, ...newEntries].slice(-50_000) } satisfies Ledger);
     const state: AutopilotState = { ...EMPTY_STATE, status: newEntries.length ? "success" : "noop", riyadhDate: clock.date, startedAt, finishedAt: new Date().toISOString(), lastSuccessfulDate: clock.date, prepared: prepared.length, queued: newEntries.length, talentera: newEntries.filter((entry) => entry.product === "talentera").length, evalufy: newEntries.filter((entry) => entry.product === "evalify").length, message: newEntries.length ? "Today's verified batch was routed to visible Smartlead sequences and started." : "No fresh verified lead remained after final safety/dedupe checks." };
     await writeJson(STATE_PATH, state);
-    return { ok: true, mode: "autopilot", state, capacity, analytics, verification, laneCounts, salesActivitySync, sequenceTiming: setup.sequenceTiming };
+    return { ok: true, mode: "autopilot", state, capacity, analytics, verification, laneTargets, laneCounts, salesActivitySync, sequenceTiming: setup.sequenceTiming };
   } catch (error) {
     const pausedCampaigns = await pauseManagedCampaigns().catch(() => 0);
     const state: AutopilotState = { ...EMPTY_STATE, status: "failed", riyadhDate: clock.date, startedAt, finishedAt: new Date().toISOString(), lastSuccessfulDate: previous.lastSuccessfulDate, message: error instanceof Error ? error.message : "Unknown visible-sequence orchestrator error", warnings: [`Managed campaigns paused after failure: ${pausedCampaigns}.`, "No successful daily completion was recorded; the next morning retry may run again."] };
@@ -531,7 +591,7 @@ export async function GET() {
     autopilotEnabled: autopilotEnabled(),
     dailyNewLeadTarget: GLOBAL_NEW_LEADS_PER_DAY,
     verification: { provider: "MillionVerifier", fallback: "SignalHire", buffer: VERIFICATION_BUFFER, policy: "Only verified current or verified recovered emails may enter Smartlead." },
-    capacityModel: { perMailboxCampaignEmails: MAX_CAMPAIGN_EMAILS_PER_MAILBOX, peakTouchMultiplier: PEAK_TOUCH_MULTIPLIER, safetyFactor: CAPACITY_SAFETY_FACTOR },
+    capacityModel: { perMailboxCampaignEmails: MAX_CAMPAIGN_EMAILS_PER_MAILBOX, peakTouchMultiplier: PEAK_TOUCH_MULTIPLIER, safetyFactor: CAPACITY_SAFETY_FACTOR, laneDailyNewCaps: DAILY_LANE_NEW_CAPS },
     campaigns: Object.fromEntries(LANES.map((lane) => [lane, VISIBLE_SEQUENCE_LANES[lane].campaignName])),
     sequences: Object.fromEntries(LANES.map((lane) => [lane, VISIBLE_SEQUENCE_LANES[lane].touches])),
     schedule: { timezone: "Asia/Riyadh", businessDays: "Sunday-Thursday", sendWindow: "09:30-16:30", minimumGapMinutes: MIN_GAP_MINUTES, touch1: "Day 1", touch2: "+4 days", touch3: "+6 days after Touch 2" },

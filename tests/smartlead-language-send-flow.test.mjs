@@ -34,6 +34,13 @@ test("high-confidence GCC Arabic names use an Arabic greeting and Arabic lane", 
   }
 });
 
+test("split compound Arabic names use the normalized greeting and Arabic lane", () => {
+  const decision = decideRecipientLanguage({ firstName: "Abd", lastName: "Alrahman", fullName: "Abd Alrahman", country: "Saudi Arabia" });
+  assert.equal(decision.greetingName, "عبدالرحمن");
+  assert.equal(laneFor("talentera", decision.locale), "talentera_ar");
+  assert.equal(laneFor("evalify", decision.locale), "evalufy_ar");
+});
+
 test("Arabic and English campaign bodies stay in their intended script", () => {
   for (const lane of [VISIBLE_SEQUENCE_LANES.talentera_ar, VISIBLE_SEQUENCE_LANES.evalufy_ar]) {
     for (const touch of lane.touches) {

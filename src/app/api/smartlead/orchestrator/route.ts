@@ -6,7 +6,7 @@ import { openRouterCompletion } from "@/lib/openrouter-low-cost";
 import { runOutreachEmailWaterfall } from "@/lib/outreach-email-waterfall";
 import { isGccCountry, isKsaCountry, type OutreachProduct, type RecipientLocale } from "@/lib/recipient-language-routing";
 import { getSmartleadV2, sequenceTemplate, type V2Lead } from "@/lib/smartlead-v2";
-import { renderOutreachTemplate, sanitizeOutreachText } from "@/lib/smartlead-policy";
+import { renderOutreachTemplate, safeOpeningLineForLocale, sanitizeOutreachText } from "@/lib/smartlead-policy";
 import { inspectSenderAccount, validateApprovedSenderInventory } from "@/lib/smartlead-sender-routing";
 
 export const runtime = "nodejs";
@@ -209,7 +209,7 @@ function painFor(lead: V2Lead, locale: RecipientLocale) {
   const ar = locale !== "en"; const product = lead.product; const bucket = lead.industryBucket;
   if (product === "evalify") {
     const en: Record<string, string> = { healthcare: "screening clinical and non-clinical candidates consistently before interviews", retail: "screening high applicant volumes before recruiter interviews", logistics: "assessing operational candidates quickly and consistently", "financial-services": "standardising assessments and shortlisting", education: "screening applicants consistently across departments", hospitality: "assessing high-volume operational applicants before interviews", technology: "validating specialist skills before interview time is used", other: "screening and assessing candidates before interviews", unknown: "screening and assessing candidates before interviews" };
-    const arMap: Record<string, string> = { healthcare: "فرز وتقييم المرشحين للوظائف الطبية والإدارية قبل المقابلات", retail: "فرز أعداد كبيرة من المتقدمين قبل وقت فريق التوظيف", logistics: "تقييم المرشحين للوظائف التشغيلية بشكل أسرع وأكثر اتساقا", "financial-services": "توحيد التقييم والـshortlisting قبل المقابلات", education: "تقييم المتقدمين بشكل موحد بين الأقسام", hospitality: "فرز وتقييم المرشحين للوظائف التشغيلية قبل المقابلات", technology: "التحقق من مهارات المرشحين قبل استهلاك وقت الفريق", other: "فرز وتقييم المرشحين قبل المقابلات", unknown: "فرز وتقييم المرشحين قبل المقابلات" };
+    const arMap: Record<string, string> = { healthcare: "فرز وتقييم المرشحين للوظائف الطبية والإدارية قبل المقابلات", retail: "فرز أعداد كبيرة من المتقدمين قبل وقت فريق التوظيف", logistics: "تقييم المرشحين للوظائف التشغيلية بشكل أسرع وأكثر اتساقا", "financial-services": "توحيد التقييم وإعداد القائمة المختصرة قبل المقابلات", education: "تقييم المتقدمين بشكل موحد بين الأقسام", hospitality: "فرز وتقييم المرشحين للوظائف التشغيلية قبل المقابلات", technology: "التحقق من مهارات المرشحين قبل استهلاك وقت الفريق", other: "فرز وتقييم المرشحين قبل المقابلات", unknown: "فرز وتقييم المرشحين قبل المقابلات" };
     return (ar ? arMap : en)[bucket] || (ar ? arMap.other : en.other);
   }
   const en: Record<string, string> = { healthcare: "clinical and non-clinical hiring across multiple teams", retail: "high-volume frontline hiring across locations", logistics: "operational and warehouse hiring at speed", "financial-services": "structured hiring with multiple approvals", education: "seasonal hiring across departments", hospitality: "high-volume operational hiring across locations", technology: "specialist hiring without extra recruiter admin", other: "screening, interviews, approvals and offers across one recruitment flow", unknown: "screening, interviews, approvals and offers across one recruitment flow" };
@@ -238,7 +238,7 @@ async function personalizeLead(lead: V2Lead): Promise<PreparedLead> {
     const data = parseAiJson(result.content); const requestedLocale = clean(data.locale) as RecipientLocale; const confidence = Number(data.nameConfidence); const candidateName = clean(data.greetingName, 60);
     const safeArabic = isGccCountry(lead.country) && (requestedLocale === "ar-SA" || requestedLocale === "ar-GCC") && Number.isFinite(confidence) && confidence >= AI_ARABIC_CONFIDENCE && /[\u0600-\u06FF]/.test(candidateName);
     if (safeArabic) { locale = isKsaCountry(lead.country) ? "ar-SA" : "ar-GCC"; greetingName = candidateName; }
-    openingLine = sanitizeOutreachText(clean(data.openingLine, 220), 220);
+    openingLine = safeOpeningLineForLocale(clean(data.openingLine, 220), locale);
   } catch {
     openingLine = "";
   }
