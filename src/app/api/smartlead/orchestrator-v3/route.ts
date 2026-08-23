@@ -398,10 +398,13 @@ function leadPayload(lead: PreparedLead) {
 
 async function setupOnly() {
   const killSwitchPaused = autopilotEnabled() ? 0 : await pauseManagedCampaigns();
-  const primeforge = await checkPrimeforgeInfrastructure();
-  if (!primeforge.healthy) {
-    if (autopilotEnabled()) await pauseManagedCampaigns();
-    throw new Error(`Primeforge infrastructure is not safe: ${primeforge.warnings.join(" ")}`);
+  let primeforge: Awaited<ReturnType<typeof checkPrimeforgeInfrastructure>> | null = null;
+  let primeforgeWarnings: string[] = [];
+  try {
+    primeforge = await checkPrimeforgeInfrastructure();
+    if (!primeforge.healthy) primeforgeWarnings = primeforge.warnings;
+  } catch (error) {
+    primeforgeWarnings = [error instanceof Error ? error.message : "Primeforge advisory check failed."];
   }
   const senders = (await listEmailAccounts()).map(parseSender).filter((item): item is Sender => Boolean(item));
   const inventory = validateApprovedSenderInventory(senders);
@@ -421,6 +424,8 @@ async function setupOnly() {
     senders: senderSync.attached,
     inventory,
     primeforge,
+    primeforgeGateEnforced: false,
+    primeforgeWarnings,
     killSwitchPaused,
     capacity,
     legacyWarnings,

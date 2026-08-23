@@ -70,19 +70,20 @@ test("production access is protected and no hardcoded owner PIN remains", async 
   assert.match(workflow, /--user "\$\{DASHBOARD_USERNAME\}:\$\{DASHBOARD_PASSWORD\}"/);
 });
 
-test("Primeforge is deployed as a read-only fail-closed Smartlead gate", async () => {
+test("Primeforge remains read-only and advisory while Smartlead safety stays enforced", async () => {
   const deploy = await read(".github/workflows/deploy-hostinger.yml");
   const autopilot = await read(".github/workflows/smartlead-autopilot.yml");
   const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
   const primeforge = await read("src/lib/primeforge-health.ts");
 
   assert.match(deploy, /PRIMEFORGE_API_KEY/);
-  assert.match(autopilot, /Primeforge infrastructure gate/);
+  assert.match(autopilot, /Primeforge infrastructure advisory/);
   assert.match(orchestrator, /checkPrimeforgeInfrastructure/);
   assert.match(orchestrator, /pauseManagedCampaigns\(\)\.catch/);
-  assert.match(orchestrator, /if \(autopilotEnabled\(\)\) await pauseManagedCampaigns\(\)/);
-  assert.match(autopilot, /primeforge-fail-closed/);
-  assert.match(deploy, /primeforge-deploy-fail-closed/);
+  assert.match(orchestrator, /validateApprovedSenderInventory/);
+  assert.match(orchestrator, /primeforgeGateEnforced: false/);
+  assert.doesNotMatch(autopilot, /primeforge-fail-closed/);
+  assert.doesNotMatch(deploy, /primeforge-deploy-fail-closed/);
   assert.match(primeforge, /method: "GET"/);
   assert.doesNotMatch(primeforge, /method: "(?:POST|PUT|PATCH|DELETE)"/);
 });
