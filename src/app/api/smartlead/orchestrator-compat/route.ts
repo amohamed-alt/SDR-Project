@@ -5,9 +5,16 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 240;
 
+function requestUrl(input: RequestInfo | URL) {
+  return typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+}
+
 function isSmartleadScheduleRequest(input: RequestInfo | URL) {
-  const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-  return /server\.smartlead\.ai\/api\/v1\/campaigns\/\d+\/schedule/i.test(url);
+  return /server\.smartlead\.ai\/api\/v1\/campaigns\/\d+\/schedule/i.test(requestUrl(input));
+}
+
+function isSmartleadSequenceRequest(input: RequestInfo | URL) {
+  return /server\.smartlead\.ai\/api\/v1\/campaigns\/\d+\/sequences/i.test(requestUrl(input));
 }
 
 function normalizeScheduleBody(body: BodyInit | null | undefined) {
@@ -24,6 +31,36 @@ function normalizeScheduleBody(body: BodyInit | null | undefined) {
   }
 }
 
+function normalizeSequenceBody(body: BodyInit | null | undefined) {
+  if (typeof body !== "string") return body;
+  try {
+    const raw = JSON.parse(body) as unknown;
+    const rows = Array.isArray(raw)
+      ? raw
+      : raw && typeof raw === "object" && Array.isArray((raw as { sequences?: unknown[] }).sequences)
+        ? (raw as { sequences: unknown[] }).sequences
+        : null;
+    if (!rows) return body;
+
+    const sequences = rows.map((value) => {
+      const row = value && typeof value === "object" ? value as Record<string, unknown> : {};
+      const variants = Array.isArray(row.variants) ? row.variants : [];
+      const firstVariant = variants[0] && typeof variants[0] === "object" ? variants[0] as Record<string, unknown> : {};
+      return {
+        id: row.id ?? null,
+        seq_number: row.seq_number,
+        subject: row.subject ?? firstVariant.subject ?? "",
+        email_body: row.email_body ?? firstVariant.email_body ?? "",
+        seq_delay_details: row.seq_delay_details,
+      };
+    });
+
+    return JSON.stringify({ sequences });
+  } catch {
+    return body;
+  }
+}
+
 export async function GET() {
   return orchestratorGet();
 }
@@ -31,8 +68,13 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (!isSmartleadScheduleRequest(input)) return originalFetch(input, init);
-    return originalFetch(input, { ...init, body: normalizeScheduleBody(init?.body) });
+    if (isSmartleadScheduleRequest(input)) {
+      return originalFetch(input, { ...init, body: normalizeScheduleBody(init?.body) });
+    }
+    if (isSmartleadSequenceRequest(input) && String(init?.method || "GET").toUpperCase() === "POST") {
+      return originalFetch(input, { ...init, body: normalizeSequenceBody(init?.body) });
+    }
+    return originalFetch(input, init);
   };
 
   try {
