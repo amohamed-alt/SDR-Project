@@ -34,7 +34,7 @@ Keep `SMARTLEAD_AUTOPILOT_ENABLED=false` until every enforced launch gate below 
 - Product is selected first, then deterministic recipient-language routing selects the exact Arabic or English campaign.
 - High-confidence Arabic names written in Latin are normalized for the Arabic greeting. Safely recognized split compound names such as `Abd` + `Alrahman` become `عبدالرحمن`; ambiguous or foreign names stay English.
 - Arabic and English sequence copy is isolated. An optional AI opening line is discarded if its script does not match the selected campaign.
-- Use the workflow's manual `dry-run` mode to inspect 50 masked recipient-to-campaign decisions. It performs no campaign writes and sends nothing.
+- Use the workflow's manual `dry-run` mode for a read-only 50-recipient routing audit. Actions logs expose aggregate lane counts only; the authenticated endpoint keeps masked row-level details private. Every post-deploy `setup` automatically runs the same aggregate audit. It performs no campaign writes and sends nothing.
 
 ## Campaign configuration
 

@@ -135,6 +135,9 @@ test("manual Smartlead dry-run reports masked routing without campaign writes", 
   assert.match(workflow, /- dry-run/);
   assert.match(workflow, /api\/smartlead\/language-test\?limit=50&refresh=1/);
   assert.match(workflow, /if: steps\.mode\.outputs\.mode != 'dry-run'/);
+  assert.match(workflow, /Audit first 50 recipient routes without sending/);
+  assert.match(workflow, /jq '\{mode, productionSendingChanged, sampled, localeCounts, laneCounts, translatedCount, lowConfidence, senderPools\}'/);
+  assert.doesNotMatch(workflow, /senderPools, samples/);
   assert.match(dryRun, /READ_ONLY_ROUTING_DRY_RUN/);
   assert.match(dryRun, /productionSendingChanged: false/);
   assert.match(dryRun, /maskedEmail\(lead\.email\)/);
