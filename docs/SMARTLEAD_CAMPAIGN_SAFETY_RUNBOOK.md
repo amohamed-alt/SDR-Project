@@ -1,6 +1,6 @@
 # Smartlead campaign safety runbook
 
-Keep `SMARTLEAD_AUTOPILOT_ENABLED=false` until every launch gate below passes. The verified `orchestrator-v3` route is the only approved send path; legacy launch routes stay disabled. Primeforge is read-only in this project: it can block sending, but it cannot buy domains, create mailboxes, change DNS, export credentials, renew, or delete infrastructure.
+Keep `SMARTLEAD_AUTOPILOT_ENABLED=false` until every enforced launch gate below passes. The verified `orchestrator-v3` route is the only approved send path; legacy launch routes stay disabled. Primeforge is a read-only advisory in this project for now: it cannot block deployment or sending, buy domains, create mailboxes, change DNS, export credentials, renew, or delete infrastructure.
 
 ## Approved sender inventory
 
@@ -43,7 +43,7 @@ Keep `SMARTLEAD_AUTOPILOT_ENABLED=false` until every launch gate below passes. T
 5. Review a small sample of recipients and all four sequence variants.
 6. Set the repository variable `SMARTLEAD_AUTOPILOT_ENABLED=true` and deploy.
 
-Every setup and daily run must pass the Primeforge gate first: all five approved domains are active, SPF/DKIM/DMARC are visible, and exactly three ready mailboxes exist per domain (15 total). Smartlead then independently verifies SMTP, IMAP, warmup, sending limits, sender-to-brand routing, campaign parity, HubSpot Sales activity, MillionVerifier validity, bounce rate, and spam complaints.
+Primeforge health is reported as an advisory only. Every setup and daily run still independently enforces the Smartlead inventory: exactly three eligible inboxes on each approved domain (15 total), healthy SMTP/IMAP, active warmup, sending limits, sender-to-brand routing, campaign parity, HubSpot Sales activity, MillionVerifier validity, bounce rate, and spam complaints.
 7. Watch the first 50 sends manually. Pause immediately on any spam complaint, unusual provider block, bounce spike, or reply-stop failure.
 
 To stop sending, set `SMARTLEAD_AUTOPILOT_ENABLED=false`, redeploy, and pause all four managed campaigns in Smartlead. Do not delete inboxes while active leads still depend on them.
