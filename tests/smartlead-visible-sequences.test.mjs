@@ -5,6 +5,7 @@ import { VISIBLE_SEQUENCE_LANES, laneFor, smartleadSequencePayload } from "../sr
 const spamTriggers = [
   "free", "guaranteed", "no obligation", "act now", "limited time", "urgent", "winner", "click here", "buy now", "order now", "risk-free", "exclusive deal", "100% free",
 ];
+const mixedArabicTerms = ["assessments", "screening", "scoring", "shortlisting", "workflow", "ats"];
 
 test("visible sequences keep the conservative 3-touch cadence", () => {
   for (const lane of Object.values(VISIBLE_SEQUENCE_LANES)) {
@@ -36,6 +37,13 @@ test("sequence copy stays plain, short and free of common spam patterns", () => 
       const lower = `${touch.subject} ${touch.body}`.toLowerCase();
       for (const trigger of spamTriggers) assert.ok(!lower.includes(trigger), `${lane.lane} contains spam trigger: ${trigger}`);
     }
+  }
+});
+
+test("Arabic visible sequences contain no untranslated operational terms", () => {
+  for (const lane of [VISIBLE_SEQUENCE_LANES.talentera_ar, VISIBLE_SEQUENCE_LANES.evalufy_ar]) {
+    const copy = lane.touches.map((touch) => `${touch.subject} ${touch.body}`).join(" ").toLowerCase();
+    for (const term of mixedArabicTerms) assert.ok(!copy.includes(term), `${lane.lane} contains untranslated term: ${term}`);
   }
 });
 

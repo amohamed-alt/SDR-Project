@@ -104,3 +104,39 @@ test("Smartlead campaign parity audits the detailed campaign response", async ()
   assert.match(parity, /DONT_EMAIL_OPEN/);
   assert.match(parity, /DONT_LINK_CLICK/);
 });
+
+test("Smartlead topology detects every non-visible Marita campaign and reports it", async () => {
+  const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
+  const workflow = await read(".github/workflows/smartlead-autopilot.yml");
+
+  assert.match(orchestrator, /isMaritaOutreachCampaignName/);
+  assert.match(orchestrator, /!MANAGED_CAMPAIGN_NAMES\.has\(item\.name\)/);
+  assert.match(orchestrator, /legacyCampaigns: legacy\.campaigns/);
+  assert.doesNotMatch(orchestrator, /const LEGACY_CAMPAIGNS/);
+  assert.match(workflow, /campaignTopology, legacyCampaigns/);
+});
+
+test("Golden Hours runs three idempotent attempts before the Riyadh send window", async () => {
+  const workflow = await read(".github/workflows/smartlead-autopilot.yml");
+  const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
+
+  assert.match(workflow, /cron: "45 5 \* \* 0-4"/);
+  assert.match(workflow, /cron: "5 6 \* \* 0-4"/);
+  assert.match(workflow, /cron: "25 6 \* \* 0-4"/);
+  assert.match(orchestrator, /start_hour: "09:30"/);
+  assert.match(orchestrator, /end_hour: "16:30"/);
+  assert.match(orchestrator, /lastSuccessfulDate === clock\.date/);
+});
+
+test("manual Smartlead dry-run reports masked routing without campaign writes", async () => {
+  const workflow = await read(".github/workflows/smartlead-autopilot.yml");
+  const dryRun = await read("src/app/api/smartlead/language-test/route.ts");
+
+  assert.match(workflow, /- dry-run/);
+  assert.match(workflow, /api\/smartlead\/language-test\?limit=50&refresh=1/);
+  assert.match(workflow, /if: steps\.mode\.outputs\.mode != 'dry-run'/);
+  assert.match(dryRun, /READ_ONLY_ROUTING_DRY_RUN/);
+  assert.match(dryRun, /productionSendingChanged: false/);
+  assert.match(dryRun, /maskedEmail\(lead\.email\)/);
+  assert.match(dryRun, /VISIBLE_SEQUENCE_LANES\[lane\]\.campaignName/);
+});

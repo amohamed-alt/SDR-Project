@@ -13,11 +13,12 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Setup only or run today's safe batch"
+        description: "Dry-run routing, setup only, or run today's safe batch"
         required: true
         default: "setup"
         type: choice
         options:
+          - dry-run
           - setup
           - autopilot
 
@@ -117,10 +118,21 @@ jobs:
         env:
           SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
           MILLIONVERIFIER_API_KEY: ${{ secrets.MILLIONVERIFIER_API_KEY }}
+          DASHBOARD_USERNAME: ${{ secrets.DASHBOARD_USERNAME || 'talentera' }}
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
           MODE: ${{ steps.mode.outputs.mode }}
         run: |
           set -euo pipefail
-          if [ "$MODE" = "setup" ]; then
+          if [ "$MODE" = "dry-run" ]; then
+            ENDPOINT='https://sdr.dashboardtalentera.tech/api/smartlead/language-test?limit=50&refresh=1'
+            HTTP_CODE=$(curl --silent --show-error \
+              --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
+              --connect-timeout 10 \
+              --max-time 300 \
+              --output /tmp/smartlead-orchestrator.json \
+              --write-out '%{http_code}' \
+              "$ENDPOINT")
+          elif [ "$MODE" = "setup" ]; then
             ENDPOINT='https://sdr.dashboardtalentera.tech/api/smartlead/orchestrator-v3'
             HTTP_CODE=$(curl --silent --show-error \
               --connect-timeout 10 \
@@ -145,7 +157,7 @@ jobs:
               -d '{"confirm":"SEND_VERIFIED_DAILY_BATCH"}')
           fi
 
-          jq '{ok, mode, skipped, blocked, reason, languagePreflight, activated, queued, campaigns, sequences, sequenceTiming, sendWindow, senders, capacity, analytics, verification, laneCounts, legacyWarnings, state}' /tmp/smartlead-orchestrator.json || cat /tmp/smartlead-orchestrator.json
+          jq '{ok, mode, productionSendingChanged, sampled, localeCounts, laneCounts, translatedCount, lowConfidence, senderPools, samples, skipped, blocked, reason, languagePreflight, activated, queued, campaigns, campaignTopology, legacyCampaigns, sequences, sequenceTiming, sendWindow, dailyLaneNewCaps, senders, capacity, analytics, verification, laneTargets, legacyWarnings, state}' /tmp/smartlead-orchestrator.json || cat /tmp/smartlead-orchestrator.json
 
           if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
             echo "::error::Smartlead ${MODE} engine returned HTTP $HTTP_CODE."
@@ -154,6 +166,7 @@ jobs:
           fi
 
       - name: Reconcile sender brands and Google Microsoft pools
+        if: steps.mode.outputs.mode != 'dry-run'
         env:
           SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
         run: |
@@ -181,6 +194,7 @@ jobs:
           fi
 
       - name: Verify all four Smartlead campaigns are structurally identical
+        if: steps.mode.outputs.mode != 'dry-run'
         env:
           SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
         run: |
@@ -221,10 +235,12 @@ jobs:
               repo: context.repo.repo,
               sha: process.env.TARGET_SHA,
               state: 'success',
-              context: mode === 'setup' ? 'smartlead/setup' : 'smartlead/autopilot',
-              description: mode === 'setup'
-                ? 'Sequences, sender pools and campaign parity verified'
-                : 'Language-safe verified Smartlead daily batch processed',
+              context: mode === 'dry-run' ? 'smartlead/dry-run' : mode === 'setup' ? 'smartlead/setup' : 'smartlead/autopilot',
+              description: mode === 'dry-run'
+                ? 'Read-only recipient routing sample verified'
+                : mode === 'setup'
+                  ? 'Sequences, sender pools and campaign parity verified'
+                  : 'Language-safe verified Smartlead daily batch processed',
               target_url: process.env.RUN_URL,
             });
 
@@ -243,9 +259,11 @@ jobs:
               repo: context.repo.repo,
               sha: process.env.TARGET_SHA,
               state: 'failure',
-              context: mode === 'setup' ? 'smartlead/setup' : 'smartlead/autopilot',
-              description: mode === 'setup'
-                ? 'Smartlead setup, sender routing or parity failed'
-                : 'Language-safe verified Smartlead daily batch failed',
+              context: mode === 'dry-run' ? 'smartlead/dry-run' : mode === 'setup' ? 'smartlead/setup' : 'smartlead/autopilot',
+              description: mode === 'dry-run'
+                ? 'Read-only recipient routing sample failed'
+                : mode === 'setup'
+                  ? 'Smartlead setup, sender routing or parity failed'
+                  : 'Language-safe verified Smartlead daily batch failed',
               target_url: process.env.RUN_URL,
             });

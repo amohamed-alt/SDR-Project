@@ -13,7 +13,7 @@ import {
 } from "@/lib/recipient-language-routing";
 import { inspectSenderAccount, validateApprovedSenderInventory } from "@/lib/smartlead-sender-routing";
 import { SALES_REP_OWNER_IDS } from "@/lib/sales-reps";
-import { emailStatusIsSafe, industryBucket, isValidBusinessEmail, personaBucket, renderOutreachTemplate, sanitizeOutreachText } from "@/lib/smartlead-policy";
+import { emailStatusIsSafe, industryBucket, isValidBusinessEmail, personaBucket, renderOutreachTemplate, safeOpeningLineForLocale, sanitizeOutreachText } from "@/lib/smartlead-policy";
 import type { HubSpotRecord } from "@/lib/types";
 
 const SMARTLEAD_API = "https://server.smartlead.ai/api/v1";
@@ -355,7 +355,7 @@ async function buildQueue(forceRefresh: boolean) {
   ]);
   const contactById = new Map(contacts.map((record) => [record.id, record])); const companyById = new Map(companies.map((record) => [record.id, record]));
   const managedCampaigns = allCampaigns.filter(isManagedCampaign); const managedRows = await Promise.all(managedCampaigns.map(async (campaign) => ({ campaign, rows: await campaignLeadRows(campaign) })));
-  const executions = buildExecutions(managedRows, ledger); const enteredEmails = new Set(executions.map((entry) => entry.email.toLowerCase())); const intelligenceMap = new Map(intelligence.entries.map((entry) => [entry.key, entry]));
+  const executions = buildExecutions(managedRows, ledger); const enteredEmails = new Set(executions.map((entry) => entry.email.toLowerCase()));
   const queue: V2Lead[] = []; const usedEmails = new Set<string>();
 
   for (const item of priority.companies) {
@@ -363,8 +363,11 @@ async function buildQueue(forceRefresh: boolean) {
     const contact = contactById.get(contactSummary.contactId); const company = companyById.get(item.companyId); const email = clean(contact?.properties?.email || contactSummary.email).toLowerCase();
     const country = text(company, "gtm_country") || text(company, "country") || item.country; const industry = text(company, "gtm_industry") || text(company, "industry"); const title = text(contact, "jobtitle") || contactSummary.contactTitle; const names = splitName(contact, contactSummary.contactName);
     const detectedAts = text(company, "detected_ats") || item.detectedAts; const atsStatus = text(company, "ats_status"); const productDecision = routeProductFromAts(detectedAts, atsStatus);
-    const deterministic = decideRecipientLanguage({ firstName: names.firstName, fullName: contactSummary.contactName, country }); const cached = freshIntelligence(intelligenceMap.get(intelligenceKey(email, productDecision.product)));
-    const locale = cached?.locale || deterministic.locale; const greetingName = cached?.greetingName || deterministic.greetingName; const confidence = cached?.confidence ?? deterministic.confidence; const reason = cached?.reason || deterministic.reason;
+    const deterministic = decideRecipientLanguage({ firstName: names.firstName, lastName: names.lastName, fullName: contactSummary.contactName, country });
+    // Deterministic name/language routing is authoritative on every refresh.
+    // Cached AI enrichment may supply copy later, but must never preserve a stale
+    // or less-safe language decision after the name library changes.
+    const locale = deterministic.locale; const greetingName = deterministic.greetingName; const confidence = deterministic.confidence; const reason = deterministic.reason;
     const emailStatus = text(contact, "gtm_email_status"); let blockReason = "";
     if (!salesSafety.healthy) blockReason = "Sales safety scan unavailable";
     else if (!isValidBusinessEmail(email)) blockReason = "Invalid or unsafe email";
@@ -413,17 +416,17 @@ function industryPain(bucket: string, locale: RecipientLocale, product: Outreach
   const talenteraEn: Record<string, string> = { healthcare: "clinical and non-clinical hiring across multiple teams", retail: "high-volume frontline hiring across locations", logistics: "operational and warehouse hiring at speed", "financial-services": "structured hiring with multiple approvals", education: "seasonal hiring across departments", hospitality: "high-volume operational hiring across locations", technology: "specialist hiring without extra recruiter admin", other: "screening, interviews, approvals and offers across one recruitment flow", unknown: "screening, interviews, approvals and offers across one recruitment flow" };
   const talenteraAr: Record<string, string> = { healthcare: "التوظيف للوظائف الطبية والإدارية مع تعدد الفرق والموافقات", retail: "التوظيف التشغيلي للفروع والتعامل مع أعداد كبيرة من المرشحين", logistics: "التوظيف التشغيلي والمستودعات بسرعة", "financial-services": "تنظيم مراحل التوظيف والموافقات الداخلية", education: "التوظيف الموسمي وتعدد الأقسام", hospitality: "التوظيف التشغيلي لعدة مواقع", technology: "توظيف الكفاءات المتخصصة وتقليل العمل اليدوي", other: "ربط الفرز والمقابلات والموافقات والعروض", unknown: "ربط الفرز والمقابلات والموافقات والعروض" };
   const evalifyEn: Record<string, string> = { healthcare: "screening clinical and non-clinical candidates consistently before interviews", retail: "screening high applicant volumes before recruiter interviews", logistics: "assessing operational candidates quickly and consistently", "financial-services": "standardising candidate assessments and shortlisting", education: "screening applicants consistently across departments", hospitality: "assessing high-volume operational applicants before interviews", technology: "validating specialist skills before recruiter and hiring-manager time is used", other: "screening and assessing candidates before interviews", unknown: "screening and assessing candidates before interviews" };
-  const evalifyAr: Record<string, string> = { healthcare: "فرز وتقييم المرشحين للوظائف الطبية والإدارية قبل المقابلات", retail: "فرز أعداد كبيرة من المتقدمين قبل وقت فريق التوظيف", logistics: "تقييم المرشحين للوظائف التشغيلية بشكل أسرع وأكثر اتساقا", "financial-services": "توحيد التقييم والـshortlisting قبل المقابلات", education: "تقييم المتقدمين بشكل موحد بين الأقسام", hospitality: "فرز وتقييم المرشحين للوظائف التشغيلية قبل المقابلات", technology: "التحقق من مهارات المرشحين قبل استهلاك وقت الفريق", other: "فرز وتقييم المرشحين قبل المقابلات", unknown: "فرز وتقييم المرشحين قبل المقابلات" };
+  const evalifyAr: Record<string, string> = { healthcare: "فرز وتقييم المرشحين للوظائف الطبية والإدارية قبل المقابلات", retail: "فرز أعداد كبيرة من المتقدمين قبل وقت فريق التوظيف", logistics: "تقييم المرشحين للوظائف التشغيلية بشكل أسرع وأكثر اتساقا", "financial-services": "توحيد التقييم وإعداد القائمة المختصرة قبل المقابلات", education: "تقييم المتقدمين بشكل موحد بين الأقسام", hospitality: "فرز وتقييم المرشحين للوظائف التشغيلية قبل المقابلات", technology: "التحقق من مهارات المرشحين قبل استهلاك وقت الفريق", other: "فرز وتقييم المرشحين قبل المقابلات", unknown: "فرز وتقييم المرشحين قبل المقابلات" };
   const isEn = locale === "en"; const table = product === "talentera" ? (isEn ? talenteraEn : talenteraAr) : (isEn ? evalifyEn : evalifyAr); return table[bucket] || table.other;
 }
 
 export function sequenceTemplate(product: OutreachProduct, locale: RecipientLocale): SequenceTemplate {
   if (product === "evalify") {
-    if (locale === "ar-SA") return {
+    if (locale !== "en") return {
       subject1: "الفرز قبل المقابلات في {company_name}",
-      touch1: "هلا {first_name}،\n\n{opening_line}\n\nبما إن عندكم نظام توظيف قائم، غالبا أكبر فرصة للتحسين تكون في {industry_pain}. Evalify تضيف assessments وscreening فوق النظام الحالي بدون ما تحتاجون تغيرون الـATS.\n\nهل تحسين مرحلة الفرز والتقييم ضمن أولوياتكم هالفترة؟",
+      touch1: "هلا {first_name}،\n\n{opening_line}\n\nبما إن عندكم نظام توظيف قائم، غالبا أكبر فرصة للتحسين تكون في {industry_pain}. Evalufy تضيف التقييم والفرز فوق النظام الحالي بدون ما تحتاجون تغيرون نظام التوظيف.\n\nهل تحسين مرحلة الفرز والتقييم ضمن أولوياتكم هالفترة؟",
       subject2: "تقييم المرشحين في {company_name}",
-      touch2: "{first_name}، فكرة Evalify ببساطة إنها تخلي الـassessments والscoring والshortlisting جزء مرتب قبل المقابلات، مع بقاء نظام التوظيف الحالي كما هو.\n\nهل يناسبكم أشـارككم كيف يركب هذا على الـworkflow الحالي؟",
+      touch2: "{first_name}، فكرة Evalufy ببساطة إنها تخلي التقييم واحتساب الدرجات وإعداد القائمة المختصرة جزء مرتب قبل المقابلات، مع بقاء نظام التوظيف الحالي كما هو.\n\nهل يناسبكم أشارككم كيف يركب هذا على سير العمل الحالي؟",
       subject3: "أقفل الموضوع؟",
       touch3: "{first_name}، ما ودي أكثر عليك. إذا تحسين الفرز والتقييم مو أولوية الآن أقفل الموضوع، وإذا مناسب أشاركك الفكرة باختصار.",
     };
@@ -436,11 +439,11 @@ export function sequenceTemplate(product: OutreachProduct, locale: RecipientLoca
       touch3: "Hi {first_name}, if candidate assessment is not a priority right now, I will close the loop. If it is, happy to share the idea briefly.",
     };
   }
-  if (locale === "ar-SA") return {
+  if (locale !== "en") return {
     subject1: "التوظيف في {company_name}",
     touch1: "هلا {first_name}،\n\n{opening_line}\n\nمع {industry_pain} عادة يزيد الوقت اللي يروح بين الفرز والمقابلات والموافقات والعروض. Talentera تجمع رحلة التوظيف في نظام واحد وتخفف المتابعة اليدوية على الفريق.\n\nهل تطوير هالجزء ضمن أولوياتكم هالفترة؟",
     subject2: "رحلة التوظيف في {company_name}",
-    touch2: "{first_name}، كثير من فرق التوظيف يكون عندها خطوات موزعة بين أدوات ومتابعات يدوية. Talentera تربط صفحة الوظائف والفرز والمقابلات والموافقات والعروض في workflow أوضح.\n\nهل يناسبكم أشـارككم الفكرة بشكل سريع؟",
+    touch2: "{first_name}، كثير من فرق التوظيف يكون عندها خطوات موزعة بين أدوات ومتابعات يدوية. Talentera تربط صفحة الوظائف والفرز والمقابلات والموافقات والعروض في سير عمل أوضح.\n\nهل يناسبكم أشارككم الفكرة بشكل سريع؟",
     subject3: "أقفل الموضوع؟",
     touch3: "{first_name}، ما ودي أكثر عليك. إذا تطوير عملية التوظيف مو أولوية الآن أقفل الموضوع من جهتي، وإذا مناسب أشاركك الفكرة باختصار.",
   };
@@ -477,7 +480,7 @@ async function enrichOneLead(lead: V2Lead, store: IntelligenceStore) {
     const data = parseAiJson(result.content); const requestedLocale = clean(data.locale) as RecipientLocale; const nameConfidence = Number(data.nameConfidence); const safeArabic = isGccCountry(lead.country) && (requestedLocale === "ar-SA" || requestedLocale === "ar-GCC") && Number.isFinite(nameConfidence) && nameConfidence >= AI_ARABIC_CONFIDENCE && /[\u0600-\u06FF]/.test(clean(data.greetingName));
     const locale: RecipientLocale = safeArabic ? (isKsaCountry(lead.country) ? "ar-SA" : "ar-GCC") : lead.locale;
     const greetingName = safeArabic ? clean(data.greetingName, 60) : lead.greetingName; const confidence = safeArabic ? Math.min(1, nameConfidence) : lead.languageConfidence;
-    return { key, locale, greetingName, confidence, reason: safeArabic ? `OpenRouter high-confidence Arabic-name QA: ${clean(data.nameReason, 160)}` : lead.languageReason, openingLine: sanitizeOutreachText(clean(data.openingLine), 220), updatedAt: new Date().toISOString() };
+    return { key, locale, greetingName, confidence, reason: safeArabic ? `OpenRouter high-confidence Arabic-name QA: ${clean(data.nameReason, 160)}` : lead.languageReason, openingLine: safeOpeningLineForLocale(clean(data.openingLine), locale), updatedAt: new Date().toISOString() };
   } catch { return fallback; }
 }
 async function enrichLeads(leads: V2Lead[], store: IntelligenceStore) {

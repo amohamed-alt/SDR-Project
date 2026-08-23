@@ -8,6 +8,7 @@ import {
   localeForCountry,
   personaBucket,
   renderOutreachTemplate,
+  safeOpeningLineForLocale,
   sanitizeOutreachText,
 } from "../src/lib/smartlead-policy.ts";
 
@@ -49,4 +50,12 @@ test("copy rendering removes links and replaces approved placeholders", () => {
   const rendered = renderOutreachTemplate("Hi {first_name} at {company_name}", { first_name: "Sara", company_name: "Acme" });
   assert.equal(rendered, "Hi Sara at Acme");
   assert.equal(sanitizeOutreachText("Hello https://example.com world", 100), "Hello world");
+});
+
+test("AI opening lines cannot mix Arabic and English campaign scripts", () => {
+  assert.equal(safeOpeningLineForLocale("فرق التوظيف تحتاج مسارا أوضح.", "ar-SA"), "فرق التوظيف تحتاج مسارا أوضح.");
+  assert.equal(safeOpeningLineForLocale("Your hiring team needs a cleaner flow.", "ar-SA"), "");
+  assert.equal(safeOpeningLineForLocale("فريق Talentera يحتاج مسارا أوضح.", "ar-GCC"), "");
+  assert.equal(safeOpeningLineForLocale("Your hiring team needs a cleaner flow.", "en"), "Your hiring team needs a cleaner flow.");
+  assert.equal(safeOpeningLineForLocale("فريق التوظيف يحتاج مسارا أوضح.", "en"), "");
 });

@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const INTELLIGENCE_PATH = process.env.SMARTLEAD_V2_INTELLIGENCE_PATH || "/app/data/smartlead-v2-intelligence-v3.json";
+const INTELLIGENCE_PATH = process.env.SMARTLEAD_V2_INTELLIGENCE_PATH || "/app/data/smartlead-v2-intelligence.json";
 const INTERNAL_BASE_URL = process.env.SMARTLEAD_INTERNAL_BASE_URL || "http://127.0.0.1:3000";
 const ARABIC_SCRIPT = /[\u0600-\u06FF]/;
 
@@ -16,23 +16,33 @@ function clean(value: unknown, max = 8_000) {
   return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
+function maskedEmail(value: string) {
+  const [local, domain] = clean(value, 320).toLowerCase().split("@");
+  if (!local || !domain) return "invalid-email";
+  return `${local.slice(0, 1)}***@${domain}`;
+}
+
 function languageIssues(leads: V2Lead[]) {
   const issues: Array<{ contactId: string; name: string; email: string; currentLocale: string; expectedLocale: string; reason: string }> = [];
   for (const lead of leads.filter((item) => item.eligible).slice(0, 250)) {
-    const expected = decideRecipientLanguage({ firstName: lead.firstName, fullName: lead.fullName, country: lead.country });
+    const expected = decideRecipientLanguage({ firstName: lead.firstName, lastName: lead.lastName, fullName: lead.fullName, country: lead.country });
     const currentArabic = lead.locale !== "en";
     const greetingArabic = ARABIC_SCRIPT.test(lead.greetingName || "");
 
-    if (expected.locale === "en" && lead.locale !== "en") {
-      issues.push({ contactId: lead.contactId, name: lead.fullName, email: lead.email, currentLocale: lead.locale, expectedLocale: "en", reason: "Conservative deterministic routing requires English." });
+    if (expected.locale !== lead.locale) {
+      issues.push({ contactId: lead.contactId, name: lead.fullName, email: maskedEmail(lead.email), currentLocale: lead.locale, expectedLocale: expected.locale, reason: "Current queue language differs from the authoritative deterministic name decision." });
       continue;
     }
     if (currentArabic && !greetingArabic) {
-      issues.push({ contactId: lead.contactId, name: lead.fullName, email: lead.email, currentLocale: lead.locale, expectedLocale: expected.locale, reason: "Arabic lane requires an Arabic-script greeting name." });
+      issues.push({ contactId: lead.contactId, name: lead.fullName, email: maskedEmail(lead.email), currentLocale: lead.locale, expectedLocale: expected.locale, reason: "Arabic lane requires an Arabic-script greeting name." });
       continue;
     }
     if (!currentArabic && greetingArabic) {
-      issues.push({ contactId: lead.contactId, name: lead.fullName, email: lead.email, currentLocale: lead.locale, expectedLocale: "en", reason: "English lane must not use an Arabic-script greeting." });
+      issues.push({ contactId: lead.contactId, name: lead.fullName, email: maskedEmail(lead.email), currentLocale: lead.locale, expectedLocale: "en", reason: "English lane must not use an Arabic-script greeting." });
+      continue;
+    }
+    if (expected.greetingName !== lead.greetingName) {
+      issues.push({ contactId: lead.contactId, name: lead.fullName, email: maskedEmail(lead.email), currentLocale: lead.locale, expectedLocale: expected.locale, reason: "Greeting name differs from the authoritative normalized name." });
     }
   }
   return issues;

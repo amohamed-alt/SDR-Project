@@ -95,6 +95,26 @@ test("full name can safely provide the first token when firstname is missing", (
   assert.equal(result.greetingName, "عبدالعزيز");
 });
 
+test("split Abd compound names are reconstructed without corrupting the family name", () => {
+  for (const input of [
+    { firstName: "Abd", lastName: "Alrahman", fullName: "Abd Alrahman" },
+    { firstName: "Abdul", lastName: "Rahman", fullName: "Abdul Rahman" },
+    { firstName: "عبد", lastName: "الرحمن", fullName: "عبد الرحمن" },
+  ]) {
+    const result = decideRecipientLanguage({ ...input, country: "Saudi Arabia" });
+    assert.equal(result.locale, "ar-SA");
+    assert.equal(result.greetingName, "عبدالرحمن");
+    assert.ok(result.confidence >= 0.99);
+  }
+});
+
+test("an incomplete or unrelated Abd name is never guessed", () => {
+  const result = decideRecipientLanguage({ firstName: "Abd", lastName: "Smith", country: "Saudi Arabia" });
+  assert.equal(result.locale, "en");
+  assert.equal(result.greetingName, "Abd");
+  assert.equal(result.translated, false);
+});
+
 test("Talentera and Evalify sender brands are kept separate", () => {
   assert.equal(senderBrand("marita@jointalentera.com"), "talentera");
   assert.equal(senderBrand("marita@getevalufy.com"), "evalify");

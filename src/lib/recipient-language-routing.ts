@@ -6,6 +6,7 @@ export type SenderBrand = OutreachProduct | "unknown";
 
 export type RecipientLanguageInput = {
   firstName?: string;
+  lastName?: string;
   fullName?: string;
   country?: string;
   explicitLanguage?: "ar" | "en" | "";
@@ -62,6 +63,31 @@ const HIGH_CONFIDENCE_ARABIC_FIRST_NAMES: Record<string, string> = {
   wafa: "وفاء", yasmeen: "ياسمين", yasmin: "ياسمين", zeinab: "زينب", zainab: "زينب",
 };
 
+// Compound Arabic given names are frequently split incorrectly between HubSpot's
+// firstname and lastname fields (for example, Abd + Alrahman). Only the
+// unambiguous "Abd + divine name" pattern is joined; a value such as Abd + Smith
+// deliberately stays English so the system never invents a recipient's name.
+const ABD_PREFIXES = new Set(["abd", "abdul", "abdel", "abdur"]);
+const ABD_SUFFIXES: Record<string, string> = {
+  allah: "الله",
+  rahman: "الرحمن", alrahman: "الرحمن", elrahman: "الرحمن",
+  rahim: "الرحيم", alrahim: "الرحيم", elrahim: "الرحيم",
+  aziz: "العزيز", alaziz: "العزيز", elaziz: "العزيز",
+  malik: "الملك", almalik: "الملك", elmalik: "الملك",
+  mohsen: "المحسن", mohsin: "المحسن", almohsen: "المحسن", almohsin: "المحسن",
+  hadi: "الهادي", alhadi: "الهادي",
+  majid: "المجيد", majeed: "المجيد", almajid: "المجيد", almajeed: "المجيد",
+  hamid: "الحميد", hameed: "الحميد", alhamid: "الحميد", alhameed: "الحميد",
+  latif: "اللطيف", lateef: "اللطيف", allatif: "اللطيف", allateef: "اللطيف",
+  karim: "الكريم", kareem: "الكريم", alkarim: "الكريم", alkareem: "الكريم",
+  qadir: "القادر", kader: "القادر", alqadir: "القادر", alkader: "القادر",
+  wahab: "الوهاب", wahhab: "الوهاب", alwahab: "الوهاب", alwahhab: "الوهاب",
+  samad: "الصمد", alsamad: "الصمد",
+  salam: "السلام", alsalam: "السلام",
+  nasir: "الناصر", nasser: "الناصر", alnasir: "الناصر", alnasser: "الناصر",
+  razzaq: "الرزاق", razzak: "الرزاق", alrazzaq: "الرزاق", alrazzak: "الرزاق",
+};
+
 function clean(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
@@ -72,6 +98,30 @@ function firstToken(value: string) {
 
 function normalizedLatinName(value: string) {
   return clean(value).toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z-]/g, "");
+}
+
+function normalizedArabicName(value: string) {
+  return clean(value).replace(/[\u064B-\u065F\u0670\u0640\s-]/g, "");
+}
+
+function compoundArabicGreeting(input: RecipientLanguageInput, firstName: string) {
+  const suppliedTokens = clean(`${firstName} ${input.lastName || ""}`).split(/\s+/).filter(Boolean);
+  const fullNameTokens = clean(input.fullName).split(/\s+/).filter(Boolean);
+  const tokens = suppliedTokens.length >= 2 ? suppliedTokens : fullNameTokens;
+  if (tokens.length < 2) return "";
+
+  const prefix = tokens[0];
+  const suffix = tokens[1];
+  const latinPrefix = normalizedLatinName(prefix).replace(/-/g, "");
+  const latinSuffix = normalizedLatinName(suffix).replace(/-/g, "");
+  if (ABD_PREFIXES.has(latinPrefix) && ABD_SUFFIXES[latinSuffix]) return `عبد${ABD_SUFFIXES[latinSuffix]}`;
+
+  if (normalizedArabicName(prefix) === "عبد") {
+    const arabicSuffix = normalizedArabicName(suffix);
+    const knownArabicSuffix = Object.values(ABD_SUFFIXES).find((value) => normalizedArabicName(value) === arabicSuffix);
+    if (knownArabicSuffix) return `عبد${knownArabicSuffix}`;
+  }
+  return "";
 }
 
 function arabicLocale(country: string): RecipientLocale {
@@ -94,7 +144,10 @@ export function decideRecipientLanguage(input: RecipientLanguageInput): Recipien
 
   if (input.explicitLanguage === "en") return { locale: "en", greetingName: firstName, originalFirstName: firstName, confidence: 1, reason: "Explicit English language signal", translated: false };
 
+  const compoundGreeting = compoundArabicGreeting(input, firstName);
+
   if (input.explicitLanguage === "ar") {
+    if (compoundGreeting) return { locale: arabicLocale(country), greetingName: compoundGreeting, originalFirstName: firstName, confidence: 0.995, reason: "Explicit Arabic language signal with a safely reconstructed compound Arabic given name", translated: compoundGreeting !== firstName };
     if (ARABIC_SCRIPT.test(firstName)) return { locale: arabicLocale(country), greetingName: firstName, originalFirstName: firstName, confidence: 1, reason: "Explicit Arabic language signal and Arabic-script first name", translated: false };
     const mapped = HIGH_CONFIDENCE_ARABIC_FIRST_NAMES[normalizedLatinName(firstName)];
     if (mapped) return { locale: arabicLocale(country), greetingName: mapped, originalFirstName: firstName, confidence: 0.99, reason: "Explicit Arabic language signal with high-confidence Arabic first-name mapping", translated: true };
@@ -102,6 +155,7 @@ export function decideRecipientLanguage(input: RecipientLanguageInput): Recipien
   }
 
   if (!firstName) return { locale: "en", greetingName: "", originalFirstName: "", confidence: 0.95, reason: "Missing first name; safe English fallback without inventing a name", translated: false };
+  if (compoundGreeting && GCC.test(country)) return { locale: arabicLocale(country), greetingName: compoundGreeting, originalFirstName: firstName, confidence: 0.99, reason: "GCC location plus a safely reconstructed compound Arabic given name", translated: compoundGreeting !== firstName };
   if (ARABIC_SCRIPT.test(firstName)) return { locale: arabicLocale(country), greetingName: firstName, originalFirstName: firstName, confidence: 1, reason: "Arabic-script first name", translated: false };
 
   const mapped = HIGH_CONFIDENCE_ARABIC_FIRST_NAMES[normalizedLatinName(firstName)];
