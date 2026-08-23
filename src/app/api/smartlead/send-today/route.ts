@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const INTELLIGENCE_PATH = process.env.SMARTLEAD_V2_INTELLIGENCE_PATH || "/app/data/smartlead-v2-intelligence.json";
+const INTERNAL_BASE_URL = process.env.SMARTLEAD_INTERNAL_BASE_URL || "http://127.0.0.1:3000";
 const ARABIC_SCRIPT = /[\u0600-\u06FF]/;
 
 function clean(value: unknown, max = 8_000) {
@@ -118,7 +119,7 @@ export async function POST(request: NextRequest) {
       }, { status: 409 });
     }
 
-    const orchestratorUrl = new URL("/api/smartlead/orchestrator-v3", request.nextUrl.origin);
+    const orchestratorUrl = new URL("/api/smartlead/orchestrator-v3", INTERNAL_BASE_URL);
     const response = await fetch(orchestratorUrl, {
       method: "POST",
       cache: "no-store",
