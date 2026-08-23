@@ -57,7 +57,9 @@ function boolLike(value: unknown) {
 
 function positiveNumber(...values: unknown[]) {
   for (const value of values) {
-    const parsed = Number(value);
+    const parsed = typeof value === "string"
+      ? Number(value.trim().replace(/%$/, ""))
+      : Number(value);
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
   return 0;
@@ -119,10 +121,10 @@ export function inspectSenderAccount(input: SenderAccountInput, maxCampaignEmail
   const accountStatus = clean(input.status || input.connection_status);
   const badStatus = /disconnect|fail|error|invalid|suspend|block/.test(`${accountStatus} ${smtpStatus} ${imapStatus}`);
   const warmupStateHealthy = /(?:active|enabled|ready|warmed|complete|completed|in[_ -]?progress)/.test(warmupStatus) || warmupReputation >= 90;
-  const warmupEnabled = warmupFlag === true && warmupStateHealthy && !/fail|error|disabled|paused|inactive|not[_ -]?(?:active|started)/.test(warmupStatus);
+  const warmupEnabled = warmupFlag !== false && warmupStateHealthy && !/fail|error|disabled|paused|inactive|not[_ -]?(?:active|started)/.test(warmupStatus);
   const smtpConnected = smtpFlag === true || /connect|success|active|ready/.test(smtpStatus);
   const imapConnected = imapFlag === true || /connect|success|active|ready/.test(imapStatus);
-  const dailyLimit = positiveNumber(input.max_email_per_day, input.daily_limit, input.max_emails_per_day);
+  const dailyLimit = positiveNumber(input.message_per_day, input.max_email_per_day, input.daily_limit, input.max_emails_per_day);
   const campaignLimit = Math.max(1, Math.min(20, Math.floor(maxCampaignEmailsPerMailbox || 20)));
   const capacity = Math.min(Math.floor(dailyLimit), campaignLimit);
   const reasons: string[] = [];
@@ -135,7 +137,7 @@ export function inspectSenderAccount(input: SenderAccountInput, maxCampaignEmail
   return {
     ...route,
     warmupEnabled,
-    warmupKnown: warmupFlag !== null,
+    warmupKnown: warmupFlag !== null || Boolean(warmupStatus),
     smtpConnected,
     imapConnected,
     dailyLimit,
@@ -162,6 +164,13 @@ export function validateApprovedSenderInventory(senders: Array<{ email: string; 
   if (eligible.length !== EXPECTED_SENDING_MAILBOXES) warnings.push(`Eligible sender inventory is ${eligible.length}/${EXPECTED_SENDING_MAILBOXES}.`);
   const approvedButUnsafe = senders.filter((sender) => senderBrandForDomain(sender.email) !== "unknown" && !sender.eligible);
   if (approvedButUnsafe.length) warnings.push(`${approvedButUnsafe.length} approved-domain mailbox(es) failed connection, warmup, or limit checks.`);
+  const reasonCounts = new Map<string, number>();
+  for (const sender of approvedButUnsafe) {
+    for (const reason of sender.reasons || []) reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1);
+  }
+  for (const [reason, count] of [...reasonCounts.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    warnings.push(`${count} approved-domain mailbox(es): ${reason}.`);
+  }
   return {
     healthy: warnings.length === 0,
     expectedTotal: EXPECTED_SENDING_MAILBOXES,

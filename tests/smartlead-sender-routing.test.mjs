@@ -42,6 +42,40 @@ test("mailbox safety fails closed unless SMTP, IMAP, warmup and daily limit are 
   assert.equal(inspectSenderAccount({ from_email: "a@talentera.com", is_smtp_success: true, is_imap_success: true, warmup_enabled: true, warmup_status: "active", max_email_per_day: 20 }).eligible, false);
 });
 
+test("official Smartlead email-account response fields are accepted", () => {
+  const safe = inspectSenderAccount({
+    id: 123,
+    from_email: "a@jointalentera.com",
+    type: "GMAIL",
+    message_per_day: 50,
+    is_smtp_success: true,
+    is_imap_success: true,
+    warmup_details: {
+      status: "ACTIVE",
+      warmup_reputation: "95%",
+      blocked_reason: null,
+    },
+  });
+  assert.equal(safe.eligible, true);
+  assert.equal(safe.warmupKnown, true);
+  assert.equal(safe.warmupEnabled, true);
+  assert.equal(safe.dailyLimit, 50);
+  assert.equal(safe.capacity, 20);
+});
+
+test("explicit disabled warmup overrides a stale active status", () => {
+  const unsafe = inspectSenderAccount({
+    from_email: "a@jointalentera.com",
+    message_per_day: 50,
+    is_smtp_success: true,
+    is_imap_success: true,
+    warmup_enabled: false,
+    warmup_details: { status: "ACTIVE" },
+  });
+  assert.equal(unsafe.eligible, false);
+  assert.match(unsafe.reasons.join(" "), /warmup/);
+});
+
 test("production inventory requires exactly three safe mailboxes on each of five approved domains", () => {
   const rows = [...APPROVED_SENDING_DOMAINS.talentera, ...APPROVED_SENDING_DOMAINS.evalify].flatMap((domain) =>
     Array.from({ length: 3 }, (_, index) => inspectSenderAccount({ from_email: `sender${index + 1}@${domain}`, is_smtp_success: true, is_imap_success: true, warmup_enabled: true, warmup_status: "active", max_email_per_day: 20 })),
