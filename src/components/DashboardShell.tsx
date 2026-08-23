@@ -3,11 +3,11 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { Activity, BrainCircuit, Building2, Flame, ListTodo, LoaderCircle, Menu, PhoneCall, Radar, Search, Target, X } from "lucide-react";
+import { Activity, BrainCircuit, Building2, Flame, ListTodo, LoaderCircle, MailCheck, Menu, PhoneCall, Radar, Search, Target, X } from "lucide-react";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardMotion";
 import styles from "@/components/DashboardShell.module.css";
 
-type ShellView = "core" | "maqsam" | "hiring" | "career" | "ats-intent" | "marita-priority" | "team-activity" | "net-new";
+type ShellView = "core" | "maqsam" | "hiring" | "career" | "ats-intent" | "marita-priority" | "smartlead" | "team-activity" | "net-new";
 
 function ViewLoading() {
   return <main className={styles.viewLoading}><LoaderCircle size={24}/><strong>Loading workspace…</strong></main>;
@@ -33,6 +33,10 @@ const MaritaPriorityQueue = dynamic(
   () => import("@/components/MaritaPriorityQueue").then((module) => module.MaritaPriorityQueue),
   { ssr: false, loading: ViewLoading },
 );
+const SmartleadCommandCenter = dynamic(
+  () => import("@/components/SmartleadCommandCenter").then((module) => module.SmartleadCommandCenter),
+  { ssr: false, loading: ViewLoading },
+);
 const TeamActivity = dynamic(
   () => import("@/components/TeamActivity").then((module) => module.TeamActivity),
   { ssr: false, loading: ViewLoading },
@@ -49,6 +53,7 @@ function viewFromUrl(): ShellView {
   if (view === "career") return "career";
   if (view === "ats-intent") return "ats-intent";
   if (view === "marita-priority") return "marita-priority";
+  if (view === "smartlead") return "smartlead";
   if (view === "team-activity") return "team-activity";
   if (view === "net-new") return "net-new";
   return "core";
@@ -103,6 +108,7 @@ export function Dashboard() {
   if (view === "career") return <CareerIntelligence onBack={() => changeView("core")}/>;
   if (view === "ats-intent") return <AtsIntentSearch onBack={() => changeView("core")}/>;
   if (view === "marita-priority") return <MaritaPriorityQueue onBack={() => changeView("core")}/>;
+  if (view === "smartlead") return <SmartleadCommandCenter onBack={() => changeView("core")}/>;
   if (view === "team-activity") return <TeamActivity onBack={() => changeView("core")}/>;
   if (view === "net-new") return <NetNewAccounts onBack={() => changeView("core")}/>;
 
@@ -149,6 +155,10 @@ export function Dashboard() {
               <span className={`${styles.toolIcon} ${styles.priorityIcon}`}><ListTodo size={17}/></span>
               <span className={styles.toolCopy}><strong>Marita Priority</strong><small>Call-next queue</small></span>
             </button>
+            <button className={styles.toolItem} type="button" onClick={() => changeView("smartlead")}>
+              <span className={`${styles.toolIcon} ${styles.priorityIcon}`}><MailCheck size={17}/></span>
+              <span className={styles.toolCopy}><strong>Smartlead Outreach</strong><small>Marita email queue & execution</small></span>
+            </button>
             <Link className={styles.toolItem} href="/marita-calls" onClick={() => trackFeature("marita-calls")}>
               <span className={`${styles.toolIcon} ${styles.callsIcon}`}><PhoneCall size={17}/></span>
               <span className={styles.toolCopy}><strong>Marita Calls</strong><small>Maqsam call activity</small></span>
@@ -172,7 +182,7 @@ export function Dashboard() {
         aria-expanded={toolsOpen}
         aria-controls="sdr-tools-menu"
       >
-        {toolsOpen ? <X size={18}/> : <Menu size={18}/>}<span>{toolsOpen ? "Close" : "SDR Tools"}</span><small>10</small>
+        {toolsOpen ? <X size={18}/> : <Menu size={18}/>}<span>{toolsOpen ? "Close" : "SDR Tools"}</span><small>11</small>
       </button>
     </div>
   </div>;
