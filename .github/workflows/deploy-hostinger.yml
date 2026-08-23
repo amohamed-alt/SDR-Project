@@ -11,17 +11,68 @@ permissions:
   statuses: write
 
 jobs:
-  deploy:
+  preflight:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    outputs:
+      should_deploy: ${{ steps.freshness.outputs.should_deploy }}
+      deploy_sha: ${{ steps.freshness.outputs.deploy_sha }}
+    steps:
+      - name: Reject stale main deployment candidates
+        id: freshness
+        uses: actions/github-script@v7
+        env:
+          CANDIDATE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          DEPLOY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          retries: 3
+          script: |
+            const candidate = String(process.env.CANDIDATE_SHA || '').trim();
+            core.setOutput('deploy_sha', candidate);
+
+            if (context.eventName === 'workflow_dispatch') {
+              core.setOutput('should_deploy', 'true');
+              core.notice(`Manual production deployment approved for ${candidate}.`);
+              return;
+            }
+
+            const { data: branch } = await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: 'main',
+            });
+            const currentMain = branch.commit.sha;
+
+            if (candidate !== currentMain) {
+              core.setOutput('should_deploy', 'false');
+              core.notice(`Skipping stale deployment ${candidate}; current main is ${currentMain}.`);
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: candidate,
+                state: 'success',
+                context: 'hostinger/deploy',
+                description: 'Superseded by a newer main commit; production untouched',
+                target_url: process.env.DEPLOY_URL,
+              });
+              return;
+            }
+
+            core.setOutput('should_deploy', 'true');
+            core.notice(`Deployment candidate ${candidate} is the current main HEAD.`);
+
+  deploy:
+    needs: preflight
+    if: needs.preflight.outputs.should_deploy == 'true'
     concurrency:
       group: hostinger-sdr-production
       cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      DEPLOY_SHA: ${{ needs.preflight.outputs.deploy_sha }}
       DEPLOY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Mark deployment pending
@@ -162,14 +213,15 @@ jobs:
           HOST='sdr.dashboardtalentera.tech'
 
           # Phase 1: use the cheap shallow endpoint to wait for the exact build.
-          # This avoids repeatedly running deep internal checks while the VPS/Traefik
-          # is still converging after a Docker Compose replacement.
+          # Cache-bust the health request so a proxy can never make a new deploy
+          # look like an old build.
           APP_UP=false
           for ATTEMPT in $(seq 1 22); do
             BODY=$(curl --silent --show-error \
               --connect-timeout 4 \
               --max-time 8 \
-              "https://${HOST}/api/health" || true)
+              -H 'Cache-Control: no-cache' \
+              "https://${HOST}/api/health?deploy=${DEPLOY_SHA}&attempt=${ATTEMPT}" || true)
 
             BUILD_REF=$(printf '%s' "$BODY" | jq -r '.buildRef // ""' 2>/dev/null || true)
             GENERATION=$(printf '%s' "$BODY" | jq -r '.careerGeneration // ""' 2>/dev/null || true)
@@ -207,7 +259,8 @@ jobs:
             BODY=$(curl --silent --show-error \
               --connect-timeout 5 \
               --max-time 12 \
-              "https://${HOST}/api/health?deep=1" || true)
+              -H 'Cache-Control: no-cache' \
+              "https://${HOST}/api/health?deep=1&deploy=${DEPLOY_SHA}&attempt=${ATTEMPT}" || true)
 
             BUILD_REF=$(printf '%s' "$BODY" | jq -r '.buildRef // ""' 2>/dev/null || true)
             GENERATION=$(printf '%s' "$BODY" | jq -r '.careerGeneration // ""' 2>/dev/null || true)
@@ -325,5 +378,22 @@ jobs:
               state: 'failure',
               context: 'hostinger/deploy',
               description: 'SDR production acquisition/build health gate failed',
+              target_url: process.env.DEPLOY_URL,
+            });
+
+      - name: Mark deployment cancelled
+        if: cancelled()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          retries: 3
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.DEPLOY_SHA,
+              state: 'error',
+              context: 'hostinger/deploy',
+              description: 'Deployment cancelled or superseded before health verification',
               target_url: process.env.DEPLOY_URL,
             });
