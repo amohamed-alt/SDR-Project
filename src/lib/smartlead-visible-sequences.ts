@@ -232,7 +232,8 @@ export const VISIBLE_SEQUENCE_LANES: Record<OutreachLane, VisibleSequenceLane> =
 
 export function laneFor(product: OutreachProduct, locale: RecipientLocale): OutreachLane {
   const language = locale === "en" ? "en" : "ar";
-  return `${product}_${language}` as OutreachLane;
+  if (product === "evalify") return language === "en" ? "evalufy_en" : "evalufy_ar";
+  return language === "en" ? "talentera_en" : "talentera_ar";
 }
 
 export function smartleadSequencePayload(lane: OutreachLane) {
