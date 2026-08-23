@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { decideRecipientLanguage } from "@/lib/recipient-language-routing";
 
 export type OpenRouterMode = "fast" | "deep";
 
@@ -65,6 +66,7 @@ const DEFAULT_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const STATE_PATH = process.env.OPENROUTER_STATE_PATH || "/app/data/openrouter-cost-state.json";
 const FAST_MODEL = process.env.OPENROUTER_FAST_MODEL || "openai/gpt-4.1-nano";
 const DEEP_MODEL = process.env.OPENROUTER_DEEP_MODEL || "openai/gpt-4.1-mini";
+const ARABIC_SCRIPT = /[\u0600-\u06FF]/;
 
 let stateQueue = Promise.resolve();
 
@@ -164,6 +166,35 @@ async function withStateLock<T>(callback: () => Promise<T>) {
   }
 }
 
+function smartleadLanguage(input: CompletionInput): "ar" | "en" | null {
+  if (!/^(?:smartlead-visible|smartlead-v2-intelligence):/i.test(input.cacheKey)) return null;
+  try {
+    const data = JSON.parse(input.user) as { firstName?: string; fullName?: string; country?: string };
+    const decision = decideRecipientLanguage({ firstName: data.firstName, fullName: data.fullName, country: data.country });
+    return decision.locale === "en" ? "en" : "ar";
+  } catch {
+    return "en";
+  }
+}
+
+function normalizeSmartleadResult(input: CompletionInput, result: OpenRouterResult): OpenRouterResult {
+  const language = smartleadLanguage(input);
+  if (!language) return result;
+  let openingLine = "";
+  try {
+    const content = result.content.trim();
+    const start = content.indexOf("{");
+    const end = content.lastIndexOf("}");
+    const parsed = JSON.parse(start >= 0 && end > start ? content.slice(start, end + 1) : content) as { openingLine?: unknown };
+    openingLine = String(parsed.openingLine || "").replace(/\s+/g, " ").trim().slice(0, 220);
+  } catch {
+    openingLine = "";
+  }
+  const hasArabic = ARABIC_SCRIPT.test(openingLine);
+  if ((language === "en" && hasArabic) || (language === "ar" && openingLine && !hasArabic)) openingLine = "";
+  return { ...result, content: JSON.stringify({ openingLine }) };
+}
+
 function cacheHash(input: CompletionInput, model: string, maxOutputTokens: number) {
   return createHash("sha256")
     .update(JSON.stringify({ input: input.cacheKey, model, mode: input.mode || "fast", maxOutputTokens, system: input.system, user: input.user }))
@@ -231,15 +262,20 @@ export async function openRouterCompletion(input: CompletionInput): Promise<Open
   const model = mode === "deep" ? cfg.deepModel : cfg.fastModel;
   const hardOutputCap = mode === "deep" ? cfg.deepMaxOutputTokens : cfg.fastMaxOutputTokens;
   const maxOutputTokens = Math.min(hardOutputCap, Math.max(32, Math.round(input.maxOutputTokens || hardOutputCap)));
-  const system = String(input.system || "").slice(0, Math.floor(cfg.maxInputChars * 0.35));
+  const requiredLanguage = smartleadLanguage(input);
+  const languageGuard = requiredLanguage
+    ? `\nFor this outreach request the deterministic required language is ${requiredLanguage === "ar" ? "Arabic" : "English"}. Return ONLY JSON with one key named openingLine. The openingLine must be in that language. Do not return locale, greetingName, transliteration or any language decision.`
+    : "";
+  const system = `${String(input.system || "")}${languageGuard}`.slice(0, Math.floor(cfg.maxInputChars * 0.35));
   const user = String(input.user || "").slice(0, cfg.maxInputChars - system.length);
-  const key = cacheHash({ ...input, mode, system, user }, model, maxOutputTokens);
+  const normalizedInput = { ...input, mode, system, user };
+  const key = cacheHash(normalizedInput, model, maxOutputTokens);
 
   const cached = await withStateLock(async () => {
     const state = normalizeState(await readState());
     const hit = state.cache[key];
     if (!hit) return null;
-    return { ...hit.result, cached: true } satisfies OpenRouterResult;
+    return normalizeSmartleadResult(normalizedInput, { ...hit.result, cached: true } satisfies OpenRouterResult);
   });
   if (cached) return cached;
 
@@ -291,13 +327,14 @@ export async function openRouterCompletion(input: CompletionInput): Promise<Open
   const estimatedCostUsd = estimateOpenRouterCostUsd(model, promptTokens, completionTokens);
   const reportedRaw = Number(payload.usage?.cost);
   const reportedCostUsd = Number.isFinite(reportedRaw) && reportedRaw >= 0 ? reportedRaw : null;
-  const result: OpenRouterResult = {
+  const rawResult: OpenRouterResult = {
     content,
     model: String(payload.model || model),
     mode,
     cached: false,
     usage: { promptTokens, completionTokens, totalTokens, estimatedCostUsd, reportedCostUsd },
   };
+  const result = normalizeSmartleadResult(normalizedInput, rawResult);
 
   await withStateLock(async () => {
     const state = normalizeState(await readState());
