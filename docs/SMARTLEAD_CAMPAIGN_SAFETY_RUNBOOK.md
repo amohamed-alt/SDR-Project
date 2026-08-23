@@ -42,7 +42,7 @@ Keep `SMARTLEAD_AUTOPILOT_ENABLED=false` until every enforced launch gate below 
 - Open and click tracking off; no links or images.
 - Stop on reply, auto-pause same-domain leads on reply, add unsubscribe tags, respect mailbox sending limits, and keep domain-level rate limiting on.
 - Send Sunday-Thursday, 09:30-16:30 Asia/Riyadh, with at least 15 minutes between emails.
-- Smartlead high-bounce auto-protection is 2%. The orchestrator also blocks at 2% bounce after 50 sends or 0.3% spam complaints after 50 sends.
+- Smartlead high-bounce auto-protection is 2%. The orchestrator also blocks at 2% bounce after 50 sends and pauses all managed campaigns on the first recorded spam complaint.
 - Four campaigns are the visible managed topology: Talentera Arabic, Talentera English, Evalufy Arabic, and Evalufy English. Any other Talentera/Evalufy `Marita SDR` campaign is legacy, is reported in setup, and is paused when empty; active legacy leads block the new autopilot to prevent duplicate sends.
 
 ## Golden Hours

@@ -44,7 +44,6 @@ const LEDGER_PATH = process.env.SMARTLEAD_V2_LEDGER_PATH || "/app/data/smartlead
 const BUSINESS_DAYS = new Set(["Sun", "Mon", "Tue", "Wed", "Thu"]);
 const BOUNCE_GUARD_MIN_SENT = 50;
 const BOUNCE_GUARD_RATE = 0.02;
-const SPAM_GUARD_RATE = 0.003;
 const LANES = Object.keys(VISIBLE_SEQUENCE_LANES) as OutreachLane[];
 const MANAGED_CAMPAIGN_NAMES = new Set(LANES.map((lane) => VISIBLE_SEQUENCE_LANES[lane].campaignName));
 
@@ -476,7 +475,7 @@ async function autopilot(millionVerifierApiKey = "") {
     for (const lane of LANES) {
       analytics[lane] = await campaignAnalytics(campaigns[lane]);
       if (analytics[lane].sent >= BOUNCE_GUARD_MIN_SENT && analytics[lane].bounceRate >= BOUNCE_GUARD_RATE) reputationWarnings.push(`${VISIBLE_SEQUENCE_LANES[lane].label} bounce rate is ${(analytics[lane].bounceRate * 100).toFixed(1)}% after ${analytics[lane].sent} sends (2% guardrail).`);
-      if (analytics[lane].sent >= BOUNCE_GUARD_MIN_SENT && analytics[lane].spamRate >= SPAM_GUARD_RATE) reputationWarnings.push(`${VISIBLE_SEQUENCE_LANES[lane].label} spam complaint rate is ${(analytics[lane].spamRate * 100).toFixed(2)}% after ${analytics[lane].sent} sends (0.3% guardrail).`);
+      if (analytics[lane].spamComplaints > 0) reputationWarnings.push(`${VISIBLE_SEQUENCE_LANES[lane].label} has ${analytics[lane].spamComplaints} recorded spam complaint(s); zero-complaint guardrail engaged.`);
     }
     if (reputationWarnings.length) {
       const pausedCampaigns = await pauseManagedCampaigns();
