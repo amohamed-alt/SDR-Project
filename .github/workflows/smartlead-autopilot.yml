@@ -157,11 +157,32 @@ jobs:
               -d '{"confirm":"SEND_VERIFIED_DAILY_BATCH"}')
           fi
 
-          jq '{ok, mode, productionSendingChanged, sampled, localeCounts, laneCounts, translatedCount, lowConfidence, senderPools, samples, skipped, blocked, reason, languagePreflight, activated, queued, campaigns, campaignTopology, legacyCampaigns, sequences, sequenceTiming, sendWindow, dailyLaneNewCaps, senders, capacity, analytics, verification, laneTargets, legacyWarnings, state}' /tmp/smartlead-orchestrator.json || cat /tmp/smartlead-orchestrator.json
+          jq '{ok, mode, productionSendingChanged, sampled, localeCounts, laneCounts, translatedCount, lowConfidence, senderPools, skipped, blocked, reason, languagePreflight, activated, queued, campaigns, campaignTopology, legacyCampaigns, sequences, sequenceTiming, sendWindow, dailyLaneNewCaps, senders, capacity, analytics, verification, laneTargets, legacyWarnings, state}' /tmp/smartlead-orchestrator.json || cat /tmp/smartlead-orchestrator.json
 
           if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
             echo "::error::Smartlead ${MODE} engine returned HTTP $HTTP_CODE."
             cat /tmp/smartlead-orchestrator.json || true
+            exit 1
+          fi
+
+      - name: Audit first 50 recipient routes without sending
+        if: steps.mode.outputs.mode == 'setup'
+        env:
+          DASHBOARD_USERNAME: ${{ secrets.DASHBOARD_USERNAME || 'talentera' }}
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
+        run: |
+          set -euo pipefail
+          HTTP_CODE=$(curl --silent --show-error \
+            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
+            --connect-timeout 10 \
+            --max-time 300 \
+            --output /tmp/smartlead-routing-audit.json \
+            --write-out '%{http_code}' \
+            'https://sdr.dashboardtalentera.tech/api/smartlead/language-test?limit=50&refresh=1')
+
+          jq '{mode, productionSendingChanged, sampled, localeCounts, laneCounts, translatedCount, lowConfidence, senderPools}' /tmp/smartlead-routing-audit.json || true
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo "::error::Read-only Smartlead routing audit returned HTTP $HTTP_CODE."
             exit 1
           fi
 
