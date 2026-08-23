@@ -39,6 +39,15 @@ test("deployment health verification is cache-busted and exact-build gated", asy
   assert.match(health, /no-store, max-age=0/);
 });
 
+test("acquisition queue status ignores skipped bootstrap and retries transient production reads", async () => {
+  const workflow = await read(".github/workflows/acquisition-queue-status.yml");
+
+  assert.match(workflow, /if: github\.event\.workflow_run\.conclusion == 'success'/);
+  assert.match(workflow, /for ATTEMPT in 1 2 3 4 5/);
+  assert.match(workflow, /Cache-Control: no-cache/);
+  assert.match(workflow, /unavailable after retries/);
+});
+
 test("today task queue and full task drawer expose WhatsApp for associated contacts", async () => {
   const workspace = await read("src/components/MaritaWorkspace.tsx");
   const drawer = await read("src/components/DrilldownDrawer.tsx");
