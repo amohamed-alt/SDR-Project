@@ -24,42 +24,42 @@ const TALENTERA_AR: VisibleSequenceTouch[] = [
     step: 1,
     delayDays: 0,
     framework: "AIDA",
-    subject: "ترتيب رحلة التوظيف",
+    subject: "سؤال سريع يا {{first_name}}",
     body: `هلا {{first_name}},
 
 {{opening_line}}
 
-مع {{industry_pain}} عادة التحدي مو في خطوة واحدة، بل في انتقال المرشح بين الفرز والمقابلات والموافقات والعروض.
+كنت حابة أسألك عن نقطة صغيرة. مع {{industry_pain}} غالبا المشكلة مو في خطوة واحدة، قد ما هي في تنقل المرشح بين المراحل وكثرة المتابعة على الفريق.
 
-Talentera تجمع الرحلة في مسار واحد وتخفف المتابعة اليدوية على فريق التوظيف.
+Talentera تجمع الفرز والمقابلات والموافقات والعروض في مسار واحد وتخفف الشغل اليدوي.
 
-هل يناسبكم أشارككم الفكرة بشكل مختصر؟`,
+إذا هذا قريب من اللي عندكم، يناسبك أوريك الفكرة في 10 دقايق؟`,
   },
   {
     step: 2,
     delayDays: 3,
     framework: "PAS",
-    subject: "نقطة عن عملية التوظيف",
+    subject: "بس أوضح قصدي",
     body: `هلا {{first_name}},
 
-أرجع لكم بنقطة واحدة: لما تكون خطوات التوظيف موزعة، غالبا الوقت يروح في المتابعة بين المراحل أكثر من الخطوة نفسها.
+حبيت أرجع لك لأن الفكرة مو إنكم تغيرون كل شيء عندكم.
 
-Talentera تربط صفحة الوظائف والفرز والمقابلات والموافقات والعروض في workflow أوضح.
+المقصود إن فريق التوظيف يكون عنده flow أوضح من أول التقديم لحد العرض، بدل المتابعة بين أكثر من خطوة ومكان.
 
-هل يستاهل نرتب 10 دقايق ونشوف إذا يناسبكم؟`,
+إذا تشوفونها قريبة من احتياج عندكم، نرتب 10 دقايق؟`,
   },
   {
     step: 3,
     delayDays: 4,
     framework: "Breakup",
-    subject: "أقفل الموضوع؟",
+    subject: "أقفلها من جهتي؟",
     body: `هلا {{first_name}},
 
-ما ودي أكثر عليكم.
+ما ودي أزعجك بكثرة المتابعة.
 
-إذا تطوير رحلة التوظيف مو ضمن الأولويات حاليا، أقفل الموضوع من جهتي.
+إذا الموضوع مو ضمن الأولويات حاليا أقفله من جهتي.
 
-وإذا مناسب نناقشه، ردوا بكلمة "مناسب" وأنا أرتب معكم الخطوة التالية.`,
+وإذا يستاهل نظرة سريعة، رد بكلمة "مناسب" وأنا أرتبها معك.`,
   },
 ];
 
@@ -68,42 +68,42 @@ const TALENTERA_EN: VisibleSequenceTouch[] = [
     step: 1,
     delayDays: 0,
     framework: "AIDA",
-    subject: "Your recruitment workflow",
+    subject: "Quick question, {{first_name}}",
     body: `Hi {{first_name}},
 
 {{opening_line}}
 
-With {{industry_pain}}, the friction is often moving candidates between screening, interviews, approvals and offers.
+I wanted to ask you something small. With {{industry_pain}}, the friction is often not one step but the handoffs between screening, interviews, approvals and offers.
 
-Talentera brings that journey into one recruitment workflow and reduces manual follow-up for the hiring team.
+Talentera brings that journey into one recruitment flow and reduces manual follow-up for the team.
 
-Worth sharing the idea briefly?`,
+If that sounds close to what you deal with, worth a 10-minute look?`,
   },
   {
     step: 2,
     delayDays: 3,
     framework: "PAS",
-    subject: "One point on hiring flow",
+    subject: "Just to clarify",
     body: `Hi {{first_name}},
 
-One reason I followed up: when recruitment steps sit across different tools or handoffs, recruiter time often goes into moving candidates between stages.
+I wanted to clarify one thing: the idea is not to make you change everything you already use.
 
-Talentera connects the career site, screening, interviews, approvals and offers in one flow.
+It is about giving the recruitment team a cleaner flow from application through screening, interviews, approvals and offers.
 
-Worth a 10-minute look?`,
+If that is relevant on your side, worth 10 minutes?`,
   },
   {
     step: 3,
     delayDays: 4,
     framework: "Breakup",
-    subject: "Close the loop?",
+    subject: "Should I close this?",
     body: `Hi {{first_name}},
 
-I do not want to keep chasing you.
+I do not want to keep filling your inbox.
 
-If improving the recruitment workflow is not a priority right now, I will close the loop on my side.
+If this is not a priority right now, I will close it on my side.
 
-If it is relevant, reply "yes" and I will send the next step.`,
+If it is worth a quick look, reply "yes" and I will arrange it with you.`,
   },
 ];
 
@@ -112,42 +112,42 @@ const EVALUFY_AR: VisibleSequenceTouch[] = [
     step: 1,
     delayDays: 0,
     framework: "AIDA",
-    subject: "الفرز قبل المقابلات",
+    subject: "سؤال سريع عن المقابلات",
     body: `هلا {{first_name}},
 
 {{opening_line}}
 
-بما أن عندكم نظام توظيف قائم، غالبا الفرصة تكون في {{industry_pain}} قبل ما يوصل المرشح للمقابلة.
+كنت حابة أسألك عن نقطة قبل المقابلات. بما إن عندكم نظام توظيف قائم، الفرصة غالبا تكون في {{industry_pain}} قبل ما يستهلك الفريق وقته في المقابلات.
 
 Evalufy تضيف assessments وscreening فوق الـATS الحالي بدون ما تحتاجون تغيرونه.
 
-هل يناسبكم أشارككم كيف تركب على الـworkflow الحالي؟`,
+إذا الفكرة تهمكم، يناسبك أوريكها في 10 دقايق؟`,
   },
   {
     step: 2,
     delayDays: 3,
     framework: "PAS",
-    subject: "وقت المقابلات",
+    subject: "قصدي قبل المقابلة",
     body: `هلا {{first_name}},
 
-الفكرة ببساطة: التقييم والفرز يصير قبل المقابلات، فيوصل للفريق عدد أنسب للمراجعة بدل ما يستهلك وقت المقابلات من البداية.
+بس أوضح قصدي: الـATS يفضل مثل ما هو، وEvalufy تضيف طبقة تقييم وفرز قبل المقابلات.
 
-Evalufy تخلي الـATS الحالي كما هو وتضيف طبقة تقييم مستقلة.
+الفكرة إن وقت الفريق يروح على shortlist أنسب بدل ما يبدأ التقييم داخل المقابلة نفسها.
 
-هل نرتب 10 دقايق ونشوف إذا تناسبكم؟`,
+إذا هذا تحدي عندكم، نرتب 10 دقايق؟`,
   },
   {
     step: 3,
     delayDays: 4,
     framework: "Breakup",
-    subject: "أقفل الموضوع؟",
+    subject: "أقفلها من جهتي؟",
     body: `هلا {{first_name}},
 
-ما ودي أكثر عليكم.
+ما ودي أزعجك بكثرة المتابعة.
 
-إذا تطوير مرحلة الفرز والتقييم مو ضمن الأولويات حاليا، أقفل الموضوع من جهتي.
+إذا الفرز والتقييم مو ضمن الأولويات حاليا أقفل الموضوع من جهتي.
 
-وإذا مناسب نناقشه، ردوا بكلمة "مناسب" وأنا أرتب معكم الخطوة التالية.`,
+وإذا يستاهل نظرة سريعة، رد بكلمة "مناسب" وأنا أرتبها معك.`,
   },
 ];
 
@@ -156,42 +156,42 @@ const EVALUFY_EN: VisibleSequenceTouch[] = [
     step: 1,
     delayDays: 0,
     framework: "AIDA",
-    subject: "Screening before interviews",
+    subject: "Quick question on interviews",
     body: `Hi {{first_name}},
 
 {{opening_line}}
 
-Since you already have a recruitment system, the opportunity is often in {{industry_pain}} before candidates reach interviews.
+I wanted to ask about one step before interviews. Since you already have a recruitment system, the opportunity is often in {{industry_pain}} before interview time is used.
 
-Evalufy adds assessments and screening on top of the existing ATS without replacing it.
+Evalufy adds assessments and screening on top of the current ATS without replacing it.
 
-Worth sharing how it fits the current workflow?`,
+If that is relevant, worth a 10-minute look?`,
   },
   {
     step: 2,
     delayDays: 3,
     framework: "PAS",
-    subject: "Interview time",
+    subject: "What I meant",
     body: `Hi {{first_name}},
 
-The simple idea is to move assessment and screening before interviews, so recruiter and hiring-manager time is used on a better-qualified shortlist.
+Just to clarify: your ATS stays where it is. Evalufy adds an assessment and screening layer before interviews.
 
-Evalufy keeps the current ATS in place and adds a separate assessment layer.
+The idea is simply to spend recruiter and hiring-manager time on a stronger shortlist.
 
-Worth a 10-minute look?`,
+If that is a problem you are trying to improve, worth 10 minutes?`,
   },
   {
     step: 3,
     delayDays: 4,
     framework: "Breakup",
-    subject: "Close the loop?",
+    subject: "Should I close this?",
     body: `Hi {{first_name}},
 
-I do not want to keep chasing you.
+I do not want to keep filling your inbox.
 
-If improving screening and assessment is not a priority right now, I will close the loop on my side.
+If screening and assessment are not a priority right now, I will close this on my side.
 
-If it is relevant, reply "yes" and I will send the next step.`,
+If it is worth a quick look, reply "yes" and I will arrange it with you.`,
   },
 ];
 
