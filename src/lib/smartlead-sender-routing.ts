@@ -1,5 +1,5 @@
-import { senderBrand, type OutreachProduct, type SenderBrand } from "@/lib/recipient-language-routing";
-
+export type SenderBrand = "talentera" | "evalify" | "unknown";
+export type OutreachProduct = "talentera" | "evalify";
 export type SenderProvider = "google" | "microsoft" | "smtp" | "unknown";
 
 export type SenderRoutingInput = {
@@ -29,6 +29,13 @@ export function senderDomain(email: string) {
   return value.includes("@") ? value.split("@").pop() ?? "" : value;
 }
 
+export function senderBrandForDomain(email: string): SenderBrand {
+  const domain = senderDomain(email);
+  if (/talentera/.test(domain)) return "talentera";
+  if (/evalufy|evalify/.test(domain)) return "evalify";
+  return "unknown";
+}
+
 export function senderProvider(input: SenderRoutingInput): SenderProvider {
   const fingerprint = [
     input.smtp_host,
@@ -49,7 +56,7 @@ export function senderProvider(input: SenderRoutingInput): SenderProvider {
 
 export function senderRoute(input: SenderRoutingInput): { email: string; domain: string; brand: SenderBrand; provider: SenderProvider } {
   const email = senderEmail(input);
-  return { email, domain: senderDomain(email), brand: senderBrand(email), provider: senderProvider(input) };
+  return { email, domain: senderDomain(email), brand: senderBrandForDomain(email), provider: senderProvider(input) };
 }
 
 export function senderMatchesProduct(input: SenderRoutingInput, product: OutreachProduct) {
