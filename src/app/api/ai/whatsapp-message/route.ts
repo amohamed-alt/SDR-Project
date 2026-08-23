@@ -8,6 +8,7 @@ import {
   buildWhatsAppMobileUrl,
   buildWhatsAppWebUrl,
   deterministicWhatsAppMessage,
+  humanizeWhatsAppMessage,
   isWhatsAppStyle,
   selectWhatsAppPhone,
   whatsappFallbackStyle,
@@ -59,18 +60,6 @@ function clean(value: unknown, max = 600) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
-function cleanMessage(value: unknown, max = 520) {
-  return String(value || "")
-    .replace(/\r/g, "")
-    .split("\n")
-    .map((line) => line.replace(/[ \t]+/g, " ").trim())
-    .filter(Boolean)
-    .slice(0, 4)
-    .join("\n")
-    .trim()
-    .slice(0, max);
-}
-
 function value(record: { properties: Record<string, string | null | undefined> }, key: string) {
   return record.properties[key]?.trim() ?? "";
 }
@@ -100,7 +89,7 @@ function parseAiResult(raw: string): AiWhatsAppResult | null {
 
   try {
     const parsed = JSON.parse(normalized) as Record<string, unknown>;
-    const message = cleanMessage(parsed.message, 520);
+    const message = humanizeWhatsAppMessage(parsed.message, 520);
     const style = parsed.style;
     const languageReason = clean(parsed.languageReason, 220);
     if (message.length < 30 || !isWhatsAppStyle(style)) return null;
@@ -198,7 +187,7 @@ export async function POST(request: NextRequest) {
     };
 
     const system = [
-      "You are the WhatsApp copy engine for a Talentera SDR. Write like a real salesperson typing a short personal message, never like marketing automation.",
+      "You are the WhatsApp copy engine for a Talentera SDR. Write like a real salesperson typing a short personal message on their phone, never like marketing automation.",
       "Return ONLY valid JSON with exactly these keys: message, style, languageReason.",
       "style MUST be exactly one of: english, saudi-ar, emirati-ar, gulf-ar.",
       "Choose style from linguistic cues in the displayed name/title plus market context; do NOT infer or state nationality, ethnicity, religion, or citizenship.",
@@ -206,11 +195,14 @@ export async function POST(request: NextRequest) {
       "If Arabic-language cues are strong: use saudi-ar for Saudi Arabia, emirati-ar for UAE, gulf-ar for Qatar/Kuwait/Bahrain/Oman. If uncertain, choose english.",
       "The message must feel one-to-one and curiosity-led. Do NOT use a reusable product-pitch structure such as 'Talentera helps recruitment teams streamline...' or 'I wanted to reach out regarding...'.",
       "Use a 3-part flow: human greeting, one relevant conversational question or observation, then a very light reason for asking plus permission-based CTA.",
+      "Write with very light WhatsApp punctuation. Real chat style is preferred over polished copy.",
+      "Use line breaks instead of commas or full stops. Avoid commas, Arabic commas, periods, colons, semicolons, exclamation marks, em dashes and en dashes. One natural question mark is okay when useful.",
+      "Do not end lines with periods and do not use a long dash between phrases.",
       "For saudi-ar: sound like a professional Saudi SDR on WhatsApp. Prefer natural phrases such as 'السلام عليكم أستاذ {firstName} يعطيك العافية', 'بغيت أعرف', 'بغيت أسألك', 'كيف ماشي عندكم', 'هالفترة', 'إذا ودك أرسل لك الفكرة باختصار'. Do not force every phrase into every message and do not use exaggerated slang.",
       "For saudi-ar, avoid stiff MSA phrases such as 'أود التواصل معكم', 'يسرني', 'نود مشاركتكم', 'تحسين كفاءة عملية التوظيف', or formal brochure language.",
-      "For emirati-ar: use warm professional UAE/Gulf WhatsApp Arabic, with natural phrases such as 'مرحبا أستاذ {firstName} يعطيك العافية', 'حبيت أسألك', and a light permission CTA. Avoid exaggerated slang.",
+      "For emirati-ar: use warm professional UAE/Gulf WhatsApp Arabic with natural phrases such as 'مرحبا أستاذ {firstName} يعطيك العافية' and 'حبيت أسألك' plus a light permission CTA. Avoid exaggerated slang.",
       "For gulf-ar: use neutral professional Gulf Arabic, conversational and short.",
-      "For english: write like a real SDR. A natural pattern is 'Hi {firstName} — quick question.' followed by one specific operational question and a short permission CTA. Avoid corporate boilerplate.",
+      "For english: write like a real SDR typing in chat. Prefer short plain lines such as 'Hi {firstName} quick question' instead of polished punctuation-heavy copy. Avoid corporate boilerplate.",
       "Personalize the actual question from the evidence. If verifiedHiring exists, you may say you saw hiring is active, but do not quote exact job counts unless needed. If no verifiedHiring exists, never imply that you saw active hiring or growth.",
       "Use the role/persona to make the question relevant, but do not awkwardly repeat a long job title.",
       "Do not mention the ATS vendor unless atsConfidence is explicitly high and the reference genuinely makes the opener better; never make the message feel creepy or over-researched.",
@@ -234,9 +226,9 @@ export async function POST(request: NextRequest) {
     try {
       const fingerprint = JSON.stringify(evidence);
       const completion = await openRouterCompletion({
-        cacheKey: `whatsapp-message-v3:${contact.id}:${fingerprint}`,
+        cacheKey: `whatsapp-message-v4:${contact.id}:${fingerprint}`,
         system,
-        user: `Write a human, attention-grabbing first WhatsApp message from this evidence object. The recipient should feel that an SDR wrote it specifically for them, not that it came from a campaign template.\n${JSON.stringify(evidence)}`,
+        user: `Write a human first WhatsApp message from this evidence object. Type it like a real SDR on a phone with line breaks and almost no punctuation. It should not look polished or campaign-generated.\n${JSON.stringify(evidence)}`,
         mode: "fast",
         maxOutputTokens: 220,
         temperature: 0.4,
