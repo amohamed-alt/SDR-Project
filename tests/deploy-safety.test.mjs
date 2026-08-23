@@ -48,6 +48,15 @@ test("acquisition queue status ignores skipped bootstrap and retries transient p
   assert.match(workflow, /unavailable after retries/);
 });
 
+test("acquisition bootstrap retries transient people-scan gateway failures", async () => {
+  const workflow = await read(".github/workflows/acquisition-bootstrap.yml");
+
+  assert.match(workflow, /for ATTEMPT in 1 2 3 4 5/);
+  assert.match(workflow, /\^\(408\|429\|5\[0-9\]\[0-9\]\)\$/);
+  assert.match(workflow, /retrying/);
+  assert.match(workflow, /ATTEMPT \* 5/);
+});
+
 test("today task queue and full task drawer expose WhatsApp for associated contacts", async () => {
   const workspace = await read("src/components/MaritaWorkspace.tsx");
   const drawer = await read("src/components/DrilldownDrawer.tsx");

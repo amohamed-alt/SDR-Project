@@ -100,15 +100,27 @@ jobs:
           # requests and no SignalHire Person enrichment calls are made here.
           for PASS in 1 2 3 4 5; do
             OUT="/tmp/acquisition-people-scan-${PASS}.json"
-            HTTP_CODE=$(curl --silent --show-error \
-              --connect-timeout 10 \
-              --max-time 720 \
-              --output "$OUT" \
-              --write-out '%{http_code}' \
-              -X POST 'https://sdr.dashboardtalentera.tech/api/acquisition/people-scan' \
-              -H 'Content-Type: application/json' \
-              -H "x-acquisition-worker-key: $WORKER_KEY" \
-              -d '{"limit":12,"retryEmpty":false}' || true)
+            HTTP_CODE=""
+            for ATTEMPT in 1 2 3 4 5; do
+              HTTP_CODE=$(curl --silent --show-error \
+                --connect-timeout 10 \
+                --max-time 720 \
+                --output "$OUT" \
+                --write-out '%{http_code}' \
+                -X POST 'https://sdr.dashboardtalentera.tech/api/acquisition/people-scan' \
+                -H 'Content-Type: application/json' \
+                -H "x-acquisition-worker-key: $WORKER_KEY" \
+                -d '{"limit":12,"retryEmpty":false}' || true)
+
+              if [ "$HTTP_CODE" = "200" ]; then
+                break
+              fi
+              if ! [[ "$HTTP_CODE" =~ ^(408|429|5[0-9][0-9])$ ]] || [ "$ATTEMPT" -eq 5 ]; then
+                break
+              fi
+              echo "::warning::People scan pass ${PASS} attempt ${ATTEMPT} returned HTTP ${HTTP_CODE:-none}; retrying."
+              sleep $((ATTEMPT * 5))
+            done
 
             echo "People scan pass ${PASS} HTTP: ${HTTP_CODE:-none}"
             jq '{status, version, selected, accountsWithPeople, peopleStored, empty, failed, costGuard}' "$OUT" || cat "$OUT"
