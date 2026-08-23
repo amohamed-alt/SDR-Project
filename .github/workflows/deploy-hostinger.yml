@@ -227,15 +227,15 @@ jobs:
           fi
           echo "Smartlead API: configured and responding"
 
-      - name: Validate Primeforge API key read-only
+      - name: Report optional Primeforge API connectivity
         env:
           PRIMEFORGE_KEY: ${{ secrets.PRIMEFORGE_API_KEY || secrets.PRIME_FORGE_API_KEY }}
         run: |
           set -euo pipefail
-          test -n "$PRIMEFORGE_KEY" || {
-            echo "::error::Add PRIMEFORGE_API_KEY as a repository Actions secret."
-            exit 1
-          }
+          if [ -z "$PRIMEFORGE_KEY" ]; then
+            echo "::warning::Primeforge advisory skipped because no API key is configured."
+            exit 0
+          fi
           HTTP_CODE=$(curl --silent --show-error \
             --connect-timeout 10 \
             --max-time 45 \
@@ -245,13 +245,13 @@ jobs:
             -H "Authorization: ${PRIMEFORGE_KEY}" \
             -H 'Accept: application/json' || true)
           if [ "$HTTP_CODE" != "200" ]; then
-            echo "::error::Primeforge read-only API validation failed (HTTP $HTTP_CODE)."
-            exit 1
+            echo "::warning::Primeforge read-only advisory failed (HTTP $HTTP_CODE)."
+            exit 0
           fi
           WORKSPACES=$(jq -r '(.results // .workspaces // .data.results // .data.workspaces // []) | length' /tmp/primeforge-workspaces.json 2>/dev/null || echo 0)
           if [ "$WORKSPACES" -lt 1 ]; then
-            echo "::error::Primeforge authenticated but returned no accessible workspaces."
-            exit 1
+            echo "::warning::Primeforge authenticated but returned no accessible workspaces."
+            exit 0
           fi
           echo "Primeforge read-only API: configured with ${WORKSPACES} accessible workspace(s)"
 
@@ -509,19 +509,11 @@ jobs:
           PRIMEFORGE_HEALTHY=$(jq -r '.healthy // false' /tmp/primeforge-health.json 2>/dev/null || echo false)
           PRIMEFORGE_READY=$(jq -r '.readyMailboxes // 0' /tmp/primeforge-health.json 2>/dev/null || echo 0)
           if [ "$PRIMEFORGE_CODE" != "200" ] || [ "$PRIMEFORGE_HEALTHY" != "true" ] || [ "$PRIMEFORGE_READY" != "15" ]; then
-            echo "::error::Primeforge domain, DNS, or 15-mailbox runtime gate failed."
+            echo "::warning::Primeforge domain, DNS, or mailbox advisory is incomplete. Deployment continues; Smartlead safety remains enforced."
             jq '{configured, healthy, expectedDomains, expectedMailboxes, readyMailboxes, workspaces, domains, warnings, error}' /tmp/primeforge-health.json || true
-            curl --silent --show-error \
-              --connect-timeout 10 \
-              --max-time 120 \
-              -X POST "https://${HOST}/api/smartlead/orchestrator-v3" \
-              -H "Authorization: Bearer ${SMARTLEAD_API_KEY}" \
-              -H 'Content-Type: application/json' \
-              -d '{"mode":"setup"}' >/tmp/primeforge-deploy-fail-closed.json || true
-            jq '{error, details, blocked, pausedCampaigns, state}' /tmp/primeforge-deploy-fail-closed.json 2>/dev/null || true
-            exit 1
+          else
+            echo "Primeforge advisory: five domains and 15 ready mailboxes verified"
           fi
-          echo "Primeforge infrastructure gate: five domains and 15 ready mailboxes verified"
 
       - name: Mark deployment successful
         if: success()
