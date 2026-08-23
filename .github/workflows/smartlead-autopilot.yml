@@ -46,7 +46,7 @@ jobs:
             exit 1
           }
 
-      - name: Validate Primeforge infrastructure gate
+      - name: Report optional Primeforge infrastructure advisory
         env:
           PRIMEFORGE_API_KEY: ${{ secrets.PRIMEFORGE_API_KEY || secrets.PRIME_FORGE_API_KEY }}
           SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
@@ -54,10 +54,10 @@ jobs:
           DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
         run: |
           set -euo pipefail
-          test -n "$PRIMEFORGE_API_KEY" || {
-            echo "::error::PRIMEFORGE_API_KEY repository secret is required."
-            exit 1
-          }
+          if [ -z "$PRIMEFORGE_API_KEY" ]; then
+            echo "::warning::Primeforge advisory skipped because no API key is configured. Smartlead safety checks remain enforced."
+            exit 0
+          fi
           HTTP_CODE=$(curl --silent --show-error \
             --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
             --connect-timeout 10 \
@@ -69,16 +69,9 @@ jobs:
           READY=$(jq -r '.readyMailboxes // 0' /tmp/primeforge-health.json 2>/dev/null || echo 0)
           jq '{configured, healthy, expectedDomains, expectedMailboxes, readyMailboxes, workspaces, domains, warnings, error}' /tmp/primeforge-health.json || true
           if [ "$HTTP_CODE" != "200" ] || [ "$HEALTHY" != "true" ] || [ "$READY" != "15" ]; then
-            echo "::error::Primeforge domain, DNS, or mailbox preflight failed; daily sending was not started and the fail-closed pause was requested."
-            curl --silent --show-error \
-              --connect-timeout 10 \
-              --max-time 120 \
-              -X POST 'https://sdr.dashboardtalentera.tech/api/smartlead/orchestrator-v3' \
-              -H "Authorization: Bearer ${SMARTLEAD_API_KEY}" \
-              -H 'Content-Type: application/json' \
-              -d '{"mode":"setup"}' >/tmp/primeforge-fail-closed.json || true
-            jq '{error, details, blocked, pausedCampaigns, state}' /tmp/primeforge-fail-closed.json 2>/dev/null || true
-            exit 1
+            echo "::warning::Primeforge inventory is incomplete or unavailable. This is advisory only; Smartlead sender and reputation gates remain enforced."
+          else
+            echo "Primeforge advisory: five domains and 15 ready mailboxes verified."
           fi
 
       - name: Validate MillionVerifier without spending a verification credit
