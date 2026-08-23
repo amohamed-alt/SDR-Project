@@ -1,6 +1,9 @@
 name: Smartlead Autopilot
 
 on:
+  workflow_run:
+    workflows: ["Deploy SDR Dashboard to Hostinger"]
+    types: [completed]
   schedule:
     # Asia/Riyadh is UTC+3 year-round. Three idempotent attempts make transient
     # HubSpot/API failures safe without ever queueing the same day twice.
@@ -8,16 +11,28 @@ on:
     - cron: "5 6 * * 0-4"  # 09:05 Riyadh, Sunday-Thursday
     - cron: "25 6 * * 0-4" # 09:25 Riyadh, Sunday-Thursday
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Setup only or run today's safe batch"
+        required: true
+        default: "setup"
+        type: choice
+        options:
+          - setup
+          - autopilot
 
 permissions:
   contents: read
 
 concurrency:
-  group: smartlead-autopilot-production
+  group: smartlead-orchestrator-production
   cancel-in-progress: false
 
 jobs:
-  queue-daily-marita-batch:
+  smartlead-orchestrator:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -30,24 +45,42 @@ jobs:
             exit 1
           }
 
-      - name: Run fail-closed SDR autopilot
+      - name: Resolve safe execution mode
+        id: mode
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_MODE: ${{ inputs.mode }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            MODE="setup"
+          elif [ "$EVENT_NAME" = "schedule" ]; then
+            MODE="autopilot"
+          else
+            MODE="${MANUAL_MODE:-setup}"
+          fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "Smartlead orchestrator mode: $MODE"
+
+      - name: Sync Smartlead campaigns or run daily batch
         env:
           SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
+          MODE: ${{ steps.mode.outputs.mode }}
         run: |
           set -euo pipefail
           HTTP_CODE=$(curl --silent --show-error \
             --connect-timeout 10 \
-            --max-time 240 \
-            --output /tmp/autopilot.json \
+            --max-time 300 \
+            --output /tmp/smartlead-orchestrator.json \
             --write-out '%{http_code}' \
-            -X POST 'https://sdr.dashboardtalentera.tech/api/smartlead/autopilot' \
+            -X POST 'https://sdr.dashboardtalentera.tech/api/smartlead/orchestrator' \
             -H "Authorization: Bearer ${SMARTLEAD_API_KEY}" \
             -H 'Content-Type: application/json' \
-            -d '{}')
+            -d "{\"mode\":\"${MODE}\"}")
 
-          jq '{ok, skipped, blocked, reason, enabled, timezone, businessDays, queueAttemptsRiyadh, smartleadSendWindowRiyadh, state}' /tmp/autopilot.json || cat /tmp/autopilot.json
+          jq '{ok, mode, skipped, blocked, reason, activated, queued, campaigns, sequence, sendWindow, senders, capacity, analytics, state}' /tmp/smartlead-orchestrator.json || cat /tmp/smartlead-orchestrator.json
 
           if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
-            echo "::error::Smartlead autopilot returned HTTP $HTTP_CODE. A later scheduled attempt may retry if today has not completed successfully."
+            echo "::error::Smartlead orchestrator returned HTTP $HTTP_CODE."
+            cat /tmp/smartlead-orchestrator.json || true
             exit 1
           fi
