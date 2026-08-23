@@ -616,7 +616,7 @@ function WorkspaceStat({ icon: Icon, label, value, helper, tone, onClick, helper
 }
 
 function TaskQueueItem({ row, timezone }: { row: ActivityRow; timezone: string }) {
-  return <article className="queue-item"><div className={"queue-icon " + (row.isHighPriority ? "urgent" : "")}><CheckCircle2 size={16}/></div><div className="queue-item-main"><strong>{row.subject}</strong><span>{row.relatedContactName ? row.relatedContactName + " · " : ""}{row.detail} · Due {shortTime(row.dueAt, timezone)}</span></div><span className={"queue-status " + (row.isHighPriority ? "high" : "")}>{row.isHighPriority ? "High" : row.status}</span><HubSpotButton href={row.url} label={row.relatedContactUrl ? "Timeline" : "Tasks"}/></article>;
+  return <article className="queue-item"><div className={"queue-icon " + (row.isHighPriority ? "urgent" : "")}><CheckCircle2 size={16}/></div><div className="queue-item-main"><strong>{row.subject}</strong><span>{row.relatedContactName ? row.relatedContactName + " · " : ""}{row.detail} · Due {shortTime(row.dueAt, timezone)}</span></div><span className={"queue-status " + (row.isHighPriority ? "high" : "")}>{row.isHighPriority ? "High" : row.status}</span><div className="queue-quick-actions">{row.relatedContactId && <WhatsAppQuickAction contactId={row.relatedContactId}/>}<HubSpotButton href={row.url} label={row.relatedContactUrl ? "Timeline" : "Tasks"}/></div></article>;
 }
 
 function LeadQueueItem({ row, timezone }: { row: ContactRow; timezone: string }) {
