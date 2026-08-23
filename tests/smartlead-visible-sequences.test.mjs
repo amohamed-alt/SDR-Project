@@ -3,19 +3,7 @@ import test from "node:test";
 import { VISIBLE_SEQUENCE_LANES, laneFor, smartleadSequencePayload } from "../src/lib/smartlead-visible-sequences.ts";
 
 const spamTriggers = [
-  "free",
-  "guaranteed",
-  "no obligation",
-  "act now",
-  "limited time",
-  "urgent",
-  "winner",
-  "click here",
-  "buy now",
-  "order now",
-  "risk-free",
-  "exclusive deal",
-  "100% free",
+  "free", "guaranteed", "no obligation", "act now", "limited time", "urgent", "winner", "click here", "buy now", "order now", "risk-free", "exclusive deal", "100% free",
 ];
 
 test("visible sequences keep the conservative 3-touch cadence", () => {
@@ -24,6 +12,16 @@ test("visible sequences keep the conservative 3-touch cadence", () => {
     assert.deepEqual(lane.touches.map((touch) => touch.delayDays), [0, 3, 4], lane.lane);
     assert.deepEqual(lane.touches.map((touch) => touch.framework), ["AIDA", "PAS", "Breakup"], lane.lane);
   }
+});
+
+test("all four campaigns use the same thread structure", () => {
+  for (const lane of Object.values(VISIBLE_SEQUENCE_LANES)) {
+    assert.ok(lane.touches[0].subject.length > 0, `${lane.lane} needs a first-touch subject`);
+    assert.equal(lane.touches[1].subject, "", `${lane.lane} touch 2 must stay in the original thread`);
+    assert.equal(lane.touches[2].subject, "", `${lane.lane} touch 3 must stay in the original thread`);
+  }
+  assert.equal(VISIBLE_SEQUENCE_LANES.talentera_ar.touches[0].subject, VISIBLE_SEQUENCE_LANES.evalufy_ar.touches[0].subject);
+  assert.equal(VISIBLE_SEQUENCE_LANES.talentera_en.touches[0].subject, VISIBLE_SEQUENCE_LANES.evalufy_en.touches[0].subject);
 });
 
 test("sequence copy stays plain, short and free of common spam patterns", () => {
@@ -49,12 +47,14 @@ test("routing selects product and language lane without changing product", () =>
   assert.equal(laneFor("evalify", "en"), "evalufy_en");
 });
 
-test("Smartlead payload exposes actual subject and body instead of full-body custom-field placeholders", () => {
+test("Smartlead payload exposes actual copy and threaded follow-ups", () => {
   for (const lane of Object.keys(VISIBLE_SEQUENCE_LANES)) {
     const payload = smartleadSequencePayload(lane);
     assert.equal(payload.sequences.length, 3);
+    assert.ok(payload.sequences[0].subject.length > 0);
+    assert.equal(payload.sequences[1].subject, "");
+    assert.equal(payload.sequences[2].subject, "");
     for (const sequence of payload.sequences) {
-      assert.ok(sequence.subject.length > 0);
       assert.ok(sequence.email_body.length > 0);
       assert.ok(!sequence.email_body.includes("{{sl_touch_"));
       assert.ok(!sequence.subject.includes("{{sl_subject_"));
