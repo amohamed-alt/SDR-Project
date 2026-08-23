@@ -19,6 +19,8 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const WHATSAPP_AI_BUDGET_MS = 6_500;
+
 const requestSchema = z.object({
   contactId: z.string().trim().min(1).max(120),
 });
@@ -54,6 +56,11 @@ type AiWhatsAppResult = {
   message: string;
   style: WhatsAppStyle;
   languageReason: string;
+};
+
+type HubSpotRecord = {
+  id: string;
+  properties: Record<string, string | null | undefined>;
 };
 
 function clean(value: unknown, max = 600) {
@@ -103,6 +110,22 @@ function parseAiResult(raw: string): AiWhatsAppResult | null {
   }
 }
 
+function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`WhatsApp AI exceeded ${ms}ms budget`)), ms);
+    promise.then(
+      (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 export async function POST(request: NextRequest) {
   try {
     if (!sameOrigin(request)) {
@@ -120,11 +143,24 @@ export async function POST(request: NextRequest) {
     const [contact] = await batchRead("contacts", [parsed.data.contactId], CONTACT_FIELDS);
     if (!contact) return NextResponse.json({ error: "Contact not found in HubSpot." }, { status: 404 });
 
+    const companyId = value(contact, "company_id");
+    let company: HubSpotRecord | undefined;
+    if (companyId) {
+      try {
+        const result = await batchRead("companies", [companyId], COMPANY_FIELDS);
+        company = result[0] as HubSpotRecord | undefined;
+      } catch (error) {
+        console.warn("WhatsApp company enrichment unavailable; continuing with contact data", error);
+      }
+    }
+
     const contactCountry = value(contact, "country");
+    const companyCountry = company ? value(company, "gtm_country") || value(company, "country") : "";
+    const country = contactCountry || companyCountry;
     const selectedPhone = selectWhatsAppPhone({
       mobilephone: value(contact, "mobilephone"),
       phone: value(contact, "phone"),
-      country: contactCountry,
+      country,
     });
 
     if (!selectedPhone) {
@@ -134,11 +170,7 @@ export async function POST(request: NextRequest) {
       }, { status: 422 });
     }
 
-    const companyId = value(contact, "company_id");
-    const [company] = companyId ? await batchRead("companies", [companyId], COMPANY_FIELDS) : [];
-    const companyName = value(company ?? contact, "name") || value(contact, "company");
-    const companyCountry = company ? value(company, "gtm_country") || value(company, "country") : "";
-    const country = contactCountry || companyCountry;
+    const companyName = company ? value(company, "name") || value(contact, "company") : value(contact, "company");
     const fullName = [value(contact, "firstname"), value(contact, "lastname")].filter(Boolean).join(" ") || "Contact";
     const title = value(contact, "jobtitle");
     const fallbackStyle = whatsappFallbackStyle({ country, fullName, title });
@@ -225,14 +257,14 @@ export async function POST(request: NextRequest) {
 
     try {
       const fingerprint = JSON.stringify(evidence);
-      const completion = await openRouterCompletion({
+      const completion = await withDeadline(openRouterCompletion({
         cacheKey: `whatsapp-message-v4:${contact.id}:${fingerprint}`,
         system,
         user: `Write a human first WhatsApp message from this evidence object. Type it like a real SDR on a phone with line breaks and almost no punctuation. It should not look polished or campaign-generated.\n${JSON.stringify(evidence)}`,
         mode: "fast",
         maxOutputTokens: 220,
         temperature: 0.4,
-      });
+      }), WHATSAPP_AI_BUDGET_MS);
       const aiResult = parseAiResult(completion.content);
       if (aiResult) {
         message = aiResult.message;
