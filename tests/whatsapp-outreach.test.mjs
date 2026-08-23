@@ -5,6 +5,7 @@ import {
   buildWhatsAppUrl,
   buildWhatsAppWebUrl,
   deterministicWhatsAppMessage,
+  humanizeWhatsAppMessage,
   selectWhatsAppPhone,
   whatsappFallbackStyle,
   whatsappStyleForCountry,
@@ -72,6 +73,12 @@ test("conservative fallback uses Saudi Arabic when explicit Arabic script is pre
   }), "saudi-ar");
 });
 
+test("humanizer strips polished punctuation but keeps a natural question mark", () => {
+  const message = humanizeWhatsAppMessage("السلام عليكم، أستاذ خالد. يعطيك العافية — بغيت أعرف: كيف ماشي عندكم الموضوع؟");
+  assert.equal(message, "السلام عليكم أستاذ خالد يعطيك العافية بغيت أعرف كيف ماشي عندكم الموضوع؟");
+  assert.doesNotMatch(message, /[،,.;؛:!…—–]/);
+});
+
 test("Saudi fallback sounds conversational and only uses verified hiring as a claim", () => {
   const withoutHiring = deterministicWhatsAppMessage({
     fullName: "محمد أحمد",
@@ -85,6 +92,7 @@ test("Saudi fallback sounds conversational and only uses verified hiring as a cl
   assert.match(withoutHiring, /بحكم شغلك/);
   assert.doesNotMatch(withoutHiring, /شفت عندكم توظيف شغال هالفترة/);
   assert.doesNotMatch(withoutHiring, /Talentera تساعد فرق التوظيف ترتب/);
+  assert.doesNotMatch(withoutHiring, /[،,.;؛:!…—–]/);
 
   const withHiring = deterministicWhatsAppMessage({
     fullName: "محمد أحمد",
@@ -96,9 +104,10 @@ test("Saudi fallback sounds conversational and only uses verified hiring as a cl
   assert.match(withHiring, /شفت عندكم توظيف شغال هالفترة/);
   assert.match(withHiring, /بغيت أعرف/);
   assert.match(withHiring, /إذا ودك أرسل لك الفكرة باختصار/);
+  assert.doesNotMatch(withHiring, /[،,.;؛:!…—–]/);
 });
 
-test("English fallback is curiosity-led rather than a brochure pitch", () => {
+test("English fallback is chat-like rather than polished campaign copy", () => {
   const message = deterministicWhatsAppMessage({
     fullName: "Sarah Miller",
     company: "Example Co",
@@ -106,9 +115,10 @@ test("English fallback is curiosity-led rather than a brochure pitch", () => {
     style: "english",
     verifiedHiring: null,
   });
-  assert.match(message, /Hi Sarah — quick question/);
+  assert.match(message, /Hi Sarah quick question/);
   assert.match(message, /screening and candidate follow-up/);
   assert.doesNotMatch(message, /streamline screening and follow-up/);
+  assert.doesNotMatch(message, /[،,.;؛:!…—–]/);
 });
 
 test("builds a direct WhatsApp Web link with encoded message text", () => {
