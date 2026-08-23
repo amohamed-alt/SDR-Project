@@ -73,7 +73,7 @@ jobs:
             --max-time 300 \
             --output /tmp/smartlead-orchestrator.json \
             --write-out '%{http_code}' \
-            -X POST 'https://sdr.dashboardtalentera.tech/api/smartlead/orchestrator' \
+            -X POST 'https://sdr.dashboardtalentera.tech/api/smartlead/orchestrator-compat' \
             -H "Authorization: Bearer ${SMARTLEAD_API_KEY}" \
             -H 'Content-Type: application/json' \
             -d "{\"mode\":\"${MODE}\"}")
