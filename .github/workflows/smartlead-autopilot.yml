@@ -85,7 +85,7 @@ jobs:
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "Smartlead orchestrator mode: $MODE"
 
-      - name: Sync Smartlead campaigns or run daily batch
+      - name: Sync visible Smartlead sequences or run daily batch
         env:
           SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
           MILLIONVERIFIER_API_KEY: ${{ secrets.MILLIONVERIFIER_API_KEY }}
@@ -97,13 +97,13 @@ jobs:
             --max-time 300 \
             --output /tmp/smartlead-orchestrator.json \
             --write-out '%{http_code}' \
-            -X POST 'https://sdr.dashboardtalentera.tech/api/smartlead/orchestrator-compat' \
+            -X POST 'https://sdr.dashboardtalentera.tech/api/smartlead/orchestrator-v3' \
             -H "Authorization: Bearer ${SMARTLEAD_API_KEY}" \
             -H "X-MillionVerifier-API-Key: ${MILLIONVERIFIER_API_KEY}" \
             -H 'Content-Type: application/json' \
             -d "{\"mode\":\"${MODE}\"}")
 
-          jq '{ok, mode, skipped, blocked, reason, activated, queued, campaigns, sequence, sendWindow, senders, capacity, analytics, verification, state}' /tmp/smartlead-orchestrator.json || cat /tmp/smartlead-orchestrator.json
+          jq '{ok, mode, skipped, blocked, reason, activated, queued, campaigns, sequences, sequenceTiming, sendWindow, senders, capacity, analytics, verification, laneCounts, legacyWarnings, state}' /tmp/smartlead-orchestrator.json || cat /tmp/smartlead-orchestrator.json
 
           if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
             echo "::error::Smartlead orchestrator returned HTTP $HTTP_CODE."
@@ -128,7 +128,7 @@ jobs:
               state: 'success',
               context: mode === 'setup' ? 'smartlead/setup' : 'smartlead/autopilot',
               description: mode === 'setup'
-                ? 'Smartlead campaigns, sequences and sender pools synced'
+                ? 'Visible Smartlead sequences and sender pools synced'
                 : 'Verified Smartlead daily batch processed',
               target_url: process.env.RUN_URL,
             });
@@ -150,7 +150,7 @@ jobs:
               state: 'failure',
               context: mode === 'setup' ? 'smartlead/setup' : 'smartlead/autopilot',
               description: mode === 'setup'
-                ? 'Smartlead setup sync failed'
+                ? 'Visible Smartlead setup sync failed'
                 : 'Verified Smartlead daily batch failed',
               target_url: process.env.RUN_URL,
             });
