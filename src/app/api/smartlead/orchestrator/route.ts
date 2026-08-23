@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { openRouterCompletion } from "@/lib/openrouter-low-cost";
+import { runOutreachEmailWaterfall } from "@/lib/outreach-email-waterfall";
 import { isGccCountry, isKsaCountry, senderBrand, type OutreachProduct, type RecipientLocale } from "@/lib/recipient-language-routing";
 import { getSmartleadV2, sequenceTemplate, type V2Lead } from "@/lib/smartlead-v2";
 import { renderOutreachTemplate, sanitizeOutreachText } from "@/lib/smartlead-policy";
@@ -18,6 +19,7 @@ const PEAK_TOUCH_MULTIPLIER = 5;
 const CAPACITY_SAFETY_FACTOR = 0.85;
 const MIN_GAP_MINUTES = 15;
 const AI_ARABIC_CONFIDENCE = 0.97;
+const VERIFICATION_BUFFER = 10;
 const STATE_PATH = process.env.SMARTLEAD_AUTOPILOT_STATE_PATH || "/app/data/smartlead-v2-autopilot.json";
 const LEDGER_PATH = process.env.SMARTLEAD_V2_LEDGER_PATH || "/app/data/smartlead-v2-ledger.json";
 const BUSINESS_DAYS = new Set(["Sun", "Mon", "Tue", "Wed", "Thu"]);
@@ -299,13 +301,13 @@ async function setupOnly() {
   };
 }
 
-async function autopilot() {
+async function autopilot(millionVerifierApiKey = "") {
   const clock = riyadhClock(); const previous = await readState();
   if (!BUSINESS_DAYS.has(clock.weekday)) return { ok: true, skipped: true, reason: "KSA weekend; no new cold outreach is queued.", state: previous };
   if (previous.lastSuccessfulDate === clock.date && ["success", "noop"].includes(previous.status)) return { ok: true, skipped: true, reason: "Today's batch was already processed successfully.", state: previous };
 
   const startedAt = new Date().toISOString();
-  await writeJson(STATE_PATH, { ...EMPTY_STATE, status: "running", riyadhDate: clock.date, startedAt, lastSuccessfulDate: previous.lastSuccessfulDate, message: "Running final Smartlead autopilot with peak-aware capacity." } satisfies AutopilotState);
+  await writeJson(STATE_PATH, { ...EMPTY_STATE, status: "running", riyadhDate: clock.date, startedAt, lastSuccessfulDate: previous.lastSuccessfulDate, message: "Running verified Smartlead autopilot with peak-aware capacity." } satisfies AutopilotState);
 
   try {
     const setup = await setupOnly();
@@ -331,22 +333,35 @@ async function autopilot() {
     }
     if (!snapshot.configuration.openRouterConfigured) throw new Error("OpenRouter is not configured in production.");
 
+    const verificationCandidates = snapshot.queue
+      .filter((lead) => !/(?:Sales activity|Already entered|Duplicate email)/i.test(lead.blockReason || ""))
+      .slice(0, capacity.globalSafeNew + VERIFICATION_BUFFER);
+    const verification = await runOutreachEmailWaterfall(verificationCandidates, capacity.globalSafeNew, {
+      millionVerifierApiKey,
+      buffer: VERIFICATION_BUFFER,
+    });
+    const verifiedEmails = new Set(verification.sendableEmails.map((email) => email.toLowerCase()));
+
+    snapshot = await getSmartleadV2(true);
+    if (!snapshot.safety.healthy) throw new Error("Fresh Sales safety changed during email verification; queue aborted.");
+
     const productCount: Record<OutreachProduct, number> = { talentera: 0, evalify: 0 }; const selected: V2Lead[] = [];
     for (const lead of snapshot.queue) {
       if (!lead.eligible) continue;
+      if (!verifiedEmails.has(lead.email.toLowerCase())) continue;
       if (productCount[lead.product] >= capacity.productCaps[lead.product]) continue;
       selected.push(lead); productCount[lead.product] += 1;
       if (selected.length >= capacity.globalSafeNew) break;
     }
     if (!selected.length) {
-      const state: AutopilotState = { ...EMPTY_STATE, status: "noop", riyadhDate: clock.date, startedAt, finishedAt: new Date().toISOString(), lastSuccessfulDate: clock.date, message: "No eligible Marita leads fit today's safe product capacity." };
-      await writeJson(STATE_PATH, state); return { ok: true, state, capacity };
+      const state: AutopilotState = { ...EMPTY_STATE, status: "noop", riyadhDate: clock.date, startedAt, finishedAt: new Date().toISOString(), lastSuccessfulDate: clock.date, message: "No MillionVerifier-valid Marita leads fit today's safe product capacity." };
+      await writeJson(STATE_PATH, state); return { ok: true, state, capacity, verification };
     }
 
     const prepared = await personalizeBatch(selected);
     snapshot = await getSmartleadV2(true);
     if (!snapshot.safety.healthy) throw new Error("Fresh Sales safety changed during personalization; queue aborted.");
-    const fresh = new Map(snapshot.queue.filter((lead) => lead.eligible).map((lead) => [lead.email.toLowerCase(), lead]));
+    const fresh = new Map(snapshot.queue.filter((lead) => lead.eligible && verifiedEmails.has(lead.email.toLowerCase())).map((lead) => [lead.email.toLowerCase(), lead]));
     const safe = prepared.filter((lead) => { const current = fresh.get(lead.email.toLowerCase()); return current && current.contactId === lead.contactId && current.companyId === lead.companyId && current.product === lead.product; });
 
     const ledger = await readLedger(); const ledgerEmails = new Set(ledger.entries.map((entry) => entry.email.toLowerCase())); const newEntries: LedgerEntry[] = [];
@@ -361,9 +376,9 @@ async function autopilot() {
     }
 
     await writeJson(LEDGER_PATH, { version: 1, entries: [...ledger.entries, ...newEntries].slice(-50_000) } satisfies Ledger);
-    const state: AutopilotState = { ...EMPTY_STATE, status: newEntries.length ? "success" : "noop", riyadhDate: clock.date, startedAt, finishedAt: new Date().toISOString(), lastSuccessfulDate: clock.date, prepared: prepared.length, queued: newEntries.length, talentera: newEntries.filter((entry) => entry.product === "talentera").length, evalufy: newEntries.filter((entry) => entry.product === "evalify").length, message: newEntries.length ? "Today's safe batch was queued to Smartlead and campaigns were started." : "No fresh lead remained after final safety/dedupe checks." };
+    const state: AutopilotState = { ...EMPTY_STATE, status: newEntries.length ? "success" : "noop", riyadhDate: clock.date, startedAt, finishedAt: new Date().toISOString(), lastSuccessfulDate: clock.date, prepared: prepared.length, queued: newEntries.length, talentera: newEntries.filter((entry) => entry.product === "talentera").length, evalufy: newEntries.filter((entry) => entry.product === "evalify").length, message: newEntries.length ? "Today's verified batch was queued to Smartlead and campaigns were started." : "No fresh verified lead remained after final safety/dedupe checks." };
     await writeJson(STATE_PATH, state);
-    return { ok: true, mode: "autopilot", state, capacity, analytics, sequence: { touch1: "Day 0", touch2: "+3 days", touch3: "+4 days after Touch 2" } };
+    return { ok: true, mode: "autopilot", state, capacity, analytics, verification, sequence: { touch1: "Day 0", touch2: "+3 days", touch3: "+4 days after Touch 2" } };
   } catch (error) {
     const state: AutopilotState = { ...EMPTY_STATE, status: "failed", riyadhDate: clock.date, startedAt, finishedAt: new Date().toISOString(), lastSuccessfulDate: previous.lastSuccessfulDate, message: error instanceof Error ? error.message : "Unknown final Smartlead orchestrator error", warnings: ["No successful daily completion was recorded; the next morning retry may run again."] };
     await writeJson(STATE_PATH, state); throw error;
@@ -374,6 +389,7 @@ export async function GET() {
   return NextResponse.json({
     configured: Boolean(apiKey()),
     dailyNewLeadTarget: GLOBAL_NEW_LEADS_PER_DAY,
+    verification: { provider: "MillionVerifier", fallback: "SignalHire", buffer: VERIFICATION_BUFFER, policy: "Only verified current or verified recovered emails may enter Smartlead." },
     capacityModel: { perMailboxCampaignEmails: MAX_CAMPAIGN_EMAILS_PER_MAILBOX, peakTouchMultiplier: PEAK_TOUCH_MULTIPLIER, safetyFactor: CAPACITY_SAFETY_FACTOR },
     campaigns: { talentera: CAMPAIGNS.talentera.name, evalufy: CAMPAIGNS.evalify.name },
     sequence: { touch1: "Day 0", touch2: "+3 days", touch3: "+4 days after Touch 2 (~Day 7)", stopOnReply: true },
@@ -385,9 +401,10 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   if (!authorized(request)) return NextResponse.json({ error: "Unauthorized Smartlead orchestrator request." }, { status: 401 });
   const body = object(await request.json().catch(() => ({}))); const mode = clean(body.mode).toLowerCase() || "setup";
+  const millionVerifierApiKey = clean(request.headers.get("x-millionverifier-api-key"), 8_000);
   try {
     if (mode === "setup") return NextResponse.json(await setupOnly());
-    if (mode === "autopilot") return NextResponse.json(await autopilot());
+    if (mode === "autopilot") return NextResponse.json(await autopilot(millionVerifierApiKey));
     return NextResponse.json({ error: "mode must be setup or autopilot" }, { status: 400 });
   } catch (error) {
     console.error("Final Smartlead orchestrator failed", { mode, error });
