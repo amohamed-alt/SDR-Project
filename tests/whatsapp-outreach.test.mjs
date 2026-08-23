@@ -72,7 +72,7 @@ test("conservative fallback uses Saudi Arabic when explicit Arabic script is pre
   }), "saudi-ar");
 });
 
-test("fallback copy only uses verified hiring as a hiring claim", () => {
+test("Saudi fallback sounds conversational and only uses verified hiring as a claim", () => {
   const withoutHiring = deterministicWhatsAppMessage({
     fullName: "محمد أحمد",
     company: "Example Co",
@@ -80,8 +80,11 @@ test("fallback copy only uses verified hiring as a hiring claim", () => {
     style: "saudi-ar",
     verifiedHiring: null,
   });
-  assert.doesNotMatch(withoutHiring, /حركة توظيف الفترة هذي/);
+  assert.match(withoutHiring, /السلام عليكم أستاذ محمد يعطيك العافية/);
+  assert.match(withoutHiring, /بغيت أسألك/);
   assert.match(withoutHiring, /بحكم شغلك/);
+  assert.doesNotMatch(withoutHiring, /شفت عندكم توظيف شغال هالفترة/);
+  assert.doesNotMatch(withoutHiring, /Talentera تساعد فرق التوظيف ترتب/);
 
   const withHiring = deterministicWhatsAppMessage({
     fullName: "محمد أحمد",
@@ -90,7 +93,22 @@ test("fallback copy only uses verified hiring as a hiring claim", () => {
     style: "saudi-ar",
     verifiedHiring: { activeJobs: 12, newJobs30d: 5 },
   });
-  assert.match(withHiring, /حركة توظيف الفترة هذي/);
+  assert.match(withHiring, /شفت عندكم توظيف شغال هالفترة/);
+  assert.match(withHiring, /بغيت أعرف/);
+  assert.match(withHiring, /إذا ودك أرسل لك الفكرة باختصار/);
+});
+
+test("English fallback is curiosity-led rather than a brochure pitch", () => {
+  const message = deterministicWhatsAppMessage({
+    fullName: "Sarah Miller",
+    company: "Example Co",
+    title: "Talent Acquisition Director",
+    style: "english",
+    verifiedHiring: null,
+  });
+  assert.match(message, /Hi Sarah — quick question/);
+  assert.match(message, /screening and candidate follow-up/);
+  assert.doesNotMatch(message, /streamline screening and follow-up/);
 });
 
 test("builds a direct WhatsApp Web link with encoded message text", () => {
