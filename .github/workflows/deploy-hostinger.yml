@@ -211,6 +211,42 @@ jobs:
           fi
           echo "Smartlead API: configured and responding"
 
+      - name: Validate MillionVerifier API key
+        env:
+          MILLIONVERIFIER_KEY: ${{ secrets.MILLIONVERIFIER_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$MILLIONVERIFIER_KEY" || {
+            echo "::error::Add MILLIONVERIFIER_API_KEY as a repository Actions secret."
+            exit 1
+          }
+          HTTP_CODE=$(curl --silent --show-error \
+            --connect-timeout 10 \
+            --max-time 30 \
+            --output /tmp/millionverifier-credits.json \
+            --write-out '%{http_code}' \
+            "https://api.millionverifier.com/api/v3/credits?api=${MILLIONVERIFIER_KEY}" || true)
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::MillionVerifier API validation failed (HTTP $HTTP_CODE)."
+            exit 1
+          fi
+          echo "MillionVerifier API: configured and responding without consuming a verification credit"
+
+      - name: Prepare Smartlead runtime verifier configuration
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("docker-compose.yml")
+          text = path.read_text()
+          anchor = "      SMARTLEAD_API_KEY: ${SMARTLEAD_API_KEY:-}\n"
+          addition = anchor + "      MILLIONVERIFIER_API_KEY: ${MILLIONVERIFIER_API_KEY:-}\n      SMARTLEAD_V2_INTELLIGENCE_PATH: /app/data/smartlead-v2-intelligence-v3.json\n"
+          if "MILLIONVERIFIER_API_KEY: ${MILLIONVERIFIER_API_KEY:-}" not in text:
+              if anchor not in text:
+                  raise SystemExit("SMARTLEAD_API_KEY compose anchor not found")
+              text = text.replace(anchor, addition, 1)
+          path.write_text(text)
+          PY
+
       - name: Deploy Docker Compose
         uses: hostinger/deploy-on-vps@v2
         with:
@@ -229,21 +265,19 @@ jobs:
             OPENROUTER_FAST_MODEL=openai/gpt-4.1-nano
             OPENROUTER_DEEP_MODEL=openai/gpt-4.1-mini
             SMARTLEAD_API_KEY=${{ secrets.SMARTLEAD_API_KEY }}
+            MILLIONVERIFIER_API_KEY=${{ secrets.MILLIONVERIFIER_API_KEY }}
             SMARTLEAD_CAMPAIGN_NAME=Talentera | Marita SDR | Localized 3-Touch
-            SMARTLEAD_DAILY_NEW_LEADS=75
+            SMARTLEAD_DAILY_NEW_LEADS=50
             SMARTLEAD_SALES_ACTIVITY_LOOKBACK_DAYS=45
             SMARTLEAD_START_HOUR=09:30
             SMARTLEAD_END_HOUR=16:30
-            SMARTLEAD_MIN_TIME_BETWEEN_EMAILS=5
+            SMARTLEAD_MIN_TIME_BETWEEN_EMAILS=15
 
       - name: Verify exact deployed build, Career ATS V3, Dashboard V2, AI gateway, acquisition, and Smartlead health
         run: |
           set -euo pipefail
           HOST='sdr.dashboardtalentera.tech'
 
-          # Phase 1: use the cheap shallow endpoint to wait for the exact build.
-          # Cache-bust the health request so a proxy can never make a new deploy
-          # look like an old build.
           APP_UP=false
           for ATTEMPT in $(seq 1 22); do
             BODY=$(curl --silent --show-error \
@@ -281,8 +315,6 @@ jobs:
             exit 1
           fi
 
-          # Phase 2: once the app is reachable on the exact build, perform the
-          # expensive deep readiness check only a small bounded number of times.
           READY=false
           for ATTEMPT in $(seq 1 6); do
             BODY=$(curl --silent --show-error \
@@ -393,6 +425,19 @@ jobs:
           fi
           if [ "$SMARTLEAD_SAFETY" != "true" ]; then
             echo "::warning::Smartlead is connected, but the Sales safety scan is currently locking outreach. Review the dashboard before preparing a batch."
+          fi
+
+          SEND_HEALTH_CODE=$(curl --silent --show-error \
+            --connect-timeout 5 \
+            --max-time 20 \
+            --output /tmp/smartlead-send-health.json \
+            --write-out '%{http_code}' \
+            "https://${HOST}/api/smartlead/send-today" || true)
+          MV_RUNTIME=$(jq -r '.millionVerifierConfigured // false' /tmp/smartlead-send-health.json 2>/dev/null || echo false)
+          if [ "$SEND_HEALTH_CODE" != "200" ] || [ "$MV_RUNTIME" != "true" ]; then
+            echo "::error::MillionVerifier secret did not reach the Smartlead runtime."
+            cat /tmp/smartlead-send-health.json || true
+            exit 1
           fi
 
       - name: Mark deployment successful
