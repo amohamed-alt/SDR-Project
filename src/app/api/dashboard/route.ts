@@ -3,6 +3,7 @@ import { z } from "zod";
 import { DEFAULT_SDR_OWNER_ID } from "@/lib/config";
 import { getDashboardSnapshot } from "@/lib/dashboard-snapshot";
 import { createMockDashboard } from "@/lib/mock-data";
+import { compressedJsonResponse } from "@/lib/compressed-json";
 import type { DashboardFilters } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -57,14 +58,12 @@ export async function GET(request: NextRequest) {
         }
       : await getDashboardSnapshot(filters, params.get("refresh") === "1");
 
-    return NextResponse.json(snapshot.data, {
-      headers: {
+    return compressedJsonResponse(request, snapshot.data, {
         "Cache-Control": "private, max-age=0, must-revalidate, stale-while-revalidate=60",
         "X-Dashboard-Cache-Version": "v7-fastapi-persistent",
         "X-Dashboard-Cache": snapshot.cacheStatus,
         "X-Dashboard-Snapshot-Age": String(snapshot.ageSeconds),
         "X-Dashboard-Refreshing": snapshot.refreshing ? "1" : "0",
-      },
     });
   } catch (error) {
     console.error("Dashboard load failed", error);

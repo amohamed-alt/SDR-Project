@@ -60,7 +60,6 @@ type OpenRouterPayload = {
   message?: string;
 };
 
-const DAY_MS = 86_400_000;
 const DEFAULT_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const STATE_PATH = process.env.OPENROUTER_STATE_PATH || "/app/data/openrouter-cost-state.json";
 const FAST_MODEL = process.env.OPENROUTER_FAST_MODEL || "openai/gpt-4.1-nano";
@@ -138,7 +137,7 @@ function normalizeState(input: Partial<CostState> | null | undefined): CostState
 
 async function readState() {
   try {
-    const raw = await fs.readFile(STATE_PATH, "utf8");
+    const raw = await fs.readFile(/* turbopackIgnore: true */ STATE_PATH, "utf8");
     return normalizeState(JSON.parse(raw) as Partial<CostState>);
   } catch {
     return emptyState();
@@ -146,10 +145,10 @@ async function readState() {
 }
 
 async function writeState(state: CostState) {
-  await fs.mkdir(path.dirname(STATE_PATH), { recursive: true });
+  await fs.mkdir(/* turbopackIgnore: true */ path.dirname(STATE_PATH), { recursive: true });
   const tempPath = `${STATE_PATH}.tmp-${process.pid}`;
-  await fs.writeFile(tempPath, JSON.stringify(state), { encoding: "utf8", mode: 0o600 });
-  await fs.rename(tempPath, STATE_PATH);
+  await fs.writeFile(/* turbopackIgnore: true */ tempPath, JSON.stringify(state), { encoding: "utf8", mode: 0o600 });
+  await fs.rename(/* turbopackIgnore: true */ tempPath, /* turbopackIgnore: true */ STATE_PATH);
 }
 
 async function withStateLock<T>(callback: () => Promise<T>) {

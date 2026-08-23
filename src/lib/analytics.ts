@@ -104,6 +104,15 @@ function number(raw: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function contactPhone(record: HubSpotRecord | undefined) {
+  if (!record) return "";
+  return value(record, "whatsapp_number")
+    || value(record, "hs_whatsapp_phone_number")
+    || value(record, "whatsapp_phone_number")
+    || value(record, "mobilephone")
+    || value(record, "phone");
+}
+
 function isBetween(raw: string, from: string, to: string) {
   if (!raw) return false;
   const timestamp = new Date(raw).getTime();
@@ -333,6 +342,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     contact.id,
     [value(contact, "firstname"), value(contact, "lastname")].filter(Boolean).join(" ") || "Unnamed contact",
   ]));
+  const contactRecordMap = new Map(allContacts.map((contact) => [contact.id, contact]));
   const activityContact = (contactIds: string[], fallbackType: "call" | "meeting" | "task" | "email" | "communication") => {
     const contactId = contactIds.find((id) => selectedIds.has(id)) ?? contactIds[0];
     if (!contactId) {
@@ -348,6 +358,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       relatedContactId: contactId,
       relatedContactName: contactNameMap.get(contactId) ?? `Contact #${contactId}`,
       relatedContactUrl: contactUrl,
+      relatedContactHasPhone: Boolean(contactPhone(contactRecordMap.get(contactId))),
       url: contactUrl,
     };
   };
@@ -426,7 +437,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   const quality: QualityMetric[] = [
     completeness("email", "Email coverage", selectedContacts),
     completeness("gtm_email_status", "Verified email", selectedContacts, (contact) => /valid|verified|deliverable/i.test(value(contact, "gtm_email_status"))),
-    completeness("phone", "Phone coverage", selectedContacts, (contact) => Boolean(value(contact, "phone") || value(contact, "mobilephone"))),
+    completeness("phone", "Phone coverage", selectedContacts, (contact) => Boolean(contactPhone(contact))),
     completeness("phone_number_status", "Tested phone", selectedContacts, (contact) => /correct|valid|verified/i.test(value(contact, "phone_number_status"))),
     completeness("gtm_linkedin_url", "LinkedIn coverage", selectedContacts),
     completeness("company_id", "Company association", selectedContacts),
@@ -462,7 +473,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     return {
       id: contact.id,
       name: [value(contact, "firstname"), value(contact, "lastname")].filter(Boolean).join(" ") || "Unnamed contact",
-      email: value(contact, "email"), phone: value(contact, "phone") || value(contact, "mobilephone"),
+      email: value(contact, "email"), phone: contactPhone(contact),
       linkedinUrl: value(contact, "gtm_linkedin_url"),
       title: value(contact, "jobtitle"), company: value(contact, "company"), country: value(contact, "country"),
       originalSource: displayValue(value(contact, "hs_analytics_source"), originalSourceLabels),
@@ -487,7 +498,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       qualityIssues: [
         !value(contact, "email") && "email",
         !/valid|verified|deliverable/i.test(emailStatus) && "gtm_email_status",
-        !(value(contact, "phone") || value(contact, "mobilephone")) && "phone",
+        !contactPhone(contact) && "phone",
         !/correct|valid|verified/i.test(phoneStatus) && "phone_number_status",
         !value(contact, "gtm_linkedin_url") && "gtm_linkedin_url",
         !value(contact, "company_id") && "company_id",

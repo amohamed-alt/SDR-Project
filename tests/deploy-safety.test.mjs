@@ -53,6 +53,36 @@ test("today task queue and full task drawer expose WhatsApp for associated conta
   const drawer = await read("src/components/DrilldownDrawer.tsx");
 
   assert.match(workspace, /function TaskQueueItem/);
-  assert.match(workspace, /row\.relatedContactId && <WhatsAppQuickAction contactId=\{row\.relatedContactId\}/);
-  assert.match(drawer, /row\.type === "Task" && row\.relatedContactId && <WhatsAppQuickAction contactId=\{row\.relatedContactId\}/);
+  assert.match(workspace, /row\.relatedContactId && row\.relatedContactHasPhone && <WhatsAppQuickAction contactId=\{row\.relatedContactId\}/);
+  assert.match(drawer, /row\.type === "Task" && row\.relatedContactId && row\.relatedContactHasPhone && <WhatsAppQuickAction contactId=\{row\.relatedContactId\}/);
+});
+
+test("production access is protected and no hardcoded owner PIN remains", async () => {
+  const proxy = await read("src/proxy.ts");
+  const acquisition = await read("src/app/api/acquisition/route.ts");
+  const smartleadAuth = await read("src/lib/smartlead-action-auth.ts");
+  const workflow = await read(".github/workflows/deploy-hostinger.yml");
+
+  assert.match(proxy, /dashboardAuthResponse/);
+  assert.doesNotMatch(acquisition, /OWNER_PIN_SHA256|e0f05da9/);
+  assert.doesNotMatch(smartleadAuth, /OWNER_PIN_SHA256|e0f05da9/);
+  assert.match(workflow, /DASHBOARD_PASSWORD:.*ACQUISITION_OWNER_TOKEN/);
+  assert.match(workflow, /--user "\$\{DASHBOARD_USERNAME\}:\$\{DASHBOARD_PASSWORD\}"/);
+});
+
+test("Primeforge is deployed as a read-only fail-closed Smartlead gate", async () => {
+  const deploy = await read(".github/workflows/deploy-hostinger.yml");
+  const autopilot = await read(".github/workflows/smartlead-autopilot.yml");
+  const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
+  const primeforge = await read("src/lib/primeforge-health.ts");
+
+  assert.match(deploy, /PRIMEFORGE_API_KEY/);
+  assert.match(autopilot, /Primeforge infrastructure gate/);
+  assert.match(orchestrator, /checkPrimeforgeInfrastructure/);
+  assert.match(orchestrator, /pauseManagedCampaigns\(\)\.catch/);
+  assert.match(orchestrator, /if \(autopilotEnabled\(\)\) await pauseManagedCampaigns\(\)/);
+  assert.match(autopilot, /primeforge-fail-closed/);
+  assert.match(deploy, /primeforge-deploy-fail-closed/);
+  assert.match(primeforge, /method: "GET"/);
+  assert.doesNotMatch(primeforge, /method: "(?:POST|PUT|PATCH|DELETE)"/);
 });

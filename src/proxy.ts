@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { dashboardAuthResponse } from "@/lib/dashboard-auth";
 
 export function proxy(request: NextRequest) {
-  // The SDR Dashboard is intentionally open. Authentication is not enforced here.
-  // Sensitive server-side credentials remain private environment variables and are
-  // never exposed to the browser by this proxy.
+  const authResponse = dashboardAuthResponse(request);
+  if (authResponse) return authResponse;
+
   //
   // Traefik/Hostinger can expose the public Origin header while Next.js resolves
   // request.nextUrl against the internal container host. For acquisition POSTs,

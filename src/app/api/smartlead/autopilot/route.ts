@@ -20,7 +20,7 @@ const STATE_PATH = process.env.SMARTLEAD_AUTOPILOT_STATE_PATH || "/app/data/smar
 const PREPARED_PATH = process.env.SMARTLEAD_V2_PREPARED_PATH || "/app/data/smartlead-v2-prepared.json";
 const BUSINESS_DAYS = new Set(["Sun", "Mon", "Tue", "Wed", "Thu"]);
 const BOUNCE_GUARD_MIN_SENT = 50;
-const BOUNCE_GUARD_RATE = 0.03;
+const BOUNCE_GUARD_RATE = 0.02;
 const LOCK_TTL_MS = 20 * 60 * 1000;
 
 type AutopilotStatus = "never" | "running" | "success" | "noop" | "blocked" | "failed";
@@ -93,7 +93,7 @@ function riyadhClock(now = new Date()) {
 
 async function readState(): Promise<AutopilotState> {
   try {
-    const parsed = JSON.parse(await fs.readFile(STATE_PATH, "utf8")) as Partial<AutopilotState>;
+    const parsed = JSON.parse(await fs.readFile(/* turbopackIgnore: true */ STATE_PATH, "utf8")) as Partial<AutopilotState>;
     return { ...EMPTY_STATE, ...parsed, version: 1 };
   } catch {
     return { ...EMPTY_STATE };
@@ -101,17 +101,17 @@ async function readState(): Promise<AutopilotState> {
 }
 
 async function writeState(state: AutopilotState) {
-  await fs.mkdir(path.dirname(STATE_PATH), { recursive: true });
+  await fs.mkdir(/* turbopackIgnore: true */ path.dirname(STATE_PATH), { recursive: true });
   const tmp = `${STATE_PATH}.tmp-${process.pid}`;
-  await fs.writeFile(tmp, JSON.stringify(state), { encoding: "utf8", mode: 0o600 });
-  await fs.rename(tmp, STATE_PATH);
+  await fs.writeFile(/* turbopackIgnore: true */ tmp, JSON.stringify(state), { encoding: "utf8", mode: 0o600 });
+  await fs.rename(/* turbopackIgnore: true */ tmp, /* turbopackIgnore: true */ STATE_PATH);
 }
 
 async function normalizeEvalufyPreparedCopy() {
   try {
-    const raw = await fs.readFile(PREPARED_PATH, "utf8");
+    const raw = await fs.readFile(/* turbopackIgnore: true */ PREPARED_PATH, "utf8");
     const normalized = raw.replace(/Evalify/g, "Evalufy");
-    if (normalized !== raw) await fs.writeFile(PREPARED_PATH, normalized, { encoding: "utf8", mode: 0o600 });
+    if (normalized !== raw) await fs.writeFile(/* turbopackIgnore: true */ PREPARED_PATH, normalized, { encoding: "utf8", mode: 0o600 });
   } catch {
     // Prepare may legitimately produce no file when there is no eligible capacity.
   }
@@ -123,7 +123,7 @@ function reputationWarnings(payload: Awaited<ReturnType<typeof getSmartleadV2>>)
     const analytics = payload.analytics[product];
     if (analytics.sent >= BOUNCE_GUARD_MIN_SENT && analytics.bounceRate >= BOUNCE_GUARD_RATE) {
       const label = product === "talentera" ? "Talentera" : "Evalufy";
-      warnings.push(`${label} bounce rate is ${(analytics.bounceRate * 100).toFixed(1)}% after ${analytics.sent} sends; automatic sending is locked at the 3% guardrail.`);
+      warnings.push(`${label} bounce rate is ${(analytics.bounceRate * 100).toFixed(1)}% after ${analytics.sent} sends; automatic sending is locked at the 2% guardrail.`);
     }
   }
   return warnings;
@@ -131,12 +131,12 @@ function reputationWarnings(payload: Awaited<ReturnType<typeof getSmartleadV2>>)
 
 function statusPayload(state: AutopilotState) {
   return {
-    enabled: process.env.SMARTLEAD_AUTOPILOT_ENABLED !== "false",
+    enabled: process.env.SMARTLEAD_AUTOPILOT_ENABLED === "true" && process.env.SMARTLEAD_LEGACY_SEND_ENABLED === "true",
     timezone: "Asia/Riyadh",
     businessDays: "Sunday-Thursday",
     queueAttemptsRiyadh: ["08:45", "09:05", "09:25"],
     smartleadSendWindowRiyadh: `${clean(process.env.SMARTLEAD_START_HOUR) || "09:30"}-${clean(process.env.SMARTLEAD_END_HOUR) || "16:30"}`,
-    starterDailyNewLeadTarget: Number(process.env.SMARTLEAD_DAILY_NEW_LEADS || 75),
+    starterDailyNewLeadTarget: Number(process.env.SMARTLEAD_DAILY_NEW_LEADS || 50),
     bounceGuard: { minSent: BOUNCE_GUARD_MIN_SENT, maxRate: BOUNCE_GUARD_RATE },
     state,
   };
@@ -150,8 +150,8 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   if (!authorized(request)) return NextResponse.json({ error: "Unauthorized autopilot request." }, { status: 401 });
-  if (process.env.SMARTLEAD_AUTOPILOT_ENABLED === "false") {
-    return NextResponse.json({ ok: true, skipped: true, reason: "Autopilot is disabled." });
+  if (process.env.SMARTLEAD_AUTOPILOT_ENABLED !== "true" || process.env.SMARTLEAD_LEGACY_SEND_ENABLED !== "true") {
+    return NextResponse.json({ ok: true, skipped: true, blocked: true, reason: "Legacy autopilot is disabled; use the MillionVerifier-gated orchestrator-v3 path." });
   }
 
   const clock = riyadhClock();

@@ -9,7 +9,7 @@ const spamTriggers = [
 test("visible sequences keep the conservative 3-touch cadence", () => {
   for (const lane of Object.values(VISIBLE_SEQUENCE_LANES)) {
     assert.equal(lane.touches.length, 3, lane.lane);
-    assert.deepEqual(lane.touches.map((touch) => touch.delayDays), [0, 3, 4], lane.lane);
+    assert.deepEqual(lane.touches.map((touch) => touch.delayDays), [0, 4, 6], lane.lane);
     assert.deepEqual(lane.touches.map((touch) => touch.framework), ["AIDA", "PAS", "Breakup"], lane.lane);
   }
 });

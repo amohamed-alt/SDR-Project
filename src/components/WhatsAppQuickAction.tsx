@@ -10,7 +10,7 @@ type WhatsAppPayload = {
   message?: string;
   phone?: {
     selected?: string;
-    source?: "mobilephone" | "phone";
+    source?: "whatsapp_number" | "hs_whatsapp_phone_number" | "whatsapp_phone_number" | "mobilephone" | "phone";
     mobileLikely?: boolean;
     alternate?: string;
   };

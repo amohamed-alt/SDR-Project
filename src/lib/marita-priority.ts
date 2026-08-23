@@ -11,7 +11,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 const HUBSPOT_API = "https://api.hubapi.com";
 
 const CONTACT_PROPS = [
-  "firstname", "lastname", "email", "phone", "mobilephone", "jobtitle", "company", "company_id", "country", "sdr_owner",
+  "firstname", "lastname", "email", "phone", "mobilephone", "whatsapp_number", "hs_whatsapp_phone_number", "whatsapp_phone_number", "jobtitle", "company", "company_id", "country", "sdr_owner",
 ] as const;
 const COMPANY_PROPS = [
   "name", "domain", "country", "gtm_country", "detected_ats", "ats_status", "ats_confidence", "career_page_url",
@@ -124,6 +124,14 @@ function unique(values: string[]) {
 
 function contactName(contact: HubSpotRecord) {
   return [text(contact, "firstname"), text(contact, "lastname")].filter(Boolean).join(" ") || text(contact, "email") || `Contact ${contact.id}`;
+}
+
+function contactPhone(contact: HubSpotRecord) {
+  return text(contact, "whatsapp_number")
+    || text(contact, "hs_whatsapp_phone_number")
+    || text(contact, "whatsapp_phone_number")
+    || text(contact, "mobilephone")
+    || text(contact, "phone");
 }
 
 function recordUrl(typeId: "0-1" | "0-2", id: string) {
@@ -361,7 +369,7 @@ export async function getMaritaPriorityQueue(forceRefresh = false): Promise<Mari
 
     const contacts: MaritaPriorityContactTask[] = [...contactTaskMap.entries()].map(([contactId, tasks]) => {
       const contact = contactById.get(contactId)!;
-      const phone = text(contact, "mobilephone") || text(contact, "phone");
+      const phone = contactPhone(contact);
       const email = text(contact, "email");
       const dueAt = earliestDue(tasks);
       return {

@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
@@ -18,6 +18,7 @@ import {
 import { searchAll } from "@/lib/hubspot";
 import { normalizeCompanyDomain } from "@/lib/prospecting-company-intelligence";
 import { scoreTalenteraAccount } from "@/lib/talentera-intelligence";
+import { verifiedActiveJobCount } from "@/lib/acquisition-job-count";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -110,17 +111,12 @@ function safeEqual(left: string, right: string) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-const OWNER_PIN_SHA256 = "e0f05da93a0f5a86a3be5fc0e301606513c9f7e59dac2357348aa0f2f47db984";
 const OWNER_PIN_WINDOW_MS = 10 * 60 * 1000;
 const OWNER_PIN_MAX_ATTEMPTS = 5;
 const ownerPinAttempts = new Map<string, { count: number; resetAt: number }>();
 
 function ownerRateKey(request: NextRequest) {
   return clean(request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0] || request.headers.get("x-real-ip") || "unknown", 120);
-}
-
-function ownerPinMatches(value: string) {
-  return createHash("sha256").update(value).digest("hex") === OWNER_PIN_SHA256;
 }
 
 function ownerAuthorized(request: NextRequest) {
@@ -137,11 +133,6 @@ function ownerAuthorized(request: NextRequest) {
     return { ok: false as const, status: 429, error: "Too many Owner PIN attempts. Try again in a few minutes." };
   }
 
-  if (ownerPinMatches(supplied)) {
-    ownerPinAttempts.delete(rateKey);
-    return { ok: true as const };
-  }
-
   ownerPinAttempts.set(rateKey, {
     count: state && state.resetAt > now ? state.count + 1 : 1,
     resetAt: state && state.resetAt > now ? state.resetAt : now + OWNER_PIN_WINDOW_MS,
@@ -153,7 +144,7 @@ function configuration() {
   return {
     apolloConfigured: Boolean(clean(process.env.APOLLO_API_KEY, 1000)),
     signalHireConfigured: Boolean(clean(process.env.SIGNALHIRE_API_KEY, 1000)),
-    ownerActionsConfigured: true,
+    ownerActionsConfigured: Boolean(clean(process.env.ACQUISITION_OWNER_TOKEN, 500)),
     apolloCost: "1 credit per results page; up to 100 companies per page",
     signalHirePolicy: "Search first; spend Person API credits only on the selected persona",
   };
@@ -192,13 +183,7 @@ function organizationDomain(org: ApolloOrganization) {
 }
 
 function activeJobs(org: ApolloOrganization) {
-  return Math.max(5, Math.round(numberValue(
-    org.num_current_jobs,
-    org.organization_num_jobs,
-    org.current_jobs,
-    org.job_postings_count,
-    org.num_jobs,
-  )));
+  return verifiedActiveJobCount(org);
 }
 
 async function existingHubSpotDomains(domains: string[]) {

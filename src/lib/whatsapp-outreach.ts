@@ -1,5 +1,5 @@
 export type WhatsAppStyle = "saudi-ar" | "emirati-ar" | "gulf-ar" | "english";
-export type WhatsAppPhoneSource = "mobilephone" | "phone";
+export type WhatsAppPhoneSource = "whatsapp_number" | "hs_whatsapp_phone_number" | "whatsapp_phone_number" | "mobilephone" | "phone";
 
 export type WhatsAppPhoneSelection = {
   phone: string;
@@ -105,12 +105,18 @@ function candidate(source: WhatsAppPhoneSource, raw: string, country: string): P
 }
 
 export function selectWhatsAppPhone(input: {
+  whatsappNumber?: string | null;
+  hubspotWhatsAppNumber?: string | null;
+  legacyWhatsAppNumber?: string | null;
   mobilephone?: string | null;
   phone?: string | null;
   country?: string | null;
 }) : WhatsAppPhoneSelection | null {
   const country = clean(input.country, 120);
   const candidates = [
+    candidate("whatsapp_number", clean(input.whatsappNumber), country),
+    candidate("hs_whatsapp_phone_number", clean(input.hubspotWhatsAppNumber), country),
+    candidate("whatsapp_phone_number", clean(input.legacyWhatsAppNumber), country),
     candidate("mobilephone", clean(input.mobilephone), country),
     candidate("phone", clean(input.phone), country),
   ].filter((item): item is PhoneCandidate => Boolean(item));
@@ -118,7 +124,8 @@ export function selectWhatsAppPhone(input: {
   const unique = [...new Map(candidates.map((item) => [item.digits, item])).values()];
   if (!unique.length) return null;
 
-  const selected = unique.find((item) => item.source === "mobilephone" && item.mobileLikely)
+  const selected = unique.find((item) => ["whatsapp_number", "hs_whatsapp_phone_number", "whatsapp_phone_number"].includes(item.source))
+    ?? unique.find((item) => item.source === "mobilephone" && item.mobileLikely)
     ?? unique.find((item) => item.source === "phone" && item.mobileLikely)
     ?? unique.find((item) => item.source === "mobilephone")
     ?? unique[0];

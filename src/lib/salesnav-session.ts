@@ -37,7 +37,7 @@ function parseRuntimeValue(content: string, key: string) {
 
 async function readStoredSession(): Promise<LinkedInSession | null> {
   try {
-    const parsed = JSON.parse(await readFile(SESSION_STORE_PATH, "utf8")) as Partial<LinkedInSession>;
+    const parsed = JSON.parse(await readFile(/* turbopackIgnore: true */ SESSION_STORE_PATH, "utf8")) as Partial<LinkedInSession>;
     const liAt = String(parsed.liAt || "").trim();
     if (!liAt) return null;
     return {
@@ -65,7 +65,7 @@ export async function getLinkedInSession(): Promise<LinkedInSession> {
   }
 
   try {
-    const content = await readFile(RUNTIME_ENV_FILE, "utf8");
+    const content = await readFile(/* turbopackIgnore: true */ RUNTIME_ENV_FILE, "utf8");
     const liAt = parseRuntimeValue(content, "LINKEDIN_LI_AT").trim();
     if (liAt) {
       return {
@@ -92,20 +92,20 @@ export async function saveLinkedInSession(liAt: string, jsessionId: string) {
     jsessionId: cleanJsession,
     updatedAt: new Date().toISOString(),
   });
-  await mkdir(dirname(SESSION_STORE_PATH), { recursive: true });
+  await mkdir(/* turbopackIgnore: true */ dirname(SESSION_STORE_PATH), { recursive: true });
   const temp = `${SESSION_STORE_PATH}.tmp`;
-  await writeFile(temp, payload, { encoding: "utf8", mode: 0o600 });
+  await writeFile(/* turbopackIgnore: true */ temp, payload, { encoding: "utf8", mode: 0o600 });
   await chmod(temp, 0o600);
-  await rename(temp, SESSION_STORE_PATH);
+  await rename(/* turbopackIgnore: true */ temp, /* turbopackIgnore: true */ SESSION_STORE_PATH);
   await chmod(SESSION_STORE_PATH, 0o600);
 }
 
 export async function clearLinkedInSession() {
-  await mkdir(dirname(SESSION_STORE_PATH), { recursive: true });
+  await mkdir(/* turbopackIgnore: true */ dirname(SESSION_STORE_PATH), { recursive: true });
   const temp = `${SESSION_STORE_PATH}.tmp`;
-  await writeFile(temp, JSON.stringify({ liAt: "", jsessionId: "", updatedAt: new Date().toISOString() }), { encoding: "utf8", mode: 0o600 });
+  await writeFile(/* turbopackIgnore: true */ temp, JSON.stringify({ liAt: "", jsessionId: "", updatedAt: new Date().toISOString() }), { encoding: "utf8", mode: 0o600 });
   await chmod(temp, 0o600);
-  await rename(temp, SESSION_STORE_PATH);
+  await rename(/* turbopackIgnore: true */ temp, /* turbopackIgnore: true */ SESSION_STORE_PATH);
   await chmod(SESSION_STORE_PATH, 0o600);
 }
 

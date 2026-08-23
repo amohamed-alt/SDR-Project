@@ -4,9 +4,10 @@ import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { openRouterCompletion } from "@/lib/openrouter-low-cost";
 import { runOutreachEmailWaterfall } from "@/lib/outreach-email-waterfall";
-import { isGccCountry, isKsaCountry, senderBrand, type OutreachProduct, type RecipientLocale } from "@/lib/recipient-language-routing";
+import { isGccCountry, isKsaCountry, type OutreachProduct, type RecipientLocale } from "@/lib/recipient-language-routing";
 import { getSmartleadV2, sequenceTemplate, type V2Lead } from "@/lib/smartlead-v2";
 import { renderOutreachTemplate, sanitizeOutreachText } from "@/lib/smartlead-policy";
+import { inspectSenderAccount, validateApprovedSenderInventory } from "@/lib/smartlead-sender-routing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +25,7 @@ const STATE_PATH = process.env.SMARTLEAD_AUTOPILOT_STATE_PATH || "/app/data/smar
 const LEDGER_PATH = process.env.SMARTLEAD_V2_LEDGER_PATH || "/app/data/smartlead-v2-ledger.json";
 const BUSINESS_DAYS = new Set(["Sun", "Mon", "Tue", "Wed", "Thu"]);
 const BOUNCE_GUARD_MIN_SENT = 50;
-const BOUNCE_GUARD_RATE = 0.03;
+const BOUNCE_GUARD_RATE = 0.02;
 
 const CAMPAIGNS: Record<OutreachProduct, { name: string; label: string }> = {
   talentera: { name: "Talentera | Marita SDR | KSA-GCC | V1", label: "Talentera" },
@@ -33,7 +34,7 @@ const CAMPAIGNS: Record<OutreachProduct, { name: string; label: string }> = {
 
 type JsonObject = Record<string, unknown>;
 type Campaign = { id: number; name: string; status: string };
-type Sender = { id: number; email: string; brand: OutreachProduct | "unknown"; capacity: number; eligible: boolean };
+type Sender = { id: number; email: string; brand: OutreachProduct | "unknown"; capacity: number; eligible: boolean; reasons: string[] };
 type LedgerEntry = { email: string; contactId: string; companyId: string; product: OutreachProduct; campaignId: number; queuedAt: string; lastKnownStatus: string };
 type Ledger = { version: 1; entries: LedgerEntry[] };
 type AutopilotState = {
@@ -80,7 +81,6 @@ function clean(value: unknown, max = 4_000) { return String(value ?? "").replace
 function object(value: unknown): JsonObject { return value && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : {}; }
 function list(value: unknown, keys: string[] = []) { if (Array.isArray(value)) return value; const item = object(value); for (const key of keys) if (Array.isArray(item[key])) return item[key] as unknown[]; return [] as unknown[]; }
 function numberFrom(value: unknown, keys: string[]) { const item = object(value); for (const key of keys) { const parsed = Number(item[key]); if (Number.isFinite(parsed)) return parsed; } return 0; }
-function boolLike(value: unknown) { if (value === true || value === 1 || String(value).toLowerCase() === "true") return true; if (value === false || value === 0 || String(value).toLowerCase() === "false") return false; return null; }
 function safeEqual(left: string, right: string) { const a = Buffer.from(left); const b = Buffer.from(right); return a.length === b.length && timingSafeEqual(a, b); }
 function apiKey() { return clean(process.env.SMARTLEAD_API_KEY, 8_000); }
 function authorized(request: NextRequest) { const supplied = clean(request.headers.get("authorization"), 8_000).replace(/^Bearer\s+/i, ""); const expected = apiKey(); return Boolean(expected && supplied && safeEqual(supplied, expected)); }
@@ -91,8 +91,8 @@ function riyadhClock(now = new Date()) {
   return { date: `${value("year")}-${value("month")}-${value("day")}`, weekday: value("weekday"), hour: Number(value("hour") || 0), minute: Number(value("minute") || 0) };
 }
 
-async function readJson<T>(file: string, fallback: T): Promise<T> { try { return JSON.parse(await fs.readFile(file, "utf8")) as T; } catch { return fallback; } }
-async function writeJson(file: string, value: unknown) { await fs.mkdir(path.dirname(file), { recursive: true }); const tmp = `${file}.tmp-${process.pid}`; await fs.writeFile(tmp, JSON.stringify(value), { encoding: "utf8", mode: 0o600 }); await fs.rename(tmp, file); }
+async function readJson<T>(file: string, fallback: T): Promise<T> { try { return JSON.parse(await fs.readFile(/* turbopackIgnore: true */ file, "utf8")) as T; } catch { return fallback; } }
+async function writeJson(file: string, value: unknown) { await fs.mkdir(/* turbopackIgnore: true */ path.dirname(file), { recursive: true }); const tmp = `${file}.tmp-${process.pid}`; await fs.writeFile(/* turbopackIgnore: true */ tmp, JSON.stringify(value), { encoding: "utf8", mode: 0o600 }); await fs.rename(/* turbopackIgnore: true */ tmp, /* turbopackIgnore: true */ file); }
 async function readState() { return readJson<AutopilotState>(STATE_PATH, { ...EMPTY_STATE }); }
 async function readLedger() { return readJson<Ledger>(LEDGER_PATH, { version: 1, entries: [] }); }
 
@@ -135,14 +135,14 @@ async function listCampaigns() {
 function sequencePayload() {
   return [
     { seq_number: 1, seq_delay_details: { delay_in_days: 0 }, variant_distribution_type: "MANUALLY_EQUAL", variants: [{ subject: "{{sl_subject_1}}", email_body: "{{sl_touch_1}}", variant_label: "A" }] },
-    { seq_number: 2, seq_delay_details: { delay_in_days: 3 }, variant_distribution_type: "MANUALLY_EQUAL", variants: [{ subject: "{{sl_subject_2}}", email_body: "{{sl_touch_2}}", variant_label: "A" }] },
-    { seq_number: 3, seq_delay_details: { delay_in_days: 4 }, variant_distribution_type: "MANUALLY_EQUAL", variants: [{ subject: "{{sl_subject_3}}", email_body: "{{sl_touch_3}}", variant_label: "A" }] },
+    { seq_number: 2, seq_delay_details: { delay_in_days: 4 }, variant_distribution_type: "MANUALLY_EQUAL", variants: [{ subject: "{{sl_subject_2}}", email_body: "{{sl_touch_2}}", variant_label: "A" }] },
+    { seq_number: 3, seq_delay_details: { delay_in_days: 6 }, variant_distribution_type: "MANUALLY_EQUAL", variants: [{ subject: "{{sl_subject_3}}", email_body: "{{sl_touch_3}}", variant_label: "A" }] },
   ];
 }
 
-async function configureCampaign(campaign: Campaign) {
-  await smartleadRequest(`/campaigns/${campaign.id}/settings`, { method: "POST", body: JSON.stringify({ track_settings: ["DONT_EMAIL_OPEN", "DONT_LINK_CLICK"], stop_lead_settings: "REPLY_TO_AN_EMAIL", unsubscribe_text: "Not relevant? Reply no / غير مناسب؟ رد لا", send_as_plain_text: true, follow_up_percentage: 100, enable_ai_esp_matching: false, client_id: null }) });
-  await smartleadRequest(`/campaigns/${campaign.id}/schedule`, { method: "POST", body: JSON.stringify({ timezone: "Asia/Riyadh", days_of_the_week: [0, 1, 2, 3, 4], start_hour: "09:30", end_hour: "16:30", min_time_btw_emails: MIN_GAP_MINUTES, max_leads_per_day: GLOBAL_NEW_LEADS_PER_DAY }) });
+async function configureCampaign(product: OutreachProduct, campaign: Campaign) {
+  await smartleadRequest(`/campaigns/${campaign.id}/settings`, { method: "POST", body: JSON.stringify({ track_settings: ["DONT_TRACK_EMAIL_OPEN", "DONT_TRACK_LINK_CLICK"], stop_lead_settings: "REPLY_TO_AN_EMAIL", unsubscribe_text: "Not relevant? Reply no / غير مناسب؟ رد لا", send_as_plain_text: true, force_plain_text: true, follow_up_percentage: 100, enable_ai_esp_matching: true, auto_pause_domain_leads_on_reply: true, ignore_ss_mailbox_sending_limit: false, bounce_autopause_threshold: "2", domain_level_rate_limit: true, add_unsubscribe_tag: true, client_id: null }) });
+  await smartleadRequest(`/campaigns/${campaign.id}/schedule`, { method: "POST", body: JSON.stringify({ timezone: "Asia/Riyadh", days_of_the_week: [0, 1, 2, 3, 4], start_hour: "09:30", end_hour: "16:30", min_time_btw_emails: MIN_GAP_MINUTES, max_new_leads_per_day: product === "talentera" ? 30 : 20 }) });
   await smartleadRequest(`/campaigns/${campaign.id}/sequences`, { method: "POST", body: JSON.stringify(sequencePayload()) });
 }
 
@@ -154,7 +154,7 @@ async function ensureCampaign(product: OutreachProduct) {
     if (!campaign) { campaigns = await listCampaigns(); campaign = campaigns.find((item) => item.name === CAMPAIGNS[product].name) ?? null; }
   }
   if (!campaign) throw new Error(`${CAMPAIGNS[product].label} campaign could not be created.`);
-  await configureCampaign(campaign);
+  await configureCampaign(product, campaign);
   return campaign;
 }
 
@@ -169,24 +169,21 @@ async function listEmailAccounts() {
 
 function parseSender(value: unknown): Sender | null {
   const item = object(value); const id = Number(item.id ?? item.email_account_id); if (!Number.isFinite(id)) return null;
-  const email = clean(item.from_email || item.email || item.username).toLowerCase(); const brand = senderBrand(email);
-  const warmup = object(item.warmup_details || item.warmup); const warmupFlag = boolLike(item.warmup_enabled ?? warmup.enabled ?? warmup.warmup_enabled); const warmupStatus = clean(warmup.status || item.warmup_status).toLowerCase();
-  const accountStatus = clean(item.status || item.connection_status || item.smtp_status).toLowerCase();
-  const disconnected = /disconnect|failed|error|invalid|suspend/.test(accountStatus);
-  const warmEnough = warmupFlag !== false || /complete|ready|active|warm/.test(warmupStatus);
-  const rawLimit = numberFrom(item, ["max_email_per_day", "daily_limit", "max_emails_per_day"]); const capacity = Math.min(rawLimit > 0 ? rawLimit : MAX_CAMPAIGN_EMAILS_PER_MAILBOX, MAX_CAMPAIGN_EMAILS_PER_MAILBOX);
-  return { id, email, brand, capacity, eligible: brand !== "unknown" && !disconnected && warmEnough && capacity > 0 };
+  const safety = inspectSenderAccount(item, MAX_CAMPAIGN_EMAILS_PER_MAILBOX);
+  return { id, email: safety.email, brand: safety.brand, capacity: safety.capacity, eligible: safety.eligible, reasons: safety.reasons };
 }
 
 async function syncSenders(campaigns: Record<OutreachProduct, Campaign>) {
   const senders = (await listEmailAccounts()).map(parseSender).filter((item): item is Sender => Boolean(item));
+  const inventory = validateApprovedSenderInventory(senders);
+  if (!inventory.healthy) throw new Error(`Approved sender inventory is not safe: ${inventory.warnings.join(" ")}`);
   const attached: Record<OutreachProduct, number> = { talentera: 0, evalify: 0 };
   for (const product of ["talentera", "evalify"] as OutreachProduct[]) {
     const ids = senders.filter((sender) => sender.eligible && sender.brand === product).map((sender) => sender.id);
     if (ids.length) await smartleadRequest(`/campaigns/${campaigns[product].id}/email-accounts`, { method: "POST", body: JSON.stringify({ email_account_ids: ids }) });
     attached[product] = ids.length;
   }
-  return { senders, attached };
+  return { senders, attached, inventory };
 }
 
 function capacityPlan(senders: Sender[]) {
@@ -294,15 +291,17 @@ async function setupOnly() {
   return {
     ok: true, mode: "setup", activated: false, queued: 0,
     campaigns: { talentera: { id: talentera.id, name: talentera.name }, evalufy: { id: evalify.id, name: evalify.name } },
-    sequence: { touch1: "Day 0", touch2: "+3 days", touch3: "+4 days after Touch 2 (~Day 7)", stopOnReply: true, plainText: true, tracking: "off" },
+    sequence: { touch1: "Day 1", touch2: "+4 days", touch3: "+6 days after Touch 2 (~Day 11)", stopOnReply: true, plainText: true, tracking: "off" },
     sendWindow: { timezone: "Asia/Riyadh", days: "Sunday-Thursday", hours: "09:30-16:30", minimumGapMinutes: MIN_GAP_MINUTES },
     senders: senderSync.attached,
+    inventory: senderSync.inventory,
     capacity,
   };
 }
 
 async function autopilot(millionVerifierApiKey = "") {
   const clock = riyadhClock(); const previous = await readState();
+  if (process.env.SMARTLEAD_LEGACY_SEND_ENABLED !== "true") return { ok: true, skipped: true, blocked: true, reason: "Legacy orchestrator is disabled; use orchestrator-v3.", state: previous };
   if (!BUSINESS_DAYS.has(clock.weekday)) return { ok: true, skipped: true, reason: "KSA weekend; no new cold outreach is queued.", state: previous };
   if (previous.lastSuccessfulDate === clock.date && ["success", "noop"].includes(previous.status)) return { ok: true, skipped: true, reason: "Today's batch was already processed successfully.", state: previous };
 
@@ -372,7 +371,7 @@ async function autopilot(millionVerifierApiKey = "") {
         await smartleadRequest(`/campaigns/${campaigns[product].id}/leads`, { method: "POST", body: JSON.stringify({ lead_list: chunk.map(leadPayload), settings: { ignore_global_block_list: false, ignore_unsubscribe_list: false, ignore_community_bounce_list: false, ignore_duplicate_leads_in_other_campaign: false } }) });
         for (const lead of chunk) { ledgerEmails.add(lead.email.toLowerCase()); newEntries.push({ email: lead.email, contactId: lead.contactId, companyId: lead.companyId, product, campaignId: campaigns[product].id, queuedAt: new Date().toISOString(), lastKnownStatus: "QUEUED" }); }
       }
-      if (leads.length) await smartleadRequest(`/campaigns/${campaigns[product].id}/status`, { method: "PATCH", body: JSON.stringify({ status: "START" }) });
+      if (leads.length) await smartleadRequest(`/campaigns/${campaigns[product].id}/status`, { method: "POST", body: JSON.stringify({ status: "START" }) });
     }
 
     await writeJson(LEDGER_PATH, { version: 1, entries: [...ledger.entries, ...newEntries].slice(-50_000) } satisfies Ledger);

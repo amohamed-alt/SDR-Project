@@ -30,6 +30,9 @@ const CONTACT_FIELDS = [
   "lastname",
   "phone",
   "mobilephone",
+  "whatsapp_number",
+  "hs_whatsapp_phone_number",
+  "whatsapp_phone_number",
   "jobtitle",
   "company",
   "company_id",
@@ -158,6 +161,9 @@ export async function POST(request: NextRequest) {
     const companyCountry = company ? value(company, "gtm_country") || value(company, "country") : "";
     const country = contactCountry || companyCountry;
     const selectedPhone = selectWhatsAppPhone({
+      whatsappNumber: value(contact, "whatsapp_number"),
+      hubspotWhatsAppNumber: value(contact, "hs_whatsapp_phone_number"),
+      legacyWhatsAppNumber: value(contact, "whatsapp_phone_number"),
       mobilephone: value(contact, "mobilephone"),
       phone: value(contact, "phone"),
       country,

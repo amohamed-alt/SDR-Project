@@ -90,7 +90,7 @@ function ownerBridge(workerKey: string) {
 
 async function completedMarker() {
   try {
-    return JSON.parse(await readFile(MARKER_PATH, "utf8")) as Record<string, unknown>;
+    return JSON.parse(await readFile(/* turbopackIgnore: true */ MARKER_PATH, "utf8")) as Record<string, unknown>;
   } catch {
     return null;
   }
@@ -489,8 +489,8 @@ export async function POST(request: NextRequest) {
       outcomes,
     };
 
-    await mkdir(dirname(MARKER_PATH), { recursive: true });
-    await writeFile(MARKER_PATH, JSON.stringify(result, null, 2), "utf8");
+    await mkdir(/* turbopackIgnore: true */ dirname(MARKER_PATH), { recursive: true });
+    await writeFile(/* turbopackIgnore: true */ MARKER_PATH, JSON.stringify(result, null, 2), "utf8");
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Acquisition recovery failed.", startedAt }, { status: 500 });

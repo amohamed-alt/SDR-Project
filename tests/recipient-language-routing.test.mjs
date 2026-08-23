@@ -96,13 +96,13 @@ test("full name can safely provide the first token when firstname is missing", (
 });
 
 test("Talentera and Evalify sender brands are kept separate", () => {
-  assert.equal(senderBrand("marita@talentera.com"), "talentera");
-  assert.equal(senderBrand("marita@campaign.evalufy.com"), "evalify");
-  assert.equal(senderBrand("marita@evalify.com"), "evalify");
+  assert.equal(senderBrand("marita@jointalentera.com"), "talentera");
+  assert.equal(senderBrand("marita@getevalufy.com"), "evalify");
+  assert.equal(senderBrand("marita@talentera.com"), "unknown");
   assert.equal(senderBrand("marita@example.com"), "unknown");
-  assert.equal(canUseSenderForProduct("marita@talentera.com", "talentera"), true);
-  assert.equal(canUseSenderForProduct("marita@evalufy.com", "talentera"), false);
-  assert.equal(canUseSenderForProduct("marita@evalufy.com", "evalify"), true);
+  assert.equal(canUseSenderForProduct("marita@usetalentera.com", "talentera"), true);
+  assert.equal(canUseSenderForProduct("marita@evalufyhq.com", "talentera"), false);
+  assert.equal(canUseSenderForProduct("marita@evalufyhq.com", "evalify"), true);
 });
 
 test("Evalify is selected only when assessment intent is verified or explicit", () => {

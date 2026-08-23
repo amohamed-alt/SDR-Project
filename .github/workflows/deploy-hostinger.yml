@@ -125,6 +125,22 @@ jobs:
           else
             echo "::warning::APOLLO_API_KEY is not configured yet; Net-New Accounts will deploy read-only with Apollo discovery disabled."
           fi
+
+      - name: Validate dashboard authentication
+        env:
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+          OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN }}
+        run: |
+          if [ -z "$DASHBOARD_PASSWORD" ] && [ -z "$OWNER_TOKEN" ]; then
+            echo "::error::Configure DASHBOARD_PASSWORD or ACQUISITION_OWNER_TOKEN before deploying the CRM dashboard."
+            exit 1
+          fi
+          echo "Dashboard authentication: configured"
+
+      - name: Report optional owner action configuration
+        env:
+          OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN }}
+        run: |
           if [ -n "$OWNER_TOKEN" ]; then
             echo "Acquisition Owner actions: configured"
           else
@@ -211,6 +227,34 @@ jobs:
           fi
           echo "Smartlead API: configured and responding"
 
+      - name: Validate Primeforge API key read-only
+        env:
+          PRIMEFORGE_KEY: ${{ secrets.PRIMEFORGE_API_KEY || secrets.PRIME_FORGE_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$PRIMEFORGE_KEY" || {
+            echo "::error::Add PRIMEFORGE_API_KEY as a repository Actions secret."
+            exit 1
+          }
+          HTTP_CODE=$(curl --silent --show-error \
+            --connect-timeout 10 \
+            --max-time 45 \
+            --output /tmp/primeforge-workspaces.json \
+            --write-out '%{http_code}' \
+            'https://api.primeforge.ai/public/workspaces?limit=100&offset=0' \
+            -H "Authorization: ${PRIMEFORGE_KEY}" \
+            -H 'Accept: application/json' || true)
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Primeforge read-only API validation failed (HTTP $HTTP_CODE)."
+            exit 1
+          fi
+          WORKSPACES=$(jq -r '(.results // .workspaces // .data.results // .data.workspaces // []) | length' /tmp/primeforge-workspaces.json 2>/dev/null || echo 0)
+          if [ "$WORKSPACES" -lt 1 ]; then
+            echo "::error::Primeforge authenticated but returned no accessible workspaces."
+            exit 1
+          fi
+          echo "Primeforge read-only API: configured with ${WORKSPACES} accessible workspace(s)"
+
       - name: Validate MillionVerifier API key
         env:
           MILLIONVERIFIER_KEY: ${{ secrets.MILLIONVERIFIER_API_KEY }}
@@ -260,20 +304,30 @@ jobs:
             TAVILY_API_KEY=${{ secrets.TAVILY_API_KEY }}
             APOLLO_API_KEY=${{ secrets.APOLLO_API_KEY }}
             ACQUISITION_OWNER_TOKEN=${{ secrets.ACQUISITION_OWNER_TOKEN }}
+            DASHBOARD_USERNAME=${{ secrets.DASHBOARD_USERNAME || 'talentera' }}
+            DASHBOARD_PASSWORD=${{ secrets.DASHBOARD_PASSWORD }}
+            DISABLE_AUTH=false
             ACQUISITION_OWNER_IDS=31644369,76369997,31558980,76370000,76369995,76369998
             OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY || secrets.GTM_RESEARCH_OPENROUTER_API_KEY }}
             OPENROUTER_FAST_MODEL=openai/gpt-4.1-nano
             OPENROUTER_DEEP_MODEL=openai/gpt-4.1-mini
             SMARTLEAD_API_KEY=${{ secrets.SMARTLEAD_API_KEY }}
+            PRIMEFORGE_API_KEY=${{ secrets.PRIMEFORGE_API_KEY || secrets.PRIME_FORGE_API_KEY }}
             MILLIONVERIFIER_API_KEY=${{ secrets.MILLIONVERIFIER_API_KEY }}
             SMARTLEAD_CAMPAIGN_NAME=Talentera | Marita SDR | Localized 3-Touch
             SMARTLEAD_DAILY_NEW_LEADS=50
+            SMARTLEAD_AUTOPILOT_ENABLED=${{ vars.SMARTLEAD_AUTOPILOT_ENABLED || 'false' }}
+            SMARTLEAD_LEGACY_SEND_ENABLED=false
             SMARTLEAD_SALES_ACTIVITY_LOOKBACK_DAYS=45
             SMARTLEAD_START_HOUR=09:30
             SMARTLEAD_END_HOUR=16:30
             SMARTLEAD_MIN_TIME_BETWEEN_EMAILS=15
 
       - name: Verify exact deployed build, Career ATS V3, Dashboard V2, AI gateway, acquisition, and Smartlead health
+        env:
+          DASHBOARD_USERNAME: ${{ secrets.DASHBOARD_USERNAME || 'talentera' }}
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
+          SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
         run: |
           set -euo pipefail
           HOST='sdr.dashboardtalentera.tech'
@@ -351,6 +405,7 @@ jobs:
           fi
 
           USAGE_CODE=$(curl --silent --show-error \
+            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
             --connect-timeout 5 \
             --max-time 15 \
             --output /tmp/usage.json \
@@ -370,6 +425,7 @@ jobs:
           fi
 
           ACQ_CODE=$(curl --silent --show-error \
+            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
             --connect-timeout 5 \
             --max-time 20 \
             --output /tmp/acquisition.json \
@@ -388,6 +444,7 @@ jobs:
           fi
 
           AI_CODE=$(curl --silent --show-error \
+            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
             --connect-timeout 5 \
             --max-time 15 \
             --output /tmp/openrouter-health.json \
@@ -409,6 +466,7 @@ jobs:
           fi
 
           SMARTLEAD_CODE=$(curl --silent --show-error \
+            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
             --connect-timeout 5 \
             --max-time 90 \
             --output /tmp/smartlead-health.json \
@@ -428,6 +486,7 @@ jobs:
           fi
 
           SEND_HEALTH_CODE=$(curl --silent --show-error \
+            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
             --connect-timeout 5 \
             --max-time 20 \
             --output /tmp/smartlead-send-health.json \
@@ -439,6 +498,30 @@ jobs:
             cat /tmp/smartlead-send-health.json || true
             exit 1
           fi
+
+          PRIMEFORGE_CODE=$(curl --silent --show-error \
+            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
+            --connect-timeout 5 \
+            --max-time 120 \
+            --output /tmp/primeforge-health.json \
+            --write-out '%{http_code}' \
+            "https://${HOST}/api/primeforge/health" || true)
+          PRIMEFORGE_HEALTHY=$(jq -r '.healthy // false' /tmp/primeforge-health.json 2>/dev/null || echo false)
+          PRIMEFORGE_READY=$(jq -r '.readyMailboxes // 0' /tmp/primeforge-health.json 2>/dev/null || echo 0)
+          if [ "$PRIMEFORGE_CODE" != "200" ] || [ "$PRIMEFORGE_HEALTHY" != "true" ] || [ "$PRIMEFORGE_READY" != "15" ]; then
+            echo "::error::Primeforge domain, DNS, or 15-mailbox runtime gate failed."
+            jq '{configured, healthy, expectedDomains, expectedMailboxes, readyMailboxes, workspaces, domains, warnings, error}' /tmp/primeforge-health.json || true
+            curl --silent --show-error \
+              --connect-timeout 10 \
+              --max-time 120 \
+              -X POST "https://${HOST}/api/smartlead/orchestrator-v3" \
+              -H "Authorization: Bearer ${SMARTLEAD_API_KEY}" \
+              -H 'Content-Type: application/json' \
+              -d '{"mode":"setup"}' >/tmp/primeforge-deploy-fail-closed.json || true
+            jq '{error, details, blocked, pausedCampaigns, state}' /tmp/primeforge-deploy-fail-closed.json 2>/dev/null || true
+            exit 1
+          fi
+          echo "Primeforge infrastructure gate: five domains and 15 ready mailboxes verified"
 
       - name: Mark deployment successful
         if: success()

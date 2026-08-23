@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft, Building2, CalendarClock, CheckSquare2, CircleAlert, ExternalLink, Flame,
-  Mail, Phone, RefreshCw, Search, ShieldAlert, Square, Target, UsersRound,
+  Mail, Phone, RefreshCw, Search, Square, Target, UsersRound,
 } from "lucide-react";
 import styles from "@/components/MaritaPriorityQueue.module.css";
 import type { MaritaPriorityCompany, MaritaPriorityPayload, MaritaPriorityTier } from "@/lib/marita-priority";

@@ -17,8 +17,14 @@ type CampaignAudit = {
   status: string;
   settings: {
     plainText: boolean;
+    forcePlainText: boolean;
     trackingOff: boolean;
     stopOnReply: boolean;
+    pauseDomainOnReply: boolean;
+    respectMailboxLimit: boolean;
+    bounceAutopauseThreshold: number;
+    domainRateLimit: boolean;
+    unsubscribeTag: boolean;
     followUpPercentage: number;
     espMatching: boolean;
     timezone: string;
@@ -92,8 +98,14 @@ function normalizeCampaign(row: JsonObject, sequencePayload: unknown): CampaignA
     status: clean(row.status),
     settings: {
       plainText: boolValue(row.send_as_plain_text),
-      trackingOff: track.includes("DONT_EMAIL_OPEN") && track.includes("DONT_LINK_CLICK"),
+      forcePlainText: boolValue(row.force_plain_text),
+      trackingOff: track.includes("DONT_TRACK_EMAIL_OPEN") && track.includes("DONT_TRACK_LINK_CLICK"),
       stopOnReply: clean(row.stop_lead_settings).toUpperCase() === "REPLY_TO_AN_EMAIL",
+      pauseDomainOnReply: boolValue(row.auto_pause_domain_leads_on_reply),
+      respectMailboxLimit: !boolValue(row.ignore_ss_mailbox_sending_limit),
+      bounceAutopauseThreshold: numberValue(row.bounce_autopause_threshold),
+      domainRateLimit: boolValue(row.domain_level_rate_limit),
+      unsubscribeTag: boolValue(row.add_unsubscribe_tag),
       followUpPercentage: numberValue(row.follow_up_percentage),
       espMatching: boolValue(row.enable_ai_esp_matching),
       timezone: clean(schedule.tz || schedule.timezone),
@@ -112,10 +124,17 @@ function normalizeCampaign(row: JsonObject, sequencePayload: unknown): CampaignA
   };
 }
 
-function expectedSettings(settings: CampaignAudit["settings"]) {
+function expectedSettings(lane: OutreachLane, settings: CampaignAudit["settings"]) {
+  const dailyCap = lane.startsWith("talentera") ? 15 : 10;
   return settings.plainText === true
+    && settings.forcePlainText === true
     && settings.trackingOff === true
     && settings.stopOnReply === true
+    && settings.pauseDomainOnReply === true
+    && settings.respectMailboxLimit === true
+    && settings.bounceAutopauseThreshold === 2
+    && settings.domainRateLimit === true
+    && settings.unsubscribeTag === true
     && settings.followUpPercentage === 100
     && settings.espMatching === true
     && settings.timezone === "Asia/Riyadh"
@@ -123,12 +142,12 @@ function expectedSettings(settings: CampaignAudit["settings"]) {
     && settings.startHour === "09:30"
     && settings.endHour === "16:30"
     && settings.minimumGapMinutes >= 15
-    && settings.maxNewLeadsPerDay === 50;
+    && settings.maxNewLeadsPerDay === dailyCap;
 }
 
 function expectedSequence(sequence: CampaignAudit["sequence"]) {
   return sequence.count === 3
-    && JSON.stringify(sequence.delays) === JSON.stringify([0, 3, 4])
+    && JSON.stringify(sequence.delays) === JSON.stringify([0, 4, 6])
     && sequence.threadedFollowUps
     && sequence.firstSubjectPresent;
 }
@@ -151,7 +170,7 @@ async function audit() {
     const sequencePayload = await smartleadRequest<unknown>(`/campaigns/${id}/sequences`);
     const normalized = normalizeCampaign(row, sequencePayload);
     audits[lane] = normalized;
-    if (!expectedSettings(normalized.settings)) issues.push(`${definition.label}: non-copy settings are not canonical`);
+    if (!expectedSettings(lane, normalized.settings)) issues.push(`${definition.label}: non-copy settings are not canonical`);
     if (!expectedSequence(normalized.sequence)) issues.push(`${definition.label}: sequence structure is not canonical/threaded`);
   }
 
@@ -161,7 +180,7 @@ async function audit() {
     blocked: campaignCount !== LANES.length || issues.length > 0,
     policy: "All four campaigns must share one canonical non-copy configuration; only product, language copy and brand-safe sender pools may differ.",
     canonical: {
-      touchTiming: [0, 3, 4],
+      touchTiming: [0, 4, 6],
       followUpsThreaded: true,
       plainText: true,
       tracking: "off",
@@ -171,7 +190,8 @@ async function audit() {
       days: [0, 1, 2, 3, 4],
       sendWindow: "09:30-16:30",
       minimumGapMinutes: 15,
-      maxNewLeadsPerDay: 50,
+      laneDailyCaps: { talentera_ar: 15, talentera_en: 15, evalufy_ar: 10, evalufy_en: 10 },
+      globalDailyCap: 50,
     },
     campaigns: audits,
     issues,

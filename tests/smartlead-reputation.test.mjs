@@ -20,9 +20,9 @@ test("only Talentera senders are eligible for the Talentera campaign", () => {
   assert.equal(isSafeTalenteraSender(sender({ brand: "unknown" })), false);
 });
 
-test("explicitly disabled warmup blocks a sender while unknown warmup is fail-soft", () => {
+test("disabled or unknown warmup blocks a sender fail-closed", () => {
   assert.equal(isSafeTalenteraSender(sender({ warmupEnabled: false, warmupKnown: true })), false);
-  assert.equal(isSafeTalenteraSender(sender({ warmupEnabled: false, warmupKnown: false })), true);
+  assert.equal(isSafeTalenteraSender(sender({ warmupEnabled: false, warmupKnown: false })), false);
 });
 
 test("new lead capacity reserves steady-state room for all three touches", () => {
@@ -44,8 +44,10 @@ test("unassigned and Evalify inboxes do not increase Talentera capacity", () => 
   assert.equal(plan.safeNewLeadCap, 6);
 });
 
-test("bounce safety locks after meaningful volume reaches three percent", () => {
+test("reputation safety locks at two percent bounce or 0.3 percent spam", () => {
   assert.equal(reputationHealth(49, 10).healthy, true);
-  assert.equal(reputationHealth(100, 2).healthy, true);
-  assert.equal(reputationHealth(100, 3).healthy, false);
+  assert.equal(reputationHealth(100, 1).healthy, true);
+  assert.equal(reputationHealth(100, 2).healthy, false);
+  assert.equal(reputationHealth(1_000, 0, 2).healthy, true);
+  assert.equal(reputationHealth(1_000, 0, 3).healthy, false);
 });

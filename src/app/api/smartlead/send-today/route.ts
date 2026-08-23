@@ -44,7 +44,7 @@ async function languagePreflight() {
   let staleIntelligenceReset = false;
 
   if (issues.length) {
-    await fs.rm(INTELLIGENCE_PATH, { force: true }).catch(() => undefined);
+    await fs.rm(/* turbopackIgnore: true */ INTELLIGENCE_PATH, { force: true }).catch(() => undefined);
     staleIntelligenceReset = true;
     snapshot = await getSmartleadV2(true);
     issues = languageIssues(snapshot.queue);
@@ -66,7 +66,9 @@ export async function GET() {
     smartleadConfigured,
     millionVerifierConfigured,
     signalHireConfigured: Boolean(clean(process.env.SIGNALHIRE_API_KEY)),
+    primeforgeConfigured: Boolean(clean(process.env.PRIMEFORGE_API_KEY)),
     ownerActionsConfigured: smartleadActionAuthConfigured(),
+    autopilotEnabled: process.env.SMARTLEAD_AUTOPILOT_ENABLED === "true",
     languagePolicy: "Deterministic English fallback wins; Arabic requires an Arabic-script greeting and a safe GCC Arabic-name decision.",
     dailyTarget: Number(process.env.SMARTLEAD_DAILY_NEW_LEADS || 50),
     minTimeBetweenEmails: Math.max(15, Number(process.env.SMARTLEAD_MIN_TIME_BETWEEN_EMAILS || 15) || 15),
@@ -81,6 +83,18 @@ export async function POST(request: NextRequest) {
   const smartleadApiKey = clean(process.env.SMARTLEAD_API_KEY);
   const millionVerifierApiKey = clean(process.env.MILLIONVERIFIER_API_KEY);
   if (!smartleadApiKey) return NextResponse.json({ error: "SMARTLEAD_API_KEY is not configured on the production server." }, { status: 503 });
+  if (process.env.SMARTLEAD_AUTOPILOT_ENABLED !== "true") {
+    const orchestratorUrl = new URL("/api/smartlead/orchestrator-v3", INTERNAL_BASE_URL);
+    const response = await fetch(orchestratorUrl, {
+      method: "POST",
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${smartleadApiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "autopilot" }),
+      signal: AbortSignal.timeout(90_000),
+    });
+    const payload = await response.json().catch(() => ({}));
+    return NextResponse.json(payload, { status: response.status, headers: { "Cache-Control": "no-store" } });
+  }
   if (!millionVerifierApiKey) return NextResponse.json({ error: "MILLIONVERIFIER_API_KEY is not configured on the production server." }, { status: 503 });
 
   try {
