@@ -10,6 +10,7 @@ const VALIDATION_MARKER = process.env.CAREER_VALIDATION_MARKER_PATH || `${DATA_D
 const VALIDATION_STATE = process.env.CAREER_VALIDATION_STATE_PATH || `${DATA_DIR}/career-validation-v1.state`;
 const CAREER_STORE = process.env.CAREER_INTELLIGENCE_STORE_PATH || `${DATA_DIR}/career-intelligence.json`;
 const GOOGLE_TOKEN_STORE = process.env.GOOGLE_TOKEN_STORE_PATH || `${DATA_DIR}/google-calendar.json`;
+const NO_CACHE_HEADERS = { "Cache-Control": "no-store, max-age=0", Pragma: "no-cache" };
 
 function careerGeneration() {
   const explicit = String(process.env.CAREER_GENERATION || "").trim();
@@ -103,7 +104,10 @@ export async function GET(request: NextRequest) {
   const deep = request.nextUrl.searchParams.get("deep") === "1";
 
   if (!deep) {
-    return NextResponse.json({ status: "ok", service: "sdr-project", buildRef, careerGeneration: generation, timestamp });
+    return NextResponse.json(
+      { status: "ok", service: "sdr-project", buildRef, careerGeneration: generation, timestamp },
+      { headers: NO_CACHE_HEADERS },
+    );
   }
 
   const runtimeConfig = runtimeConfigState();
@@ -135,7 +139,7 @@ export async function GET(request: NextRequest) {
     },
     {
       status: ready ? 200 : 503,
-      headers: { "Cache-Control": "no-store" },
+      headers: NO_CACHE_HEADERS,
     },
   );
 }
