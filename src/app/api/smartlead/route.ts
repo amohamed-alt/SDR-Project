@@ -1,6 +1,6 @@
-import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { smartleadActionAuthConfigured, smartleadActionAuthorized, smartleadSameOrigin } from "@/lib/smartlead-action-auth";
 import {
   analyzeRecipientNames,
   bootstrapSmartleadV2,
@@ -25,21 +25,6 @@ const actionSchema = z.discriminatedUnion("action", [
 ]);
 
 function clean(value: unknown, max = 2_000) { return String(value ?? "").trim().slice(0, max); }
-function sameOrigin(request: NextRequest) {
-  const site = request.headers.get("sec-fetch-site");
-  if (site && !["same-origin", "same-site", "none"].includes(site)) return false;
-  const origin = request.headers.get("origin");
-  if (!origin) return true;
-  try { return new URL(origin).host === request.nextUrl.host; } catch { return false; }
-}
-function safeEqual(left: string, right: string) { const a = Buffer.from(left); const b = Buffer.from(right); return a.length === b.length && timingSafeEqual(a, b); }
-function ownerAuthorized(request: NextRequest) {
-  const configured = clean(process.env.ACQUISITION_OWNER_TOKEN, 2_000);
-  if (!configured) return { ok: false as const, status: 503, error: "Owner actions are not configured on the production server." };
-  const supplied = clean(request.headers.get("x-acquisition-owner-token"), 2_000);
-  if (!supplied || !safeEqual(supplied, configured)) return { ok: false as const, status: 401, error: "Valid Owner key required." };
-  return { ok: true as const };
-}
 
 function lightweightHealthPayload() {
   return {
@@ -48,9 +33,9 @@ function lightweightHealthPayload() {
     configuration: {
       apiConfigured: Boolean(clean(process.env.SMARTLEAD_API_KEY)),
       openRouterConfigured: Boolean(clean(process.env.OPENROUTER_API_KEY)),
-      ownerActionsConfigured: Boolean(clean(process.env.ACQUISITION_OWNER_TOKEN)),
+      ownerActionsConfigured: smartleadActionAuthConfigured(),
       maritaOwnerId: "31644369",
-      globalDailyNewTarget: Number(process.env.SMARTLEAD_DAILY_NEW_LEADS || 75),
+      globalDailyNewTarget: Number(process.env.SMARTLEAD_DAILY_NEW_LEADS || 50),
       minTimeBetweenEmails: Math.max(15, Number(process.env.SMARTLEAD_MIN_TIME_BETWEEN_EMAILS || 15) || 15),
       maxCampaignEmailsPerMailbox: 20,
       autopilotEnabled: process.env.SMARTLEAD_AUTOPILOT_ENABLED !== "false",
@@ -74,10 +59,10 @@ function degradedPayload(error: unknown) {
     configuration: {
       apiConfigured: Boolean(clean(process.env.SMARTLEAD_API_KEY)),
       openRouterConfigured: Boolean(clean(process.env.OPENROUTER_API_KEY)),
-      ownerActionsConfigured: Boolean(clean(process.env.ACQUISITION_OWNER_TOKEN)),
+      ownerActionsConfigured: smartleadActionAuthConfigured(),
       maritaOwnerId: "31644369",
-      globalDailyNewTarget: Number(process.env.SMARTLEAD_DAILY_NEW_LEADS || 75),
-      minTimeBetweenEmails: Math.max(15, Number(process.env.SMARTLEAD_MIN_TIME_BETWEEN_EMAILS || 15)),
+      globalDailyNewTarget: Number(process.env.SMARTLEAD_DAILY_NEW_LEADS || 50),
+      minTimeBetweenEmails: Math.max(15, Number(process.env.SMARTLEAD_MIN_TIME_BETWEEN_EMAILS || 15) || 15),
       maxCampaignEmailsPerMailbox: 20,
     },
     safety: {
@@ -152,8 +137,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  if (!sameOrigin(request)) return NextResponse.json({ error: "Cross-origin Smartlead actions are blocked." }, { status: 403 });
-  const auth = ownerAuthorized(request); if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  if (!smartleadSameOrigin(request)) return NextResponse.json({ error: "Cross-origin Smartlead actions are blocked." }, { status: 403 });
+  const auth = smartleadActionAuthorized(request); if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const parsed = actionSchema.safeParse(await request.json().catch(() => ({}))); if (!parsed.success) return NextResponse.json({ error: "Invalid Smartlead action", details: parsed.error.flatten() }, { status: 400 });
   try {
     if (parsed.data.action === "bootstrap") return NextResponse.json({ ok: true, ...(await bootstrapSmartleadV2()) });
