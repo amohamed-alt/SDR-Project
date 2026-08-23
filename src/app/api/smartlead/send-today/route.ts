@@ -1,41 +1,19 @@
-import { timingSafeEqual } from "node:crypto";
 import fs from "node:fs/promises";
 import { NextRequest, NextResponse } from "next/server";
 import { decideRecipientLanguage } from "@/lib/recipient-language-routing";
+import { smartleadActionAuthConfigured, smartleadActionAuthorized, smartleadSameOrigin } from "@/lib/smartlead-action-auth";
 import { getSmartleadV2, type V2Lead } from "@/lib/smartlead-v2";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const INTELLIGENCE_PATH = process.env.SMARTLEAD_V2_INTELLIGENCE_PATH || "/app/data/smartlead-v2-intelligence.json";
+const INTELLIGENCE_PATH = process.env.SMARTLEAD_V2_INTELLIGENCE_PATH || "/app/data/smartlead-v2-intelligence-v3.json";
 const INTERNAL_BASE_URL = process.env.SMARTLEAD_INTERNAL_BASE_URL || "http://127.0.0.1:3000";
 const ARABIC_SCRIPT = /[\u0600-\u06FF]/;
 
 function clean(value: unknown, max = 8_000) {
   return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
-}
-
-function safeEqual(left: string, right: string) {
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
-function sameOrigin(request: NextRequest) {
-  const site = request.headers.get("sec-fetch-site");
-  if (site && !["same-origin", "same-site", "none"].includes(site)) return false;
-  const origin = request.headers.get("origin");
-  if (!origin) return true;
-  try { return new URL(origin).host === request.nextUrl.host; } catch { return false; }
-}
-
-function ownerAuthorized(request: NextRequest) {
-  const configured = clean(process.env.ACQUISITION_OWNER_TOKEN, 2_000);
-  if (!configured) return { ok: false as const, status: 503, error: "Owner actions are not configured on the production server." };
-  const supplied = clean(request.headers.get("x-acquisition-owner-token"), 2_000);
-  if (!supplied || !safeEqual(supplied, configured)) return { ok: false as const, status: 401, error: "Valid Owner key required." };
-  return { ok: true as const };
 }
 
 function languageIssues(leads: V2Lead[]) {
@@ -65,9 +43,6 @@ async function languagePreflight() {
   let issues = languageIssues(snapshot.queue);
   let staleIntelligenceReset = false;
 
-  // Old AI/name-analysis cache entries must never overrule the conservative
-  // deterministic English fallback. If an old mismatch exists, remove the
-  // cache and rebuild the queue before any Smartlead write occurs.
   if (issues.length) {
     await fs.rm(INTELLIGENCE_PATH, { force: true }).catch(() => undefined);
     staleIntelligenceReset = true;
@@ -84,20 +59,23 @@ async function languagePreflight() {
 }
 
 export async function GET() {
+  const smartleadConfigured = Boolean(clean(process.env.SMARTLEAD_API_KEY));
+  const millionVerifierConfigured = Boolean(clean(process.env.MILLIONVERIFIER_API_KEY));
   return NextResponse.json({
-    configured: Boolean(clean(process.env.SMARTLEAD_API_KEY)) && Boolean(clean(process.env.ACQUISITION_OWNER_TOKEN)),
-    smartleadConfigured: Boolean(clean(process.env.SMARTLEAD_API_KEY)),
-    millionVerifierConfigured: Boolean(clean(process.env.MILLIONVERIFIER_API_KEY)),
+    configured: smartleadConfigured && millionVerifierConfigured && smartleadActionAuthConfigured(),
+    smartleadConfigured,
+    millionVerifierConfigured,
     signalHireConfigured: Boolean(clean(process.env.SIGNALHIRE_API_KEY)),
-    ownerActionsConfigured: Boolean(clean(process.env.ACQUISITION_OWNER_TOKEN)),
+    ownerActionsConfigured: smartleadActionAuthConfigured(),
     languagePolicy: "Deterministic English fallback wins; Arabic requires an Arabic-script greeting and a safe GCC Arabic-name decision.",
-    dailyTarget: 50,
+    dailyTarget: Number(process.env.SMARTLEAD_DAILY_NEW_LEADS || 50),
+    minTimeBetweenEmails: Math.max(15, Number(process.env.SMARTLEAD_MIN_TIME_BETWEEN_EMAILS || 15) || 15),
   }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function POST(request: NextRequest) {
-  if (!sameOrigin(request)) return NextResponse.json({ error: "Cross-origin Smartlead daily-send actions are blocked." }, { status: 403 });
-  const auth = ownerAuthorized(request);
+  if (!smartleadSameOrigin(request)) return NextResponse.json({ error: "Cross-origin Smartlead daily-send actions are blocked." }, { status: 403 });
+  const auth = smartleadActionAuthorized(request);
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const smartleadApiKey = clean(process.env.SMARTLEAD_API_KEY);
@@ -138,6 +116,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      authMode: auth.mode,
       languagePreflight: {
         checked: preflight.checked,
         staleIntelligenceReset: preflight.staleIntelligenceReset,

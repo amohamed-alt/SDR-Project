@@ -74,11 +74,11 @@ export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
   function saveOwnerToken() {
     const value = ownerTokenDraft.trim(); setOwnerToken(value);
     if (value) window.sessionStorage.setItem(OWNER_STORAGE_KEY, value); else window.sessionStorage.removeItem(OWNER_STORAGE_KEY);
-    setNotice(value ? "Owner key saved for this browser session." : "Owner key cleared.");
+    setNotice(value ? "Owner PIN saved for this browser session." : "Owner PIN cleared.");
   }
 
   async function action(body: Record<string, unknown>, busyKey: string) {
-    if (!ownerToken) { setError("Enter the Owner key first. Smartlead/OpenRouter secrets stay server-side."); return null; }
+    if (!ownerToken) { setError("Enter the Owner PIN first. Smartlead/OpenRouter/MillionVerifier secrets stay server-side."); return null; }
     setBusy(busyKey); setError(""); setNotice("");
     try {
       const response = await fetch("/api/smartlead", { method: "POST", headers: { "Content-Type": "application/json", "x-acquisition-owner-token": ownerToken }, body: JSON.stringify(body) });
@@ -86,6 +86,27 @@ export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
       if (!response.ok) throw new Error(payload.details || payload.error || "Smartlead action failed.");
       await load(true); return payload;
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Smartlead action failed."); return null; }
+    finally { setBusy(""); }
+  }
+
+  async function sendToday() {
+    if (!ownerToken) { setError("Enter the Owner PIN once, save it for this browser session, then press Send today's batch."); return; }
+    const today = data?.summary.today || data?.capacity.liveNewLeadsPerDay || 0;
+    if (!today) { setError("There is no safe live capacity to send today."); return; }
+    if (!window.confirm(`Run today's verified outreach for up to ${today} new leads? This will run Sales safety, language routing, MillionVerifier, SignalHire recovery, dedupe and Smartlead routing before anything is queued.`)) return;
+    setBusy("send-today"); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/smartlead/send-today", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-acquisition-owner-token": ownerToken },
+        body: JSON.stringify({ confirm: "SEND_VERIFIED_DAILY_BATCH" }),
+      });
+      const payload = await response.json() as Record<string, unknown> & { error?: string; details?: unknown; queued?: number; talentera?: number; evalufy?: number; skipped?: boolean; reason?: string };
+      if (!response.ok) throw new Error(typeof payload.details === "string" ? payload.details : payload.error || "Verified daily send failed.");
+      if (payload.skipped) setNotice(`Nothing new was queued: ${payload.reason || "today's safe batch was already processed"}.`);
+      else setNotice(`Today's verified batch completed: ${String(payload.queued || 0)} queued · ${String(payload.talentera || 0)} Talentera · ${String(payload.evalufy || 0)} Evalufy.`);
+      await load(true);
+    } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Verified daily send failed."); }
     finally { setBusy(""); }
   }
 
@@ -179,21 +200,22 @@ export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
 
     <section className={styles.executionPanel}>
       <div className={styles.executionIntro}>
-        <div><strong>Manual / emergency controls</strong><p>Daily execution is automated. Use these controls only for initial setup, QA, or an intentional manual intervention.</p></div>
-        <div className={styles.ownerKey}><KeyRound size={15}/><input type="password" value={ownerTokenDraft} onChange={(event) => setOwnerTokenDraft(event.target.value)} placeholder="Owner key"/><button type="button" onClick={saveOwnerToken}>Save</button></div>
+        <div><strong>Send today</strong><p>One click runs the same verified engine as autopilot: Sales safety → language → MillionVerifier → SignalHire recovery → dedupe → product lane → Smartlead.</p></div>
+        <div className={styles.ownerKey}><KeyRound size={15}/><input type="password" value={ownerTokenDraft} onChange={(event) => setOwnerTokenDraft(event.target.value)} placeholder="Owner PIN"/><button type="button" onClick={saveOwnerToken}>Save</button></div>
       </div>
       <div className={styles.actions}>
+        <button type="button" className={styles.primary} onClick={() => void sendToday()} disabled={Boolean(busy) || !safetyHealthy || !data?.capacity.liveNewLeadsPerDay}><Send size={15}/>{busy === "send-today" ? "Verifying & queueing…" : `Send today's batch (${number(data?.summary.today)})`}</button>
         <button type="button" onClick={() => void bootstrap()} disabled={Boolean(busy)}><Database size={15}/>{busy === "bootstrap" ? "Configuring…" : "Bootstrap V2 campaigns"}</button>
         <button type="button" onClick={() => void syncSenders()} disabled={Boolean(busy) || !tCampaign || !eCampaign}><UsersRound size={15}/>{busy === "senders" ? "Syncing…" : "Sync sender pools"}</button>
         <button type="button" onClick={() => void analyzeNames()} disabled={Boolean(busy) || !data?.configuration.openRouterConfigured}><Sparkles size={15}/>{busy === "names" ? "Analyzing…" : "AI-analyze 150 names"}</button>
-        <button type="button" onClick={() => void prepare()} disabled={Boolean(busy) || !safetyHealthy || !data?.capacity.liveNewLeadsPerDay}><Sparkles size={15}/>{busy === "prepare" ? "Preparing…" : "Prepare today"}</button>
-        <button type="button" className={styles.primary} onClick={() => void launch()} disabled={Boolean(busy) || !data?.summary.prepared || !safetyHealthy}><Send size={15}/>{busy === "launch" ? "Safety checking…" : "Queue prepared batch"}</button>
+        <button type="button" onClick={() => void prepare()} disabled={Boolean(busy) || !safetyHealthy || !data?.capacity.liveNewLeadsPerDay}><Sparkles size={15}/>{busy === "prepare" ? "Preparing…" : "Prepare only"}</button>
+        <button type="button" onClick={() => void launch()} disabled={Boolean(busy) || !data?.summary.prepared || !safetyHealthy}><Send size={15}/>{busy === "launch" ? "Safety checking…" : "Queue prepared only"}</button>
         <button type="button" onClick={() => void changeStatus("all", "START")} disabled={Boolean(busy) || !tCampaign || !eCampaign}><Play size={15}/>Start both</button>
         <button type="button" onClick={() => void changeStatus("all", "PAUSED")} disabled={Boolean(busy) || (!tCampaign && !eCampaign)}><Pause size={15}/>Pause both</button>
       </div>
     </section>
 
-    {!safetyHealthy && <section className={styles.warningPanel}><ShieldCheck size={18}/><div><strong>Sending is locked</strong><p>Sales activity safety must be healthy before Prepare or Queue.</p>{(data?.safety.warnings || []).map((warning) => <small key={warning}>{warning}</small>)}</div></section>}
+    {!safetyHealthy && <section className={styles.warningPanel}><ShieldCheck size={18}/><div><strong>Sending is locked</strong><p>Sales activity safety must be healthy before any batch can be queued.</p>{(data?.safety.warnings || []).map((warning) => <small key={warning}>{warning}</small>)}</div></section>}
 
     <section className={styles.healthGrid}>
       <article><strong>15-inbox capacity model</strong><span>{number(data?.capacity.liveCampaignEmailsPerDay)} live campaign emails/day</span><small>{number(data?.capacity.assignedInboxes)} assigned · {number(data?.capacity.eligibleInboxes)} eligible · max {number(data?.configuration.maxCampaignEmailsPerMailbox)}/mailbox · {number(data?.configuration.minTimeBetweenEmails)}m gap</small></article>
@@ -212,7 +234,7 @@ export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
     </section>
 
     <section className={styles.previewPanel}>
-      <div className={styles.sectionHeader}><div><h2>Sequence studio</h2><p>Fixed copy is the source of truth. OpenRouter only improves recipient language/greeting and one safe contextual opening line.</p></div></div>
+      <div className={styles.sectionHeader}><div><h2>Sequence studio</h2><p>Fixed copy is the source of truth. OpenRouter only writes one safe contextual opening line; language routing itself is deterministic and cannot be changed by AI.</p></div></div>
       <div className={styles.previewGrid}>
         {(["talentera", "evalify"] as OutreachProduct[]).flatMap((product) => (["arSA", "en"] as const).map((language) => {
           const seq = data?.sequenceCatalog[product][language];
@@ -225,7 +247,7 @@ export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
     </section>
 
     {Boolean(data?.preparedSamples.length) && <section className={styles.previewPanel}>
-      <div className={styles.sectionHeader}><div><h2>Prepared copy preview</h2><p>Final rendered copy after OpenRouter recipient QA. Review this before Queue.</p></div></div>
+      <div className={styles.sectionHeader}><div><h2>Prepared copy preview</h2><p>Final rendered copy after deterministic language routing and OpenRouter opening-line personalization.</p></div></div>
       <div className={styles.previewGrid}>{data?.preparedSamples.map((lead) => <article key={lead.contactId}><strong>{lead.greetingName} · {lead.companyName} · {productLabel(lead.product)}</strong><small>{lead.locale} · confidence {percent(lead.languageConfidence)} · {lead.languageReason}</small><b>{visibleCampaignName(lead.subject1)}</b><p>{visibleCampaignName(lead.touch1)}</p></article>)}</div>
     </section>}
 

@@ -40,14 +40,9 @@ jobs:
       - name: Validate Smartlead automation secret
         env:
           SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
-          OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN }}
         run: |
           test -n "$SMARTLEAD_API_KEY" || {
             echo "::error::SMARTLEAD_API_KEY repository secret is required."
-            exit 1
-          }
-          test -n "$OWNER_TOKEN" || {
-            echo "::error::ACQUISITION_OWNER_TOKEN repository secret is required."
             exit 1
           }
 
@@ -94,7 +89,6 @@ jobs:
         env:
           SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
           MILLIONVERIFIER_API_KEY: ${{ secrets.MILLIONVERIFIER_API_KEY }}
-          OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN }}
           MODE: ${{ steps.mode.outputs.mode }}
         run: |
           set -euo pipefail
@@ -118,7 +112,7 @@ jobs:
               --output /tmp/smartlead-orchestrator.json \
               --write-out '%{http_code}' \
               -X POST "$ENDPOINT" \
-              -H "x-acquisition-owner-token: ${OWNER_TOKEN}" \
+              -H "Authorization: Bearer ${SMARTLEAD_API_KEY}" \
               -H 'Content-Type: application/json' \
               -d '{"confirm":"SEND_VERIFIED_DAILY_BATCH"}')
           fi
