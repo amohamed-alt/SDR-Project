@@ -189,6 +189,28 @@ jobs:
           MODEL=$(jq -r '.model // "unknown"' /tmp/openrouter-test.json 2>/dev/null || echo unknown)
           echo "OpenRouter low-cost route: configured and responding via $MODEL"
 
+      - name: Validate Smartlead API key
+        env:
+          SMARTLEAD_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SMARTLEAD_KEY" || {
+            echo "::error::Add SMARTLEAD_API_KEY as a repository Actions secret."
+            exit 1
+          }
+          HTTP_CODE=$(curl --silent --show-error \
+            --connect-timeout 10 \
+            --max-time 45 \
+            --output /tmp/smartlead-test.json \
+            --write-out '%{http_code}' \
+            "https://server.smartlead.ai/api/v1/campaigns/?api_key=${SMARTLEAD_KEY}" || true)
+          if [ "$HTTP_CODE" != "200" ]; then
+            SMARTLEAD_ERROR=$(jq -r '.error // .message // "unknown Smartlead error"' /tmp/smartlead-test.json 2>/dev/null || true)
+            echo "::error::Smartlead API validation failed (HTTP $HTTP_CODE): $SMARTLEAD_ERROR"
+            exit 1
+          fi
+          echo "Smartlead API: configured and responding"
+
       - name: Deploy Docker Compose
         uses: hostinger/deploy-on-vps@v2
         with:
@@ -206,8 +228,15 @@ jobs:
             OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY || secrets.GTM_RESEARCH_OPENROUTER_API_KEY }}
             OPENROUTER_FAST_MODEL=openai/gpt-4.1-nano
             OPENROUTER_DEEP_MODEL=openai/gpt-4.1-mini
+            SMARTLEAD_API_KEY=${{ secrets.SMARTLEAD_API_KEY }}
+            SMARTLEAD_CAMPAIGN_NAME=Talentera | Marita SDR | Localized 3-Touch
+            SMARTLEAD_DAILY_NEW_LEADS=75
+            SMARTLEAD_SALES_ACTIVITY_LOOKBACK_DAYS=45
+            SMARTLEAD_START_HOUR=09:30
+            SMARTLEAD_END_HOUR=16:30
+            SMARTLEAD_MIN_TIME_BETWEEN_EMAILS=5
 
-      - name: Verify exact deployed build, Career ATS V3, Dashboard V2, AI gateway, and acquisition data health
+      - name: Verify exact deployed build, Career ATS V3, Dashboard V2, AI gateway, acquisition, and Smartlead health
         run: |
           set -euo pipefail
           HOST='sdr.dashboardtalentera.tech'
@@ -347,6 +376,25 @@ jobs:
             exit 1
           fi
 
+          SMARTLEAD_CODE=$(curl --silent --show-error \
+            --connect-timeout 5 \
+            --max-time 90 \
+            --output /tmp/smartlead-health.json \
+            --write-out '%{http_code}' \
+            "https://${HOST}/api/smartlead" || true)
+          SMARTLEAD_CONFIGURED=$(jq -r '.configuration.apiConfigured // false' /tmp/smartlead-health.json 2>/dev/null || echo false)
+          SMARTLEAD_SAFETY=$(jq -r '.safety.healthy // false' /tmp/smartlead-health.json 2>/dev/null || echo false)
+
+          echo "Smartlead command center: http=${SMARTLEAD_CODE:-none} configured=${SMARTLEAD_CONFIGURED:-false} safety=${SMARTLEAD_SAFETY:-false}"
+          if [ "$SMARTLEAD_CODE" != "200" ] || [ "$SMARTLEAD_CONFIGURED" != "true" ]; then
+            echo "::error::Smartlead API secret did not reach the production SDR runtime."
+            cat /tmp/smartlead-health.json || true
+            exit 1
+          fi
+          if [ "$SMARTLEAD_SAFETY" != "true" ]; then
+            echo "::warning::Smartlead is connected, but the Sales safety scan is currently locking outreach. Review the dashboard before preparing a batch."
+          fi
+
       - name: Mark deployment successful
         if: success()
         continue-on-error: true
@@ -360,7 +408,7 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'success',
               context: 'hostinger/deploy',
-              description: 'SDR V2, acquisition, Career ATS, and low-cost AI are live',
+              description: 'SDR V2, Smartlead, acquisition, Career ATS, and low-cost AI are live',
               target_url: process.env.DEPLOY_URL,
             });
 
@@ -377,7 +425,7 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'failure',
               context: 'hostinger/deploy',
-              description: 'SDR production acquisition/build health gate failed',
+              description: 'SDR production acquisition/Smartlead/build health gate failed',
               target_url: process.env.DEPLOY_URL,
             });
 
