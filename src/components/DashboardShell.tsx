@@ -41,8 +41,8 @@ const TeamActivity = dynamic(
   () => import("@/components/TeamActivity").then((module) => module.TeamActivity),
   { ssr: false, loading: ViewLoading },
 );
-const NetNewAccounts = dynamic(
-  () => import("@/components/NetNewAccounts").then((module) => module.NetNewAccounts),
+const BestAccounts = dynamic(
+  () => import("@/components/BestAccounts").then((module) => module.BestAccounts),
   { ssr: false, loading: ViewLoading },
 );
 
@@ -110,7 +110,7 @@ export function Dashboard() {
   if (view === "marita-priority") return <MaritaPriorityQueue onBack={() => changeView("core")}/>;
   if (view === "smartlead") return <SmartleadCommandCenter onBack={() => changeView("core")}/>;
   if (view === "team-activity") return <TeamActivity onBack={() => changeView("core")}/>;
-  if (view === "net-new") return <NetNewAccounts onBack={() => changeView("core")}/>;
+  if (view === "net-new") return <BestAccounts onBack={() => changeView("core")}/>;
 
   return <div className={styles.shell}>
     <ExistingDashboard/>
@@ -129,7 +129,7 @@ export function Dashboard() {
           <div className={styles.toolList}>
             <button className={styles.toolItem} type="button" onClick={() => changeView("net-new")}>
               <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Target size={17}/></span>
-              <span className={styles.toolCopy}><strong>Net-New Accounts</strong><small>Apollo → Persona → SignalHire → HubSpot</small></span>
+              <span className={styles.toolCopy}><strong>Best Accounts</strong><small>Ranked accounts · evidence · AI briefs</small></span>
             </button>
             <Link className={styles.toolItem} href="/company-enrichment" onClick={() => trackFeature("company-repair")}>
               <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Building2 size={17}/></span>
