@@ -16,6 +16,7 @@ jobs:
       - name: Patch and verify the existing HubSpot property through an isolated container
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           test -n "$HOSTINGER_API_KEY"
@@ -31,59 +32,10 @@ jobs:
           trap cleanup EXIT
           cleanup
 
-          read -r -d '' COMPOSE_CONTENT <<'YAML' || true
-          name: sdr-hubspot-property-once
-          services:
-            hubspot-property:
-              image: curlimages/curl:8.10.1
-              user: "0:0"
-              restart: "no"
-              command:
-                - /bin/sh
-                - -c
-                - |
-                  set -eu
-                  set -a
-                  . /run/sdr-env/.env
-                  set +a
-                  test -n "$$HUBSPOT_PRIVATE_APP_TOKEN"
-                  API='https://api.hubapi.com/crm/v3/properties/contacts/gtm_email_status'
-                  curl --silent --show-error --fail \
-                    -H "Authorization: Bearer $$HUBSPOT_PRIVATE_APP_TOKEN" \
-                    "$$API" > /tmp/before.json
-                  grep -Fq '"name":"gtm_email_status"' /tmp/before.json
-                  grep -Fq '"type":"enumeration"' /tmp/before.json
-                  for STATUS in valid catch_all invalid unknown; do
-                    grep -Fq "\"value\":\"$$STATUS\"" /tmp/before.json
-                  done
-                  echo 'Existing HubSpot property and statuses verified.'
-                  curl --silent --show-error --fail \
-                    -X PATCH \
-                    -H "Authorization: Bearer $$HUBSPOT_PRIVATE_APP_TOKEN" \
-                    -H 'Content-Type: application/json' \
-                    -d '{"label":"MillionVerifier Status"}' \
-                    "$$API" > /tmp/update.json
-                  curl --silent --show-error --fail \
-                    -H "Authorization: Bearer $$HUBSPOT_PRIVATE_APP_TOKEN" \
-                    "$$API" > /tmp/after.json
-                  grep -Fq '"name":"gtm_email_status"' /tmp/after.json
-                  grep -Fq '"label":"MillionVerifier Status"' /tmp/after.json
-                  grep -Fq '"type":"enumeration"' /tmp/after.json
-                  for STATUS in valid catch_all invalid unknown; do
-                    grep -Fq "\"value\":\"$$STATUS\"" /tmp/after.json
-                  done
-                  echo 'HUBSPOT_PROPERTY_RECONCILED name=gtm_email_status label=MillionVerifier_Status statuses=valid,catch_all,invalid,unknown'
-              volumes:
-                - sdr_runtime_env:/run/sdr-env:ro
-          volumes:
-            sdr_runtime_env:
-              external: true
-              name: sdr-project_sdr_runtime_env
-          YAML
-
+          CONTENT_URL="https://github.com/amohamed-alt/SDR-Project/blob/${HEAD_SHA}/docker-compose.hubspot-once.yml"
           BODY=$(jq -n \
             --arg project_name "$PROJECT" \
-            --arg content "$COMPOSE_CONTENT" \
+            --arg content "$CONTENT_URL" \
             '{project_name: $project_name, content: $content}')
           HTTP_CODE=$(curl --silent --show-error \
             --output /tmp/create.json \
@@ -97,16 +49,17 @@ jobs:
             echo "::error::Temporary Hostinger project creation failed (HTTP ${HTTP_CODE})."
             exit 1
           fi
+          jq '{id, status, message}' /tmp/create.json
 
           COMPLETED=false
-          for ATTEMPT in $(seq 1 24); do
+          for ATTEMPT in $(seq 1 60); do
             sleep 5
             curl --silent --show-error --fail \
               -H "Authorization: Bearer ${HOSTINGER_API_KEY}" \
               "${API_BASE}/${PROJECT}/containers" > /tmp/containers.json || continue
             STATE=$(jq -r '.[0].state // ""' /tmp/containers.json)
             STATUS=$(jq -r '.[0].status // ""' /tmp/containers.json)
-            echo "Property worker ${ATTEMPT}/24: state=${STATE:-pending} status=${STATUS:-pending}"
+            echo "Property worker ${ATTEMPT}/60: state=${STATE:-pending} status=${STATUS:-pending}"
             if [ "$STATE" = "exited" ]; then
               if printf '%s' "$STATUS" | grep -Fq 'Exited (0)'; then
                 COMPLETED=true
