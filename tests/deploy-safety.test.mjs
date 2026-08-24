@@ -184,3 +184,10 @@ test("verified Smartlead autopilot is launched while every legacy send path stay
   assert.match(deploy, /SMARTLEAD_AUTOPILOT_ENABLED=true/);
   assert.match(deploy, /SMARTLEAD_LEGACY_SEND_ENABLED=false/);
 });
+
+test("Smartlead spam guard does not use the provider's broken is_spam query filter", async () => {
+  const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
+  assert.doesNotMatch(orchestrator, /emailStatus:\s*"is_spam"/);
+  assert.match(orchestrator, /leadRows\.filter/);
+  assert.match(orchestrator, /row\.is_spam/);
+});
