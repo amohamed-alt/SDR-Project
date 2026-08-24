@@ -1,4 +1,4 @@
-name: Audit Today's Smartlead Launch
+name: Pause Personal-Domain Smartlead Leads
 
 on:
   pull_request:
@@ -10,11 +10,11 @@ permissions:
   contents: read
 
 jobs:
-  audit:
+  pause-personal:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
-      - name: Read today's production state and managed campaign statuses
+      - name: Pause today's personal-domain leads and verify the managed campaigns
         env:
           SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
           DASHBOARD_USERNAME: ${{ secrets.DASHBOARD_USERNAME || 'talentera' }}
@@ -24,22 +24,60 @@ jobs:
           test -n "${SMARTLEAD_API_KEY:-}"
           test -n "${DASHBOARD_PASSWORD:-}"
 
-          curl --silent --show-error --fail             --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}"             --connect-timeout 10             --max-time 60             'https://sdr.dashboardtalentera.tech/api/smartlead/orchestrator-v3'             > /tmp/state.json
+          RIYADH_DATE=$(TZ=Asia/Riyadh date +%F)
+          curl --silent --show-error --fail             --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}"             --connect-timeout 10             --max-time 180             'https://sdr.dashboardtalentera.tech/api/smartlead?view=full&refresh=1'             > /tmp/smartlead-state.json
+          test "$(jq -r '.degraded // false' /tmp/smartlead-state.json)" = 'false'
 
-          jq '{state, schedule, verification, campaigns}' /tmp/state.json
+          jq -r --arg day "$RIYADH_DATE" '
+            [.executions[]?
+              | select((.queuedAt // "") | startswith($day))
+              | (.email // "" | ascii_downcase)
+              | select(test("@(gmail|googlemail|hotmail|outlook|live|yahoo|icloud|me|aol|protonmail|proton)\\.[a-z]{2,}$"))
+            ] | unique[]
+          ' /tmp/smartlead-state.json > /tmp/personal-emails.txt
 
-          echo '[]' > /tmp/all-campaigns.json
-          for OFFSET in $(seq 0 100 900); do
-            curl --silent --show-error --fail               --connect-timeout 10               --max-time 60               "https://server.smartlead.ai/api/v1/campaigns?api_key=${SMARTLEAD_API_KEY}&offset=${OFFSET}&limit=100"               > /tmp/page.json
-            jq 'if type == "array" then . elif (.data | type) == "array" then .data elif (.campaigns | type) == "array" then .campaigns else [] end'               /tmp/page.json > /tmp/page-normalized.json
-            COUNT=$(jq 'length' /tmp/page-normalized.json)
-            jq -s 'add' /tmp/all-campaigns.json /tmp/page-normalized.json > /tmp/next.json
-            mv /tmp/next.json /tmp/all-campaigns.json
-            if [ "$COUNT" -lt 100 ]; then break; fi
+          PERSONAL_COUNT=$(wc -l < /tmp/personal-emails.txt | tr -d ' ')
+          echo "Today's personal-domain leads detected: $PERSONAL_COUNT"
+          if [ "$PERSONAL_COUNT" = '0' ]; then
+            echo 'SMARTLEAD_PERSONAL_PAUSE_OK detected=0 paused=0 active_remaining=0'
+            exit 0
+          fi
+
+          jq -Rn '[inputs]' < /tmp/personal-emails.txt > /tmp/personal-emails.json
+          PAUSED=0
+          CAMPAIGNS='3841527 3841528 3841529 3841530'
+          for CAMPAIGN_ID in $CAMPAIGNS; do
+            for OFFSET in $(seq 0 100 4900); do
+              curl --silent --show-error --fail                 --connect-timeout 10                 --max-time 60                 "https://server.smartlead.ai/api/v1/campaigns/${CAMPAIGN_ID}/leads?api_key=${SMARTLEAD_API_KEY}&offset=${OFFSET}&limit=100"                 > /tmp/leads-page.json
+              jq 'if type == "array" then . elif (.data | type) == "array" then .data elif (.leads | type) == "array" then .leads elif (.results | type) == "array" then .results else [] end'                 /tmp/leads-page.json > /tmp/leads.json
+              PAGE_COUNT=$(jq 'length' /tmp/leads.json)
+
+              while IFS=$'\t' read -r LEAD_ID EMAIL STATUS; do
+                test -n "$LEAD_ID" || continue
+                if jq -e --arg email "$EMAIL" 'index($email) != null' /tmp/personal-emails.json >/dev/null                   && ! printf '%s' "$STATUS" | grep -Eiq 'complete|stopp|paus|unsub|bounce|repl'; then
+                  curl --silent --show-error --fail                     --connect-timeout 10                     --max-time 60                     -X POST                     "https://server.smartlead.ai/api/v1/campaigns/${CAMPAIGN_ID}/leads/${LEAD_ID}/pause?api_key=${SMARTLEAD_API_KEY}"                     > /tmp/pause.json
+                  PAUSED=$((PAUSED + 1))
+                fi
+              done < <(jq -r '.[] | (.lead // {}) as $nested | [(.id // .lead_id // $nested.id // ""), ((.email // $nested.email // "") | ascii_downcase), ((.status // .lead_status // .email_status // .category // "") | tostring)] | @tsv' /tmp/leads.json)
+
+              if [ "$PAGE_COUNT" -lt 100 ]; then break; fi
+            done
           done
 
-          jq '[.[] | select((.id // .campaign_id) as $id | [3841527,3841528,3841529,3841530] | index($id)) | {id:(.id // .campaign_id), name:(.name // .campaign_name), status}] | sort_by(.id)'             /tmp/all-campaigns.json > /tmp/managed.json
-          jq . /tmp/managed.json
-          test "$(jq 'length' /tmp/managed.json)" = '4'
-          test "$(jq '[.[] | select((.status | ascii_upcase) != "STARTED" and (.status | ascii_upcase) != "ACTIVE")] | length' /tmp/managed.json)" = '0'
-          echo 'SMARTLEAD_LAUNCH_AUDIT_OK managed_campaigns=4 status=started'
+          ACTIVE_REMAINING=0
+          for CAMPAIGN_ID in $CAMPAIGNS; do
+            for OFFSET in $(seq 0 100 4900); do
+              curl --silent --show-error --fail                 --connect-timeout 10                 --max-time 60                 "https://server.smartlead.ai/api/v1/campaigns/${CAMPAIGN_ID}/leads?api_key=${SMARTLEAD_API_KEY}&offset=${OFFSET}&limit=100"                 > /tmp/verify-page.json
+              jq 'if type == "array" then . elif (.data | type) == "array" then .data elif (.leads | type) == "array" then .leads elif (.results | type) == "array" then .results else [] end'                 /tmp/verify-page.json > /tmp/verify-leads.json
+              PAGE_COUNT=$(jq 'length' /tmp/verify-leads.json)
+              while IFS=$'\t' read -r EMAIL STATUS; do
+                if jq -e --arg email "$EMAIL" 'index($email) != null' /tmp/personal-emails.json >/dev/null                   && ! printf '%s' "$STATUS" | grep -Eiq 'complete|stopp|paus|unsub|bounce|repl'; then
+                  ACTIVE_REMAINING=$((ACTIVE_REMAINING + 1))
+                fi
+              done < <(jq -r '.[] | (.lead // {}) as $nested | [((.email // $nested.email // "") | ascii_downcase), ((.status // .lead_status // .email_status // .category // "") | tostring)] | @tsv' /tmp/verify-leads.json)
+              if [ "$PAGE_COUNT" -lt 100 ]; then break; fi
+            done
+          done
+
+          test "$ACTIVE_REMAINING" = '0'
+          echo "SMARTLEAD_PERSONAL_PAUSE_OK detected=$PERSONAL_COUNT paused=$PAUSED active_remaining=$ACTIVE_REMAINING"
