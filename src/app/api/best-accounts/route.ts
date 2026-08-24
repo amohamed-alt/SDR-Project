@@ -93,6 +93,11 @@ function researchEvidence(account: AcquisitionAccount) {
   return record(record(account.evidence).bestAccountsResearch);
 }
 
+function recentlyResearched(account: AcquisitionAccount, hours = 12) {
+  const checkedAt = Date.parse(clean(researchEvidence(account).checkedAt, 80));
+  return Number.isFinite(checkedAt) && Date.now() - checkedAt < hours * 60 * 60 * 1000;
+}
+
 function priorityScore(account: AcquisitionAccount) {
   const research = researchEvidence(account);
   let score = Number(account.gtmScore || 0);
@@ -303,6 +308,7 @@ async function researchAccount(input: AcquisitionAccount) {
   const research = {
     checkedAt,
     confidence,
+    resolvedDomain: intelligence.domain,
     website: intelligence.website,
     careerPageUrl: intelligence.careerPageUrl,
     careerConfidence: intelligence.careerConfidence,
@@ -322,7 +328,9 @@ async function researchAccount(input: AcquisitionAccount) {
 
   let updated: AcquisitionAccount = {
     ...input,
-    domain: intelligence.domain || input.domain,
+    // Keep the acquisition queue's primary key stable. Any canonical domain discovered
+    // during research is stored as evidence instead of silently creating a second account.
+    domain: input.domain,
     careerPageUrl: intelligence.careerPageUrl || input.careerPageUrl,
     detectedAts: intelligence.detectedAts || input.detectedAts,
     activeJobs,
@@ -366,7 +374,7 @@ async function researchAccount(input: AcquisitionAccount) {
 async function researchTop(limit: number) {
   const data = await listAcquisitionAccounts({ limit: 1000, includeExcluded: false });
   const queue = data.accounts
-    .filter((account) => account.exclusionStatus === "eligible" && account.status !== "pushed")
+    .filter((account) => account.exclusionStatus === "eligible" && account.status !== "pushed" && !recentlyResearched(account))
     .sort((a, b) => priorityScore(b) - priorityScore(a) || b.gtmScore - a.gtmScore || b.activeJobs - a.activeJobs)
     .slice(0, limit);
 
@@ -444,6 +452,7 @@ export async function POST(request: NextRequest) {
       requested: parsed.data.limit,
       completed: results.filter((item) => item.ok).length,
       failed: results.filter((item) => !item.ok).length,
+      skippedFresh: Math.max(0, parsed.data.limit - results.length),
       results,
     });
   } catch (error) {
