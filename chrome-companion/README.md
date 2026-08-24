@@ -8,7 +8,7 @@ This is the existing Talentera SDR Chrome companion for user-triggered prospecti
 2. Open `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Click **Load unpacked** and select the `chrome-companion` folder.
-5. Confirm the extension shows version **1.3.0** or newer.
+5. Confirm the extension shows version **1.4.0** or newer.
 6. In the SDR Dashboard, open **Sales Nav → Companion setup**.
 7. Unlock admin settings and click **Generate / rotate token**.
 8. Paste that token into the extension and click **Test connection**.
@@ -27,12 +27,13 @@ This is the existing Talentera SDR Chrome companion for user-triggered prospecti
 1. Open SignalHire → **Lead Lists** → the list you want to work, such as **Abdullah**.
 2. Click the same Talentera Prospecting Companion icon.
 3. Click **Sync current SignalHire list**.
-4. The companion reads only the currently open SignalHire list after that explicit click and sends the extracted lead fields to **SignalHire Queue** in the SDR Dashboard.
-5. The dashboard checks HubSpot **before** another SignalHire enrichment call:
+4. The companion reads only validated candidate/profile rows from the currently open SignalHire list. Resume history, experience, education and contact-detail sections are not treated as leads.
+5. The server validates candidate identity again before accepting the batch and ignores old parser batches automatically.
+6. The dashboard checks HubSpot **before** another SignalHire enrichment call:
    - existing contact → stop and show the match;
    - active Retention customer or company with an open deal → protect/stop;
    - clean new person/company → enrich, run ATS/hiring intelligence, then expose reviewed **Push + Task** actions.
-6. Existing HubSpot push logic handles contact/company creation or missing-field sync, company association and duplicate-task protection.
+7. Existing HubSpot push logic handles contact/company creation or missing-field sync, company association and duplicate-task protection.
 
 ## Safety design
 
@@ -44,6 +45,7 @@ This is the existing Talentera SDR Chrome companion for user-triggered prospecti
 - Pairing token is stored locally in Chrome; the server stores only its SHA-256 hash.
 - Sales Navigator runs remain capped at 50 leads / two pages; SignalHire list sync is capped at 100 visible/list-loaded leads per explicit run.
 - 1st-degree Sales Navigator connections are removed before import.
+- SignalHire imports require a real candidate/profile identity URL and parser v2; resume/history rows are rejected at both browser and server layers.
 - Old extension versions are rejected by the server so stale parsers cannot silently import bad fields.
 
 ## Detection note
