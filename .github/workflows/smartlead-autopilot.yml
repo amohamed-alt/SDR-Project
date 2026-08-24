@@ -114,6 +114,79 @@ jobs:
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "Smartlead orchestrator mode: $MODE"
 
+      - name: Reconcile active-campaign warmup for approved inboxes
+        if: steps.mode.outputs.mode != 'dry-run'
+        env:
+          SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          APPROVED_DOMAINS='["jointalentera.com","usetalentera.com","talenteramena.com","evalufyhq.com","getevalufy.com"]'
+          EXPECTED_DOMAIN_COUNTS='{"jointalentera.com":3,"usetalentera.com":3,"talenteramena.com":3,"evalufyhq.com":3,"getevalufy.com":3}'
+          WARMUP_PAYLOAD='{"warmup_enabled":true,"total_warmup_per_day":10,"daily_rampup":5,"reply_rate_percentage":30,"auto_adjust_warmup":true,"is_rampup_enabled":false}'
+
+          echo '[]' > /tmp/smartlead-email-accounts.json
+          for OFFSET in $(seq 0 100 4900); do
+            HTTP_CODE=$(curl --silent --show-error \
+              --connect-timeout 10 \
+              --max-time 60 \
+              --output /tmp/smartlead-email-accounts-page.json \
+              --write-out '%{http_code}' \
+              "https://server.smartlead.ai/api/v1/email-accounts/?api_key=${SMARTLEAD_API_KEY}&offset=${OFFSET}&limit=100")
+            if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+              echo "::error::Could not inventory Smartlead email accounts (HTTP $HTTP_CODE)."
+              exit 1
+            fi
+
+            jq 'if type == "array" then . elif (.email_accounts | type) == "array" then .email_accounts elif (.data | type) == "array" then .data elif (.accounts | type) == "array" then .accounts else [] end' \
+              /tmp/smartlead-email-accounts-page.json > /tmp/smartlead-email-accounts-page-normalized.json
+            PAGE_COUNT=$(jq 'length' /tmp/smartlead-email-accounts-page-normalized.json)
+            jq -s 'add' /tmp/smartlead-email-accounts.json /tmp/smartlead-email-accounts-page-normalized.json > /tmp/smartlead-email-accounts-next.json
+            mv /tmp/smartlead-email-accounts-next.json /tmp/smartlead-email-accounts.json
+            if [ "$PAGE_COUNT" -lt 100 ]; then break; fi
+          done
+
+          jq --argjson domains "$APPROVED_DOMAINS" '
+            [ .[]
+              | {
+                  id: (.id // .email_account_id),
+                  domain: ((.from_email // .email // .username // "") | ascii_downcase | split("@") | last)
+                }
+              | select(.id != null and (.domain as $domain | $domains | index($domain)))
+            ]
+            | unique_by(.id)
+          ' /tmp/smartlead-email-accounts.json > /tmp/smartlead-approved-email-accounts.json
+
+          APPROVED_COUNT=$(jq 'length' /tmp/smartlead-approved-email-accounts.json)
+          DOMAIN_COUNTS=$(jq -c 'group_by(.domain) | map({key: .[0].domain, value: length}) | from_entries' /tmp/smartlead-approved-email-accounts.json)
+          if [ "$APPROVED_COUNT" != "15" ] || ! jq -e --argjson actual "$DOMAIN_COUNTS" --argjson expected "$EXPECTED_DOMAIN_COUNTS" -n '$actual == $expected' >/dev/null; then
+            echo "::error::Warmup reconciliation expected exactly three approved inboxes on each of five domains; no settings were changed."
+            echo "Approved inbox count: $APPROVED_COUNT"
+            echo "Approved domain counts: $DOMAIN_COUNTS"
+            exit 1
+          fi
+
+          UPDATED=0
+          while IFS= read -r ACCOUNT_ID; do
+            HTTP_CODE=$(curl --silent --show-error \
+              --connect-timeout 10 \
+              --max-time 60 \
+              --output /tmp/smartlead-warmup-update.json \
+              --write-out '%{http_code}' \
+              -X POST "https://server.smartlead.ai/api/v1/email-accounts/${ACCOUNT_ID}/warmup?api_key=${SMARTLEAD_API_KEY}" \
+              -H 'Content-Type: application/json' \
+              -d "$WARMUP_PAYLOAD")
+            if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ] || ! jq -e '.ok == true' /tmp/smartlead-warmup-update.json >/dev/null; then
+              echo "::error::Warmup update failed for approved Smartlead account ID $ACCOUNT_ID (HTTP $HTTP_CODE)."
+              jq '{ok, message, error}' /tmp/smartlead-warmup-update.json || true
+              exit 1
+            fi
+            UPDATED=$((UPDATED + 1))
+          done < <(jq -r '.[].id' /tmp/smartlead-approved-email-accounts.json)
+
+          test "$UPDATED" = "15"
+          echo "Smartlead warmup reconciled for 15 approved inboxes: enabled, 10/day, 30% replies, auto-adjust on, ramp-up off."
+
       - name: Sync visible Smartlead sequences or run daily batch
         env:
           SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
