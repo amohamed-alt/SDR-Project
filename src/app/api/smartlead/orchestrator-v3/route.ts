@@ -264,6 +264,19 @@ async function campaignAnalytics(campaign: Campaign) {
   return { sent, bounces, bounceRate: sent ? bounces / sent : 0, spamComplaints, spamRate: sent ? spamComplaints / sent : 0, replies: numberFrom(payload, ["reply_count", "replies", "total_replies"]) };
 }
 
+async function freshHealthySnapshot(context: string) {
+  let snapshot = await getSmartleadV2(true);
+  for (let attempt = 0; !snapshot.safety.healthy && attempt < 3; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1_500 * 2 ** attempt));
+    snapshot = await getSmartleadV2(true);
+  }
+  if (!snapshot.safety.healthy) {
+    const warnings = snapshot.safety.warnings.filter(Boolean).join(" ") || "Unknown HubSpot or sender-inventory safety warning.";
+    throw new Error(`${context}; queue aborted after safety retries. ${warnings}`);
+  }
+  return snapshot;
+}
+
 function inactiveLead(row: JsonObject) {
   return /complete|stopp|paus|unsub|bounce|repl/i.test(clean(row.status || row.lead_status || row.email_status || row.category));
 }
@@ -529,8 +542,7 @@ async function autopilot(millionVerifierApiKey = "") {
       }])),
     };
 
-    snapshot = await getSmartleadV2(true);
-    if (!snapshot.safety.healthy) throw new Error("Fresh Sales safety changed during email verification; queue aborted.");
+    snapshot = await freshHealthySnapshot("Fresh Sales safety was temporarily unavailable after email verification");
     const selection = selectVerifiedDailyBatch(snapshot.queue, verifiedEmails, {
       globalLimit: capacity.globalSafeNew,
       productLimits: capacity.productCaps,
@@ -543,8 +555,7 @@ async function autopilot(millionVerifierApiKey = "") {
     }
 
     const prepared = await personalizeBatch(selected);
-    snapshot = await getSmartleadV2(true);
-    if (!snapshot.safety.healthy) throw new Error("Fresh Sales safety changed during personalization; queue aborted.");
+    snapshot = await freshHealthySnapshot("Fresh Sales safety was temporarily unavailable after personalization");
     const finalSelection = selectVerifiedDailyBatch(snapshot.queue, verifiedEmails, {
       globalLimit: capacity.globalSafeNew,
       productLimits: capacity.productCaps,
