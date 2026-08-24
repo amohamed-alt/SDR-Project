@@ -6,7 +6,21 @@ export const dynamic = "force-dynamic";
 
 let activeBatch: Promise<Awaited<ReturnType<typeof runCareerAtsBackfillBatch>>> | null = null;
 
+function writesEnabled() {
+  return String(process.env.CAREER_MANUAL_WRITE_ENABLED || "false").toLowerCase() === "true";
+}
+
 export async function POST(request: NextRequest) {
+  if (!writesEnabled()) {
+    return NextResponse.json(
+      {
+        error: "Career + ATS automatic HubSpot writes are disabled. Research must be manually verified before CRM updates.",
+        mode: "manual-verification-required",
+      },
+      { status: 423, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
   if (activeBatch) {
     return NextResponse.json(
       { error: "A Career + ATS Search Status batch is already running." },
@@ -27,8 +41,8 @@ export async function POST(request: NextRequest) {
       {
         ...payload,
         remainingEligible: payload.summary.remainingEligible,
-        autoPushEnabled: true,
-        mode: "career-ats-search-status-backfill",
+        autoPushEnabled: false,
+        mode: "manual-verification-gated-backfill",
       },
       { headers: { "Cache-Control": "no-store" } },
     );
