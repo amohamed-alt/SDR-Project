@@ -1,0 +1,43 @@
+name: Run Marita Extensive Lighter Cleanup on VPS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cleanup-marita-vps-direct.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-cleanup-runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout cleanup runner
+        uses: actions/checkout@v5
+
+      - name: Validate cleanup deployment credentials
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+          SIGNALHIRE_API_KEY: ${{ secrets.SIGNALHIRE_API_KEY }}
+        run: |
+          test -n "$HOSTINGER_API_KEY" || {
+            echo "::error::HOSTINGER_API_KEY is required."
+            exit 1
+          }
+          test -n "$SIGNALHIRE_API_KEY" || {
+            echo "::error::SIGNALHIRE_API_KEY is required."
+            exit 1
+          }
+
+      - name: Deploy one-shot cleanup runner inside VPS network
+        uses: hostinger/deploy-on-vps@v2
+        with:
+          api-key: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+          virtual-machine: "1604210"
+          project-name: sdr-marita-task-cleanup
+          docker-compose-path: docker-compose.cleanup-marita.yml
+          environment-variables: |
+            SIGNALHIRE_API_KEY=${{ secrets.SIGNALHIRE_API_KEY }}
