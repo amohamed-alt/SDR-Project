@@ -251,12 +251,16 @@ function capacityPlan(senders: Sender[]) {
 }
 
 async function campaignAnalytics(campaign: Campaign) {
-  const [payload, spamPayload] = await Promise.all([
-    smartleadRequest<unknown>(`/campaigns/${campaign.id}/analytics`, { method: "GET" }),
-    smartleadRequest<unknown>(`/campaigns/${campaign.id}/leads`, { method: "GET" }, { offset: "0", limit: "1", emailStatus: "is_spam" }),
-  ]);
+  const payload = await smartleadRequest<unknown>(`/campaigns/${campaign.id}/analytics`, { method: "GET" });
+  const leadRows: JsonObject[] = [];
+  for (let offset = 0; offset < 20_000; offset += 100) {
+    const leadPayload = await smartleadRequest<unknown>(`/campaigns/${campaign.id}/leads`, { method: "GET" }, { offset: String(offset), limit: "100" });
+    const batch = list(leadPayload, ["leads", "data", "results"]).map(object);
+    leadRows.push(...batch);
+    if (batch.length < 100) break;
+  }
   const sent = numberFrom(payload, ["sent_count", "sent", "total_sent", "emails_sent"]); const bounces = numberFrom(payload, ["bounce_count", "bounces", "total_bounces"]);
-  const spamComplaints = numberFrom(spamPayload, ["total", "count", "total_count"]) || numberFrom(object(spamPayload).data, ["total", "count", "total_count"]) || list(spamPayload, ["leads", "results"]).length;
+  const spamComplaints = leadRows.filter((row) => Boolean(row.is_spam) || /(?:^|[_ -])spam(?:$|[_ -])/i.test(clean(row.status || row.lead_status || row.email_status || row.category))).length;
   return { sent, bounces, bounceRate: sent ? bounces / sent : 0, spamComplaints, spamRate: sent ? spamComplaints / sent : 0, replies: numberFrom(payload, ["reply_count", "replies", "total_replies"]) };
 }
 
