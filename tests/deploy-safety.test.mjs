@@ -191,3 +191,11 @@ test("Smartlead spam guard does not use the provider's broken is_spam query filt
   assert.match(orchestrator, /leadRows\.filter/);
   assert.match(orchestrator, /row\.is_spam/);
 });
+
+test("Smartlead retries transient fresh safety reads without weakening fail-closed sending", async () => {
+  const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
+  assert.match(orchestrator, /async function freshHealthySnapshot/);
+  assert.match(orchestrator, /attempt < 3/);
+  assert.match(orchestrator, /queue aborted after safety retries/);
+  assert.match(orchestrator, /await freshHealthySnapshot\("Fresh Sales safety was temporarily unavailable after email verification"\)/);
+});
