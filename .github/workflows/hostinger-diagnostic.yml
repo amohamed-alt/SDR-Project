@@ -2,6 +2,7 @@ name: Reconcile HubSpot MillionVerifier Property
 
 on:
   pull_request:
+    types: [reopened]
     paths:
       - .github/workflows/hostinger-diagnostic.yml
 
@@ -11,68 +12,32 @@ permissions:
 jobs:
   reconcile:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 2
     steps:
-      - name: Patch and verify the existing HubSpot property through an isolated container
+      - name: Rename and verify the existing HubSpot contact property
         env:
-          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HUBSPOT_PRIVATE_APP_TOKEN: ${{ secrets.HUBSPOT_PRIVATE_APP_TOKEN }}
         run: |
           set -euo pipefail
-          test -n "$HOSTINGER_API_KEY"
-          API_BASE='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210/docker'
-          PROJECT='sdr-hubspot-property-once'
-
-          cleanup() {
-            curl --silent --show-error \
-              -X DELETE \
-              -H "Authorization: Bearer ${HOSTINGER_API_KEY}" \
-              "${API_BASE}/${PROJECT}/down" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-          cleanup
-
-          CONTENT_URL="https://github.com/amohamed-alt/SDR-Project/blob/${HEAD_SHA}/docker-compose.hubspot-once.yml"
-          BODY=$(jq -n \
-            --arg project_name "$PROJECT" \
-            --arg content "$CONTENT_URL" \
-            '{project_name: $project_name, content: $content}')
-          HTTP_CODE=$(curl --silent --show-error \
-            --output /tmp/create.json \
-            --write-out '%{http_code}' \
-            -X POST \
-            -H "Authorization: Bearer ${HOSTINGER_API_KEY}" \
-            -H 'Content-Type: application/json' \
-            -d "$BODY" \
-            "${API_BASE}")
-          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
-            echo "::error::Temporary Hostinger project creation failed (HTTP ${HTTP_CODE})."
+          test -n "${HUBSPOT_PRIVATE_APP_TOKEN:-}" || {
+            echo "::error::HUBSPOT_PRIVATE_APP_TOKEN is missing."
             exit 1
-          fi
-          jq '{id, status, message}' /tmp/create.json
+          }
 
-          COMPLETED=false
-          for ATTEMPT in $(seq 1 60); do
-            sleep 5
-            curl --silent --show-error --fail \
-              -H "Authorization: Bearer ${HOSTINGER_API_KEY}" \
-              "${API_BASE}/${PROJECT}/containers" > /tmp/containers.json || continue
-            STATE=$(jq -r '.[0].state // ""' /tmp/containers.json)
-            STATUS=$(jq -r '.[0].status // ""' /tmp/containers.json)
-            echo "Property worker ${ATTEMPT}/60: state=${STATE:-pending} status=${STATUS:-pending}"
-            if [ "$STATE" = "exited" ]; then
-              if printf '%s' "$STATUS" | grep -Fq 'Exited (0)'; then
-                COMPLETED=true
-              fi
-              break
-            fi
-          done
+          API_URL='https://api.hubapi.com/crm/v3/properties/contacts/gtm_email_status'
+          AUTH_HEADER="Authorization: Bearer ${HUBSPOT_PRIVATE_APP_TOKEN}"
 
-          curl --silent --show-error --fail \
-            -H "Authorization: Bearer ${HOSTINGER_API_KEY}" \
-            "${API_BASE}/${PROJECT}/logs" > /tmp/logs.json
-          SAFE_LOGS=$(jq -r '.. | strings' /tmp/logs.json \
-            | grep -E 'Existing HubSpot property|HUBSPOT_PROPERTY_RECONCILED' || true)
-          printf '%s\n' "$SAFE_LOGS"
-          test "$COMPLETED" = "true"
-          printf '%s' "$SAFE_LOGS" | grep -Fq 'HUBSPOT_PROPERTY_RECONCILED'
+          curl --silent --show-error --fail             -H "$AUTH_HEADER"             "$API_URL" > /tmp/property-before.json
+
+          test "$(jq -r '.name' /tmp/property-before.json)" = 'gtm_email_status'
+          test "$(jq -r '.type' /tmp/property-before.json)" = 'enumeration'
+          test "$(jq -r '[.options[].value] | sort | join(",")' /tmp/property-before.json)" = 'catch_all,invalid,unknown,valid'
+
+          curl --silent --show-error --fail             -X PATCH             -H "$AUTH_HEADER"             -H 'Content-Type: application/json'             --data '{"label":"MillionVerifier Status"}'             "$API_URL" > /tmp/property-after.json
+
+          test "$(jq -r '.name' /tmp/property-after.json)" = 'gtm_email_status'
+          test "$(jq -r '.label' /tmp/property-after.json)" = 'MillionVerifier Status'
+          test "$(jq -r '.type' /tmp/property-after.json)" = 'enumeration'
+          test "$(jq -r '[.options[].value] | sort | join(",")' /tmp/property-after.json)" = 'catch_all,invalid,unknown,valid'
+
+          echo 'HUBSPOT_PROPERTY_RECONCILED name=gtm_email_status label=MillionVerifier_Status statuses=valid,catch_all,invalid,unknown'
