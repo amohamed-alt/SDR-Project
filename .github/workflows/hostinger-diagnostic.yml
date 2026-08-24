@@ -1,4 +1,4 @@
-name: Dispatch Verified Production Deploy
+name: Verify Official Production Deploy
 
 on:
   pull_request:
@@ -7,22 +7,54 @@ on:
       - .github/workflows/hostinger-diagnostic.yml
 
 permissions:
-  actions: write
+  actions: read
   contents: read
 
 jobs:
-  dispatch:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 10
     steps:
-      - name: Dispatch the official Hostinger deployment from current main
+      - name: Wait for the official deploy and verify the production build
         env:
           GH_TOKEN: ${{ github.token }}
+          DASHBOARD_USERNAME: ${{ secrets.DASHBOARD_USERNAME || 'talentera' }}
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
         run: |
           set -euo pipefail
-          MAIN_SHA=$(curl --silent --show-error --fail             -H "Authorization: Bearer ${GH_TOKEN}"             -H 'Accept: application/vnd.github+json'             "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/main"             | jq -r '.commit.sha')
-          test "$MAIN_SHA" = '86d9e95d2f82e8d058a3352230126d47b787fc22'
+          EXPECTED_SHA='86d9e95d2f82e8d058a3352230126d47b787fc22'
+          test -n "${DASHBOARD_PASSWORD:-}"
 
-          HTTP_CODE=$(curl --silent --show-error             --output /tmp/dispatch.json             --write-out '%{http_code}'             -X POST             -H "Authorization: Bearer ${GH_TOKEN}"             -H 'Accept: application/vnd.github+json'             -H 'Content-Type: application/json'             -d '{"ref":"main"}'             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-hostinger.yml/dispatches")
-          test "$HTTP_CODE" = '204'
-          echo "OFFICIAL_DEPLOY_DISPATCHED sha=$MAIN_SHA"
+          RUN_ID=''
+          for ATTEMPT in $(seq 1 20); do
+            curl --silent --show-error --fail               -H "Authorization: Bearer ${GH_TOKEN}"               -H 'Accept: application/vnd.github+json'               "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-hostinger.yml/runs?event=workflow_dispatch&branch=main&per_page=20"               > /tmp/runs.json
+            RUN_ID=$(jq -r --arg sha "$EXPECTED_SHA" '[.workflow_runs[] | select(.head_sha == $sha)] | sort_by(.created_at) | reverse | .[0].id // empty' /tmp/runs.json)
+            if [ -n "$RUN_ID" ]; then break; fi
+            sleep 5
+          done
+          test -n "$RUN_ID"
+          echo "Official deployment run: $RUN_ID"
+
+          CONCLUSION=''
+          for ATTEMPT in $(seq 1 50); do
+            curl --silent --show-error --fail               -H "Authorization: Bearer ${GH_TOKEN}"               -H 'Accept: application/vnd.github+json'               "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}"               > /tmp/run.json
+            STATUS=$(jq -r '.status' /tmp/run.json)
+            CONCLUSION=$(jq -r '.conclusion // ""' /tmp/run.json)
+            echo "Deploy status ${ATTEMPT}/50: $STATUS ${CONCLUSION:-pending}"
+            if [ "$STATUS" = 'completed' ]; then break; fi
+            sleep 10
+          done
+          test "$CONCLUSION" = 'success'
+
+          for ATTEMPT in $(seq 1 12); do
+            HTTP_CODE=$(curl --silent --show-error               --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}"               --connect-timeout 10               --max-time 30               --output /tmp/health.json               --write-out '%{http_code}'               "https://sdr.dashboardtalentera.tech/api/health?deployAudit=${EXPECTED_SHA}&attempt=${ATTEMPT}" || true)
+            BUILD_REF=$(jq -r '.buildRef // .build // empty' /tmp/health.json 2>/dev/null || true)
+            if [ "$HTTP_CODE" = '200' ] && [ "$BUILD_REF" = "$EXPECTED_SHA" ]; then
+              echo "PRODUCTION_CURRENT_WORK_EMAIL_SAFETY_OK build=$BUILD_REF deploy_run=$RUN_ID"
+              exit 0
+            fi
+            echo "Production verification ${ATTEMPT}/12: HTTP=${HTTP_CODE:-none} build=${BUILD_REF:-unknown}"
+            sleep 10
+          done
+          echo '::error::Production did not expose the expected build.'
+          exit 1
