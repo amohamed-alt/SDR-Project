@@ -1,4 +1,5 @@
 name: Verify Official Production Deploy
+# Verification trigger: 2026-08-24 current-work-email safety
 
 on:
   pull_request:
