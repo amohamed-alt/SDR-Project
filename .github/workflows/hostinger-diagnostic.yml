@@ -1,4 +1,4 @@
-name: Diagnose Hostinger Docker Project
+name: Recover Hostinger Docker Project Routing
 
 on:
   pull_request:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  diagnose:
+  diagnose-and-recover:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -42,3 +42,41 @@ jobs:
             | grep -Ei 'error|fatal|failed|exited|permission|eacces|enomem|invalid|unhealthy|refused' \
             | sed -E 's/[A-Za-z0-9_+\/=.-]{24,}/[REDACTED]/g' \
             | tail -120 || true
+
+      - name: Restart healthy project to refresh Traefik routing
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210/docker/sdr-project'
+          CONTAINERS=$(curl --silent --show-error --fail \
+            -H "Authorization: Bearer ${HOSTINGER_API_KEY}" \
+            "${BASE}/containers")
+          DASHBOARD_STATE=$(printf '%s' "$CONTAINERS" | jq -r '.[] | select(.name == "sdr-project-sdr-dashboard-1") | .state')
+          DASHBOARD_HEALTH=$(printf '%s' "$CONTAINERS" | jq -r '.[] | select(.name == "sdr-project-sdr-dashboard-1") | .health')
+          test "$DASHBOARD_STATE" = "running"
+          test "$DASHBOARD_HEALTH" = "healthy"
+
+          curl --silent --show-error --fail \
+            -X POST \
+            -H "Authorization: Bearer ${HOSTINGER_API_KEY}" \
+            "${BASE}/restart" > /tmp/restart.json
+          echo 'Hostinger accepted the volume-preserving project restart.'
+
+          for ATTEMPT in $(seq 1 18); do
+            HTTP_CODE=$(curl --silent --show-error \
+              --connect-timeout 5 \
+              --max-time 12 \
+              --output /tmp/health.json \
+              --write-out '%{http_code}' \
+              "https://sdr.dashboardtalentera.tech/api/health?recovery=${ATTEMPT}" || true)
+            BUILD_REF=$(jq -r '.buildRef // ""' /tmp/health.json 2>/dev/null || true)
+            echo "Recovery gate ${ATTEMPT}/18: http=${HTTP_CODE:-none} build=${BUILD_REF:-none}"
+            if [ "$HTTP_CODE" = "200" ] && [ -n "$BUILD_REF" ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+
+          echo '::error::Dashboard did not reconnect to Traefik after the safe project restart.'
+          exit 1
