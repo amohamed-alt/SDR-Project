@@ -3,15 +3,15 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Sales Nav Companion</title>
+  <title>Talentera Prospecting Companion</title>
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
   <main>
     <header>
       <div class="eyebrow">TALENTERA SDR</div>
-      <h1>Sales Nav Companion</h1>
-      <p>Reads only the Sales Navigator result cards you explicitly trigger. It never reads or exports LinkedIn cookies.</p>
+      <h1>Prospecting Companion</h1>
+      <p>Reads only the Sales Navigator or SignalHire page you explicitly trigger. It never reads or exports browser cookies.</p>
       <div id="versionStatus" class="status muted">Loading version…</div>
     </header>
 
@@ -35,8 +35,16 @@
       <div id="runStatus" class="status muted">Ready</div>
     </section>
 
-    <footer>No cookie permission · no hidden profile fetches · no background crawler · max 50 per run</footer>
+    <section class="card">
+      <h2>Sync SignalHire Lead List</h2>
+      <p class="small">Open SignalHire → Lead Lists → Abdullah, then sync the current list. The dashboard checks HubSpot contacts and companies before spending another SignalHire enrichment call.</p>
+      <button id="extractSignalHire" class="primary">Sync current SignalHire list</button>
+      <div id="signalHireStatus" class="status muted">Ready</div>
+    </section>
+
+    <footer>User-triggered only · no cookie permission · no hidden profile fetches · no background crawler</footer>
   </main>
   <script src="popup.js"></script>
+  <script src="popup-signalhire.js"></script>
 </body>
 </html>
