@@ -1,12 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "Talentera Sales Nav Companion",
-  "version": "1.2.0",
-  "description": "User-triggered Sales Navigator card extraction for the Talentera SDR dashboard. No cookie access, no hidden LinkedIn profile fetches, and no background crawling.",
+  "name": "Talentera Prospecting Companion",
+  "version": "1.3.0",
+  "description": "User-triggered Sales Navigator and SignalHire Lead List sync for the Talentera SDR dashboard. No cookie access, hidden profile fetches, or background crawling.",
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": ["https://sdr.dashboardtalentera.tech/*"],
   "action": {
-    "default_title": "Sales Nav Companion",
+    "default_title": "Talentera Prospecting Companion",
     "default_popup": "popup.html"
   }
 }
