@@ -11,7 +11,7 @@ const PORT = Number(process.env.PORT || 3000);
 const CACHE_TTL_DAYS = Number(process.env.CACHE_TTL_DAYS || 30);
 const MAX_STATIC_PAGES = Number(process.env.MAX_STATIC_PAGES || 30);
 const MAX_BROWSER_STEPS = Number(process.env.MAX_BROWSER_STEPS || 8);
-const VERSION = '3.1.0';
+const VERSION = '3.1.1';
 let cacheWriteQueue = Promise.resolve();
 
 function terminalCareerStatus(status) { return ['found_verified','no_public_career_page','website_domain_invalid','insufficient_company_data'].includes(String(status || '')); }
@@ -39,9 +39,21 @@ function finalizeCareer(result) {
   if (result.detection_method === 'input_missing_website') { result.career_status = 'insufficient_company_data'; result.career_confidence_score = 99; result.career_evidence_reason = 'No usable company website or domain was supplied.'; return result; }
   if (result.detection_method === 'website_validation_failed') { result.career_status = 'website_domain_invalid'; result.career_confidence_score = 98; result.career_evidence_reason = result.detection_error || 'The supplied website could not be resolved as a public HTTP(S) destination.'; return result; }
   if (blocked || result.pages_checked === 0) { result.career_status = 'needs_manual_review'; result.career_confidence_score = Math.max(35,Math.min(70,45 + Number(result.pages_checked || 0))); result.career_evidence_reason = blocked ? 'Automated verification was blocked or timed out before the site could be ruled out.' : 'The automated crawler could not collect enough public evidence to reach a safe conclusion.'; return result; }
+
+  const pagesChecked = Number(result.pages_checked || 0);
+  const staticPagesChecked = Number(result.static_pages_checked || 0);
+  const browserPagesChecked = Number(result.browser_pages_checked || 0);
+  const enoughNegativeEvidence = pagesChecked >= 5 && browserPagesChecked >= 2;
+  if (!enoughNegativeEvidence) {
+    result.career_status = 'needs_manual_review';
+    result.career_confidence_score = Math.min(79, 52 + Math.min(15, pagesChecked * 2) + Math.min(8, browserPagesChecked * 2));
+    result.career_evidence_reason = `Only ${pagesChecked} public page${pagesChecked === 1 ? '' : 's'} and ${browserPagesChecked} rendered page${browserPagesChecked === 1 ? '' : 's'} were checked; that is not enough negative evidence to safely conclude there is no public Career Page.`;
+    return result;
+  }
+
   result.career_status = 'no_public_career_page';
-  result.career_confidence_score = result.browser_pages_checked > 0 ? 90 : Math.min(88,72 + Math.min(16,Number(result.static_pages_checked || 0)));
-  result.career_evidence_reason = `Checked ${result.pages_checked} public page${result.pages_checked === 1 ? '' : 's'} without verifying an employer-owned career destination.`;
+  result.career_confidence_score = browserPagesChecked >= 3 ? 94 : Math.min(92,88 + Math.min(4,staticPagesChecked));
+  result.career_evidence_reason = `Checked ${pagesChecked} public pages, including ${browserPagesChecked} rendered pages, without verifying an employer-owned career destination.`;
   return result;
 }
 function cacheEntryFresh(entry, fallbackTtlDays = CACHE_TTL_DAYS) { if (!entry?.cached_at) return false; const ttlDays = Number(entry.ttl_days || fallbackTtlDays); return Date.now() - Date.parse(entry.cached_at) <= ttlDays * 86400000; }
