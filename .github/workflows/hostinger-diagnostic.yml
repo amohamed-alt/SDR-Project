@@ -1,5 +1,5 @@
-name: Verify Official Production Deploy
-# Verification trigger: 2026-08-24 current-work-email safety
+name: Verify Current Work Email Safety Production
+# Temporary read-only production verification for PR #141.
 
 on:
   pull_request:
@@ -8,54 +8,38 @@ on:
       - .github/workflows/hostinger-diagnostic.yml
 
 permissions:
-  actions: read
   contents: read
 
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
-      - name: Wait for the official deploy and verify the production build
+      - name: Verify the exact safety merge is live
         env:
-          GH_TOKEN: ${{ github.token }}
           DASHBOARD_USERNAME: ${{ secrets.DASHBOARD_USERNAME || 'talentera' }}
           DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
         run: |
           set -euo pipefail
-          EXPECTED_SHA='86d9e95d2f82e8d058a3352230126d47b787fc22'
+          EXPECTED_SHA='ea58b05a0d821a55f0b1b0537ea6fc1dcc718779'
           test -n "${DASHBOARD_PASSWORD:-}"
 
-          RUN_ID=''
-          for ATTEMPT in $(seq 1 20); do
-            curl --silent --show-error --fail               -H "Authorization: Bearer ${GH_TOKEN}"               -H 'Accept: application/vnd.github+json'               "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-hostinger.yml/runs?event=workflow_dispatch&branch=main&per_page=20"               > /tmp/runs.json
-            RUN_ID=$(jq -r --arg sha "$EXPECTED_SHA" '[.workflow_runs[] | select(.head_sha == $sha)] | sort_by(.created_at) | reverse | .[0].id // empty' /tmp/runs.json)
-            if [ -n "$RUN_ID" ]; then break; fi
-            sleep 5
-          done
-          test -n "$RUN_ID"
-          echo "Official deployment run: $RUN_ID"
-
-          CONCLUSION=''
-          for ATTEMPT in $(seq 1 50); do
-            curl --silent --show-error --fail               -H "Authorization: Bearer ${GH_TOKEN}"               -H 'Accept: application/vnd.github+json'               "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}"               > /tmp/run.json
-            STATUS=$(jq -r '.status' /tmp/run.json)
-            CONCLUSION=$(jq -r '.conclusion // ""' /tmp/run.json)
-            echo "Deploy status ${ATTEMPT}/50: $STATUS ${CONCLUSION:-pending}"
-            if [ "$STATUS" = 'completed' ]; then break; fi
-            sleep 10
-          done
-          test "$CONCLUSION" = 'success'
-
           for ATTEMPT in $(seq 1 12); do
-            HTTP_CODE=$(curl --silent --show-error               --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}"               --connect-timeout 10               --max-time 30               --output /tmp/health.json               --write-out '%{http_code}'               "https://sdr.dashboardtalentera.tech/api/health?deployAudit=${EXPECTED_SHA}&attempt=${ATTEMPT}" || true)
+            HTTP_CODE=$(curl --silent --show-error \
+              --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
+              --connect-timeout 10 \
+              --max-time 30 \
+              --output /tmp/health.json \
+              --write-out '%{http_code}' \
+              "https://sdr.dashboardtalentera.tech/api/health?workEmailSafety=${EXPECTED_SHA}&attempt=${ATTEMPT}" || true)
             BUILD_REF=$(jq -r '.buildRef // .build // empty' /tmp/health.json 2>/dev/null || true)
             if [ "$HTTP_CODE" = '200' ] && [ "$BUILD_REF" = "$EXPECTED_SHA" ]; then
-              echo "PRODUCTION_CURRENT_WORK_EMAIL_SAFETY_OK build=$BUILD_REF deploy_run=$RUN_ID"
+              echo "PRODUCTION_CURRENT_WORK_EMAIL_SAFETY_OK build=$BUILD_REF"
               exit 0
             fi
             echo "Production verification ${ATTEMPT}/12: HTTP=${HTTP_CODE:-none} build=${BUILD_REF:-unknown}"
             sleep 10
           done
-          echo '::error::Production did not expose the expected build.'
+
+          echo '::error::Production did not expose the safety merge build.'
           exit 1
