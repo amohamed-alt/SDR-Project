@@ -1,5 +1,5 @@
-name: Run Verified Smartlead Batch Once
-# Temporary dispatcher. The official workflow owns all send and safety logic.
+name: Read-only Smartlead Production Audit
+# Temporary diagnostic. No writes to Smartlead, HubSpot, or production.
 
 on:
   pull_request:
@@ -8,62 +8,128 @@ on:
       - .github/workflows/hostinger-diagnostic.yml
 
 permissions:
-  actions: write
   contents: read
 
 jobs:
-  dispatch-and-wait:
+  audit:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - name: Dispatch official idempotent Smartlead autopilot
+      - name: Audit live production aggregates
         env:
-          GH_TOKEN: ${{ github.token }}
+          SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
+          DASHBOARD_USERNAME: ${{ secrets.DASHBOARD_USERNAME || 'talentera' }}
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
         run: |
           set -euo pipefail
-          EXPECTED_SHA='b4ca90c319060af2ee436700ce88f1a4c8980fe5'
-          STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          test -n "$SMARTLEAD_API_KEY"
+          test -n "$DASHBOARD_PASSWORD"
+          BASE='https://sdr.dashboardtalentera.tech'
+          SL='https://server.smartlead.ai/api/v1'
 
-          DISPATCH_CODE=$(curl --silent --show-error \
+          curl --silent --show-error --fail --max-time 60 \
+            --user "$DASHBOARD_USERNAME:$DASHBOARD_PASSWORD" \
+            "$BASE/api/smartlead/health" > /tmp/health.json
+          echo 'SMARTLEAD_HEALTH'
+          jq -c . /tmp/health.json
+
+          curl --silent --show-error --fail --max-time 60 \
+            --user "$DASHBOARD_USERNAME:$DASHBOARD_PASSWORD" \
+            "$BASE/api/smartlead/orchestrator-v3" > /tmp/state.json
+          echo 'SMARTLEAD_ORCHESTRATOR_STATE'
+          jq -c '{configured,autopilotEnabled,dailyNewLeadTarget,capacityModel,schedule,state}' /tmp/state.json
+
+          curl --silent --show-error --fail --max-time 240 \
+            --user "$DASHBOARD_USERNAME:$DASHBOARD_PASSWORD" \
+            "$BASE/api/smartlead?view=full&refresh=1" > /tmp/full.json
+          echo 'SMARTLEAD_COMMAND_CENTER_AGGREGATE'
+          jq -c '{
+            generatedAt, degraded, refreshError, configuration, safety, campaigns, analytics, capacity, summary,
+            senderAudit: {
+              total: ((.senders // []) | length),
+              eligible: ([.senders[]? | select(.eligible == true)] | length),
+              warmupEnabled: ([.senders[]? | select(.warmupEnabled == true)] | length),
+              byBrand: ([.senders[]?.brand // "unknown"] | group_by(.) | map({key: .[0], value: length}) | from_entries),
+              dailyLimits: ([.senders[]?.maxPerDay // 0] | group_by(.) | map({key: (.[0] | tostring), value: length}) | from_entries)
+            },
+            executionAudit: {
+              total: ((.executions // []) | length),
+              statuses: ([.executions[]?.status // "UNKNOWN"] | group_by(.) | map({key: .[0], value: length}) | from_entries),
+              products: ([.executions[]?.product // "unknown"] | group_by(.) | map({key: .[0], value: length}) | from_entries)
+            }
+          }' /tmp/full.json
+
+          PARITY_CODE=$(curl --silent --show-error --max-time 180 \
             --request POST \
-            --header "Authorization: Bearer ${GH_TOKEN}" \
-            --header 'Accept: application/vnd.github+json' \
-            --header 'X-GitHub-Api-Version: 2022-11-28' \
-            --output /tmp/dispatch.json \
+            --header "Authorization: Bearer $SMARTLEAD_API_KEY" \
+            --header 'Content-Type: application/json' \
+            --output /tmp/parity.json \
             --write-out '%{http_code}' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/smartlead-autopilot.yml/dispatches" \
-            --data '{"ref":"main","inputs":{"mode":"autopilot"}}')
-          test "$DISPATCH_CODE" = '204'
-          echo "Official Smartlead autopilot dispatched."
+            "$BASE/api/smartlead/campaign-parity")
+          echo "SMARTLEAD_PARITY_HTTP=$PARITY_CODE"
+          jq -c . /tmp/parity.json
+          test "$PARITY_CODE" = '200'
 
-          RUN_ID=''
-          for ATTEMPT in $(seq 1 30); do
-            curl --silent --show-error --fail \
-              --header "Authorization: Bearer ${GH_TOKEN}" \
-              --header 'Accept: application/vnd.github+json' \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/smartlead-autopilot.yml/runs?event=workflow_dispatch&branch=main&per_page=20" \
-              > /tmp/runs.json
-            RUN_ID=$(jq -r --arg sha "$EXPECTED_SHA" --arg started "$STARTED_AT" \
-              '[.workflow_runs[] | select(.head_sha == $sha and .created_at >= $started)] | sort_by(.created_at) | reverse | .[0].id // empty' /tmp/runs.json)
-            if [ -n "$RUN_ID" ]; then break; fi
-            sleep 5
-          done
-          test -n "$RUN_ID"
-          echo "SMARTLEAD_OFFICIAL_RUN_ID=$RUN_ID"
+          curl --silent --show-error --fail --max-time 60 \
+            "$SL/campaigns/?include_tags=true&api_key=$SMARTLEAD_API_KEY" > /tmp/campaigns.json
 
-          CONCLUSION=''
-          for ATTEMPT in $(seq 1 60); do
-            curl --silent --show-error --fail \
-              --header "Authorization: Bearer ${GH_TOKEN}" \
-              --header 'Accept: application/vnd.github+json' \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" \
-              > /tmp/run.json
-            STATUS=$(jq -r '.status' /tmp/run.json)
-            CONCLUSION=$(jq -r '.conclusion // ""' /tmp/run.json)
-            echo "Smartlead run ${ATTEMPT}/60: ${STATUS} ${CONCLUSION:-pending}"
-            if [ "$STATUS" = 'completed' ]; then break; fi
-            sleep 10
-          done
+          printf '%s\n' \
+            'talentera_ar|Talentera | Marita SDR | Arabic KSA-GCC | V1' \
+            'talentera_en|Talentera | Marita SDR | English | V1' \
+            'evalufy_ar|Evalufy | Marita SDR | Arabic KSA-GCC | V1' \
+            'evalufy_en|Evalufy | Marita SDR | English | V1' > /tmp/specs.txt
 
-          test "$CONCLUSION" = 'success'
-          echo "SMARTLEAD_VERIFIED_BATCH_WORKFLOW_OK run=$RUN_ID"
+          while IFS='|' read -r LANE NAME; do
+            ID=$(jq -r --arg n "$NAME" '
+              (if type == "array" then . else (.campaigns // .data // []) end)
+              | map(select(.name == $n)) | .[0].id // empty
+            ' /tmp/campaigns.json)
+            test -n "$ID"
+
+            curl --silent --show-error --fail --max-time 60 \
+              "$SL/campaigns/$ID/analytics?api_key=$SMARTLEAD_API_KEY" > "/tmp/a-$LANE.json"
+            curl --silent --show-error --fail --max-time 60 \
+              "$SL/campaigns/$ID/leads?offset=0&limit=100&api_key=$SMARTLEAD_API_KEY" > "/tmp/l-$LANE.json"
+            curl --silent --show-error --fail --max-time 60 \
+              "$SL/campaigns/$ID/leads?offset=0&limit=1&emailStatus=is_spam&api_key=$SMARTLEAD_API_KEY" > "/tmp/s-$LANE.json"
+            curl --silent --show-error --fail --max-time 60 \
+              "$SL/campaigns/$ID/email-accounts?api_key=$SMARTLEAD_API_KEY" > "/tmp/e-$LANE.json"
+
+            CAMPAIGN=$(jq -c --arg n "$NAME" '
+              (if type == "array" then . else (.campaigns // .data // []) end)
+              | map(select(.name == $n)) | .[0] | {id,name,status}
+            ' /tmp/campaigns.json)
+
+            jq -nc \
+              --arg lane "$LANE" \
+              --argjson campaign "$CAMPAIGN" \
+              --slurpfile analytics "/tmp/a-$LANE.json" \
+              --slurpfile leads "/tmp/l-$LANE.json" \
+              --slurpfile spam "/tmp/s-$LANE.json" \
+              --slurpfile accounts "/tmp/e-$LANE.json" '
+              def rows($x):
+                if ($x | type) == "array" then $x
+                else ($x.data // $x.leads // $x.results // $x.email_accounts // $x.accounts // [])
+                end;
+              def status($r): ($r.status // $r.lead_status // $r.email_status // $r.category // "UNKNOWN" | tostring);
+              def personal($e): (($e // "" | ascii_downcase) | test("@(gmail|hotmail|outlook|yahoo|icloud|live|protonmail|aol)\\."));
+              def spamcount($x):
+                (($x.total // $x.count // $x.total_count // $x.data.total // $x.data.count // $x.data.total_count) // (rows($x) | length));
+              {
+                lane: $lane,
+                campaign: $campaign,
+                analytics: $analytics[0],
+                leads: {
+                  total: (rows($leads[0]) | length),
+                  statuses: (rows($leads[0]) | map(status(.)) | sort | group_by(.) | map({key: .[0], value: length}) | from_entries),
+                  personalDomains: (rows($leads[0]) | map(select(personal(.email // .lead.email))) | length),
+                  personalDomainStatuses: (rows($leads[0]) | map(select(personal(.email // .lead.email))) | map(status(.)) | sort | group_by(.) | map({key: .[0], value: length}) | from_entries),
+                  emailStatuses: (rows($leads[0]) | map((.email_status // "UNKNOWN") | tostring) | sort | group_by(.) | map({key: .[0], value: length}) | from_entries),
+                  sequenceSteps: (rows($leads[0]) | map((.last_email_sequence_sent // .sequence_number // .current_sequence_number // 0) | tostring) | sort | group_by(.) | map({key: .[0], value: length}) | from_entries)
+                },
+                spamComplaints: spamcount($spam[0]),
+                assignedSenders: (rows($accounts[0]) | length)
+              }'
+          done < /tmp/specs.txt
+
+          echo 'SMARTLEAD_READ_ONLY_AUDIT_OK'
