@@ -144,6 +144,19 @@ test("manual Smartlead dry-run reports masked routing without campaign writes", 
   assert.match(dryRun, /VISIBLE_SEQUENCE_LANES\[lane\]\.campaignName/);
 });
 
+test("Smartlead active-campaign warmup is reconciled only for the exact approved 15 inboxes", async () => {
+  const workflow = await read(".github/workflows/smartlead-autopilot.yml");
+
+  assert.match(workflow, /Reconcile active-campaign warmup for approved inboxes/);
+  assert.match(workflow, /if: steps\.mode\.outputs\.mode != 'dry-run'/);
+  assert.match(workflow, /EXPECTED_DOMAIN_COUNTS='\{"jointalentera\.com":3,"usetalentera\.com":3,"talenteramena\.com":3,"evalufyhq\.com":3,"getevalufy\.com":3\}'/);
+  assert.match(workflow, /"total_warmup_per_day":10/);
+  assert.match(workflow, /"reply_rate_percentage":30/);
+  assert.match(workflow, /"auto_adjust_warmup":true/);
+  assert.match(workflow, /"is_rampup_enabled":false/);
+  assert.match(workflow, /test "\$UPDATED" = "15"/);
+});
+
 test("Smartlead pauses on the first recorded spam complaint", async () => {
   const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
   assert.match(orchestrator, /analytics\[lane\]\.spamComplaints > 0/);
