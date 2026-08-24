@@ -2,7 +2,7 @@ name: Reconcile HubSpot MillionVerifier Property
 
 on:
   pull_request:
-    types: [reopened]
+    types: [synchronize]
     paths:
       - .github/workflows/hostinger-diagnostic.yml
 
