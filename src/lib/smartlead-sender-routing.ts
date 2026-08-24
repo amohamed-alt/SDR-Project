@@ -9,6 +9,7 @@ export const APPROVED_SENDING_DOMAINS = {
 
 export const EXPECTED_MAILBOXES_PER_DOMAIN = 3;
 export const EXPECTED_SENDING_MAILBOXES = 15;
+export const OUTREACH_SENDER_NAME = "Marita Chedid";
 
 export type SenderRoutingInput = {
   from_email?: unknown;
@@ -25,6 +26,11 @@ export type SenderRoutingInput = {
 };
 
 export type SenderAccountInput = SenderRoutingInput & Record<string, unknown>;
+
+export type SenderIdentityInput = {
+  from_name?: unknown;
+  signature?: unknown;
+};
 
 export type SenderAccountSafety = {
   email: string;
@@ -43,6 +49,30 @@ export type SenderAccountSafety = {
 
 function clean(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function displayClean(value: unknown) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+export function visibleSenderSignature(value: unknown) {
+  return String(value ?? "")
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function inspectSenderIdentity(input: SenderIdentityInput) {
+  const fromName = displayClean(input.from_name);
+  const visibleSignature = visibleSenderSignature(input.signature);
+  return {
+    fromName,
+    visibleSignature,
+    healthy: fromName === OUTREACH_SENDER_NAME && visibleSignature === "",
+  };
 }
 
 function object(value: unknown): Record<string, unknown> {

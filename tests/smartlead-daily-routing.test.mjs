@@ -50,6 +50,15 @@ test("verification candidates are isolated by lane and exclude sales or duplicat
   assert.deepEqual(verificationCandidatesForLane(queue, "talentera_ar").map((item) => item.email), ["lead-1@example.com"]);
 });
 
+test("valid personal email addresses cannot enter verification or the final send batch", () => {
+  const personal = { ...lead(5, "talentera", "en"), email: "person@hotmail.com" };
+  assert.deepEqual(verificationCandidatesForLane([personal], "talentera_en"), []);
+  assert.deepEqual(selectVerifiedDailyBatch([personal], new Set([personal.email]), {
+    globalLimit: 1,
+    productLimits: { talentera: 1, evalify: 0 },
+  }).selected, []);
+});
+
 test("a missing current email can still reach the LinkedIn recovery gate", () => {
   const candidate = { ...lead(4, "evalify", "en", false), email: "", linkedinUrl: "https://www.linkedin.com/in/example-person", blockReason: "Invalid or unsafe email" };
   assert.deepEqual(verificationCandidatesForLane([candidate], "evalufy_en"), [candidate]);

@@ -47,6 +47,20 @@ test("Arabic visible sequences contain no untranslated operational terms", () =>
   }
 });
 
+test("every touch has one short language- and product-matched signature", () => {
+  for (const lane of Object.values(VISIBLE_SEQUENCE_LANES)) {
+    const name = lane.language === "ar" ? "ماريتا شديد" : "Marita Chedid";
+    const brand = lane.product === "evalify" ? "Evalufy" : "Talentera";
+    for (const touch of lane.touches) {
+      assert.ok(touch.body.endsWith(`${name}\n${brand}`), `${lane.lane} has the wrong signature`);
+      assert.equal((touch.body.match(/Marita Chedid|ماريتا شديد/g) || []).length, 1, `${lane.lane} signature is duplicated`);
+      assert.doesNotMatch(touch.body, /Sales Development Representative|www\./i);
+      if (lane.language === "ar") assert.doesNotMatch(touch.body, /Marita Chedid/);
+      else assert.doesNotMatch(touch.body, /ماريتا شديد/);
+    }
+  }
+});
+
 test("routing selects product and language lane without changing product", () => {
   assert.equal(laneFor("talentera", "ar-SA"), "talentera_ar");
   assert.equal(laneFor("talentera", "ar-GCC"), "talentera_ar");

@@ -281,7 +281,7 @@ jobs:
             -H "Authorization: Bearer ${SMARTLEAD_API_KEY}" \
             -H 'Content-Type: application/json')
 
-          jq '{ok, blocked, policy, providerMatching, lanes, providers, inventory, unclassified, warnings}' /tmp/smartlead-senders.json || cat /tmp/smartlead-senders.json
+          jq '{ok, blocked, policy, providerMatching, senderIdentity, personalLeadSafety, lanes, providers, inventory, unclassified, warnings}' /tmp/smartlead-senders.json || cat /tmp/smartlead-senders.json
 
           if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
             echo "::error::Smartlead sender reconciliation returned HTTP $HTTP_CODE."

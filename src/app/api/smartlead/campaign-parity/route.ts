@@ -39,6 +39,9 @@ type CampaignAudit = {
     delays: number[];
     threadedFollowUps: boolean;
     firstSubjectPresent: boolean;
+    copyMatches: boolean;
+    localizedSignatures: boolean;
+    legacySignatureRemoved: boolean;
   };
 };
 
@@ -52,6 +55,15 @@ function optionalBool(row: JsonObject, key: string) {
 }
 function optionalNumber(row: JsonObject, key: string) {
   return Object.prototype.hasOwnProperty.call(row, key) ? numberValue(row[key]) : null;
+}
+function normalizedBody(value: unknown) {
+  return String(value ?? "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 function safeEqual(left: string, right: string) { const a = Buffer.from(left); const b = Buffer.from(right); return a.length === b.length && timingSafeEqual(a, b); }
 function apiKey() { return clean(process.env.SMARTLEAD_API_KEY, 8_000); }
@@ -86,7 +98,7 @@ async function smartleadRequest<T>(endpoint: string): Promise<T> {
   throw lastError instanceof Error ? lastError : new Error("Smartlead parity request failed.");
 }
 
-function normalizeCampaign(row: JsonObject, sequencePayload: unknown): CampaignAudit {
+function normalizeCampaign(lane: OutreachLane, row: JsonObject, sequencePayload: unknown): CampaignAudit {
   const schedule = object(row.scheduler_cron_value || row.schedule || row.scheduler);
   const track = list(row.track_settings).map((value) => clean(value).toUpperCase());
   const sequences = list(sequencePayload, ["sequences", "data"]);
@@ -95,9 +107,14 @@ function normalizeCampaign(row: JsonObject, sequencePayload: unknown): CampaignA
     const delay = object(item.seq_delay_details || item.delay_details);
     return {
       subject: clean(item.subject),
+      body: normalizedBody(item.email_body || item.body),
       delay: numberValue(delay.delay_in_days ?? item.delay_in_days),
     };
   });
+  const definition = VISIBLE_SEQUENCE_LANES[lane];
+  const expectedBodies = definition.touches.map((touch) => normalizedBody(touch.body));
+  const localizedName = definition.language === "ar" ? "ماريتا شديد" : "Marita Chedid";
+  const localizedBrand = definition.product === "evalify" ? "Evalufy" : "Talentera";
   return {
     id: numberValue(row.id),
     name: clean(row.name),
@@ -129,6 +146,10 @@ function normalizeCampaign(row: JsonObject, sequencePayload: unknown): CampaignA
       delays: normalizedSequences.map((item) => item.delay),
       threadedFollowUps: normalizedSequences.length === 3 && normalizedSequences[1]?.subject === "" && normalizedSequences[2]?.subject === "",
       firstSubjectPresent: Boolean(normalizedSequences[0]?.subject),
+      copyMatches: normalizedSequences.length === expectedBodies.length
+        && normalizedSequences.every((item, index) => item.body === expectedBodies[index]),
+      localizedSignatures: normalizedSequences.every((item) => item.body.endsWith(`${localizedName} ${localizedBrand}`)),
+      legacySignatureRemoved: normalizedSequences.every((item) => !/Sales Development Representative|www\./i.test(item.body)),
     },
   };
 }
@@ -158,7 +179,10 @@ function expectedSequence(sequence: CampaignAudit["sequence"]) {
   return sequence.count === 3
     && JSON.stringify(sequence.delays) === JSON.stringify([0, 4, 6])
     && sequence.threadedFollowUps
-    && sequence.firstSubjectPresent;
+    && sequence.firstSubjectPresent
+    && sequence.copyMatches
+    && sequence.localizedSignatures
+    && sequence.legacySignatureRemoved;
 }
 
 async function audit() {
@@ -183,7 +207,7 @@ async function audit() {
     const detailRoot = object(detailPayload);
     const nestedDetail = object(detailRoot.data);
     const detail = Object.keys(nestedDetail).length ? nestedDetail : detailRoot;
-    const normalized = normalizeCampaign({ ...row, ...detail }, sequencePayload);
+    const normalized = normalizeCampaign(lane, { ...row, ...detail }, sequencePayload);
     audits[lane] = normalized;
     if (!expectedSettings(lane, normalized.settings)) issues.push(`${definition.label}: non-copy settings are not canonical`);
     if (!expectedSequence(normalized.sequence)) issues.push(`${definition.label}: sequence structure is not canonical/threaded`);
@@ -207,6 +231,7 @@ async function audit() {
       minimumGapMinutes: 15,
       laneDailyCaps: { talentera_ar: 15, talentera_en: 15, evalufy_ar: 10, evalufy_en: 10 },
       globalDailyCap: 50,
+      signatures: "Localized plain text in each touch; sender-account signature blank",
     },
     campaigns: audits,
     issues,
