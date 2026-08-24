@@ -100,6 +100,8 @@ export async function OPTIONS() {
 
 export async function GET() {
   const status = await companionStatus();
+  const latest = await getLatestSignalHireCompanionBatch();
+  const latestBatch = latest?.parserVersion === REQUIRED_PARSER_VERSION ? latest : null;
   return NextResponse.json({
     ok: true,
     paired: status.paired,
@@ -108,7 +110,8 @@ export async function GET() {
     signalHireConfigured: Boolean(process.env.SIGNALHIRE_API_KEY),
     minimumClientVersion: MIN_CLIENT_VERSION,
     requiredParserVersion: REQUIRED_PARSER_VERSION,
-    latestBatch: await getLatestSignalHireCompanionBatch(),
+    staleBatchIgnored: Boolean(latest && !latestBatch),
+    latestBatch,
   }, { headers: corsHeaders() });
 }
 
@@ -143,8 +146,6 @@ export async function POST(request: NextRequest) {
     const linkedinUrl = normalizedLinkedIn(raw.linkedinUrl);
     const signalHireProfileUrl = normalizedSignalHireProfile(raw.signalHireProfileUrl);
 
-    // Server-side identity gate: contact info, experience, education and history rows
-    // are never accepted as leads even if a browser parser regresses later.
     if (suspiciousLeadName(raw.name) || (!linkedinUrl && !signalHireProfileUrl)) {
       rejected += 1;
       continue;
