@@ -69,13 +69,6 @@ export interface HubSpotPropertyDefinition {
   options?: Array<{ value: string; label: string; hidden?: boolean }>;
 }
 
-export interface MillionVerifierPropertyResult {
-  name: "gtm_email_status";
-  label: "MillionVerifier Status";
-  changed: boolean;
-  statuses: string[];
-}
-
 export class HubSpotApiError extends Error {
   constructor(
     message: string,
@@ -199,58 +192,6 @@ async function hubspotRequest<T>(path: string, init: RequestInit = {}): Promise<
   }
 
   throw lastError instanceof Error ? lastError : new Error("Unknown HubSpot API error");
-}
-
-export async function ensureMillionVerifierStatusProperty(): Promise<MillionVerifierPropertyResult> {
-  const propertyName = "gtm_email_status" as const;
-  const desiredLabel = "MillionVerifier Status" as const;
-  const requiredStatuses = ["valid", "catch_all", "invalid", "unknown"];
-  const path = `/crm/v3/properties/contacts/${propertyName}`;
-  const before = await hubspotRequest<HubSpotPropertyDefinition>(path);
-  const beforeStatuses = (before.options ?? []).map((option) => option.value);
-
-  if (before.name !== propertyName || before.type !== "enumeration") {
-    throw new HubSpotApiError(
-      "MillionVerifier property definition is not safe to update",
-      409,
-      `Expected ${propertyName} to be an enumeration; received ${before.name}/${before.type}.`,
-    );
-  }
-
-  const missingStatuses = requiredStatuses.filter((status) => !beforeStatuses.includes(status));
-  if (missingStatuses.length) {
-    throw new HubSpotApiError(
-      "MillionVerifier property statuses are incomplete",
-      409,
-      `Missing statuses: ${missingStatuses.join(", ")}.`,
-    );
-  }
-
-  if (before.label === desiredLabel) {
-    return { name: propertyName, label: desiredLabel, changed: false, statuses: beforeStatuses };
-  }
-
-  await hubspotRequest<HubSpotPropertyDefinition>(path, {
-    method: "PATCH",
-    body: JSON.stringify({ label: desiredLabel }),
-  });
-
-  const after = await hubspotRequest<HubSpotPropertyDefinition>(path);
-  const afterStatuses = (after.options ?? []).map((option) => option.value);
-  if (
-    after.name !== before.name
-    || after.type !== before.type
-    || after.label !== desiredLabel
-    || JSON.stringify(afterStatuses) !== JSON.stringify(beforeStatuses)
-  ) {
-    throw new HubSpotApiError(
-      "MillionVerifier property verification failed",
-      409,
-      "The property label or its existing status values did not match the approved result.",
-    );
-  }
-
-  return { name: propertyName, label: desiredLabel, changed: true, statuses: afterStatuses };
 }
 
 export async function searchAll(

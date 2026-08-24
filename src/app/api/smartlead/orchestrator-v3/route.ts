@@ -26,7 +26,6 @@ import {
   type OutreachLane,
 } from "@/lib/smartlead-visible-sequences";
 import { inspectSenderAccount, validateApprovedSenderInventory } from "@/lib/smartlead-sender-routing";
-import { ensureMillionVerifierStatusProperty } from "@/lib/hubspot";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -430,15 +429,6 @@ function leadPayload(lead: PreparedLead) {
 
 async function setupOnly() {
   const killSwitchPaused = autopilotEnabled() ? 0 : await pauseManagedCampaigns();
-  let millionVerifierProperty: Awaited<ReturnType<typeof ensureMillionVerifierStatusProperty>> | null = null;
-  let millionVerifierPropertyWarning = "";
-  try {
-    millionVerifierProperty = await ensureMillionVerifierStatusProperty();
-  } catch (error) {
-    millionVerifierPropertyWarning = error instanceof Error
-      ? error.message
-      : "MillionVerifier property reconciliation failed.";
-  }
   let primeforge: Awaited<ReturnType<typeof checkPrimeforgeInfrastructure>> | null = null;
   let primeforgeWarnings: string[] = [];
   try {
@@ -469,8 +459,6 @@ async function setupOnly() {
     primeforge,
     primeforgeGateEnforced: false,
     primeforgeWarnings,
-    millionVerifierProperty,
-    millionVerifierPropertyWarning,
     killSwitchPaused,
     capacity,
     legacyWarnings: legacy.warnings,
