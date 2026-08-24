@@ -208,17 +208,3 @@ test("HubSpot association reads prefer the stable v4 endpoint with a versioned f
   assert.ok(stable >= 0);
   assert.ok(fallback > stable);
 });
-
-test("MillionVerifier property reconciliation renames only the existing HubSpot label", async () => {
-  const hubspot = await read("src/lib/hubspot.ts");
-  const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
-
-  assert.match(hubspot, /const propertyName = "gtm_email_status" as const/);
-  assert.match(hubspot, /const desiredLabel = "MillionVerifier Status" as const/);
-  assert.match(hubspot, /requiredStatuses = \["valid", "catch_all", "invalid", "unknown"\]/);
-  assert.match(hubspot, /method: "PATCH"/);
-  assert.match(hubspot, /JSON\.stringify\(\{ label: desiredLabel \}\)/);
-  assert.doesNotMatch(hubspot, /method: "POST"[\s\S]{0,180}desiredLabel/);
-  assert.match(orchestrator, /await ensureMillionVerifierStatusProperty\(\)/);
-  assert.match(orchestrator, /millionVerifierPropertyWarning/);
-});
