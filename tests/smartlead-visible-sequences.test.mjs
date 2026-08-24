@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { VISIBLE_SEQUENCE_LANES, laneFor, smartleadSequencePayload } from "../src/lib/smartlead-visible-sequences.ts";
+import { VISIBLE_SEQUENCE_LANES, laneFor, smartleadSequenceMatchesLane, smartleadSequencePayload } from "../src/lib/smartlead-visible-sequences.ts";
 
 const spamTriggers = [
   "free", "guaranteed", "no obligation", "act now", "limited time", "urgent", "winner", "click here", "buy now", "order now", "risk-free", "exclusive deal", "100% free",
@@ -82,4 +82,21 @@ test("Smartlead payload exposes actual copy and threaded follow-ups", () => {
       assert.ok(!sequence.subject.includes("{{sl_subject_"));
     }
   }
+});
+
+test("sequence comparison makes repeated setup reads idempotent", () => {
+  const payload = smartleadSequencePayload("evalufy_ar");
+  assert.equal(smartleadSequenceMatchesLane("evalufy_ar", payload), true);
+  assert.equal(smartleadSequenceMatchesLane("evalufy_ar", {
+    data: {
+      sequences: payload.sequences.map((sequence) => ({
+        ...sequence,
+        email_body: `<p>${sequence.email_body.replace(/\n/g, "<br>")}</p>`,
+        seq_delay_details: { delay_in_days: String(sequence.seq_delay_details.delay_in_days) },
+      })),
+    },
+  }), true);
+  assert.equal(smartleadSequenceMatchesLane("evalufy_ar", {
+    sequences: payload.sequences.map((sequence, index) => index === 0 ? { ...sequence, email_body: `${sequence.email_body} changed` } : sequence),
+  }), false);
 });

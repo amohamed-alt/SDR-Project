@@ -119,6 +119,15 @@ test("Smartlead sender reconciliation enforces Marita identity and pauses person
   assert.match(workflow, /senderIdentity, personalLeadSafety/);
 });
 
+test("Smartlead setup never rewrites a matching active sequence", async () => {
+  const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
+  assert.match(orchestrator, /smartleadSequenceMatchesLane\(lane, current\)/);
+  assert.match(orchestrator, /return "unchanged"/);
+  assert.match(orchestrator, /activeCampaignLeadCount\(campaign\)/);
+  assert.match(orchestrator, /Automatic sequence rewrite is blocked to prevent duplicate initial emails/);
+  assert.match(orchestrator, /updated_no_active_leads/);
+});
+
 test("Smartlead topology detects every non-visible Marita campaign and reports it", async () => {
   const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
   const workflow = await read(".github/workflows/smartlead-autopilot.yml");

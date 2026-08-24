@@ -23,6 +23,7 @@ import {
   VISIBLE_SEQUENCE_LANES,
   laneFor,
   smartleadSequencePayload,
+  smartleadSequenceMatchesLane,
   type OutreachLane,
 } from "@/lib/smartlead-visible-sequences";
 import { inspectSenderAccount, validateApprovedSenderInventory } from "@/lib/smartlead-sender-routing";
@@ -155,8 +156,31 @@ async function pauseManagedCampaigns() {
   return paused;
 }
 
-async function configureCampaign(lane: OutreachLane, campaign: Campaign) {
+async function syncCampaignSequence(lane: OutreachLane, campaign: Campaign, campaignCreated: boolean) {
+  const current = campaignCreated
+    ? null
+    : await smartleadRequest<unknown>(`/campaigns/${campaign.id}/sequences`, { method: "GET" });
+  if (current && smartleadSequenceMatchesLane(lane, current)) return "unchanged" as const;
+
+  if (!campaignCreated) {
+    const activeLeads = await activeCampaignLeadCount(campaign);
+    if (activeLeads > 0) {
+      throw new Error(`${VISIBLE_SEQUENCE_LANES[lane].label} sequence differs while ${activeLeads} lead(s) are active. Automatic sequence rewrite is blocked to prevent duplicate initial emails; use a versioned campaign migration.`);
+    }
+  }
+
+  await smartleadRequest(`/campaigns/${campaign.id}/sequences`, {
+    method: "POST",
+    body: JSON.stringify(smartleadSequencePayload(lane)),
+  });
+  const verified = await smartleadRequest<unknown>(`/campaigns/${campaign.id}/sequences`, { method: "GET" });
+  if (!smartleadSequenceMatchesLane(lane, verified)) throw new Error(`${VISIBLE_SEQUENCE_LANES[lane].label} sequence did not retain the canonical copy.`);
+  return campaignCreated ? "created" as const : "updated_no_active_leads" as const;
+}
+
+async function configureCampaign(lane: OutreachLane, campaign: Campaign, campaignCreated: boolean) {
   const language = VISIBLE_SEQUENCE_LANES[lane].language;
+  const sequenceSync = await syncCampaignSequence(lane, campaign, campaignCreated);
   await smartleadRequest(`/campaigns/${campaign.id}/settings`, {
     method: "POST",
     body: JSON.stringify({
@@ -192,24 +216,23 @@ async function configureCampaign(lane: OutreachLane, campaign: Campaign) {
       max_new_leads_per_day: DAILY_LANE_NEW_CAPS[lane],
     }),
   });
-  await smartleadRequest(`/campaigns/${campaign.id}/sequences`, {
-    method: "POST",
-    body: JSON.stringify(smartleadSequencePayload(lane)),
-  });
+  return sequenceSync;
 }
 
 async function ensureCampaign(lane: OutreachLane) {
   const definition = VISIBLE_SEQUENCE_LANES[lane];
   let campaigns = await listCampaigns();
   let campaign = campaigns.find((item) => item.name === definition.campaignName) ?? null;
+  let campaignCreated = false;
   if (!campaign) {
     const created = await smartleadRequest<unknown>("/campaigns/create", { method: "POST", body: JSON.stringify({ name: definition.campaignName, client_id: null }) });
     campaign = parseCampaign(created);
     if (!campaign) { campaigns = await listCampaigns(); campaign = campaigns.find((item) => item.name === definition.campaignName) ?? null; }
+    campaignCreated = Boolean(campaign);
   }
   if (!campaign) throw new Error(`${definition.label} campaign could not be created.`);
-  await configureCampaign(lane, campaign);
-  return campaign;
+  const sequenceSync = await configureCampaign(lane, campaign, campaignCreated);
+  return { campaign, sequenceSync };
 }
 
 async function listEmailAccounts() {
@@ -441,7 +464,8 @@ async function setupOnly() {
   const inventory = validateApprovedSenderInventory(senders);
   if (!inventory.healthy) throw new Error(`Approved sender inventory is not safe: ${inventory.warnings.join(" ")}`);
   const pairs = await Promise.all(LANES.map(async (lane) => [lane, await ensureCampaign(lane)] as const));
-  const campaigns = Object.fromEntries(pairs) as Record<OutreachLane, Campaign>;
+  const campaigns = Object.fromEntries(pairs.map(([lane, result]) => [lane, result.campaign])) as Record<OutreachLane, Campaign>;
+  const sequenceSync = Object.fromEntries(pairs.map(([lane, result]) => [lane, result.sequenceSync])) as Record<OutreachLane, "unchanged" | "created" | "updated_no_active_leads">;
   const senderSync = await syncSenders(campaigns, senders); const capacity = capacityPlan(senderSync.senders); const legacy = await legacySafety();
   return {
     ok: true,
@@ -451,6 +475,7 @@ async function setupOnly() {
     campaigns: Object.fromEntries(LANES.map((lane) => [lane, { id: campaigns[lane].id, name: campaigns[lane].name, status: campaigns[lane].status }])),
     campaignTopology: { managedVisible: LANES.length, legacyDetected: legacy.campaigns.length, totalMaritaOutreach: LANES.length + legacy.campaigns.length },
     sequences: Object.fromEntries(LANES.map((lane) => [lane, VISIBLE_SEQUENCE_LANES[lane].touches])),
+    sequenceSync,
     sequenceTiming: { touch1: "Day 1", touch2: "+4 days", touch3: "+6 days after Touch 2 (~Day 11)", stopOnReply: true, plainText: true, tracking: "off" },
     sendWindow: { timezone: "Asia/Riyadh", days: "Sunday-Thursday", hours: "09:30-16:30", minimumGapMinutes: MIN_GAP_MINUTES },
     dailyLaneNewCaps: DAILY_LANE_NEW_CAPS,
