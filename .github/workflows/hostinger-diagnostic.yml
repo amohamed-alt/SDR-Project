@@ -13,33 +13,25 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
     steps:
-      - name: Verify the exact safety merge is live
+      - name: Verify the exact deployed descendant is live
         env:
           DASHBOARD_USERNAME: ${{ secrets.DASHBOARD_USERNAME || 'talentera' }}
           DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
         run: |
           set -euo pipefail
-          EXPECTED_SHA='ea58b05a0d821a55f0b1b0537ea6fc1dcc718779'
+          EXPECTED_SHA='86d9e95d2f82e8d058a3352230126d47b787fc22'
           test -n "${DASHBOARD_PASSWORD:-}"
 
-          for ATTEMPT in $(seq 1 12); do
-            HTTP_CODE=$(curl --silent --show-error \
-              --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
-              --connect-timeout 10 \
-              --max-time 30 \
-              --output /tmp/health.json \
-              --write-out '%{http_code}' \
-              "https://sdr.dashboardtalentera.tech/api/health?workEmailSafety=${EXPECTED_SHA}&attempt=${ATTEMPT}" || true)
-            BUILD_REF=$(jq -r '.buildRef // .build // empty' /tmp/health.json 2>/dev/null || true)
-            if [ "$HTTP_CODE" = '200' ] && [ "$BUILD_REF" = "$EXPECTED_SHA" ]; then
-              echo "PRODUCTION_CURRENT_WORK_EMAIL_SAFETY_OK build=$BUILD_REF"
-              exit 0
-            fi
-            echo "Production verification ${ATTEMPT}/12: HTTP=${HTTP_CODE:-none} build=${BUILD_REF:-unknown}"
-            sleep 10
-          done
-
-          echo '::error::Production did not expose the safety merge build.'
-          exit 1
+          HTTP_CODE=$(curl --silent --show-error \
+            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
+            --connect-timeout 10 \
+            --max-time 30 \
+            --output /tmp/health.json \
+            --write-out '%{http_code}' \
+            "https://sdr.dashboardtalentera.tech/api/health?workEmailSafety=${EXPECTED_SHA}" || true)
+          BUILD_REF=$(jq -r '.buildRef // .build // empty' /tmp/health.json 2>/dev/null || true)
+          test "$HTTP_CODE" = '200'
+          test "$BUILD_REF" = "$EXPECTED_SHA"
+          echo "PRODUCTION_CURRENT_WORK_EMAIL_SAFETY_OK build=$BUILD_REF"
