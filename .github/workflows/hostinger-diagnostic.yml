@@ -1,5 +1,5 @@
-name: Verify Current Work Email Safety Production
-# Temporary read-only production verification for PR #141.
+name: Deploy And Verify Fresh MillionVerifier Gate
+# Temporary production deployment verifier. Never merge this PR.
 
 on:
   pull_request:
@@ -8,30 +8,53 @@ on:
       - .github/workflows/hostinger-diagnostic.yml
 
 permissions:
+  actions: write
   contents: read
 
 jobs:
-  verify:
+  deploy-and-verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 15
     steps:
-      - name: Verify the exact deployed descendant is live
+      - name: Dispatch official Hostinger deployment and verify exact build
         env:
+          GH_TOKEN: ${{ github.token }}
           DASHBOARD_USERNAME: ${{ secrets.DASHBOARD_USERNAME || 'talentera' }}
           DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
         run: |
           set -euo pipefail
-          EXPECTED_SHA='86d9e95d2f82e8d058a3352230126d47b787fc22'
+          EXPECTED_SHA='b4ca90c319060af2ee436700ce88f1a4c8980fe5'
           test -n "${DASHBOARD_PASSWORD:-}"
 
-          HTTP_CODE=$(curl --silent --show-error \
-            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
-            --connect-timeout 10 \
-            --max-time 30 \
-            --output /tmp/health.json \
+          DISPATCH_CODE=$(curl --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --output /tmp/dispatch.json \
             --write-out '%{http_code}' \
-            "https://sdr.dashboardtalentera.tech/api/health?workEmailSafety=${EXPECTED_SHA}" || true)
-          BUILD_REF=$(jq -r '.buildRef // .build // empty' /tmp/health.json 2>/dev/null || true)
-          test "$HTTP_CODE" = '200'
-          test "$BUILD_REF" = "$EXPECTED_SHA"
-          echo "PRODUCTION_CURRENT_WORK_EMAIL_SAFETY_OK build=$BUILD_REF"
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-hostinger.yml/dispatches" \
+            --data '{"ref":"main"}')
+          test "$DISPATCH_CODE" = '204'
+          echo "Official Hostinger deployment dispatched for $EXPECTED_SHA"
+
+          for ATTEMPT in $(seq 1 72); do
+            HTTP_CODE=$(curl --silent --show-error \
+              --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
+              --connect-timeout 10 \
+              --max-time 30 \
+              --header 'Cache-Control: no-cache' \
+              --output /tmp/health.json \
+              --write-out '%{http_code}' \
+              "https://sdr.dashboardtalentera.tech/api/health?freshMvGate=${EXPECTED_SHA}&attempt=${ATTEMPT}" || true)
+            BUILD_REF=$(jq -r '.buildRef // .build // empty' /tmp/health.json 2>/dev/null || true)
+            if [ "$HTTP_CODE" = '200' ] && [ "$BUILD_REF" = "$EXPECTED_SHA" ]; then
+              echo "PRODUCTION_FRESH_MILLIONVERIFIER_GATE_OK build=$BUILD_REF"
+              exit 0
+            fi
+            echo "Production verification ${ATTEMPT}/72: HTTP=${HTTP_CODE:-none} build=${BUILD_REF:-unknown}"
+            sleep 10
+          done
+
+          echo '::error::Production did not expose the fresh MillionVerifier gate build.'
+          exit 1
