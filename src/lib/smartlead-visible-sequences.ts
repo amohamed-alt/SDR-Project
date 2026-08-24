@@ -262,3 +262,55 @@ export function smartleadSequencePayload(lane: OutreachLane) {
     })),
   };
 }
+
+type SequenceRecord = Record<string, unknown>;
+
+function sequenceObject(value: unknown): SequenceRecord {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as SequenceRecord : {};
+}
+
+function sequenceRows(value: unknown) {
+  if (Array.isArray(value)) return value;
+  const root = sequenceObject(value);
+  for (const key of ["sequences", "data"]) {
+    if (Array.isArray(root[key])) return root[key] as unknown[];
+  }
+  const data = sequenceObject(root.data);
+  return Array.isArray(data.sequences) ? data.sequences as unknown[] : [];
+}
+
+export function normalizeSmartleadSequenceText(value: unknown) {
+  return String(value ?? "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function smartleadSequenceSnapshot(value: unknown) {
+  return sequenceRows(value).map((row, index) => {
+    const item = sequenceObject(row);
+    const delay = sequenceObject(item.seq_delay_details || item.delay_details);
+    const sequenceNumber = Number(item.seq_number ?? item.sequence_number ?? index + 1);
+    return {
+      sequenceNumber: Number.isFinite(sequenceNumber) ? sequenceNumber : index + 1,
+      subject: normalizeSmartleadSequenceText(item.subject),
+      body: normalizeSmartleadSequenceText(item.email_body || item.body),
+      delayDays: Number(delay.delay_in_days ?? item.delay_in_days) || 0,
+    };
+  }).sort((left, right) => left.sequenceNumber - right.sequenceNumber);
+}
+
+export function smartleadSequenceMatchesLane(lane: OutreachLane, value: unknown) {
+  const actual = smartleadSequenceSnapshot(value);
+  const expected = VISIBLE_SEQUENCE_LANES[lane].touches.map((touch) => ({
+    sequenceNumber: touch.step,
+    subject: normalizeSmartleadSequenceText(touch.subject),
+    body: normalizeSmartleadSequenceText(touch.body),
+    delayDays: touch.delayDays,
+  }));
+  return actual.length === expected.length
+    && actual.every((row, index) => JSON.stringify(row) === JSON.stringify(expected[index]));
+}
