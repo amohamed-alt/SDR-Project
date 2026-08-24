@@ -1,7 +1,15 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { isPersonalEmail } from "@/lib/email-domain-policy";
 import { type OutreachProduct } from "@/lib/recipient-language-routing";
-import { inspectSenderAccount, senderInventory, validateApprovedSenderInventory, type SenderProvider } from "@/lib/smartlead-sender-routing";
+import {
+  inspectSenderAccount,
+  inspectSenderIdentity,
+  OUTREACH_SENDER_NAME,
+  senderInventory,
+  validateApprovedSenderInventory,
+  type SenderProvider,
+} from "@/lib/smartlead-sender-routing";
 import { VISIBLE_SEQUENCE_LANES, type OutreachLane } from "@/lib/smartlead-visible-sequences";
 
 export const runtime = "nodejs";
@@ -84,23 +92,113 @@ function parseSender(value: unknown): Sender | null {
   return { id, email: safety.email, domain: safety.domain, brand: safety.brand, provider: safety.provider, eligible: safety.eligible, capacity: safety.capacity, reasons: safety.reasons };
 }
 
+function accountDetail(value: unknown) {
+  const root = object(value);
+  for (const key of ["data", "email_account", "account"]) {
+    const nested = object(root[key]);
+    if (Object.keys(nested).length) return nested;
+  }
+  return root;
+}
+
+async function getEmailAccount(id: number) {
+  return accountDetail(await smartleadRequest<unknown>(`/email-accounts/${id}`, { method: "GET" }));
+}
+
+async function reconcileSenderIdentities(senders: Sender[]) {
+  const approved = senders.filter((sender) => sender.eligible && sender.brand !== "unknown");
+  let updated = 0;
+  let verified = 0;
+
+  for (let index = 0; index < approved.length; index += 3) {
+    const results = await Promise.all(approved.slice(index, index + 3).map(async (sender) => {
+      const before = inspectSenderIdentity(await getEmailAccount(sender.id));
+      if (before.healthy) return { updated: false, verified: true };
+      await smartleadRequest(`/email-accounts/${sender.id}`, {
+        method: "POST",
+        body: JSON.stringify({ from_name: OUTREACH_SENDER_NAME, signature: " " }),
+      });
+      const after = inspectSenderIdentity(await getEmailAccount(sender.id));
+      if (!after.healthy) throw new Error(`Approved sender account ${sender.id} did not retain the canonical display name and blank account signature.`);
+      return { updated: true, verified: true };
+    }));
+    updated += results.filter((result) => result.updated).length;
+    verified += results.filter((result) => result.verified).length;
+  }
+
+  return {
+    expected: approved.length,
+    verified,
+    updated,
+    displayName: OUTREACH_SENDER_NAME,
+    accountSignature: "blank; each campaign touch carries its localized plain-text signature",
+    healthy: approved.length === 15 && verified === approved.length,
+  };
+}
+
 async function campaignSenderIds(campaign: Campaign) {
   const payload = await smartleadRequest<unknown>(`/campaigns/${campaign.id}/email-accounts`, { method: "GET" });
   return new Set(list(payload, ["email_accounts", "data", "accounts"]).map((value) => Number(object(value).id ?? object(value).email_account_id)).filter(Number.isFinite));
 }
 
 function inactiveLead(row: JsonObject) {
-  return /complete|stopp|unsub|bounce|repl/i.test(clean(row.status || row.lead_status || row.email_status || row.category));
+  return /complete|stopp|paus|unsub|bounce|repl/i.test(clean(row.status || row.lead_status || row.email_status || row.category));
+}
+
+async function campaignLeadRows(campaign: Campaign) {
+  const rows: JsonObject[] = [];
+  for (let offset = 0; offset < 20_000; offset += 100) {
+    const payload = await smartleadRequest<unknown>(`/campaigns/${campaign.id}/leads`, { method: "GET" }, { offset: String(offset), limit: "100" });
+    const batch = list(payload, ["leads", "data", "results"]).map(object);
+    rows.push(...batch);
+    if (batch.length < 100) break;
+  }
+  return rows;
+}
+
+function personalLead(row: JsonObject) {
+  const nested = object(row.lead);
+  return !inactiveLead(row) && isPersonalEmail(row.email || nested.email);
+}
+
+async function pauseActivePersonalLeads(campaigns: Campaign[]) {
+  let detected = 0;
+  let paused = 0;
+  let activeRemaining = 0;
+
+  for (const campaign of campaigns) {
+    const active = (await campaignLeadRows(campaign)).filter(personalLead);
+    detected += active.length;
+    for (const row of active) {
+      const nested = object(row.lead);
+      const leadId = Number(row.id ?? row.lead_id ?? nested.id);
+      if (!Number.isFinite(leadId)) continue;
+      await smartleadRequest(`/campaigns/${campaign.id}/leads/${leadId}/pause`, { method: "POST" });
+      paused += 1;
+    }
+
+    let remaining = active;
+    if (active.length) {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 750 * (attempt + 1)));
+        remaining = (await campaignLeadRows(campaign)).filter(personalLead);
+        if (!remaining.length) break;
+      }
+    }
+    activeRemaining += remaining.length;
+  }
+
+  return {
+    detected,
+    paused,
+    activeRemaining,
+    policy: "Personal-domain leads are paused even when their mailbox is technically valid.",
+    healthy: activeRemaining === 0,
+  };
 }
 
 async function activeCampaignLeads(campaign: Campaign) {
-  for (let offset = 0; offset < 5_000; offset += 100) {
-    const payload = await smartleadRequest<unknown>(`/campaigns/${campaign.id}/leads`, { method: "GET" }, { offset: String(offset), limit: "100" });
-    const batch = list(payload, ["leads", "data", "results"]).map(object);
-    if (batch.some((row) => !inactiveLead(row))) return true;
-    if (batch.length < 100) return false;
-  }
-  return true;
+  return (await campaignLeadRows(campaign)).some((row) => !inactiveLead(row));
 }
 
 async function configureEspMatching(lane: OutreachLane, campaign: Campaign) {
@@ -141,8 +239,17 @@ async function reconcile() {
   const approvedInventory = validateApprovedSenderInventory(senders);
   if (!approvedInventory.healthy) throw new Error(`Approved sender inventory is not safe: ${approvedInventory.warnings.join(" ")}`);
   const campaignByName = new Map(campaignRows.map((campaign) => [campaign.name, campaign]));
+  const managedCampaigns = LANES.map((lane) => VISIBLE_SEQUENCE_LANES[lane]).map((definition) => {
+    const campaign = campaignByName.get(definition.campaignName);
+    if (!campaign) throw new Error(`${definition.campaignName} does not exist yet.`);
+    return campaign;
+  });
+  const senderIdentity = await reconcileSenderIdentities(senders);
+  if (!senderIdentity.healthy) throw new Error("The 15 approved inbox identities could not be verified.");
+  const personalLeadSafety = await pauseActivePersonalLeads(managedCampaigns);
   const laneResult = {} as Record<OutreachLane, { campaignId: number; desired: number; added: number; removed: number; current: number; product: OutreachProduct }>;
   const warnings: string[] = [];
+  if (!personalLeadSafety.healthy) warnings.push(`${personalLeadSafety.activeRemaining} personal-domain lead(s) remain active.`);
 
   for (const lane of LANES) {
     const definition = VISIBLE_SEQUENCE_LANES[lane];
@@ -186,9 +293,11 @@ async function reconcile() {
   return {
     ok: true,
     mode: "sender-reconcile",
-    blocked: warnings.some((warning) => /incompatible sender\(s\) remain|active leads exist/.test(warning)),
+    blocked: !personalLeadSafety.healthy || warnings.some((warning) => /incompatible sender\(s\) remain|active leads exist/.test(warning)),
     policy: "Brand gate first; Smartlead ESP matching chooses Google/Outlook only inside the matching brand pool.",
     providerMatching: true,
+    senderIdentity,
+    personalLeadSafety,
     lanes: laneResult,
     providers: {
       talentera: providerCounts(senders, "talentera"),

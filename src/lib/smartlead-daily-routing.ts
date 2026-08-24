@@ -1,5 +1,6 @@
 import type { OutreachProduct, RecipientLocale } from "./recipient-language-routing.ts";
 import { laneFor, type OutreachLane } from "./smartlead-visible-sequences.ts";
+import { isPersonalEmail } from "./email-domain-policy.ts";
 
 export const DAILY_LANE_NEW_CAPS: Record<OutreachLane, number> = {
   talentera_ar: 15,
@@ -66,6 +67,7 @@ export function verificationCandidatesForLane<T extends DailyRoutingLead>(leads:
     const linkedin = String((lead as T & { linkedinUrl?: string }).linkedinUrl || "").trim().toLowerCase();
     const identity = email || linkedin;
     if (!identity || seen.has(identity) || laneFor(lead.product, lead.locale) !== lane) return false;
+    if (email && isPersonalEmail(email)) return false;
     if (/(?:Sales activity|Already entered|Duplicate email)/i.test(lead.blockReason || "")) return false;
     seen.add(identity);
     return true;
@@ -90,7 +92,7 @@ export function selectVerifiedDailyBatch<T extends DailyRoutingLead>(
 
   for (const lead of leads) {
     const email = String(lead.email || "").trim().toLowerCase();
-    if (!lead.eligible || !email || usedEmails.has(email) || !verifiedEmails.has(email)) continue;
+    if (!lead.eligible || !email || isPersonalEmail(email) || usedEmails.has(email) || !verifiedEmails.has(email)) continue;
     const lane = laneFor(lead.product, lead.locale);
     if (laneCounts[lane] >= nonNegativeInteger(laneLimits[lane])) continue;
     if (productCounts[lead.product] >= nonNegativeInteger(options.productLimits[lead.product])) continue;

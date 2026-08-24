@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { APPROVED_SENDING_DOMAINS, inspectSenderAccount, senderDomain, senderProvider, senderRoute, senderInventory, validateApprovedSenderInventory } from "../src/lib/smartlead-sender-routing.ts";
+import { APPROVED_SENDING_DOMAINS, inspectSenderAccount, inspectSenderIdentity, OUTREACH_SENDER_NAME, senderDomain, senderProvider, senderRoute, senderInventory, validateApprovedSenderInventory, visibleSenderSignature } from "../src/lib/smartlead-sender-routing.ts";
 
 test("Talentera and Evalufy domains never cross brands", () => {
   assert.equal(senderRoute({ from_email: "marita@jointalentera.com", smtp_host: "smtp.gmail.com" }).brand, "talentera");
@@ -83,4 +83,13 @@ test("production inventory requires exactly three safe mailboxes on each of five
   assert.equal(validateApprovedSenderInventory(rows).healthy, true);
   rows[0] = { ...rows[0], eligible: false };
   assert.equal(validateApprovedSenderInventory(rows).healthy, false);
+});
+
+test("sender identity requires Marita's exact display name and no account-level signature", () => {
+  assert.equal(OUTREACH_SENDER_NAME, "Marita Chedid");
+  assert.equal(inspectSenderIdentity({ from_name: "Marita Chedid", signature: " " }).healthy, true);
+  assert.equal(inspectSenderIdentity({ from_name: "Marita Chedid", signature: "<p><br></p>" }).healthy, true);
+  assert.equal(inspectSenderIdentity({ from_name: "Marita", signature: "" }).healthy, false);
+  assert.equal(inspectSenderIdentity({ from_name: "Marita Chedid", signature: "Sales Development Representative" }).healthy, false);
+  assert.equal(visibleSenderSignature("<p>Marita&nbsp;Chedid</p>"), "Marita Chedid");
 });

@@ -103,6 +103,20 @@ test("Smartlead campaign parity audits the detailed campaign response", async ()
   assert.match(parity, /object\(detailRoot\.data\)/);
   assert.match(parity, /DONT_EMAIL_OPEN/);
   assert.match(parity, /DONT_LINK_CLICK/);
+  assert.match(parity, /copyMatches/);
+  assert.match(parity, /localizedSignatures/);
+  assert.match(parity, /legacySignatureRemoved/);
+});
+
+test("Smartlead sender reconciliation enforces Marita identity and pauses personal-domain leads", async () => {
+  const reconcile = await read("src/app/api/smartlead/sender-reconcile/route.ts");
+  const workflow = await read(".github/workflows/smartlead-autopilot.yml");
+  assert.match(reconcile, /OUTREACH_SENDER_NAME/);
+  assert.match(reconcile, /signature: " "/);
+  assert.match(reconcile, /pauseActivePersonalLeads/);
+  assert.match(reconcile, /isPersonalEmail/);
+  assert.match(reconcile, /personalLeadSafety/);
+  assert.match(workflow, /senderIdentity, personalLeadSafety/);
 });
 
 test("Smartlead topology detects every non-visible Marita campaign and reports it", async () => {

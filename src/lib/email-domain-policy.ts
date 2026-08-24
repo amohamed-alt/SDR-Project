@@ -2,6 +2,11 @@ function clean(value: unknown, max = 500) {
   return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max).toLowerCase();
 }
 
+const PERSONAL_EMAIL_DOMAINS = new Set([
+  "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com",
+  "yahoo.com", "ymail.com", "icloud.com", "me.com", "aol.com", "proton.me", "protonmail.com",
+]);
+
 export function normalizeCompanyDomain(value: unknown) {
   const raw = clean(value);
   if (!raw) return "";
@@ -27,4 +32,8 @@ export function domainsMatch(left: unknown, right: unknown) {
 
 export function emailMatchesCompanyDomain(email: unknown, companyDomain: unknown) {
   return domainsMatch(emailDomain(email), companyDomain);
+}
+
+export function isPersonalEmail(value: unknown) {
+  return PERSONAL_EMAIL_DOMAINS.has(emailDomain(value));
 }

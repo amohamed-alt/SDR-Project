@@ -31,11 +31,14 @@ const TALENTERA_AR: VisibleSequenceTouch[] = [
 
 كنت حابة أسألك عن نقطة في التوظيف عندكم.
 
-مع {{industry_pain}}، اللي يستهلك وقت الفريق غالبا هو متابعة المرشح بين الفرز والمقابلات والموافقات والعرض.
+غالبا أكثر شيء يستهلك وقت الفريق هو متابعة المرشح بين المراحل، خصوصا لما يكون التحدي هو {{industry_pain}}.
 
 Talentera تجمع رحلة التوظيف في مكان واحد وتخفف المتابعة اليدوية على الفريق.
 
-إذا هذا قريب من اللي عندكم، يناسبك أعرض لك الفكرة في 10 دقايق؟`,
+إذا هذا قريب من اللي عندكم، يناسبك أعرض لك الفكرة في 10 دقايق؟
+
+ماريتا شديد
+Talentera`,
   },
   {
     step: 2,
@@ -48,7 +51,10 @@ Talentera تجمع رحلة التوظيف في مكان واحد وتخفف ا�
 
 الفكرة إن رحلة المرشح تكون أوضح للفريق من أول التقديم لحد العرض، بدل المتابعة بين أكثر من مكان.
 
-إذا هذا شيء تبغون تحسنونه، نرتب 10 دقايق؟`,
+إذا هذا شيء تبغون تحسنونه، نرتب 10 دقايق؟
+
+ماريتا شديد
+Talentera`,
   },
   {
     step: 3,
@@ -61,7 +67,10 @@ Talentera تجمع رحلة التوظيف في مكان واحد وتخفف ا�
 
 إذا تطوير رحلة التوظيف مو ضمن الأولويات حاليا أقفلها من جهتي.
 
-وإذا يستاهل نظرة سريعة، رد بكلمة "مناسب" وأنا أرتبها معك.`,
+وإذا يستاهل نظرة سريعة، رد بكلمة "مناسب" وأنا أرتبها معك.
+
+ماريتا شديد
+Talentera`,
   },
 ];
 
@@ -81,7 +90,10 @@ With {{industry_pain}}, a lot of recruiter time can disappear in the handoffs be
 
 Talentera brings that journey into one recruitment flow and reduces the manual follow-up around it.
 
-If that sounds relevant, worth a quick 10-minute look?`,
+If that sounds relevant, worth a quick 10-minute look?
+
+Marita Chedid
+Talentera`,
   },
   {
     step: 2,
@@ -94,7 +106,10 @@ Just to clarify: I am not suggesting you change everything you already do.
 
 The idea is simply to give the recruitment team a cleaner path from application through offer, with fewer manual handoffs.
 
-If that is something you are looking to improve, worth 10 minutes?`,
+If that is something you are looking to improve, worth 10 minutes?
+
+Marita Chedid
+Talentera`,
   },
   {
     step: 3,
@@ -107,7 +122,10 @@ I do not want to keep filling your inbox.
 
 If improving the hiring flow is not a priority right now, I will close this on my side.
 
-If it is worth a quick look, reply "yes" and I will arrange it with you.`,
+If it is worth a quick look, reply "yes" and I will arrange it with you.
+
+Marita Chedid
+Talentera`,
   },
 ];
 
@@ -127,7 +145,10 @@ const EVALUFY_AR: VisibleSequenceTouch[] = [
 
 Evalufy تضيف التقييم والفرز قبل المقابلات فوق نظام التوظيف الحالي بدون ما تحتاجون تغيرونه.
 
-إذا الفكرة قريبة من احتياجكم، يناسبك أعرضها لك في 10 دقايق؟`,
+إذا الفكرة قريبة من احتياجكم، يناسبك أعرضها لك في 10 دقايق؟
+
+ماريتا شديد
+Evalufy`,
   },
   {
     step: 2,
@@ -140,7 +161,10 @@ Evalufy تضيف التقييم والفرز قبل المقابلات فوق ن
 
 Evalufy تضيف طبقة تقييم وفرز قبل المقابلات، بحيث وقت الفريق يروح على قائمة مرشحين أنسب بدل ما يبدأ التقييم داخل المقابلة نفسها.
 
-إذا هذا تحدي عندكم، نرتب 10 دقايق؟`,
+إذا هذا تحدي عندكم، نرتب 10 دقايق؟
+
+ماريتا شديد
+Evalufy`,
   },
   {
     step: 3,
@@ -153,7 +177,10 @@ Evalufy تضيف طبقة تقييم وفرز قبل المقابلات، بحي
 
 إذا الفرز والتقييم مو ضمن الأولويات حاليا أقفل الموضوع من جهتي.
 
-وإذا يستاهل نظرة سريعة، رد بكلمة "مناسب" وأنا أرتبها معك.`,
+وإذا يستاهل نظرة سريعة، رد بكلمة "مناسب" وأنا أرتبها معك.
+
+ماريتا شديد
+Evalufy`,
   },
 ];
 
@@ -173,7 +200,10 @@ Since you already have a recruitment system in place, the opportunity is often i
 
 Evalufy adds assessment and screening before interviews without replacing your current recruitment system.
 
-If that sounds relevant, worth a quick 10-minute look?`,
+If that sounds relevant, worth a quick 10-minute look?
+
+Marita Chedid
+Evalufy`,
   },
   {
     step: 2,
@@ -186,7 +216,10 @@ Just to clarify: your current recruitment system stays where it is.
 
 Evalufy adds an assessment and screening layer before interviews, so recruiter and hiring-manager time goes to a stronger shortlist.
 
-If that is something you are trying to improve, worth 10 minutes?`,
+If that is something you are trying to improve, worth 10 minutes?
+
+Marita Chedid
+Evalufy`,
   },
   {
     step: 3,
@@ -199,7 +232,10 @@ I do not want to keep filling your inbox.
 
 If screening and assessment are not a priority right now, I will close this on my side.
 
-If it is worth a quick look, reply "yes" and I will arrange it with you.`,
+If it is worth a quick look, reply "yes" and I will arrange it with you.
+
+Marita Chedid
+Evalufy`,
   },
 ];
 
