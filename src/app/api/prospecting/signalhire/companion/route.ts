@@ -7,7 +7,8 @@ import { getLatestSignalHireCompanionBatch, saveSignalHireCompanionBatch } from 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MIN_CLIENT_VERSION = "1.3.0";
+const MIN_CLIENT_VERSION = "1.4.0";
+const REQUIRED_PARSER_VERSION = "signalhire-list-v2";
 
 const leadSchema = z.object({
   name: z.string().trim().min(1).max(220),
@@ -49,7 +50,7 @@ function supportedClient(version: string) {
   const match = String(version || "").match(/^(\d+)\.(\d+)\.(\d+)/);
   if (!match) return false;
   const [, major, minor] = match.map(Number);
-  return major > 1 || (major === 1 && minor >= 3);
+  return major > 1 || (major === 1 && minor >= 4);
 }
 
 function normalizedLinkedIn(value: string) {
@@ -67,12 +68,40 @@ function normalizedLinkedIn(value: string) {
   }
 }
 
+function normalizedSignalHireProfile(value: string) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (host !== "signalhire.com" && !host.endsWith(".signalhire.com")) return "";
+    const path = url.pathname.toLowerCase();
+    if (/lead[-_ ]?lists?|lists?\//i.test(path)) return "";
+    if (!/(?:candidate|profile|resume|people|person)/i.test(path)) return "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function suspiciousLeadName(value: string) {
+  const name = String(value || "").replace(/\s+/g, " ").trim();
+  if (!name) return true;
+  if (/^(?:contact info|contact information|personal emails?|work emails?|emails?|phone numbers?|phones?|experience|employment|education|skills?|languages?|certifications?|licenses?|projects?|publications?|interests?|summary|about|show \d+ more|expert no pdf|company|lead tracker beta)$/i.test(name)) return true;
+  if (/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{4}\s*[-–—]\s*(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{4}|present|current)\b/i.test(name)) return true;
+  if (/^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b/i.test(name)) return true;
+  if (/@|https?:|www\.|\+?\d{5,}/i.test(name)) return true;
+  const words = name.split(/\s+/).filter(Boolean);
+  return words.length < 2 || words.length > 7;
+}
+
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: corsHeaders() });
 }
 
 export async function GET() {
   const status = await companionStatus();
+  const latest = await getLatestSignalHireCompanionBatch();
+  const latestBatch = latest?.parserVersion === REQUIRED_PARSER_VERSION ? latest : null;
   return NextResponse.json({
     ok: true,
     paired: status.paired,
@@ -80,7 +109,9 @@ export async function GET() {
     lastUsedAt: status.lastUsedAt,
     signalHireConfigured: Boolean(process.env.SIGNALHIRE_API_KEY),
     minimumClientVersion: MIN_CLIENT_VERSION,
-    latestBatch: await getLatestSignalHireCompanionBatch(),
+    requiredParserVersion: REQUIRED_PARSER_VERSION,
+    staleBatchIgnored: Boolean(latest && !latestBatch),
+    latestBatch,
   }, { headers: corsHeaders() });
 }
 
@@ -95,10 +126,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid SignalHire lead-list payload." }, { status: 400, headers: corsHeaders() });
   }
 
-  if (!supportedClient(parsed.data.clientVersion)) {
+  if (!supportedClient(parsed.data.clientVersion) || parsed.data.parserVersion !== REQUIRED_PARSER_VERSION) {
     return NextResponse.json({
-      error: `Update the Talentera Prospecting Companion to v${MIN_CLIENT_VERSION} or newer.`,
+      error: `Update the Talentera Prospecting Companion to v${MIN_CLIENT_VERSION} or newer before syncing SignalHire.`,
       minimumClientVersion: MIN_CLIENT_VERSION,
+      requiredParserVersion: REQUIRED_PARSER_VERSION,
     }, { status: 426, headers: corsHeaders() });
   }
 
@@ -109,18 +141,39 @@ export async function POST(request: NextRequest) {
   }
 
   const unique = new Map<string, z.infer<typeof leadSchema>>();
+  let rejected = 0;
   for (const raw of parsed.data.leads) {
+    const linkedinUrl = normalizedLinkedIn(raw.linkedinUrl);
+    const signalHireProfileUrl = normalizedSignalHireProfile(raw.signalHireProfileUrl);
+
+    if (suspiciousLeadName(raw.name) || (!linkedinUrl && !signalHireProfileUrl)) {
+      rejected += 1;
+      continue;
+    }
+
+    const emails = [...new Set([raw.email, ...raw.emails].map((value) => value.trim().toLowerCase()).filter(Boolean))];
+    const phones = [...new Set([raw.phone, ...raw.phones].map((value) => value.trim()).filter(Boolean))];
     const lead = {
       ...raw,
-      linkedinUrl: normalizedLinkedIn(raw.linkedinUrl),
-      emails: [...new Set([raw.email, ...raw.emails].map((value) => value.trim().toLowerCase()).filter(Boolean))],
-      phones: [...new Set([raw.phone, ...raw.phones].map((value) => value.trim()).filter(Boolean))],
+      linkedinUrl,
+      signalHireProfileUrl,
+      email: emails[0] || "",
+      emails,
+      phone: phones[0] || "",
+      phones,
     };
-    const key = lead.linkedinUrl || lead.email.toLowerCase() || lead.signalHireProfileUrl || `${lead.name.toLowerCase()}:${lead.company.toLowerCase()}`;
+    const key = lead.linkedinUrl || lead.signalHireProfileUrl || lead.email.toLowerCase() || `${lead.name.toLowerCase()}:${lead.company.toLowerCase()}`;
     if (!unique.has(key)) unique.set(key, lead);
   }
 
   const leads = [...unique.values()].slice(0, 100);
+  if (!leads.length) {
+    return NextResponse.json({
+      error: "No validated candidate rows were found. Open the SignalHire Lead List and sync again with the updated companion.",
+      rejected,
+    }, { status: 422, headers: corsHeaders() });
+  }
+
   const batch = {
     id: randomUUID(),
     importedAt: new Date().toISOString(),
@@ -138,9 +191,11 @@ export async function POST(request: NextRequest) {
     ok: true,
     batchId: batch.id,
     imported: batch.leads.length,
+    rejected,
     listName: batch.listName,
     diagnostics: {
       linkedin: leads.filter((lead) => Boolean(lead.linkedinUrl)).length,
+      signalHireProfile: leads.filter((lead) => Boolean(lead.signalHireProfileUrl)).length,
       email: leads.filter((lead) => Boolean(lead.email || lead.emails.length)).length,
       phone: leads.filter((lead) => Boolean(lead.phone || lead.phones.length)).length,
       company: leads.filter((lead) => Boolean(lead.company)).length,
