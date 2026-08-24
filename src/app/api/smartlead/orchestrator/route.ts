@@ -338,6 +338,7 @@ async function autopilot(millionVerifierApiKey = "") {
     const verification = await runOutreachEmailWaterfall(verificationCandidates, capacity.globalSafeNew, {
       millionVerifierApiKey,
       buffer: VERIFICATION_BUFFER,
+      forceReverify: true,
     });
     const verifiedEmails = new Set(verification.sendableEmails.map((email) => email.toLowerCase()));
 
@@ -388,7 +389,7 @@ export async function GET() {
   return NextResponse.json({
     configured: Boolean(apiKey()),
     dailyNewLeadTarget: GLOBAL_NEW_LEADS_PER_DAY,
-    verification: { provider: "MillionVerifier", fallback: "SignalHire", buffer: VERIFICATION_BUFFER, policy: "Only verified current or verified recovered emails may enter Smartlead." },
+    verification: { provider: "MillionVerifier", fallback: "SignalHire", buffer: VERIFICATION_BUFFER, policy: "Every send candidate is freshly reverified; only current-company work emails with a fresh valid result may enter Smartlead." },
     capacityModel: { perMailboxCampaignEmails: MAX_CAMPAIGN_EMAILS_PER_MAILBOX, peakTouchMultiplier: PEAK_TOUCH_MULTIPLIER, safetyFactor: CAPACITY_SAFETY_FACTOR },
     campaigns: { talentera: CAMPAIGNS.talentera.name, evalufy: CAMPAIGNS.evalify.name },
     sequence: { touch1: "Day 0", touch2: "+3 days", touch3: "+4 days after Touch 2 (~Day 7)", stopOnReply: true },
