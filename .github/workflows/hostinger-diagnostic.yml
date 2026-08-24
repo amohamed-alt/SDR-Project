@@ -1,4 +1,4 @@
-name: Reconcile HubSpot MillionVerifier Property
+name: Audit Today's Smartlead Launch
 
 on:
   pull_request:
@@ -10,34 +10,36 @@ permissions:
   contents: read
 
 jobs:
-  reconcile:
+  audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
     steps:
-      - name: Rename and verify the existing HubSpot contact property
+      - name: Read today's production state and managed campaign statuses
         env:
-          HUBSPOT_PRIVATE_APP_TOKEN: ${{ secrets.HUBSPOT_PRIVATE_APP_TOKEN }}
+          SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
+          DASHBOARD_USERNAME: ${{ secrets.DASHBOARD_USERNAME || 'talentera' }}
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
         run: |
           set -euo pipefail
-          test -n "${HUBSPOT_PRIVATE_APP_TOKEN:-}" || {
-            echo "::error::HUBSPOT_PRIVATE_APP_TOKEN is missing."
-            exit 1
-          }
+          test -n "${SMARTLEAD_API_KEY:-}"
+          test -n "${DASHBOARD_PASSWORD:-}"
 
-          API_URL='https://api.hubapi.com/crm/v3/properties/contacts/gtm_email_status'
-          AUTH_HEADER="Authorization: Bearer ${HUBSPOT_PRIVATE_APP_TOKEN}"
+          curl --silent --show-error --fail             --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}"             --connect-timeout 10             --max-time 60             'https://sdr.dashboardtalentera.tech/api/smartlead/orchestrator-v3'             > /tmp/state.json
 
-          curl --silent --show-error --fail             -H "$AUTH_HEADER"             "$API_URL" > /tmp/property-before.json
+          jq '{state, schedule, verification, campaigns}' /tmp/state.json
 
-          test "$(jq -r '.name' /tmp/property-before.json)" = 'gtm_email_status'
-          test "$(jq -r '.type' /tmp/property-before.json)" = 'enumeration'
-          test "$(jq -r '[.options[].value] | sort | join(",")' /tmp/property-before.json)" = 'catch_all,invalid,unknown,valid'
+          echo '[]' > /tmp/all-campaigns.json
+          for OFFSET in $(seq 0 100 900); do
+            curl --silent --show-error --fail               --connect-timeout 10               --max-time 60               "https://server.smartlead.ai/api/v1/campaigns?api_key=${SMARTLEAD_API_KEY}&offset=${OFFSET}&limit=100"               > /tmp/page.json
+            jq 'if type == "array" then . elif (.data | type) == "array" then .data elif (.campaigns | type) == "array" then .campaigns else [] end'               /tmp/page.json > /tmp/page-normalized.json
+            COUNT=$(jq 'length' /tmp/page-normalized.json)
+            jq -s 'add' /tmp/all-campaigns.json /tmp/page-normalized.json > /tmp/next.json
+            mv /tmp/next.json /tmp/all-campaigns.json
+            if [ "$COUNT" -lt 100 ]; then break; fi
+          done
 
-          curl --silent --show-error --fail             -X PATCH             -H "$AUTH_HEADER"             -H 'Content-Type: application/json'             --data '{"label":"MillionVerifier Status"}'             "$API_URL" > /tmp/property-after.json
-
-          test "$(jq -r '.name' /tmp/property-after.json)" = 'gtm_email_status'
-          test "$(jq -r '.label' /tmp/property-after.json)" = 'MillionVerifier Status'
-          test "$(jq -r '.type' /tmp/property-after.json)" = 'enumeration'
-          test "$(jq -r '[.options[].value] | sort | join(",")' /tmp/property-after.json)" = 'catch_all,invalid,unknown,valid'
-
-          echo 'HUBSPOT_PROPERTY_RECONCILED name=gtm_email_status label=MillionVerifier_Status statuses=valid,catch_all,invalid,unknown'
+          jq '[.[] | select((.id // .campaign_id) as $id | [3841527,3841528,3841529,3841530] | index($id)) | {id:(.id // .campaign_id), name:(.name // .campaign_name), status}] | sort_by(.id)'             /tmp/all-campaigns.json > /tmp/managed.json
+          jq . /tmp/managed.json
+          test "$(jq 'length' /tmp/managed.json)" = '4'
+          test "$(jq '[.[] | select((.status | ascii_upcase) != "STARTED" and (.status | ascii_upcase) != "ACTIVE")] | length' /tmp/managed.json)" = '0'
+          echo 'SMARTLEAD_LAUNCH_AUDIT_OK managed_campaigns=4 status=started'
