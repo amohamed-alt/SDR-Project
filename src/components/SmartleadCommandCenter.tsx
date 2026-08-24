@@ -17,7 +17,7 @@ type AutopilotPayload = {
 function savedOwnerToken() { return typeof window === "undefined" ? "" : window.sessionStorage.getItem(OWNER_STORAGE_KEY) || ""; }
 function number(value: number | undefined) { return new Intl.NumberFormat("en-US").format(value || 0); }
 function formatDate(value: string | undefined) { if (!value) return "—"; try { return new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Riyadh", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value)); } catch { return value; } }
-function verificationLabel(status: string) { return ({ valid: "MV valid", invalid: "MV invalid", catch_all: "Catch-all", unknown: "Unknown", error: "Check error", not_checked: "Not checked" } as Record<string, string>)[status] || status; }
+function verificationLabel(status: string) { return ({ valid: "MV valid today", invalid: "MV invalid today", catch_all: "Catch-all today", unknown: "Unknown today", stale: "Needs fresh check", error: "Check error", not_checked: "Not checked" } as Record<string, string>)[status] || status; }
 function laneLabel(lane: string) { return ({ talentera_ar: "Talentera · Arabic", talentera_en: "Talentera · English", evalufy_ar: "Evalufy · Arabic", evalufy_en: "Evalufy · English" } as Record<string, string>)[lane] || lane; }
 
 export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
@@ -76,7 +76,7 @@ export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
     const queue = data?.queue || [];
     return {
       valid: queue.filter((lead) => lead.verification.status === "valid").length,
-      waiting: queue.filter((lead) => ["not_checked", "unknown"].includes(lead.verification.status)).length,
+      waiting: queue.filter((lead) => ["not_checked", "stale", "unknown"].includes(lead.verification.status)).length,
       recovered: queue.filter((lead) => lead.verification.replacementUsed).length,
       recovery: queue.filter((lead) => lead.verification.signalHireAttempted && !lead.verification.replacementUsed).length,
     };
@@ -88,7 +88,7 @@ export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
       if (filter === "today" && lead.batchNumber !== 1) return false;
       if (filter === "valid" && lead.verification.status !== "valid") return false;
       if (filter === "recovery" && !lead.verification.signalHireAttempted) return false;
-      if (filter === "waiting" && !["not_checked", "unknown"].includes(lead.verification.status)) return false;
+      if (filter === "waiting" && !["not_checked", "stale", "unknown"].includes(lead.verification.status)) return false;
       if (filter === "entered" && !/Already entered/i.test(lead.blockReason)) return false;
       if (filter === "blocked" && lead.eligible) return false;
       if (!query) return true;
@@ -120,13 +120,13 @@ export function SmartleadCommandCenter({ onBack }: { onBack: () => void }) {
 
     <section className={styles.metrics}>
       <article><Send size={18}/><span>On deck today</span><strong>{number(data?.summary.today)}</strong><small>maximum across the 4 lanes</small></article>
-      <article><BadgeCheck size={18}/><span>MV valid</span><strong>{number(counts.valid)}</strong><small>visible cached/persisted results</small></article>
+      <article><BadgeCheck size={18}/><span>MV valid today</span><strong>{number(counts.valid)}</strong><small>send gate still runs a fresh live check</small></article>
       <article><Clock3 size={18}/><span>Waiting check</span><strong>{number(counts.waiting)}</strong><small>checked only when their batch runs</small></article>
       <article><CheckCircle2 size={18}/><span>Recovered</span><strong>{number(counts.recovered)}</strong><small>SignalHire + MV valid replacement</small></article>
     </section>
 
     <section className={styles.executionPanel}>
-      <div className={styles.executionIntro}><div><strong>Start today&apos;s verified batch</strong><p>Current/bad email → exact LinkedIn and current employer match → work email only → MillionVerifier valid → final dedupe → exact language/product campaign.</p></div><div className={styles.ownerKey}><KeyRound size={15}/><input type="password" value={ownerTokenDraft} onChange={(event) => setOwnerTokenDraft(event.target.value)} placeholder="Owner PIN"/><button type="button" onClick={saveOwnerToken}>Save</button></div></div>
+      <div className={styles.executionIntro}><div><strong>Start today&apos;s verified batch</strong><p>Fresh MillionVerifier check → exact LinkedIn and current employer match when recovery is needed → work email only → HubSpot status update → final dedupe → exact campaign.</p></div><div className={styles.ownerKey}><KeyRound size={15}/><input type="password" value={ownerTokenDraft} onChange={(event) => setOwnerTokenDraft(event.target.value)} placeholder="Owner PIN"/><button type="button" onClick={saveOwnerToken}>Save</button></div></div>
       <div className={styles.actions}><button type="button" className={styles.primary} onClick={() => void sendToday()} disabled={busy || !safetyHealthy || !data?.summary.today}><Send size={15}/>{busy ? "Verifying & queueing…" : `Run verified batch (${number(data?.summary.today)})`}</button><small>Nothing enters Smartlead on catch-all, invalid, unknown, personal email, LinkedIn mismatch, employer mismatch, Sales activity, or duplicate.</small></div>
     </section>
 

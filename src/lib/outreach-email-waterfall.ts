@@ -7,6 +7,9 @@ const SIGNALHIRE_URL = "https://www.signalhire.com/api/v1/candidate/search";
 const HUBSPOT_API = "https://api.hubapi.com";
 const CACHE_PATH = process.env.MILLIONVERIFIER_CACHE_PATH || "/app/data/millionverifier-cache.json";
 const HISTORY_PATH = process.env.OUTREACH_VERIFICATION_HISTORY_PATH || "/app/data/outreach-verification-history.json";
+// Persistent results are useful for queue visibility and audit history only.
+// The Smartlead send gate deliberately bypasses this cache and asks
+// MillionVerifier again for every unique email considered in the current run.
 const CACHE_TTL_MS: Record<VerificationStatus, number> = {
   valid: 14 * 86_400_000,
   catch_all: 24 * 60 * 60 * 1000,
@@ -16,7 +19,7 @@ const CACHE_TTL_MS: Record<VerificationStatus, number> = {
 const MAX_SIGNALHIRE_EMAILS_TO_VERIFY = 3;
 
 export type VerificationStatus = "valid" | "catch_all" | "invalid" | "unknown";
-export type VisibleVerificationStatus = VerificationStatus | "not_checked" | "error";
+export type VisibleVerificationStatus = VerificationStatus | "not_checked" | "stale" | "error";
 
 type CacheEntry = {
   email: string;
@@ -190,18 +193,24 @@ export async function getOutreachVerificationSnapshot(candidates: Array<{ contac
     const cached = cacheByEmail.get(email);
     const previous = historyByContact.get(candidate.contactId);
     const matchingHistory = previous?.currentEmail === email ? previous : undefined;
-    const status: VisibleVerificationStatus = cached?.status || matchingHistory?.status || "not_checked";
+    const checkedAt = cached?.checkedAt || matchingHistory?.checkedAt || "";
+    const historicalStatus = cached?.status || matchingHistory?.status;
+    const status: VisibleVerificationStatus = historicalStatus && !checkedInCurrentRiyadhDay(checkedAt)
+      ? "stale"
+      : historicalStatus || "not_checked";
     return [candidate.contactId, {
       status,
-      checkedAt: cached?.checkedAt || matchingHistory?.checkedAt || "",
+      checkedAt,
       source: matchingHistory?.source || (cached ? "current" : "none"),
-      cacheFresh: freshEntry(cached),
+      cacheFresh: checkedInCurrentRiyadhDay(checkedAt),
       signalHireAttempted: matchingHistory?.signalHireAttempted || false,
       linkedInMatched: matchingHistory?.linkedInMatched || false,
       employerMatched: matchingHistory?.employerMatched || false,
       replacementUsed: matchingHistory?.replacementUsed || false,
       originalEmail: matchingHistory?.originalEmail || email,
-      reason: matchingHistory?.reason || (cached ? `MillionVerifier ${cached.status}` : "Waiting for verification when this batch reaches the send gate."),
+      reason: status === "stale"
+        ? "Previous MillionVerifier result is historical; the send gate will run a fresh check."
+        : matchingHistory?.reason || (cached ? `MillionVerifier ${cached.status}` : "Waiting for verification when this batch reaches the send gate."),
     } as const];
   }));
 }
@@ -210,10 +219,36 @@ function freshEntry(entry: CacheEntry | undefined) {
   return Boolean(entry && Date.now() - new Date(entry.checkedAt).getTime() < CACHE_TTL_MS[entry.status]);
 }
 
-async function verifyEmail(email: string, apiKey: string, store: CacheStore) {
+function riyadhDate(value: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Riyadh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(value);
+}
+
+function checkedInCurrentRiyadhDay(checkedAt: string | undefined) {
+  if (!checkedAt) return false;
+  const parsed = new Date(checkedAt);
+  return Number.isFinite(parsed.getTime()) && riyadhDate(parsed) === riyadhDate(new Date());
+}
+
+type VerifyEmailOptions = {
+  forceFresh?: boolean;
+  batchEntries?: Map<string, CacheEntry>;
+};
+
+async function verifyEmail(email: string, apiKey: string, store: CacheStore, options: VerifyEmailOptions = {}) {
   const normalized = normalizedEmail(email);
+  const batchEntry = options.batchEntries?.get(normalized);
+  if (batchEntry) return { entry: batchEntry, cacheHit: true, creditsLeft: null as number | null };
+
   const existing = store.entries.find((entry) => entry.email === normalized);
-  if (freshEntry(existing)) return { entry: existing!, cacheHit: true, creditsLeft: null as number | null };
+  if (!options.forceFresh && freshEntry(existing)) {
+    options.batchEntries?.set(normalized, existing!);
+    return { entry: existing!, cacheHit: true, creditsLeft: null as number | null };
+  }
 
   const query = new URLSearchParams({ api: apiKey, email: normalized, timeout: "10" });
   const response = await fetch(`${MILLIONVERIFIER_URL}?${query.toString()}`, {
@@ -233,6 +268,7 @@ async function verifyEmail(email: string, apiKey: string, store: CacheStore) {
   const byEmail = new Map(store.entries.map((item) => [item.email, item]));
   byEmail.set(normalized, entry);
   store.entries = [...byEmail.values()].slice(-50_000);
+  options.batchEntries?.set(normalized, entry);
   await writeCache(store);
   const credits = Number(payload.credits);
   return { entry, cacheHit: false, creditsLeft: Number.isFinite(credits) ? credits : null };
@@ -322,7 +358,7 @@ function recoverableCandidate(candidate: OutreachEmailCandidate) {
 export async function runOutreachEmailWaterfall(
   candidates: OutreachEmailCandidate[],
   target: number,
-  options: { millionVerifierApiKey?: string; buffer?: number } = {},
+  options: { millionVerifierApiKey?: string; buffer?: number; forceReverify?: boolean } = {},
 ): Promise<OutreachEmailWaterfallResult> {
   const millionVerifierApiKey = clean(options.millionVerifierApiKey || process.env.MILLIONVERIFIER_API_KEY, 8_000);
   const signalHireApiKey = clean(process.env.SIGNALHIRE_API_KEY, 8_000);
@@ -333,6 +369,11 @@ export async function runOutreachEmailWaterfall(
   const buffer = Math.max(0, Math.min(25, Math.floor(options.buffer ?? 10)));
   const pool = candidates.filter(recoverableCandidate).slice(0, wanted + buffer);
   const [cache, history] = await Promise.all([readCache(), readHistory()]);
+  const batchEntries = new Map<string, CacheEntry>();
+  const verifyOptions: VerifyEmailOptions = {
+    forceFresh: options.forceReverify ?? true,
+    batchEntries,
+  };
   const sendableEmails: string[] = [];
   let millionVerifierChecks = 0;
   let millionVerifierCacheHits = 0;
@@ -351,10 +392,14 @@ export async function runOutreachEmailWaterfall(
     let current: Awaited<ReturnType<typeof verifyEmail>> | null = null;
     if (isEmail(currentEmail)) {
       try {
-        current = await verifyEmail(currentEmail, millionVerifierApiKey, cache);
+        current = await verifyEmail(currentEmail, millionVerifierApiKey, cache, verifyOptions);
         successfulVerifierCalls += 1;
       } catch (error) {
         errors += 1;
+        await updateHubSpotContact(lead.contactId, {
+          gtm_email_status: "unknown",
+          gtm_last_enriched_at: dateOnly(),
+        }).catch(() => undefined);
         await saveVerificationRecord(history, {
           contactId: lead.contactId, originalEmail: currentEmail, currentEmail, status: "error", checkedAt: new Date().toISOString(), source: "none", cacheHit: false,
           signalHireAttempted: false, linkedInMatched: false, employerMatched: false, replacementUsed: false,
@@ -364,13 +409,28 @@ export async function runOutreachEmailWaterfall(
       }
       if (current.cacheHit) millionVerifierCacheHits += 1; else millionVerifierChecks += 1;
       if (current.creditsLeft !== null) millionVerifierCreditsLeft = current.creditsLeft;
-      await updateHubSpotContact(lead.contactId, { gtm_email_status: current.entry.status, gtm_last_enriched_at: dateOnly() }).catch(() => undefined);
     }
 
     if (current?.entry.status === "valid" && emailMatchesCompanyDomain(currentEmail, lead.domain)) {
+      try {
+        await updateHubSpotContact(lead.contactId, {
+          gtm_email_status: "valid",
+          gtm_last_enriched_at: dateOnly(),
+          work_email: currentEmail,
+          gtm_email_type: "work",
+        });
+      } catch (error) {
+        errors += 1;
+        noValidEmail += 1;
+        await saveVerificationRecord(history, {
+          contactId: lead.contactId, originalEmail: currentEmail, currentEmail, status: "error", checkedAt: new Date().toISOString(), source: "current", cacheHit: current.cacheHit,
+          signalHireAttempted: false, linkedInMatched: false, employerMatched: false, replacementUsed: false,
+          reason: `MillionVerifier returned valid, but HubSpot could not persist the fresh status: ${error instanceof Error ? error.message.slice(0, 220) : "unknown error"}`,
+        });
+        continue;
+      }
       validCurrent += 1;
       sendableEmails.push(currentEmail);
-      await updateHubSpotContact(lead.contactId, { work_email: currentEmail, gtm_email_type: "work" }).catch(() => undefined);
       await saveVerificationRecord(history, {
         contactId: lead.contactId, originalEmail: currentEmail, currentEmail, status: "valid", checkedAt: current.entry.checkedAt, source: "current", cacheHit: current.cacheHit,
         signalHireAttempted: false, linkedInMatched: false, employerMatched: false, replacementUsed: false, reason: "Current work email is MillionVerifier valid.",
@@ -383,6 +443,8 @@ export async function runOutreachEmailWaterfall(
     if (fallback.creditsLeft !== null) signalHireCreditsLeft = fallback.creditsLeft;
     if (!fallback.matched || !fallback.candidate) {
       await updateHubSpotContact(lead.contactId, {
+        gtm_email_status: current?.entry.status || "unknown",
+        gtm_last_enriched_at: dateOnly(),
         signalhire_match_status: "failed",
         email_enrichment_status: "no_work_email",
         signalhire_last_enriched_at: dateOnly(),
@@ -433,7 +495,7 @@ export async function runOutreachEmailWaterfall(
       if (alternative.type !== "work") continue;
       let verified: Awaited<ReturnType<typeof verifyEmail>>;
       try {
-        verified = await verifyEmail(alternative.email, millionVerifierApiKey, cache);
+        verified = await verifyEmail(alternative.email, millionVerifierApiKey, cache, verifyOptions);
         successfulVerifierCalls += 1;
       } catch {
         errors += 1;
@@ -449,6 +511,8 @@ export async function runOutreachEmailWaterfall(
 
     if (!replacement) {
       await updateHubSpotContact(lead.contactId, {
+        gtm_email_status: current?.entry.status || "unknown",
+        gtm_last_enriched_at: dateOnly(),
         signalhire_match_status: "success",
         signalhire_uid: clean(fallback.candidate.uid, 160),
         email_enrichment_status: hasPersonalEmail(fallback.candidate, currentEmail) ? "personal_only" : "no_work_email",

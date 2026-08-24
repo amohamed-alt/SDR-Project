@@ -24,7 +24,7 @@ Keep `SMARTLEAD_AUTOPILOT_ENABLED=false` until every enforced launch gate below 
 - MillionVerifier `valid` is the only accepted result.
 - `catch_all`, `unknown`, `invalid`, and `disposable` never enter Smartlead.
 - A SignalHire replacement is accepted only when it is a work email, matches the current employer, and independently passes MillionVerifier.
-- Valid-verification cache expires after 14 days; catch-all and unknown results retry after 24 hours.
+- Persistent verification history is display/audit data only. Every daily send run bypasses old HubSpot and local statuses and makes a fresh MillionVerifier request for each unique email it considers. Only duplicate use of the same email inside that one run may reuse the newly returned result.
 - Global blocklist, unsubscribe list, community bounce list, cross-campaign duplicate checks, HubSpot Sales activity, and the local send ledger all remain enforced.
 - Verification runs independently per language/product lane. Final selection re-enforces 15/15/10/10, so a language-skewed queue cannot overflow one campaign and create an accidental next-day backlog.
 

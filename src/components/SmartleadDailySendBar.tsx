@@ -76,7 +76,7 @@ export function SmartleadDailySendBar() {
         const cache = result.verification?.millionVerifierCacheHits || 0;
         const signal = result.verification?.signalHireLookups || 0;
         const replaced = result.verification?.replacements || 0;
-        setNotice(`Queued ${queued}: ${talentera} Talentera + ${evalufy} Evalufy. MillionVerifier ${mv} new checks + ${cache} cache hits; SignalHire ${signal} fallbacks; ${replaced} verified replacements.`);
+        setNotice(`Queued ${queued}: ${talentera} Talentera + ${evalufy} Evalufy. MillionVerifier ${mv} fresh checks + ${cache} same-run reuses; SignalHire ${signal} fallbacks; ${replaced} verified replacements.`);
       }
       const refreshed = await fetch("/api/smartlead/orchestrator-v3", { cache: "no-store" });
       if (refreshed.ok) setInfo(await refreshed.json() as OrchestratorPayload);

@@ -518,7 +518,11 @@ async function autopilot(millionVerifierApiKey = "") {
       if (target < 1) continue;
       const laneBuffer = Math.max(2, Math.ceil(VERIFICATION_BUFFER * target / Math.max(1, targetTotal)));
       const candidates = verificationCandidatesForLane(snapshot.queue, lane);
-      const result = await runOutreachEmailWaterfall(candidates, target, { millionVerifierApiKey, buffer: laneBuffer });
+      const result = await runOutreachEmailWaterfall(candidates, target, {
+        millionVerifierApiKey,
+        buffer: laneBuffer,
+        forceReverify: true,
+      });
       verificationByLane[lane] = result;
       for (const email of result.sendableEmails) verifiedEmails.add(email.toLowerCase());
     }
@@ -526,7 +530,7 @@ async function autopilot(millionVerifierApiKey = "") {
     const verification = {
       provider: "MillionVerifier",
       fallback: "SignalHire work email, re-verified by MillionVerifier",
-      policy: "valid-only",
+      policy: "fresh-valid-only",
       target: targetTotal,
       considered: verificationResults.reduce((sum, result) => sum + result.considered, 0),
       millionVerifierChecks: verificationResults.reduce((sum, result) => sum + result.millionVerifierChecks, 0),
@@ -608,7 +612,7 @@ export async function GET() {
     primeforgeConfigured: Boolean(clean(process.env.PRIMEFORGE_API_KEY, 8_000)),
     autopilotEnabled: autopilotEnabled(),
     dailyNewLeadTarget: GLOBAL_NEW_LEADS_PER_DAY,
-    verification: { provider: "MillionVerifier", fallback: "SignalHire", buffer: VERIFICATION_BUFFER, policy: "Only verified current or verified recovered emails may enter Smartlead." },
+    verification: { provider: "MillionVerifier", fallback: "SignalHire", buffer: VERIFICATION_BUFFER, policy: "Every send candidate is freshly reverified; only current-company work emails with a fresh valid result may enter Smartlead." },
     capacityModel: { perMailboxCampaignEmails: MAX_CAMPAIGN_EMAILS_PER_MAILBOX, peakTouchMultiplier: PEAK_TOUCH_MULTIPLIER, safetyFactor: CAPACITY_SAFETY_FACTOR, laneDailyNewCaps: DAILY_LANE_NEW_CAPS },
     campaigns: Object.fromEntries(LANES.map((lane) => [lane, VISIBLE_SEQUENCE_LANES[lane].campaignName])),
     sequences: Object.fromEntries(LANES.map((lane) => [lane, VISIBLE_SEQUENCE_LANES[lane].touches])),

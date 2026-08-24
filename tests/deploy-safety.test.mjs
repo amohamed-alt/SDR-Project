@@ -168,6 +168,7 @@ test("Smartlead page exposes one verified send path and individual verification 
   const page = await read("src/components/SmartleadCommandCenter.tsx");
   const route = await read("src/app/api/smartlead/route.ts");
   const waterfall = await read("src/lib/outreach-email-waterfall.ts");
+  const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
 
   assert.match(page, /\/api\/smartlead\/send-today/);
   assert.match(page, /lead\.verification\.status/);
@@ -179,6 +180,11 @@ test("Smartlead page exposes one verified send path and individual verification 
   assert.match(waterfall, /verified\.entry\.status === "valid"/);
   assert.match(waterfall, /workEmailMatchesCurrentCompany/);
   assert.match(waterfall, /item\.subType === "work"/);
+  assert.match(waterfall, /forceFresh: options\.forceReverify \?\? true/);
+  assert.match(waterfall, /HubSpot could not persist the fresh status/);
+  assert.match(page, /Needs fresh check/);
+  assert.match(orchestrator, /forceReverify: true/);
+  assert.match(orchestrator, /policy: "fresh-valid-only"/);
   assert.doesNotMatch(waterfall, /replacement personal email/);
 });
 
