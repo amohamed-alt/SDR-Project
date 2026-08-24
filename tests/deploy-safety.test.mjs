@@ -178,3 +178,9 @@ test("Smartlead page exposes one verified send path and individual verification 
   assert.match(waterfall, /companyMatches\(person, candidate\.companyName, candidate\.domain\)/);
   assert.match(waterfall, /verified\.entry\.status === "valid"/);
 });
+
+test("verified Smartlead autopilot is launched while every legacy send path stays disabled", async () => {
+  const deploy = await read(".github/workflows/deploy-hostinger.yml");
+  assert.match(deploy, /SMARTLEAD_AUTOPILOT_ENABLED=true/);
+  assert.match(deploy, /SMARTLEAD_LEGACY_SEND_ENABLED=false/);
+});
