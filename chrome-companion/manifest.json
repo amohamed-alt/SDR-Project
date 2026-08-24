@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Talentera Prospecting Companion",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "User-triggered Sales Navigator and SignalHire Lead List sync for the Talentera SDR dashboard. No cookie access, hidden profile fetches, or background crawling.",
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": ["https://sdr.dashboardtalentera.tech/*"],
