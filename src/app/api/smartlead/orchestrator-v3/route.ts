@@ -265,16 +265,18 @@ async function campaignAnalytics(campaign: Campaign) {
 }
 
 async function freshHealthySnapshot(context: string) {
-  let snapshot = await getSmartleadV2(true);
-  for (let attempt = 0; !snapshot.safety.healthy && attempt < 3; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 1_500 * 2 ** attempt));
-    snapshot = await getSmartleadV2(true);
+  let lastWarning = "Unknown HubSpot or sender-inventory safety warning.";
+  for (let attempt = 0; attempt <= 3; attempt += 1) {
+    try {
+      const snapshot = await getSmartleadV2(true);
+      if (snapshot.safety.healthy) return snapshot;
+      lastWarning = snapshot.safety.warnings.filter(Boolean).join(" ") || lastWarning;
+    } catch (error) {
+      lastWarning = error instanceof Error ? error.message : lastWarning;
+    }
+    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 1_500 * 2 ** attempt));
   }
-  if (!snapshot.safety.healthy) {
-    const warnings = snapshot.safety.warnings.filter(Boolean).join(" ") || "Unknown HubSpot or sender-inventory safety warning.";
-    throw new Error(`${context}; queue aborted after safety retries. ${warnings}`);
-  }
-  return snapshot;
+  throw new Error(`${context}; queue aborted after safety retries. ${lastWarning}`);
 }
 
 function inactiveLead(row: JsonObject) {
