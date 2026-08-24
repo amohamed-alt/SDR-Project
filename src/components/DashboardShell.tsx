@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { Activity, BrainCircuit, Building2, Flame, ListTodo, LoaderCircle, MailCheck, Menu, PhoneCall, Radar, Search, Target, X } from "lucide-react";
+import { Activity, BrainCircuit, Building2, Flame, ListTodo, LoaderCircle, MailCheck, Menu, PhoneCall, Radar, Search, Target, UserPlus, X } from "lucide-react";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardMotion";
 import styles from "@/components/DashboardShell.module.css";
 
@@ -147,6 +147,10 @@ export function Dashboard() {
               <span className={`${styles.toolIcon} ${styles.salesIcon}`}><Radar size={17}/></span>
               <span className={styles.toolCopy}><strong>Sales Nav</strong><small>Net-new prospecting</small></span>
             </Link>
+            <Link className={styles.toolItem} href="/signalhire-queue" onClick={() => trackFeature("signalhire-queue")}>
+              <span className={`${styles.toolIcon} ${styles.salesIcon}`}><UserPlus size={17}/></span>
+              <span className={styles.toolCopy}><strong>SignalHire Queue</strong><small>List → HubSpot check → Push + Task</small></span>
+            </Link>
             <button className={styles.toolItem} type="button" onClick={() => changeView("career")}>
               <span className={`${styles.toolIcon} ${styles.careerIcon}`}><Search size={17}/></span>
               <span className={styles.toolCopy}><strong>Career Intelligence</strong><small>Career pages & ATS detection</small></span>
@@ -182,7 +186,7 @@ export function Dashboard() {
         aria-expanded={toolsOpen}
         aria-controls="sdr-tools-menu"
       >
-        {toolsOpen ? <X size={18}/> : <Menu size={18}/>}<span>{toolsOpen ? "Close" : "SDR Tools"}</span><small>11</small>
+        {toolsOpen ? <X size={18}/> : <Menu size={18}/>}<span>{toolsOpen ? "Close" : "SDR Tools"}</span><small>12</small>
       </button>
     </div>
   </div>;
