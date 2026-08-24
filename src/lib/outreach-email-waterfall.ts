@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { emailMatchesCompanyDomain, normalizeCompanyDomain } from "./email-domain-policy.ts";
 
 const MILLIONVERIFIER_URL = "https://api.millionverifier.com/api/v3/";
 const SIGNALHIRE_URL = "https://www.signalhire.com/api/v1/candidate/search";
@@ -89,17 +90,6 @@ function isEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value);
 }
 
-function normalizeDomain(value: unknown) {
-  const raw = clean(value, 500).toLowerCase();
-  if (!raw) return "";
-  try {
-    const url = new URL(/^https?:\/\//.test(raw) ? raw : `https://${raw}`);
-    return url.hostname.replace(/^www\./, "");
-  } catch {
-    return raw.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
-  }
-}
-
 function normalizeCompany(value: unknown) {
   return clean(value, 300)
     .toLowerCase()
@@ -131,8 +121,8 @@ function linkedinMatches(candidate: SignalHireCandidate, expectedLinkedIn: strin
 function companyMatches(candidate: SignalHireCandidate, expectedName: string, expectedDomain: string) {
   const current = candidate.experience?.find((item) => item.current) || candidate.experience?.[0];
   if (!current) return false;
-  const actualDomain = normalizeDomain(current.website);
-  const targetDomain = normalizeDomain(expectedDomain);
+  const actualDomain = normalizeCompanyDomain(current.website);
+  const targetDomain = normalizeCompanyDomain(expectedDomain);
   if (actualDomain && targetDomain && (actualDomain === targetDomain || actualDomain.endsWith(`.${targetDomain}`) || targetDomain.endsWith(`.${actualDomain}`))) return true;
 
   const actual = normalizeCompany(current.company);
@@ -265,19 +255,37 @@ function dateOnly() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function rankedSignalHireEmails(candidate: SignalHireCandidate, originalEmail: string) {
+function currentEmployerDomains(candidate: SignalHireCandidate) {
+  return [...new Set((candidate.experience || [])
+    .filter((item) => item.current)
+    .map((item) => normalizeCompanyDomain(item.website))
+    .filter(Boolean))];
+}
+
+function workEmailMatchesCurrentCompany(email: string, hubSpotDomain: string, candidate: SignalHireCandidate) {
+  if (emailMatchesCompanyDomain(email, hubSpotDomain)) return true;
+  return currentEmployerDomains(candidate).some((domain) => emailMatchesCompanyDomain(email, domain));
+}
+
+function rankedSignalHireEmails(candidate: SignalHireCandidate, originalEmail: string, hubSpotDomain: string) {
   const original = normalizedEmail(originalEmail);
   return (candidate.contacts || [])
-    .filter((item) => item.type === "email" && isEmail(normalizedEmail(item.value)) && normalizedEmail(item.value) !== original && Number(item.rating || 0) >= 70)
+    .filter((item) => item.type === "email" && item.subType === "work" && isEmail(normalizedEmail(item.value)) && normalizedEmail(item.value) !== original && Number(item.rating || 0) >= 70)
     .sort((a, b) => {
       const aWork = a.subType === "work" ? 1 : 0;
       const bWork = b.subType === "work" ? 1 : 0;
       if (aWork !== bWork) return bWork - aWork;
       return Number(b.rating || 0) - Number(a.rating || 0);
     })
-    .map((item) => ({ email: normalizedEmail(item.value), type: item.subType === "work" ? "work" as const : "personal" as const, rating: Number(item.rating || 0) }))
+    .map((item) => ({ email: normalizedEmail(item.value), type: "work" as const, rating: Number(item.rating || 0) }))
+    .filter((item) => workEmailMatchesCurrentCompany(item.email, hubSpotDomain, candidate))
     .filter((item, index, rows) => rows.findIndex((candidateRow) => candidateRow.email === item.email) === index)
     .slice(0, MAX_SIGNALHIRE_EMAILS_TO_VERIFY);
+}
+
+function hasPersonalEmail(candidate: SignalHireCandidate, originalEmail: string) {
+  const original = normalizedEmail(originalEmail);
+  return (candidate.contacts || []).some((item) => item.type === "email" && item.subType !== "work" && isEmail(normalizedEmail(item.value)) && normalizedEmail(item.value) !== original && Number(item.rating || 0) >= 70);
 }
 
 async function signalHireFallback(candidate: OutreachEmailCandidate, apiKey: string) {
@@ -359,9 +367,10 @@ export async function runOutreachEmailWaterfall(
       await updateHubSpotContact(lead.contactId, { gtm_email_status: current.entry.status, gtm_last_enriched_at: dateOnly() }).catch(() => undefined);
     }
 
-    if (current?.entry.status === "valid") {
+    if (current?.entry.status === "valid" && emailMatchesCompanyDomain(currentEmail, lead.domain)) {
       validCurrent += 1;
       sendableEmails.push(currentEmail);
+      await updateHubSpotContact(lead.contactId, { work_email: currentEmail, gtm_email_type: "work" }).catch(() => undefined);
       await saveVerificationRecord(history, {
         contactId: lead.contactId, originalEmail: currentEmail, currentEmail, status: "valid", checkedAt: current.entry.checkedAt, source: "current", cacheHit: current.cacheHit,
         signalHireAttempted: false, linkedInMatched: false, employerMatched: false, replacementUsed: false, reason: "Current work email is MillionVerifier valid.",
@@ -387,7 +396,38 @@ export async function runOutreachEmailWaterfall(
       continue;
     }
 
-    const alternatives = rankedSignalHireEmails(fallback.candidate, currentEmail);
+    if (current?.entry.status === "valid" && workEmailMatchesCurrentCompany(currentEmail, lead.domain, fallback.candidate)) {
+      try {
+        await updateHubSpotContact(lead.contactId, {
+          work_email: currentEmail,
+          gtm_email_status: "valid",
+          gtm_email_type: "work",
+          signalhire_match_status: "success",
+          signalhire_uid: clean(fallback.candidate.uid, 160),
+          signalhire_last_enriched_at: dateOnly(),
+          gtm_last_enriched_at: dateOnly(),
+        });
+      } catch (error) {
+        errors += 1;
+        noValidEmail += 1;
+        await saveVerificationRecord(history, {
+          contactId: lead.contactId, originalEmail: currentEmail, currentEmail, status: "error", checkedAt: new Date().toISOString(), source: "signalhire", cacheHit: current.cacheHit,
+          signalHireAttempted: true, linkedInMatched: true, employerMatched: true, replacementUsed: false,
+          reason: `SignalHire confirmed the current employer, but HubSpot could not persist the current work email: ${error instanceof Error ? error.message.slice(0, 220) : "unknown error"}`,
+        });
+        continue;
+      }
+      validCurrent += 1;
+      sendableEmails.push(currentEmail);
+      await saveVerificationRecord(history, {
+        contactId: lead.contactId, originalEmail: currentEmail, currentEmail, status: "valid", checkedAt: current.entry.checkedAt, source: "current", cacheHit: current.cacheHit,
+        signalHireAttempted: true, linkedInMatched: true, employerMatched: true, replacementUsed: false,
+        reason: "MillionVerifier marked the current email valid and SignalHire confirmed its domain belongs to the current employer.",
+      });
+      continue;
+    }
+
+    const alternatives = rankedSignalHireEmails(fallback.candidate, currentEmail, lead.domain);
     let replacement: { email: string; type: "work" } | null = null;
     for (const alternative of alternatives) {
       if (alternative.type !== "work") continue;
@@ -411,13 +451,15 @@ export async function runOutreachEmailWaterfall(
       await updateHubSpotContact(lead.contactId, {
         signalhire_match_status: "success",
         signalhire_uid: clean(fallback.candidate.uid, 160),
-        email_enrichment_status: alternatives.some((item) => item.type === "personal") ? "personal_only" : "no_work_email",
+        email_enrichment_status: hasPersonalEmail(fallback.candidate, currentEmail) ? "personal_only" : "no_work_email",
         signalhire_last_enriched_at: dateOnly(),
       }).catch(() => undefined);
       await saveVerificationRecord(history, {
         contactId: lead.contactId, originalEmail: currentEmail, currentEmail, status: current?.entry.status || "unknown", checkedAt: current?.entry.checkedAt || new Date().toISOString(), source: "none", cacheHit: current?.cacheHit || false,
         signalHireAttempted: true, linkedInMatched: true, employerMatched: true, replacementUsed: false,
-        reason: "SignalHire matched LinkedIn and employer, but no alternative work email was MillionVerifier valid.",
+        reason: current?.entry.status === "valid"
+          ? "The current email is deliverable but its domain does not match the current employer; SignalHire found no current-company work email that was MillionVerifier valid."
+          : "SignalHire matched LinkedIn and employer, but no current-company work email was MillionVerifier valid.",
       });
       noValidEmail += 1;
       continue;

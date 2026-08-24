@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { emailMatchesCompanyDomain } from "@/lib/email-domain-policy";
 import { batchRead, readAssociations, searchAll } from "@/lib/hubspot";
 import { getMaritaPriorityQueue, type MaritaPriorityCompany } from "@/lib/marita-priority";
 import { openRouterCompletion } from "@/lib/openrouter-low-cost";
@@ -380,6 +381,7 @@ async function buildQueue(forceRefresh: boolean) {
   for (const item of priority.companies) {
     const contactSummary = bestEmailContact(item); if (!contactSummary) continue;
     const contact = contactById.get(contactSummary.contactId); const company = companyById.get(item.companyId); const email = clean(contact?.properties?.email || contactSummary.email).toLowerCase();
+    const companyDomain = text(company, "domain") || item.domain;
     const country = text(company, "gtm_country") || text(company, "country") || item.country; const industry = text(company, "gtm_industry") || text(company, "industry"); const title = text(contact, "jobtitle") || contactSummary.contactTitle; const names = splitName(contact, contactSummary.contactName);
     const detectedAts = text(company, "detected_ats") || item.detectedAts; const atsStatus = text(company, "ats_status"); const productDecision = routeProductFromAts(detectedAts, atsStatus);
     const deterministic = decideRecipientLanguage({ firstName: names.firstName, lastName: names.lastName, fullName: contactSummary.contactName, country });
@@ -390,6 +392,7 @@ async function buildQueue(forceRefresh: boolean) {
     const emailStatus = text(contact, "gtm_email_status"); let blockReason = "";
     if (!salesSafety.healthy) blockReason = "Sales safety scan unavailable";
     else if (!isValidBusinessEmail(email)) blockReason = "Invalid or unsafe email";
+    else if (!emailMatchesCompanyDomain(email, companyDomain)) blockReason = "Email domain does not match current company";
     else if (!emailStatusIsSafe(emailStatus)) blockReason = `Email status: ${emailStatus}`;
     else if (salesSafety.blockedCompanyIds.has(item.companyId)) blockReason = "Recent Sales activity at company";
     else if (salesSafety.blockedContactIds.has(contactSummary.contactId)) blockReason = "Recent Sales activity with contact";
@@ -400,7 +403,7 @@ async function buildQueue(forceRefresh: boolean) {
     queue.push({
       contactId: contactSummary.contactId, companyId: item.companyId, firstName: names.firstName, greetingName, lastName: names.lastName,
       fullName: clean(`${names.firstName} ${names.lastName}`) || contactSummary.contactName, email, title, companyName: text(company, "name") || item.companyName,
-      domain: text(company, "domain") || item.domain, country, industry, industryBucket: industryBucket(industry), persona: text(contact, "gtm_persona") || personaBucket(title),
+      domain: companyDomain, country, industry, industryBucket: industryBucket(industry), persona: text(contact, "gtm_persona") || personaBucket(title),
       locale, languageConfidence: confidence, languageReason: reason, nameTranslated: greetingName !== names.firstName, detectedAts, atsStatus,
       product: productDecision.product, productReason: productDecision.reason, linkedinUrl: text(contact, "gtm_linkedin_url"), priority: item.priority, priorityScore: item.priorityScore,
       eligible: !blockReason, blockReason, executionStatus: blockReason.includes("Already entered") ? executions.find((entry) => entry.email === email)?.status || "ALREADY_ENTERED" : "READY",

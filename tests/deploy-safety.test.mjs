@@ -177,6 +177,9 @@ test("Smartlead page exposes one verified send path and individual verification 
   assert.match(waterfall, /linkedinMatches\(person, identifier\)/);
   assert.match(waterfall, /companyMatches\(person, candidate\.companyName, candidate\.domain\)/);
   assert.match(waterfall, /verified\.entry\.status === "valid"/);
+  assert.match(waterfall, /workEmailMatchesCurrentCompany/);
+  assert.match(waterfall, /item\.subType === "work"/);
+  assert.doesNotMatch(waterfall, /replacement personal email/);
 });
 
 test("verified Smartlead autopilot is launched while every legacy send path stays disabled", async () => {
