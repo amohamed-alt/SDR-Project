@@ -200,3 +200,11 @@ test("Smartlead retries transient fresh safety reads without weakening fail-clos
   assert.match(orchestrator, /queue aborted after safety retries/);
   assert.match(orchestrator, /await freshHealthySnapshot\("Fresh Sales safety was temporarily unavailable after email verification"\)/);
 });
+
+test("HubSpot association reads prefer the stable v4 endpoint with a versioned fallback", async () => {
+  const hubspot = await read("src/lib/hubspot.ts");
+  const stable = hubspot.indexOf("/crm/v4/associations/${fromObjectType}/${toObjectType}/batch/read");
+  const fallback = hubspot.indexOf("/crm/associations/2026-03/${fromObjectType}/${toObjectType}/batch/read");
+  assert.ok(stable >= 0);
+  assert.ok(fallback > stable);
+});
