@@ -3,9 +3,9 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ArrowLeft, ArrowUpRight, BrainCircuit, Building2, CheckCircle2, ChevronRight,
+  ArrowLeft, ArrowUpRight, BrainCircuit, CheckCircle2, ChevronRight,
   CircleAlert, Database, ExternalLink, Filter, Flame, KeyRound, LoaderCircle,
-  Phone, Radar, RefreshCw, Search, ShieldCheck, Sparkles, Target, TrendingUp,
+  Phone, Radar, RefreshCw, Search, ShieldCheck, Sparkles, Target,
   UsersRound, X, Zap,
 } from "lucide-react";
 import styles from "./BestAccounts.module.css";
@@ -165,7 +165,10 @@ export function BestAccounts({ onBack }: { onBack: () => void }) {
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
 
   const eligible = useMemo(
     () => (payload?.accounts || []).filter((account) => account.exclusionStatus === "eligible"),
@@ -243,7 +246,8 @@ export function BestAccounts({ onBack }: { onBack: () => void }) {
     setNotice("");
     try {
       const result = await bestAction({ action: "research_top", limit: researchLimit });
-      setNotice(`Research complete · ${String(result.completed || 0)} refreshed · ${String(result.failed || 0)} need review.`);
+      const skipped = Number(result.skippedFresh || 0);
+      setNotice(`Research complete · ${String(result.completed || 0)} refreshed · ${String(result.failed || 0)} need review${skipped ? ` · ${skipped} already fresh` : ""}.`);
       track("best-accounts-research-top", { limit: researchLimit, completed: result.completed });
       await load();
     } catch (requestError) {
