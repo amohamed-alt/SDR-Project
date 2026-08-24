@@ -1,0 +1,44 @@
+name: Diagnose Hostinger Docker Project
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/hostinger-diagnostic.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read project and container health
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$HOSTINGER_API_KEY"
+          BASE='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210/docker/sdr-project'
+
+          curl --silent --show-error --fail \
+            -H "Authorization: Bearer ${HOSTINGER_API_KEY}" \
+            "${BASE}" > /tmp/project.json
+          curl --silent --show-error --fail \
+            -H "Authorization: Bearer ${HOSTINGER_API_KEY}" \
+            "${BASE}/containers" > /tmp/containers.json
+          curl --silent --show-error --fail \
+            -H "Authorization: Bearer ${HOSTINGER_API_KEY}" \
+            "${BASE}/logs" > /tmp/logs.json
+
+          echo 'Project summary:'
+          jq '{project_name: (.project_name // .name), status, state, containers}' /tmp/project.json
+
+          echo 'Container health summary:'
+          jq 'walk(if type == "object" then with_entries(select(.key | test("environment|content|compose|config|secret|token|key"; "i") | not)) else . end)' /tmp/containers.json
+
+          echo 'Sanitized recent errors:'
+          jq -r '.. | strings' /tmp/logs.json \
+            | grep -Ei 'error|fatal|failed|exited|permission|eacces|enomem|invalid|unhealthy|refused' \
+            | sed -E 's/[A-Za-z0-9_+\/=.-]{24,}/[REDACTED]/g' \
+            | tail -120 || true
