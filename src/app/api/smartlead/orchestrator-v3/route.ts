@@ -516,6 +516,7 @@ async function autopilot(millionVerifierApiKey = "") {
       replacements: verificationResults.reduce((sum, result) => sum + result.replacements, 0),
       validCurrent: verificationResults.reduce((sum, result) => sum + result.validCurrent, 0),
       noValidEmail: verificationResults.reduce((sum, result) => sum + result.noValidEmail, 0),
+      errors: verificationResults.reduce((sum, result) => sum + result.errors, 0),
       sendable: verifiedEmails.size,
       lanes: Object.fromEntries(LANES.map((lane) => [lane, {
         target: laneTargets[lane],
@@ -568,6 +569,7 @@ async function autopilot(millionVerifierApiKey = "") {
         const chunk = leads.slice(index, index + 400);
         await smartleadRequest(`/campaigns/${campaigns[lane].id}/leads`, { method: "POST", body: JSON.stringify({ lead_list: chunk.map(leadPayload), settings: { ignore_global_block_list: false, ignore_unsubscribe_list: false, ignore_community_bounce_list: false, ignore_duplicate_leads_in_other_campaign: false } }) });
         for (const lead of chunk) { ledgerEmails.add(lead.email.toLowerCase()); newEntries.push({ email: lead.email, contactId: lead.contactId, companyId: lead.companyId, product: definition.product, campaignId: campaigns[lane].id, queuedAt: new Date().toISOString(), lastKnownStatus: "QUEUED" }); laneCounts[lane] += 1; }
+        await writeJson(LEDGER_PATH, { version: 1, entries: [...ledger.entries, ...newEntries].slice(-50_000) } satisfies Ledger);
       }
       if (leads.length) await smartleadRequest(`/campaigns/${campaigns[lane].id}/status`, { method: "POST", body: JSON.stringify({ status: "START" }) });
     }

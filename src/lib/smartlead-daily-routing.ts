@@ -63,9 +63,11 @@ export function verificationCandidatesForLane<T extends DailyRoutingLead>(leads:
   const seen = new Set<string>();
   return leads.filter((lead) => {
     const email = String(lead.email || "").trim().toLowerCase();
-    if (!email || seen.has(email) || laneFor(lead.product, lead.locale) !== lane) return false;
+    const linkedin = String((lead as T & { linkedinUrl?: string }).linkedinUrl || "").trim().toLowerCase();
+    const identity = email || linkedin;
+    if (!identity || seen.has(identity) || laneFor(lead.product, lead.locale) !== lane) return false;
     if (/(?:Sales activity|Already entered|Duplicate email)/i.test(lead.blockReason || "")) return false;
-    seen.add(email);
+    seen.add(identity);
     return true;
   });
 }

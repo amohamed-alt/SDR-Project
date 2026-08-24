@@ -163,3 +163,18 @@ test("Smartlead pauses on the first recorded spam complaint", async () => {
   assert.match(orchestrator, /zero-complaint guardrail engaged/);
   assert.doesNotMatch(orchestrator, /SPAM_GUARD_RATE/);
 });
+
+test("Smartlead page exposes one verified send path and individual verification visibility", async () => {
+  const page = await read("src/components/SmartleadCommandCenter.tsx");
+  const route = await read("src/app/api/smartlead/route.ts");
+  const waterfall = await read("src/lib/outreach-email-waterfall.ts");
+
+  assert.match(page, /\/api\/smartlead\/send-today/);
+  assert.match(page, /lead\.verification\.status/);
+  assert.match(page, /lead\.campaignName/);
+  assert.doesNotMatch(page, /Bootstrap V2 campaigns|Queue prepared only|Start both|Sync sender pools/);
+  assert.match(route, /Legacy Smartlead write actions are retired/);
+  assert.match(waterfall, /linkedinMatches\(person, identifier\)/);
+  assert.match(waterfall, /companyMatches\(person, candidate\.companyName, candidate\.domain\)/);
+  assert.match(waterfall, /verified\.entry\.status === "valid"/);
+});

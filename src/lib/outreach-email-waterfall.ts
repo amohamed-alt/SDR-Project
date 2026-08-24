@@ -5,6 +5,7 @@ const MILLIONVERIFIER_URL = "https://api.millionverifier.com/api/v3/";
 const SIGNALHIRE_URL = "https://www.signalhire.com/api/v1/candidate/search";
 const HUBSPOT_API = "https://api.hubapi.com";
 const CACHE_PATH = process.env.MILLIONVERIFIER_CACHE_PATH || "/app/data/millionverifier-cache.json";
+const HISTORY_PATH = process.env.OUTREACH_VERIFICATION_HISTORY_PATH || "/app/data/outreach-verification-history.json";
 const CACHE_TTL_MS: Record<VerificationStatus, number> = {
   valid: 14 * 86_400_000,
   catch_all: 24 * 60 * 60 * 1000,
@@ -13,7 +14,8 @@ const CACHE_TTL_MS: Record<VerificationStatus, number> = {
 };
 const MAX_SIGNALHIRE_EMAILS_TO_VERIFY = 3;
 
-type VerificationStatus = "valid" | "catch_all" | "invalid" | "unknown";
+export type VerificationStatus = "valid" | "catch_all" | "invalid" | "unknown";
+export type VisibleVerificationStatus = VerificationStatus | "not_checked" | "error";
 
 type CacheEntry = {
   email: string;
@@ -24,12 +26,28 @@ type CacheEntry = {
 };
 
 type CacheStore = { version: 1; entries: CacheEntry[] };
+export type OutreachVerificationRecord = {
+  contactId: string;
+  originalEmail: string;
+  currentEmail: string;
+  status: VisibleVerificationStatus;
+  checkedAt: string;
+  source: "current" | "signalhire" | "none";
+  cacheHit: boolean;
+  signalHireAttempted: boolean;
+  linkedInMatched: boolean;
+  employerMatched: boolean;
+  replacementUsed: boolean;
+  reason: string;
+};
+type VerificationHistoryStore = { version: 1; records: OutreachVerificationRecord[] };
 
 type SignalHireContact = { type?: string; value?: string; rating?: number; subType?: string | null };
 type SignalHireCandidate = {
   uid?: string;
   fullName?: string;
   contacts?: SignalHireContact[];
+  social?: Array<{ type?: string; link?: string; rating?: number }>;
   experience?: Array<{ company?: string | null; website?: string | null; current?: boolean }>;
 };
 type SignalHireResult = { status?: string; candidate?: SignalHireCandidate };
@@ -56,6 +74,7 @@ export type OutreachEmailWaterfallResult = {
   millionVerifierCreditsLeft: number | null;
   signalHireCreditsLeft: number | null;
   sendableEmails: string[];
+  errors: number;
 };
 
 function clean(value: unknown, max = 2_000) {
@@ -88,6 +107,25 @@ function normalizeCompany(value: unknown) {
     .replace(/[^a-z0-9\u0600-\u06ff]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeLinkedIn(value: unknown) {
+  const raw = clean(value, 1_200).toLowerCase();
+  if (!raw) return "";
+  try {
+    const url = new URL(/^https?:\/\//.test(raw) ? raw : `https://${raw}`);
+    const host = url.hostname.replace(/^www\./, "");
+    const pathName = url.pathname.replace(/\/+$/, "");
+    return host === "linkedin.com" && /^\/in\/[^/]+/.test(pathName) ? `${host}${pathName}` : "";
+  } catch {
+    return "";
+  }
+}
+
+function linkedinMatches(candidate: SignalHireCandidate, expectedLinkedIn: string) {
+  const expected = normalizeLinkedIn(expectedLinkedIn);
+  if (!expected) return false;
+  return (candidate.social || []).some((item) => item.type === "li" && normalizeLinkedIn(item.link) === expected && Number(item.rating || 0) >= 70);
 }
 
 function companyMatches(candidate: SignalHireCandidate, expectedName: string, expectedDomain: string) {
@@ -129,6 +167,53 @@ async function writeCache(store: CacheStore) {
   const tmp = `${CACHE_PATH}.tmp-${process.pid}`;
   await fs.writeFile(/* turbopackIgnore: true */ tmp, JSON.stringify(store), { encoding: "utf8", mode: 0o600 });
   await fs.rename(/* turbopackIgnore: true */ tmp, /* turbopackIgnore: true */ CACHE_PATH);
+}
+
+async function readHistory() {
+  try {
+    return JSON.parse(await fs.readFile(/* turbopackIgnore: true */ HISTORY_PATH, "utf8")) as VerificationHistoryStore;
+  } catch {
+    return { version: 1 as const, records: [] };
+  }
+}
+
+async function writeHistory(store: VerificationHistoryStore) {
+  await fs.mkdir(/* turbopackIgnore: true */ path.dirname(HISTORY_PATH), { recursive: true });
+  const tmp = `${HISTORY_PATH}.tmp-${process.pid}`;
+  await fs.writeFile(/* turbopackIgnore: true */ tmp, JSON.stringify(store), { encoding: "utf8", mode: 0o600 });
+  await fs.rename(/* turbopackIgnore: true */ tmp, /* turbopackIgnore: true */ HISTORY_PATH);
+}
+
+async function saveVerificationRecord(store: VerificationHistoryStore, record: OutreachVerificationRecord) {
+  const byContact = new Map(store.records.map((item) => [item.contactId, item]));
+  byContact.set(record.contactId, record);
+  store.records = [...byContact.values()].slice(-50_000);
+  await writeHistory(store);
+}
+
+export async function getOutreachVerificationSnapshot(candidates: Array<{ contactId: string; email: string }>) {
+  const [cache, history] = await Promise.all([readCache(), readHistory()]);
+  const cacheByEmail = new Map(cache.entries.map((entry) => [entry.email, entry]));
+  const historyByContact = new Map(history.records.map((record) => [record.contactId, record]));
+  return new Map(candidates.map((candidate) => {
+    const email = normalizedEmail(candidate.email);
+    const cached = cacheByEmail.get(email);
+    const previous = historyByContact.get(candidate.contactId);
+    const matchingHistory = previous?.currentEmail === email ? previous : undefined;
+    const status: VisibleVerificationStatus = cached?.status || matchingHistory?.status || "not_checked";
+    return [candidate.contactId, {
+      status,
+      checkedAt: cached?.checkedAt || matchingHistory?.checkedAt || "",
+      source: matchingHistory?.source || (cached ? "current" : "none"),
+      cacheFresh: freshEntry(cached),
+      signalHireAttempted: matchingHistory?.signalHireAttempted || false,
+      linkedInMatched: matchingHistory?.linkedInMatched || false,
+      employerMatched: matchingHistory?.employerMatched || false,
+      replacementUsed: matchingHistory?.replacementUsed || false,
+      originalEmail: matchingHistory?.originalEmail || email,
+      reason: matchingHistory?.reason || (cached ? `MillionVerifier ${cached.status}` : "Waiting for verification when this batch reaches the send gate."),
+    } as const];
+  }));
 }
 
 function freshEntry(entry: CacheEntry | undefined) {
@@ -196,8 +281,8 @@ function rankedSignalHireEmails(candidate: SignalHireCandidate, originalEmail: s
 }
 
 async function signalHireFallback(candidate: OutreachEmailCandidate, apiKey: string) {
-  const identifier = clean(candidate.linkedinUrl, 1_200) || normalizedEmail(candidate.email);
-  if (!identifier) return { matched: false as const, candidate: null, creditsLeft: null as number | null };
+  const identifier = clean(candidate.linkedinUrl, 1_200);
+  if (!normalizeLinkedIn(identifier)) return { matched: false as const, candidate: null, creditsLeft: null as number | null, linkedInMatched: false, employerMatched: false };
   const response = await fetch(SIGNALHIRE_URL, {
     method: "POST",
     headers: { apikey: apiKey, "Content-Type": "application/json" },
@@ -213,10 +298,12 @@ async function signalHireFallback(candidate: OutreachEmailCandidate, apiKey: str
   }
   const result = Array.isArray(payload) ? payload[0] : null;
   const person = result?.status === "success" ? result.candidate || null : null;
-  if (!person || !companyMatches(person, candidate.companyName, candidate.domain)) {
-    return { matched: false as const, candidate: person, creditsLeft: Number.isFinite(creditsHeader) ? creditsHeader : null };
+  const linkedInMatched = Boolean(person && linkedinMatches(person, identifier));
+  const employerMatched = Boolean(person && companyMatches(person, candidate.companyName, candidate.domain));
+  if (!person || !linkedInMatched || !employerMatched) {
+    return { matched: false as const, candidate: person, creditsLeft: Number.isFinite(creditsHeader) ? creditsHeader : null, linkedInMatched, employerMatched };
   }
-  return { matched: true as const, candidate: person, creditsLeft: Number.isFinite(creditsHeader) ? creditsHeader : null };
+  return { matched: true as const, candidate: person, creditsLeft: Number.isFinite(creditsHeader) ? creditsHeader : null, linkedInMatched, employerMatched };
 }
 
 function recoverableCandidate(candidate: OutreachEmailCandidate) {
@@ -237,7 +324,7 @@ export async function runOutreachEmailWaterfall(
   const wanted = Math.max(1, Math.floor(target));
   const buffer = Math.max(0, Math.min(25, Math.floor(options.buffer ?? 10)));
   const pool = candidates.filter(recoverableCandidate).slice(0, wanted + buffer);
-  const cache = await readCache();
+  const [cache, history] = await Promise.all([readCache(), readHistory()]);
   const sendableEmails: string[] = [];
   let millionVerifierChecks = 0;
   let millionVerifierCacheHits = 0;
@@ -247,38 +334,54 @@ export async function runOutreachEmailWaterfall(
   let noValidEmail = 0;
   let millionVerifierCreditsLeft: number | null = null;
   let signalHireCreditsLeft: number | null = null;
+  let errors = 0;
+  let successfulVerifierCalls = 0;
 
   for (const lead of pool) {
     if (sendableEmails.length >= wanted) break;
     const currentEmail = normalizedEmail(lead.email);
-    if (!currentEmail || !isEmail(currentEmail)) {
-      noValidEmail += 1;
-      continue;
+    let current: Awaited<ReturnType<typeof verifyEmail>> | null = null;
+    if (isEmail(currentEmail)) {
+      try {
+        current = await verifyEmail(currentEmail, millionVerifierApiKey, cache);
+        successfulVerifierCalls += 1;
+      } catch (error) {
+        errors += 1;
+        await saveVerificationRecord(history, {
+          contactId: lead.contactId, originalEmail: currentEmail, currentEmail, status: "error", checkedAt: new Date().toISOString(), source: "none", cacheHit: false,
+          signalHireAttempted: false, linkedInMatched: false, employerMatched: false, replacementUsed: false,
+          reason: error instanceof Error ? error.message.slice(0, 300) : "MillionVerifier request failed for this recipient.",
+        });
+        continue;
+      }
+      if (current.cacheHit) millionVerifierCacheHits += 1; else millionVerifierChecks += 1;
+      if (current.creditsLeft !== null) millionVerifierCreditsLeft = current.creditsLeft;
+      await updateHubSpotContact(lead.contactId, { gtm_email_status: current.entry.status, gtm_last_enriched_at: dateOnly() }).catch(() => undefined);
     }
 
-    const current = await verifyEmail(currentEmail, millionVerifierApiKey, cache);
-    if (current.cacheHit) millionVerifierCacheHits += 1; else millionVerifierChecks += 1;
-    if (current.creditsLeft !== null) millionVerifierCreditsLeft = current.creditsLeft;
-
-    await updateHubSpotContact(lead.contactId, {
-      gtm_email_status: current.entry.status,
-      gtm_last_enriched_at: dateOnly(),
-    });
-
-    if (current.entry.status === "valid") {
+    if (current?.entry.status === "valid") {
       validCurrent += 1;
       sendableEmails.push(currentEmail);
+      await saveVerificationRecord(history, {
+        contactId: lead.contactId, originalEmail: currentEmail, currentEmail, status: "valid", checkedAt: current.entry.checkedAt, source: "current", cacheHit: current.cacheHit,
+        signalHireAttempted: false, linkedInMatched: false, employerMatched: false, replacementUsed: false, reason: "Current work email is MillionVerifier valid.",
+      });
       continue;
     }
 
     signalHireLookups += 1;
-    const fallback = await signalHireFallback(lead, signalHireApiKey).catch(() => ({ matched: false as const, candidate: null, creditsLeft: null as number | null }));
+    const fallback = await signalHireFallback(lead, signalHireApiKey).catch(() => ({ matched: false as const, candidate: null, creditsLeft: null as number | null, linkedInMatched: false, employerMatched: false }));
     if (fallback.creditsLeft !== null) signalHireCreditsLeft = fallback.creditsLeft;
     if (!fallback.matched || !fallback.candidate) {
       await updateHubSpotContact(lead.contactId, {
         signalhire_match_status: "failed",
         email_enrichment_status: "no_work_email",
         signalhire_last_enriched_at: dateOnly(),
+      }).catch(() => undefined);
+      await saveVerificationRecord(history, {
+        contactId: lead.contactId, originalEmail: currentEmail, currentEmail, status: current?.entry.status || "unknown", checkedAt: current?.entry.checkedAt || new Date().toISOString(), source: "none", cacheHit: current?.cacheHit || false,
+        signalHireAttempted: true, linkedInMatched: fallback.linkedInMatched, employerMatched: fallback.employerMatched, replacementUsed: false,
+        reason: !normalizeLinkedIn(lead.linkedinUrl) ? "No safe LinkedIn profile is available for SignalHire recovery." : !fallback.linkedInMatched ? "SignalHire did not return the same LinkedIn profile." : "SignalHire current employer did not match HubSpot.",
       });
       noValidEmail += 1;
       continue;
@@ -288,7 +391,14 @@ export async function runOutreachEmailWaterfall(
     let replacement: { email: string; type: "work" } | null = null;
     for (const alternative of alternatives) {
       if (alternative.type !== "work") continue;
-      const verified = await verifyEmail(alternative.email, millionVerifierApiKey, cache);
+      let verified: Awaited<ReturnType<typeof verifyEmail>>;
+      try {
+        verified = await verifyEmail(alternative.email, millionVerifierApiKey, cache);
+        successfulVerifierCalls += 1;
+      } catch {
+        errors += 1;
+        continue;
+      }
       if (verified.cacheHit) millionVerifierCacheHits += 1; else millionVerifierChecks += 1;
       if (verified.creditsLeft !== null) millionVerifierCreditsLeft = verified.creditsLeft;
       if (verified.entry.status === "valid") {
@@ -303,6 +413,11 @@ export async function runOutreachEmailWaterfall(
         signalhire_uid: clean(fallback.candidate.uid, 160),
         email_enrichment_status: alternatives.some((item) => item.type === "personal") ? "personal_only" : "no_work_email",
         signalhire_last_enriched_at: dateOnly(),
+      }).catch(() => undefined);
+      await saveVerificationRecord(history, {
+        contactId: lead.contactId, originalEmail: currentEmail, currentEmail, status: current?.entry.status || "unknown", checkedAt: current?.entry.checkedAt || new Date().toISOString(), source: "none", cacheHit: current?.cacheHit || false,
+        signalHireAttempted: true, linkedInMatched: true, employerMatched: true, replacementUsed: false,
+        reason: "SignalHire matched LinkedIn and employer, but no alternative work email was MillionVerifier valid.",
       });
       noValidEmail += 1;
       continue;
@@ -319,9 +434,30 @@ export async function runOutreachEmailWaterfall(
       gtm_last_enriched_at: dateOnly(),
     };
     properties.work_email = replacement.email;
-    await updateHubSpotContact(lead.contactId, properties);
+    try {
+      await updateHubSpotContact(lead.contactId, properties);
+    } catch (error) {
+      errors += 1;
+      noValidEmail += 1;
+      await saveVerificationRecord(history, {
+        contactId: lead.contactId, originalEmail: currentEmail, currentEmail, status: "error", checkedAt: new Date().toISOString(), source: "signalhire", cacheHit: false,
+        signalHireAttempted: true, linkedInMatched: true, employerMatched: true, replacementUsed: false,
+        reason: `Replacement was valid but could not be persisted to HubSpot: ${error instanceof Error ? error.message.slice(0, 220) : "unknown error"}`,
+      });
+      continue;
+    }
+    const replacementCache = cache.entries.find((entry) => entry.email === replacement.email);
+    await saveVerificationRecord(history, {
+      contactId: lead.contactId, originalEmail: currentEmail, currentEmail: replacement.email, status: "valid", checkedAt: replacementCache?.checkedAt || new Date().toISOString(), source: "signalhire", cacheHit: Boolean(replacementCache && freshEntry(replacementCache)),
+      signalHireAttempted: true, linkedInMatched: true, employerMatched: true, replacementUsed: true,
+      reason: "Original email failed; SignalHire matched the LinkedIn profile and current employer, and the replacement work email is MillionVerifier valid.",
+    });
     replacements += 1;
     sendableEmails.push(replacement.email);
+  }
+
+  if (pool.length && successfulVerifierCalls === 0 && errors > 0) {
+    throw new Error("MillionVerifier was unavailable for the entire candidate pool; no outreach was queued.");
   }
 
   return {
@@ -336,5 +472,6 @@ export async function runOutreachEmailWaterfall(
     millionVerifierCreditsLeft,
     signalHireCreditsLeft,
     sendableEmails: [...new Set(sendableEmails)],
+    errors,
   };
 }

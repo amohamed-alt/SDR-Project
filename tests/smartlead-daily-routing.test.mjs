@@ -49,3 +49,8 @@ test("verification candidates are isolated by lane and exclude sales or duplicat
   ];
   assert.deepEqual(verificationCandidatesForLane(queue, "talentera_ar").map((item) => item.email), ["lead-1@example.com"]);
 });
+
+test("a missing current email can still reach the LinkedIn recovery gate", () => {
+  const candidate = { ...lead(4, "evalify", "en", false), email: "", linkedinUrl: "https://www.linkedin.com/in/example-person", blockReason: "Invalid or unsafe email" };
+  assert.deepEqual(verificationCandidatesForLane([candidate], "evalufy_en"), [candidate]);
+});
