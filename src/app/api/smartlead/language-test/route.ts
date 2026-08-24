@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { decideRecipientLanguage } from "@/lib/recipient-language-routing";
-import { getSmartleadV2 } from "@/lib/smartlead-v2";
+import { getSmartleadRoutingSnapshot } from "@/lib/smartlead-v2";
 import { VISIBLE_SEQUENCE_LANES, laneFor } from "@/lib/smartlead-visible-sequences";
 
 export const runtime = "nodejs";
@@ -23,7 +23,18 @@ export async function GET(request: NextRequest) {
   try {
     const limit = boundedLimit(request.nextUrl.searchParams.get("limit"));
     const refresh = request.nextUrl.searchParams.get("refresh") === "1";
-    const data = await getSmartleadV2(refresh);
+    let data: Awaited<ReturnType<typeof getSmartleadRoutingSnapshot>> | null = null;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        data = await getSmartleadRoutingSnapshot(refresh && attempt === 0);
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+      }
+    }
+    if (!data) throw lastError instanceof Error ? lastError : new Error("Routing snapshot failed after retries.");
     const ready = data.queue.filter((lead) => lead.eligible).slice(0, limit);
 
     const samples = ready.map((lead) => {

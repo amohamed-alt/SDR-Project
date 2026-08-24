@@ -3,6 +3,7 @@ import path from "node:path";
 import { batchRead, readAssociations, searchAll } from "@/lib/hubspot";
 import { getMaritaPriorityQueue, type MaritaPriorityCompany } from "@/lib/marita-priority";
 import { openRouterCompletion } from "@/lib/openrouter-low-cost";
+import { getOutreachVerificationSnapshot, type VisibleVerificationStatus } from "@/lib/outreach-email-waterfall";
 import {
   decideRecipientLanguage,
   isGccCountry,
@@ -12,6 +13,8 @@ import {
   type SenderBrand,
 } from "@/lib/recipient-language-routing";
 import { inspectSenderAccount, validateApprovedSenderInventory } from "@/lib/smartlead-sender-routing";
+import { DAILY_LANE_NEW_CAPS, verificationCandidatesForLane } from "@/lib/smartlead-daily-routing";
+import { VISIBLE_SEQUENCE_LANES, laneFor, type OutreachLane } from "@/lib/smartlead-visible-sequences";
 import { SALES_REP_OWNER_IDS } from "@/lib/sales-reps";
 import { emailStatusIsSafe, industryBucket, isValidBusinessEmail, personaBucket, renderOutreachTemplate, safeOpeningLineForLocale, sanitizeOutreachText } from "@/lib/smartlead-policy";
 import type { HubSpotRecord } from "@/lib/types";
@@ -34,7 +37,7 @@ const PREPARED_PATH = process.env.SMARTLEAD_V2_PREPARED_PATH || "/app/data/smart
 const LEDGER_PATH = process.env.SMARTLEAD_V2_LEDGER_PATH || "/app/data/smartlead-v2-ledger.json";
 const INTELLIGENCE_PATH = process.env.SMARTLEAD_V2_INTELLIGENCE_PATH || "/app/data/smartlead-v2-intelligence.json";
 
-const CONTACT_PROPERTIES = ["firstname", "lastname", "email", "jobtitle", "country", "gtm_email_status", "gtm_persona", "gtm_linkedin_url"] as const;
+const CONTACT_PROPERTIES = ["firstname", "lastname", "email", "work_email", "jobtitle", "country", "gtm_email_status", "gtm_persona", "gtm_linkedin_url", "email_enrichment_status", "signalhire_match_status", "signalhire_last_enriched_at"] as const;
 const COMPANY_PROPERTIES = ["name", "domain", "country", "gtm_country", "industry", "gtm_industry", "detected_ats", "ats_status", "career_page_url"] as const;
 
 type JsonObject = Record<string, unknown>;
@@ -88,6 +91,20 @@ export type V2Lead = {
   eligible: boolean;
   blockReason: string;
   executionStatus: string;
+  lane: OutreachLane;
+  campaignName: string;
+  lanePosition: number;
+  batchNumber: number;
+  batchLabel: string;
+  verification: {
+    status: VisibleVerificationStatus;
+    checkedAt: string;
+    source: "current" | "signalhire" | "none";
+    cacheFresh: boolean;
+    signalHireAttempted: boolean;
+    replacementUsed: boolean;
+    reason: string;
+  };
 };
 
 export type PreparedV2Lead = V2Lead & {
@@ -310,7 +327,9 @@ export async function getSmartleadSalesSafetySnapshot() {
   };
 }
 
-function bestEmailContact(company: MaritaPriorityCompany) { return company.contacts.find((contact) => isValidBusinessEmail(contact.email)) ?? null; }
+function bestEmailContact(company: MaritaPriorityCompany) {
+  return company.contacts.find((contact) => isValidBusinessEmail(contact.email)) ?? company.contacts[0] ?? null;
+}
 function splitName(record: HubSpotRecord | undefined, fallback: string) { const firstName = text(record, "firstname"); const lastName = text(record, "lastname"); if (firstName || lastName) return { firstName, lastName }; const parts = clean(fallback).split(/\s+/).filter(Boolean); return { firstName: parts[0] ?? "", lastName: parts.slice(1).join(" ") }; }
 
 export function routeProductFromAts(detectedAts: string, atsStatus = ""): { product: OutreachProduct; reason: string } {
@@ -376,7 +395,8 @@ async function buildQueue(forceRefresh: boolean) {
     else if (salesSafety.blockedContactIds.has(contactSummary.contactId)) blockReason = "Recent Sales activity with contact";
     else if (enteredEmails.has(email)) blockReason = "Already entered a managed Smartlead sequence";
     else if (usedEmails.has(email)) blockReason = "Duplicate email in Marita queue";
-    usedEmails.add(email);
+    if (email) usedEmails.add(email);
+    const lane = laneFor(productDecision.product, locale);
     queue.push({
       contactId: contactSummary.contactId, companyId: item.companyId, firstName: names.firstName, greetingName, lastName: names.lastName,
       fullName: clean(`${names.firstName} ${names.lastName}`) || contactSummary.contactName, email, title, companyName: text(company, "name") || item.companyName,
@@ -384,11 +404,38 @@ async function buildQueue(forceRefresh: boolean) {
       locale, languageConfidence: confidence, languageReason: reason, nameTranslated: greetingName !== names.firstName, detectedAts, atsStatus,
       product: productDecision.product, productReason: productDecision.reason, linkedinUrl: text(contact, "gtm_linkedin_url"), priority: item.priority, priorityScore: item.priorityScore,
       eligible: !blockReason, blockReason, executionStatus: blockReason.includes("Already entered") ? executions.find((entry) => entry.email === email)?.status || "ALREADY_ENTERED" : "READY",
+      lane, campaignName: VISIBLE_SEQUENCE_LANES[lane].campaignName, lanePosition: 0, batchNumber: 0, batchLabel: "Waiting",
+      verification: { status: "not_checked", checkedAt: "", source: "none", cacheFresh: false, signalHireAttempted: false, replacementUsed: false, reason: "Waiting for MillionVerifier." },
     });
   }
   queue.sort((a, b) => Number(b.eligible) - Number(a.eligible) || b.priorityScore - a.priorityScore || a.companyName.localeCompare(b.companyName));
   const campaigns: Record<OutreachProduct, V2Campaign | null> = { talentera: currentProductCampaign("talentera", allCampaigns), evalify: currentProductCampaign("evalify", allCampaigns) };
   return { priority, queue, salesSafety, campaigns, managedRows, executions, ledger, intelligence };
+}
+
+async function decorateQueue(queue: V2Lead[]) {
+  const snapshot = await getOutreachVerificationSnapshot(queue.map((lead) => ({ contactId: lead.contactId, email: lead.email })));
+  const positionByContact = new Map<string, number>();
+  for (const lane of Object.keys(DAILY_LANE_NEW_CAPS) as OutreachLane[]) {
+    verificationCandidatesForLane(queue, lane).forEach((lead, index) => positionByContact.set(lead.contactId, index + 1));
+  }
+  for (const lead of queue) {
+    const verification = snapshot.get(lead.contactId);
+    const position = positionByContact.get(lead.contactId) || 0;
+    const batchNumber = position ? Math.ceil(position / DAILY_LANE_NEW_CAPS[lead.lane]) : 0;
+    lead.lanePosition = position;
+    lead.batchNumber = batchNumber;
+    lead.batchLabel = batchNumber === 1 ? "Today" : batchNumber === 2 ? "Next batch" : batchNumber ? `Batch ${batchNumber}` : "Blocked";
+    if (verification) lead.verification = verification;
+  }
+  return queue;
+}
+
+export async function getSmartleadRoutingSnapshot(forceRefresh = false) {
+  const built = await buildQueue(forceRefresh);
+  const assigned = { talentera: new Set<number>(), evalify: new Set<number>() };
+  const senders = (await listAllEmailAccounts()).map((row) => parseSender(row, assigned)).filter((row): row is V2Sender => Boolean(row));
+  return { queue: await decorateQueue(built.queue), senders };
 }
 
 function senderCapacity(sender: V2Sender) { return Math.min(Math.max(0, sender.maxPerDay), MAX_CAMPAIGN_EMAILS_PER_MAILBOX); }
@@ -526,12 +573,13 @@ export async function getSmartleadV2(forceRefresh = false): Promise<SmartleadV2P
   const currentRows: Record<OutreachProduct, JsonObject[]> = { talentera: [], evalify: [] };
   for (const product of ["talentera", "evalify"] as OutreachProduct[]) currentRows[product] = built.campaigns[product] ? await campaignLeadRows(built.campaigns[product]) : [];
   const [talenteraAnalytics, evalifyAnalytics, prepared] = await Promise.all([analytics(built.campaigns.talentera, currentRows.talentera), analytics(built.campaigns.evalify, currentRows.evalify), readPrepared()]);
-  const approvedInventory = validateApprovedSenderInventory(senders); const capacity = capacityPlan(senders); const ready = built.queue.filter((lead) => lead.eligible); const liveCap = capacity.liveNewLeadsPerDay; const coverageDays = liveCap ? Math.ceil(ready.length / liveCap * 10) / 10 : 0;
+  await decorateQueue(built.queue);
+  const approvedInventory = validateApprovedSenderInventory(senders); const capacity = capacityPlan(senders); const ready = built.queue.filter((lead) => lead.eligible); const liveCap = globalDailyTarget(); const coverageDays = liveCap ? Math.ceil(ready.length / liveCap * 10) / 10 : 0;
   const payload: SmartleadV2Payload = {
     generatedAt: new Date().toISOString(), configuration: { apiConfigured: Boolean(getApiKey()), openRouterConfigured: aiConfigured(), ownerActionsConfigured: Boolean(clean(process.env.ACQUISITION_OWNER_TOKEN)), maritaOwnerId: MARITA_OWNER_ID, globalDailyNewTarget: globalDailyTarget(), minTimeBetweenEmails: Math.max(MIN_GAP_MINUTES, positiveInt(process.env.SMARTLEAD_MIN_TIME_BETWEEN_EMAILS, MIN_GAP_MINUTES, 1, 240)), maxCampaignEmailsPerMailbox: MAX_CAMPAIGN_EMAILS_PER_MAILBOX },
     safety: { healthy: built.salesSafety.healthy && approvedInventory.healthy, recentSalesActivities: built.salesSafety.activityCount, blockedContacts: built.salesSafety.blockedContactIds.size, blockedCompanies: built.salesSafety.blockedCompanyIds.size, warnings: [...built.salesSafety.warnings, ...approvedInventory.warnings] },
     campaigns: built.campaigns, analytics: { talentera: talenteraAnalytics, evalify: evalifyAnalytics }, senders, capacity,
-    summary: { maritaCompanies: built.priority.companies.length, emailCandidates: built.queue.length, ready: ready.length, talenteraReady: ready.filter((lead) => lead.product === "talentera").length, evalifyReady: ready.filter((lead) => lead.product === "evalify").length, blockedBySales: built.queue.filter((lead) => /Sales activity/i.test(lead.blockReason)).length, blockedEmail: built.queue.filter((lead) => /email/i.test(lead.blockReason)).length, alreadyEntered: built.queue.filter((lead) => /Already entered/i.test(lead.blockReason)).length, prepared: prepared?.leads.length ?? 0, today: Math.min(ready.length, liveCap), tomorrow: Math.min(Math.max(0, ready.length - liveCap), liveCap), next48Hours: Math.min(ready.length, liveCap * 2), coverageDays },
+    summary: { maritaCompanies: built.priority.companies.length, emailCandidates: built.queue.length, ready: ready.length, talenteraReady: ready.filter((lead) => lead.product === "talentera").length, evalifyReady: ready.filter((lead) => lead.product === "evalify").length, blockedBySales: built.queue.filter((lead) => /Sales activity/i.test(lead.blockReason)).length, blockedEmail: built.queue.filter((lead) => /email/i.test(lead.blockReason)).length, alreadyEntered: built.queue.filter((lead) => /Already entered/i.test(lead.blockReason)).length, prepared: prepared?.leads.length ?? 0, today: built.queue.filter((lead) => lead.batchNumber === 1).length, tomorrow: built.queue.filter((lead) => lead.batchNumber === 2).length, next48Hours: built.queue.filter((lead) => lead.batchNumber > 0 && lead.batchNumber <= 2).length, coverageDays },
     queue: built.queue.slice(0, 1_000), preparedSamples: (prepared?.leads ?? []).slice(0, 8), executions: built.executions.slice(0, 500), sequenceCatalog: { talentera: { arSA: sequenceTemplate("talentera", "ar-SA"), en: sequenceTemplate("talentera", "en") }, evalify: { arSA: sequenceTemplate("evalify", "ar-SA"), en: sequenceTemplate("evalify", "en") } },
   };
   cache = { expiresAt: Date.now() + CACHE_TTL_MS, payload }; return payload;

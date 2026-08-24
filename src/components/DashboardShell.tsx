@@ -37,10 +37,6 @@ const SmartleadCommandCenter = dynamic(
   () => import("@/components/SmartleadCommandCenter").then((module) => module.SmartleadCommandCenter),
   { ssr: false, loading: ViewLoading },
 );
-const SmartleadDailySendBar = dynamic(
-  () => import("@/components/SmartleadDailySendBar").then((module) => module.SmartleadDailySendBar),
-  { ssr: false },
-);
 const TeamActivity = dynamic(
   () => import("@/components/TeamActivity").then((module) => module.TeamActivity),
   { ssr: false, loading: ViewLoading },
@@ -112,7 +108,7 @@ export function Dashboard() {
   if (view === "career") return <CareerIntelligence onBack={() => changeView("core")}/>;
   if (view === "ats-intent") return <AtsIntentSearch onBack={() => changeView("core")}/>;
   if (view === "marita-priority") return <MaritaPriorityQueue onBack={() => changeView("core")}/>;
-  if (view === "smartlead") return <><SmartleadDailySendBar/><SmartleadCommandCenter onBack={() => changeView("core")}/></>;
+  if (view === "smartlead") return <SmartleadCommandCenter onBack={() => changeView("core")}/>;
   if (view === "team-activity") return <TeamActivity onBack={() => changeView("core")}/>;
   if (view === "net-new") return <NetNewAccounts onBack={() => changeView("core")}/>;
 
