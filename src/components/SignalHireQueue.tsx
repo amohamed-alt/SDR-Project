@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft, Building2, CheckCircle2, CircleAlert, ExternalLink, Filter, LoaderCircle,
@@ -63,7 +63,11 @@ type HubSpotCompanyCheck = {
   protectedReason: string;
 };
 
-type Precheck = { contact: HubSpotContactCheck; company: HubSpotCompanyCheck; checkedAt: string };
+type Precheck = {
+  contact: HubSpotContactCheck;
+  company: HubSpotCompanyCheck;
+  checkedAt: string;
+};
 
 type HiringInsight = {
   status: "Hiring Now" | "Accepting Applications" | "No Active Jobs" | "Unknown";
@@ -118,7 +122,14 @@ type Prospect = {
 
 type Stage = "checking" | "existing" | "protected" | "enriching" | "ready" | "error";
 type PushState = { loading?: boolean; success?: string; error?: string };
-type Row = { key: string; lead: SignalHireLead; stage: Stage; precheck?: Precheck; prospect?: Prospect; error?: string };
+type Row = {
+  key: string;
+  lead: SignalHireLead;
+  stage: Stage;
+  precheck?: Precheck;
+  prospect?: Prospect;
+  error?: string;
+};
 type View = "new" | "existing" | "protected" | "all" | "review";
 
 function keyFor(lead: SignalHireLead) {
@@ -126,7 +137,10 @@ function keyFor(lead: SignalHireLead) {
 }
 
 function isEligible(row: Row) {
-  return row.stage === "ready" && Boolean(row.prospect) && !row.precheck?.contact.inHubSpot && !row.precheck?.company.protected;
+  return row.stage === "ready"
+    && Boolean(row.prospect)
+    && !row.precheck?.contact.inHubSpot
+    && !row.precheck?.company.protected;
 }
 
 function companyState(company?: HubSpotCompanyCheck) {
@@ -139,6 +153,57 @@ function companyState(company?: HubSpotCompanyCheck) {
 
 async function readJson<T>(response: Response): Promise<T> {
   return await response.json() as T;
+}
+
+async function checkHubSpot(lead: SignalHireLead) {
+  const response = await fetch("/api/prospecting/signalhire/precheck", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(lead),
+  });
+  const payload = await readJson<Precheck & { error?: string }>(response);
+  if (!response.ok) throw new Error(payload.error || "HubSpot precheck failed.");
+  return payload;
+}
+
+async function enrichSignalHireLead(lead: SignalHireLead, listName: string) {
+  const source = `SignalHire Lead List · ${listName || "Abdullah"}`;
+  const fastResponse = await fetch("/api/prospecting/resolve-companion", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      linkedinUrl: lead.linkedinUrl,
+      name: lead.name,
+      company: lead.company,
+      title: lead.title,
+      location: lead.location,
+      source,
+    }),
+  });
+  const fast = await readJson<{ prospect?: Prospect; error?: string }>(fastResponse);
+  if (!fastResponse.ok || !fast.prospect) {
+    throw new Error(fast.error || "SignalHire could not enrich this lead.");
+  }
+
+  const intelResponse = await fetch("/api/prospecting/intelligence", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      linkedinUrl: fast.prospect.linkedinUrl,
+      company: fast.prospect.company,
+      companyWebsite: fast.prospect.companyWebsite,
+      companyDomain: fast.prospect.companyDomain,
+      email: fast.prospect.email,
+      emails: fast.prospect.emails,
+      score: fast.prospect.score,
+      scoreReasons: fast.prospect.scoreReasons,
+    }),
+  });
+  const intel = await readJson<{ patch?: Partial<Prospect>; error?: string }>(intelResponse);
+  if (!intelResponse.ok || !intel.patch) {
+    throw new Error(intel.error || "Company intelligence failed.");
+  }
+  return { ...fast.prospect, ...intel.patch, source } as Prospect;
 }
 
 export function SignalHireQueue() {
@@ -156,94 +221,7 @@ export function SignalHireQueue() {
   const lastBatch = useRef("");
   const processingRef = useRef(false);
 
-  async function fetchStatus() {
-    const response = await fetch("/api/prospecting/signalhire/companion", { cache: "no-store" });
-    if (!response.ok) throw new Error("Could not read SignalHire queue status.");
-    return readJson<CompanionStatus>(response);
-  }
-
-  useEffect(() => {
-    let active = true;
-    const read = async () => {
-      try {
-        const payload = await fetchStatus();
-        if (!active) return;
-        setStatus(payload);
-        const batch = payload.latestBatch;
-        if (batch?.id && batch.id !== lastBatch.current && !processingRef.current) {
-          lastBatch.current = batch.id;
-          void processBatch(batch);
-        }
-      } catch {
-        if (active) setStatus({ ok: false, paired: false, signalHireConfigured: false });
-      }
-    };
-    void read();
-    const timer = window.setInterval(() => void read(), 3000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, []);
-
-  async function precheckLead(lead: SignalHireLead) {
-    const response = await fetch("/api/prospecting/signalhire/precheck", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(lead),
-    });
-    const payload = await readJson<Precheck & { error?: string }>(response);
-    if (!response.ok) throw new Error(payload.error || "HubSpot precheck failed.");
-    return payload;
-  }
-
-  async function enrichLead(lead: SignalHireLead, precheck: Precheck) {
-    const source = `SignalHire Lead List · ${status?.latestBatch?.listName || "Abdullah"}`;
-    const fastResponse = await fetch("/api/prospecting/resolve-companion", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        linkedinUrl: lead.linkedinUrl,
-        name: lead.name,
-        company: lead.company,
-        title: lead.title,
-        location: lead.location,
-        source,
-      }),
-    });
-    const fast = await readJson<{ prospect?: Prospect; error?: string }>(fastResponse);
-    if (!fastResponse.ok || !fast.prospect) throw new Error(fast.error || "SignalHire could not enrich this lead.");
-
-    const intelResponse = await fetch("/api/prospecting/intelligence", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        linkedinUrl: fast.prospect.linkedinUrl,
-        company: fast.prospect.company,
-        companyWebsite: fast.prospect.companyWebsite,
-        companyDomain: fast.prospect.companyDomain,
-        email: fast.prospect.email,
-        emails: fast.prospect.emails,
-        score: fast.prospect.score,
-        scoreReasons: fast.prospect.scoreReasons,
-      }),
-    });
-    const intel = await readJson<{ patch?: Partial<Prospect>; error?: string }>(intelResponse);
-    if (!intelResponse.ok || !intel.patch) throw new Error(intel.error || "Company intelligence failed.");
-    return { ...fast.prospect, ...intel.patch, source } as Prospect;
-  }
-
-  async function processOne(lead: SignalHireLead): Promise<Row> {
-    const key = keyFor(lead);
-    try {
-      const precheck = await precheckLead(lead);
-      if (precheck.contact.inHubSpot) return { key, lead, precheck, stage: "existing" };
-      if (precheck.company.protected) return { key, lead, precheck, stage: "protected" };
-      const prospect = await enrichLead(lead, precheck);
-      return { key, lead, precheck, prospect, stage: "ready" };
-    } catch (requestError) {
-      return { key, lead, stage: "error", error: requestError instanceof Error ? requestError.message : "Lead processing failed." };
-    }
-  }
-
-  async function processBatch(batch: SignalHireBatch) {
+  const processBatch = useCallback(async (batch: SignalHireBatch) => {
     processingRef.current = true;
     setProcessing(true);
     setError("");
@@ -259,22 +237,37 @@ export function SignalHireQueue() {
         const lead = pending.shift();
         if (!lead) return;
         const key = keyFor(lead);
-        setRows((current) => current.map((row) => row.key === key ? { ...row, stage: "checking" } : row));
         let checked: Precheck | undefined;
+
         try {
-          checked = await precheckLead(lead);
+          checked = await checkHubSpot(lead);
           if (checked.contact.inHubSpot) {
-            setRows((current) => current.map((row) => row.key === key ? { key, lead, precheck: checked, stage: "existing" } : row));
-          } else if (checked.company.protected) {
-            setRows((current) => current.map((row) => row.key === key ? { key, lead, precheck: checked, stage: "protected" } : row));
-          } else {
-            setRows((current) => current.map((row) => row.key === key ? { key, lead, precheck: checked, stage: "enriching" } : row));
-            const prospect = await enrichLead(lead, checked);
-            setRows((current) => current.map((row) => row.key === key ? { key, lead, precheck: checked, prospect, stage: "ready" } : row));
+            setRows((current) => current.map((row) => row.key === key
+              ? { key, lead, precheck: checked, stage: "existing" }
+              : row));
+            continue;
           }
+
+          if (checked.company.protected) {
+            setRows((current) => current.map((row) => row.key === key
+              ? { key, lead, precheck: checked, stage: "protected" }
+              : row));
+            continue;
+          }
+
+          setRows((current) => current.map((row) => row.key === key
+            ? { key, lead, precheck: checked, stage: "enriching" }
+            : row));
+          const prospect = await enrichSignalHireLead(lead, batch.listName);
+          setRows((current) => current.map((row) => row.key === key
+            ? { key, lead, precheck: checked, prospect, stage: "ready" }
+            : row));
         } catch (requestError) {
           setRows((current) => current.map((row) => row.key === key ? {
-            key, lead, precheck: checked, stage: "error",
+            key,
+            lead,
+            precheck: checked,
+            stage: "error",
             error: requestError instanceof Error ? requestError.message : "Lead processing failed.",
           } : row));
         } finally {
@@ -292,9 +285,36 @@ export function SignalHireQueue() {
       processingRef.current = false;
       setProcessing(false);
     }
-  }
+  }, []);
 
-  async function push(row: Row) {
+  useEffect(() => {
+    let active = true;
+    const read = async () => {
+      try {
+        const response = await fetch("/api/prospecting/signalhire/companion", { cache: "no-store" });
+        if (!response.ok) throw new Error("Could not read SignalHire queue status.");
+        const payload = await readJson<CompanionStatus>(response);
+        if (!active) return;
+        setStatus(payload);
+        const batch = payload.latestBatch;
+        if (batch?.id && batch.id !== lastBatch.current && !processingRef.current) {
+          lastBatch.current = batch.id;
+          void processBatch(batch);
+        }
+      } catch {
+        if (active) setStatus({ ok: false, paired: false, signalHireConfigured: false });
+      }
+    };
+
+    void read();
+    const timer = window.setInterval(() => void read(), 3000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [processBatch]);
+
+  async function pushRow(row: Row) {
     if (!row.prospect || !isEligible(row)) return false;
     setPushState((current) => ({ ...current, [row.key]: { loading: true } }));
     try {
@@ -304,7 +324,12 @@ export function SignalHireQueue() {
         body: JSON.stringify(row.prospect),
       });
       const payload = await readJson<{
-        duplicate?: boolean; taskId?: string; contactId?: string; companyId?: string; ownerName?: string; error?: string;
+        duplicate?: boolean;
+        taskId?: string;
+        contactId?: string;
+        companyId?: string;
+        ownerName?: string;
+        error?: string;
       }>(response);
       if (!response.ok) throw new Error(payload.error || "HubSpot push failed.");
       const success = payload.duplicate
@@ -313,7 +338,10 @@ export function SignalHireQueue() {
       setPushState((current) => ({ ...current, [row.key]: { success } }));
       return true;
     } catch (requestError) {
-      setPushState((current) => ({ ...current, [row.key]: { error: requestError instanceof Error ? requestError.message : "Push failed." } }));
+      setPushState((current) => ({
+        ...current,
+        [row.key]: { error: requestError instanceof Error ? requestError.message : "Push failed." },
+      }));
       return false;
     }
   }
@@ -327,7 +355,7 @@ export function SignalHireQueue() {
       while (pending.length) {
         const row = pending.shift();
         if (!row) return;
-        await push(row);
+        await pushRow(row);
         setBulk((current) => ({ ...current, done: current.done + 1 }));
       }
     });
@@ -352,24 +380,33 @@ export function SignalHireQueue() {
       if (view === "existing" && row.stage !== "existing") return false;
       if (view === "protected" && row.stage !== "protected") return false;
       if (view === "review" && row.stage !== "error") return false;
-      if (view === "all" && row.stage === "checking") return true;
       if (!term) return true;
-      const p = row.prospect;
-      const c = row.precheck?.company;
-      return [row.lead.name, row.lead.title, row.lead.company, row.lead.email, row.lead.phone,
-        p?.fullName, p?.companyDomain, p?.detectedAts, c?.accountType, c?.accountStatus, c?.detectedAts]
-        .some((value) => String(value || "").toLowerCase().includes(term));
+      const prospect = row.prospect;
+      const company = row.precheck?.company;
+      return [
+        row.lead.name,
+        row.lead.title,
+        row.lead.company,
+        row.lead.email,
+        row.lead.phone,
+        prospect?.fullName,
+        prospect?.companyDomain,
+        prospect?.detectedAts,
+        company?.accountType,
+        company?.accountStatus,
+        company?.detectedAts,
+      ].some((value) => String(value || "").toLowerCase().includes(term));
     }).sort((a, b) => (b.prospect?.score || 0) - (a.prospect?.score || 0));
   }, [query, rows, view]);
 
   const selectedEligible = rows.filter((row) => selected.has(row.key) && isEligible(row)).length;
-  const allVisibleSelected = visible.length > 0 && visible.every((row) => selected.has(row.key));
+  const eligibleVisible = visible.filter(isEligible);
+  const allVisibleSelected = eligibleVisible.length > 0 && eligibleVisible.every((row) => selected.has(row.key));
 
   function selectVisible() {
     setSelected((current) => {
       const next = new Set(current);
-      for (const row of visible) {
-        if (!isEligible(row)) continue;
+      for (const row of eligibleVisible) {
         if (allVisibleSelected) next.delete(row.key);
         else next.add(row.key);
       }
@@ -447,14 +484,17 @@ export function SignalHireQueue() {
                 const prospect = row.prospect;
                 const company = row.precheck?.company;
                 const contactExists = row.precheck?.contact.inHubSpot;
-                const push = pushState[row.key];
+                const rowPush = pushState[row.key];
                 return <tr key={row.key} data-protected={row.stage === "protected"}>
                   <td><input type="checkbox" disabled={!isEligible(row)} checked={selected.has(row.key)} onChange={() => setSelected((current) => { const next = new Set(current); if (next.has(row.key)) next.delete(row.key); else next.add(row.key); return next; })}/></td>
                   <td>
                     <strong>{prospect?.fullName || row.lead.name}</strong>
                     <span>{prospect?.title || row.lead.title || "—"}</span>
                     <small>{prospect?.location || row.lead.location || "—"}</small>
-                    <div className={styles.links}>{row.lead.signalHireProfileUrl && <a href={row.lead.signalHireProfileUrl} target="_blank" rel="noreferrer">SignalHire <ExternalLink size={10}/></a>}{prospect?.linkedinUrl && <a href={prospect.linkedinUrl} target="_blank" rel="noreferrer">LinkedIn <ExternalLink size={10}/></a>}</div>
+                    <div className={styles.links}>
+                      {row.lead.signalHireProfileUrl && <a href={row.lead.signalHireProfileUrl} target="_blank" rel="noreferrer">SignalHire <ExternalLink size={10}/></a>}
+                      {prospect?.linkedinUrl && <a href={prospect.linkedinUrl} target="_blank" rel="noreferrer">LinkedIn <ExternalLink size={10}/></a>}
+                    </div>
                   </td>
                   <td>
                     {(prospect?.phone || row.lead.phone) ? <strong className={styles.phone}><Phone size={12}/>{prospect?.phone || row.lead.phone}</strong> : <span className={styles.muted}>No phone yet</span>}
@@ -480,13 +520,13 @@ export function SignalHireQueue() {
                     {row.stage === "protected" && <span className={styles.protectedBadge}><ShieldCheck size={11}/>{company?.protectedReason || "Protected"}</span>}
                     {row.stage === "error" && <span className={styles.errorBadge}><CircleAlert size={11}/>Needs review</span>}
                     {row.error && <small className={styles.rowError}>{row.error}</small>}
-                    {push?.success && <small className={styles.goodText}>{push.success}</small>}
-                    {push?.error && <small className={styles.badText}>{push.error}</small>}
+                    {rowPush?.success && <small className={styles.goodText}>{rowPush.success}</small>}
+                    {rowPush?.error && <small className={styles.badText}>{rowPush.error}</small>}
                   </td>
                   <td>
-                    <button className={styles.pushButton} type="button" disabled={!isEligible(row) || Boolean(push?.loading || push?.success)} onClick={() => void push(row)}>
-                      {push?.loading ? <LoaderCircle className={styles.spin} size={13}/> : <Send size={13}/>}
-                      {push?.success ? "Pushed" : "Push + Task"}
+                    <button className={styles.pushButton} type="button" disabled={!isEligible(row) || Boolean(rowPush?.loading || rowPush?.success)} onClick={() => void pushRow(row)}>
+                      {rowPush?.loading ? <LoaderCircle className={styles.spin} size={13}/> : <Send size={13}/>}
+                      {rowPush?.success ? "Pushed" : "Push + Task"}
                     </button>
                   </td>
                 </tr>;
