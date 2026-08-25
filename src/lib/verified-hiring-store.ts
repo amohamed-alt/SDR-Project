@@ -20,10 +20,12 @@ import {
 } from "@/lib/hiring-verification";
 
 const CACHE_VERSION = 1;
+const VERIFIED_STORE_VERSION = 1;
 const DEFAULT_CACHE_TTL_HOURS = 24;
 const DEFAULT_INCONCLUSIVE_TTL_HOURS = 2;
 const DEFAULT_CONCURRENCY = 4;
 const MAX_CACHE_ENTRIES = 2_000;
+const MAX_STALE_VERIFIED_STORE_HOURS = 24;
 const DAY_MS = 86_400_000;
 
 type VerificationCoverage = "complete" | "partial" | "unknown";
@@ -38,6 +40,12 @@ type VerificationCacheEntry = {
 type VerificationCache = {
   version: 1;
   entries: Record<string, VerificationCacheEntry>;
+};
+
+type PersistedVerifiedStore = {
+  version: 1;
+  rawGeneratedAt: string;
+  store: VerifiedHiringStore;
 };
 
 export type VerifiedHiringCompanySignal = HiringCompanySignal & {
@@ -73,6 +81,10 @@ function clean(value: unknown, max = 1_000) {
 
 function cachePath() {
   return process.env.HIRING_VERIFICATION_CACHE_PATH || "/app/data/hiring-verification-cache.json";
+}
+
+function verifiedStorePath() {
+  return process.env.VERIFIED_HIRING_STORE_PATH || "/app/data/verified-hiring-store.json";
 }
 
 function emptyCache(): VerificationCache {
@@ -116,6 +128,26 @@ async function writeCache(cache: VerificationCache) {
   await mkdir(/* turbopackIgnore: true */ path.dirname(target), { recursive: true });
   const temp = `${target}.tmp-${process.pid}`;
   await writeFile(/* turbopackIgnore: true */ temp, JSON.stringify(cache), { encoding: "utf8", mode: 0o600 });
+  await rename(/* turbopackIgnore: true */ temp, /* turbopackIgnore: true */ target);
+}
+
+async function readPersistedVerifiedStore() {
+  try {
+    const raw = await readFile(/* turbopackIgnore: true */ verifiedStorePath(), "utf8");
+    const parsed = JSON.parse(raw) as PersistedVerifiedStore;
+    if (parsed.version !== VERIFIED_STORE_VERSION || !parsed.store || !Array.isArray(parsed.store.companies)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function persistVerifiedStore(rawGeneratedAt: string, store: VerifiedHiringStore) {
+  const target = verifiedStorePath();
+  await mkdir(/* turbopackIgnore: true */ path.dirname(target), { recursive: true });
+  const temp = `${target}.tmp-${process.pid}`;
+  const payload: PersistedVerifiedStore = { version: VERIFIED_STORE_VERSION, rawGeneratedAt, store };
+  await writeFile(/* turbopackIgnore: true */ temp, JSON.stringify(payload), { encoding: "utf8", mode: 0o600 });
   await rename(/* turbopackIgnore: true */ temp, /* turbopackIgnore: true */ target);
 }
 
@@ -349,8 +381,28 @@ function applyVerification(company: HiringCompanySignal, result: HiringVerificat
   };
 }
 
-async function buildVerifiedStore(): Promise<VerifiedHiringStore> {
-  const raw = await getHiringStore();
+function pendingVerification(company: HiringCompanySignal): VerifiedHiringCompanySignal {
+  return applyVerification(company, {
+    jobs: [],
+    conclusive: false,
+    method: "inconclusive",
+    confidence: "low",
+    rawCandidateCount: activeRawJobs(company).length,
+    rejectedStaleCount: 0,
+    webSearchUsed: false,
+    note: "Verification is pending. Raw career-page candidates are deliberately not counted until current official evidence is confirmed.",
+  });
+}
+
+function conservativeStore(raw: HiringStore): VerifiedHiringStore {
+  return {
+    ...raw,
+    verificationGeneratedAt: "",
+    companies: raw.companies.map(pendingVerification),
+  };
+}
+
+async function buildVerifiedStore(raw: HiringStore): Promise<VerifiedHiringStore> {
   const concurrency = numberEnv("HIRING_VERIFICATION_CONCURRENCY", DEFAULT_CONCURRENCY, 1, 8);
   const companies = await mapConcurrent(raw.companies, concurrency, async (company) => {
     const candidates = activeRawJobs(company);
@@ -368,10 +420,39 @@ async function buildVerifiedStore(): Promise<VerifiedHiringStore> {
   };
 }
 
-export async function getVerifiedHiringStore() {
+export async function refreshVerifiedHiringStore() {
   if (verificationInFlight) return verificationInFlight;
-  verificationInFlight = buildVerifiedStore().finally(() => {
+  verificationInFlight = (async () => {
+    const raw = await getHiringStore();
+    const store = await buildVerifiedStore(raw);
+    await persistVerifiedStore(raw.generatedAt, store);
+    return store;
+  })().finally(() => {
     verificationInFlight = null;
   });
   return verificationInFlight;
+}
+
+export async function getVerifiedHiringStore() {
+  const raw = await getHiringStore();
+  const persisted = await readPersistedVerifiedStore();
+  const persistedAgeMs = persisted?.store.verificationGeneratedAt
+    ? Date.now() - timestamp(persisted.store.verificationGeneratedAt)
+    : Number.POSITIVE_INFINITY;
+  const exactRawMatch = Boolean(persisted && persisted.rawGeneratedAt === raw.generatedAt);
+  const acceptStaleVerified = Boolean(
+    persisted
+      && persistedAgeMs >= 0
+      && persistedAgeMs <= MAX_STALE_VERIFIED_STORE_HOURS * 60 * 60_000,
+  );
+
+  if (!exactRawMatch) {
+    void refreshVerifiedHiringStore().catch((error) => {
+      console.error("Verified hiring refresh failed", error);
+    });
+  }
+
+  if (exactRawMatch && persisted) return persisted.store;
+  if (acceptStaleVerified && persisted) return persisted.store;
+  return conservativeStore(raw);
 }
