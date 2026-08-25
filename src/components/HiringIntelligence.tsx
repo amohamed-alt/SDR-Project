@@ -41,6 +41,8 @@ interface SnapshotPoint {
   score: number;
 }
 
+type VerificationMethod = "authoritative-ats" | "structured-freshness" | "openrouter-web" | "verified-empty" | "inconclusive";
+
 interface HiringCompany {
   companyId: string;
   name: string;
@@ -68,12 +70,24 @@ interface HiringCompany {
   error: string;
   jobs: HiringJob[];
   snapshots: SnapshotPoint[];
+  rawActiveJobs: number;
+  rawNewJobs7d: number;
+  rawNewJobs30d: number;
+  rawJobsDetected: number;
+  staleJobsExcluded: number;
+  verificationMethod: VerificationMethod;
+  verificationConfidence: "high" | "medium" | "low";
+  verificationCoverage: "complete" | "partial" | "unknown";
+  verificationNote: string;
+  webSearchVerified: boolean;
 }
 
 interface HiringPayload {
   meta: {
     generatedAt: string;
+    verificationGeneratedAt: string;
     refreshCadenceHours: number;
+    truthPolicy: string;
     countries: string[];
     run: {
       startedAt: string;
@@ -90,6 +104,9 @@ interface HiringPayload {
     monitoredCompanies: number;
     checkedCompanies: number;
     coverageRate: number;
+    pendingVerification: number;
+    staleJobsExcluded: number;
+    webVerified: number;
     hiringNow: number;
     strongHiring: number;
     hiringSurges: number;
@@ -115,7 +132,7 @@ function formatDate(value: string) {
 }
 
 function ageLabel(value: string) {
-  if (!value) return "Pending first scan";
+  if (!value) return "Pending verification";
   const minutes = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 60_000));
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.round(minutes / 60);
@@ -136,6 +153,14 @@ function sourceLabel(source: HiringCompany["sourceKind"]) {
   if (source === "lever") return "Lever API";
   if (source === "smartrecruiters") return "SmartRecruiters API";
   return "Career Page";
+}
+
+function verificationLabel(method: VerificationMethod) {
+  if (method === "authoritative-ats") return "Live ATS API";
+  if (method === "structured-freshness") return "Fresh structured postings";
+  if (method === "openrouter-web") return "OpenRouter official-web check";
+  if (method === "verified-empty") return "Verified no openings";
+  return "Verification pending";
 }
 
 function TrendIcon({ trend }: { trend: HiringCompany["trend"] }) {
@@ -195,7 +220,7 @@ export function HiringIntelligence({ onBack }: { onBack: () => void }) {
     if (!data) return [];
     const query = search.trim().toLowerCase();
     return data.companies.filter((company) => {
-      if (query && ![company.name, company.domain, company.ats, ...company.topDepartments, ...company.topLocations].join(" ").toLowerCase().includes(query)) return false;
+      if (query && ![company.name, company.domain, company.ats, verificationLabel(company.verificationMethod), ...company.topDepartments, ...company.topLocations].join(" ").toLowerCase().includes(query)) return false;
       if (country && company.country !== country) return false;
       if (status && company.hiringStatus !== status) return false;
       if (ats && (company.ats || sourceLabel(company.sourceKind)) !== ats) return false;
@@ -210,43 +235,43 @@ export function HiringIntelligence({ onBack }: { onBack: () => void }) {
   return <main className={styles.page}>
     <div className={styles.topbar}>
       <button className={styles.backButton} type="button" onClick={onBack}><ArrowLeft size={17}/>SDR Dashboard</button>
-      <div className={styles.scopePills}><span>🇸🇦 KSA</span><span>🇦🇪 UAE</span><span><RefreshCw size={12}/>Rolling ≤{data?.meta.refreshCadenceHours ?? 6}h</span></div>
+      <div className={styles.scopePills}><span>🇸🇦 KSA</span><span>🇦🇪 UAE</span><span><ShieldCheck size={12}/>Verified truth</span></div>
     </div>
 
     <section className={styles.hero}>
       <div className={styles.heroCopy}>
         <div className={styles.eyebrow}><Flame size={16}/>Talentera Buying Intent</div>
         <h1>Hiring Intelligence</h1>
-        <p>Live hiring signals from public ATS feeds and company career pages, scored for SDR outreach priority.</p>
+        <p>Verified current hiring signals from live ATS feeds, fresh structured postings, and official-web verification for ambiguous career pages.</p>
         <div className={styles.heroMeta}>
-          <span><Clock3 size={14}/>{scanning ? `Scanning now · ${data?.meta.run.scanned ?? 0}/${activeScanTarget}` : initialized ? `Updated ${ageLabel(data?.meta.generatedAt ?? "")}` : "Waiting for first scan"}</span>
-          <span><ShieldCheck size={14}/>Public hiring data only</span>
-          <span><Gauge size={14}/>{data?.summary.coverageRate ?? 0}% scan coverage</span>
+          <span><Clock3 size={14}/>{scanning ? `Collecting now · ${data?.meta.run.scanned ?? 0}/${activeScanTarget}` : data?.meta.verificationGeneratedAt ? `Verified ${ageLabel(data.meta.verificationGeneratedAt)}` : "Verification warming up"}</span>
+          <span><ShieldCheck size={14}/>Unverified jobs count as zero</span>
+          <span><Gauge size={14}/>{data?.summary.coverageRate ?? 0}% verified coverage</span>
         </div>
       </div>
-      <div className={styles.heroBadge}><Sparkles size={22}/><strong>{data?.summary.hiringSurges ?? 0}</strong><span>Hiring Surges</span></div>
+      <div className={styles.heroBadge}><Sparkles size={22}/><strong>{data?.summary.hiringSurges ?? 0}</strong><span>Verified Surges</span></div>
     </section>
 
     {error && <div className={styles.errorBanner}><CircleAlert size={18}/><div><strong>Hiring intelligence unavailable</strong><span>{error}</span></div></div>}
 
     <section className={styles.metrics}>
-      <MetricCard icon={<Building2 size={18}/>} label="Monitored Companies" value={formatNumber(data?.summary.monitoredCompanies ?? 0)} helper={`${data?.summary.checkedCompanies ?? 0} checked successfully`}/>
-      <MetricCard icon={<BriefcaseBusiness size={18}/>} label="Hiring Now" value={formatNumber(data?.summary.hiringNow ?? 0)} helper="Companies with active vacancies"/>
-      <MetricCard icon={<Flame size={18}/>} label="Strong Intent" value={formatNumber(data?.summary.strongHiring ?? 0)} helper="Hiring Score 60+" emphasis/>
-      <MetricCard icon={<TrendingUp size={18}/>} label="New Jobs · 7d" value={formatNumber(data?.summary.newJobs7d ?? 0)} helper="New vacancies first detected this week"/>
-      <MetricCard icon={<Sparkles size={18}/>} label="Hiring Surges" value={formatNumber(data?.summary.hiringSurges ?? 0)} helper="Hiring Score 80+" emphasis/>
+      <MetricCard icon={<Building2 size={18}/>} label="Monitored Companies" value={formatNumber(data?.summary.monitoredCompanies ?? 0)} helper={`${data?.summary.checkedCompanies ?? 0} verified · ${data?.summary.pendingVerification ?? 0} pending`}/>
+      <MetricCard icon={<BriefcaseBusiness size={18}/>} label="Verified Hiring Now" value={formatNumber(data?.summary.hiringNow ?? 0)} helper="Companies with proven current openings"/>
+      <MetricCard icon={<Flame size={18}/>} label="Strong Intent" value={formatNumber(data?.summary.strongHiring ?? 0)} helper="Score 60+ from verified evidence" emphasis/>
+      <MetricCard icon={<TrendingUp size={18}/>} label="Verified New · 7d" value={formatNumber(data?.summary.newJobs7d ?? 0)} helper="Real post dates or post-baseline discoveries"/>
+      <MetricCard icon={<ShieldCheck size={18}/>} label="Stale Removed" value={formatNumber(data?.summary.staleJobsExcluded ?? 0)} helper={`${data?.summary.webVerified ?? 0} companies used official-web verification`}/>
     </section>
 
     <section className={styles.panel}>
       <div className={styles.panelHeader}>
-        <div><h2>Companies to contact</h2><p>Highest-intent KSA and UAE accounts first. Open a company to see the actual job evidence.</p></div>
+        <div><h2>Companies to contact</h2><p>Only verified current hiring contributes to ranking. Raw career-page candidates remain visible as diagnostics, never as buying intent.</p></div>
         <div className={styles.runMeta}>
-          {data?.meta.run.completedAt ? <><CheckCircle2 size={14}/><span>Last batch: {data.meta.run.succeeded}/{data.meta.run.scanned} successful</span></> : initialized ? <><RefreshCw size={14}/><span>Scanning now: {data?.meta.run.scanned ?? 0}/{activeScanTarget}</span></> : <><Clock3 size={14}/><span>Initial scan starting</span></>}
+          {data?.meta.verificationGeneratedAt ? <><CheckCircle2 size={14}/><span>Truth layer: {ageLabel(data.meta.verificationGeneratedAt)}</span></> : <><RefreshCw size={14}/><span>Building verified baseline</span></>}
         </div>
       </div>
 
       <div className={styles.filters}>
-        <label className={styles.searchField}><Search size={16}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search company, ATS, department, location…"/></label>
+        <label className={styles.searchField}><Search size={16}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search company, ATS, verification, department…"/></label>
         <select value={country} onChange={(event) => setCountry(event.target.value)}><option value="">All countries</option><option value="Saudi Arabia">Saudi Arabia</option><option value="United Arab Emirates">United Arab Emirates</option></select>
         <select value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)}><option value="">All signals</option><option>Hiring Surge</option><option>Strong Hiring</option><option>Active Hiring</option><option>Hiring</option><option>No Signal</option></select>
         <select value={ats} onChange={(event) => setAts(event.target.value)}><option value="">All ATS</option>{atsOptions.map((option) => <option key={option}>{option}</option>)}</select>
@@ -255,17 +280,17 @@ export function HiringIntelligence({ onBack }: { onBack: () => void }) {
 
       <div className={styles.tableWrap}>
         <table className={styles.table}>
-          <thead><tr><th>Company</th><th>Signal</th><th>Score</th><th>Active Jobs</th><th>New 7d</th><th>Trend</th><th>Top Hiring</th><th>Source</th><th>Checked</th><th/></tr></thead>
+          <thead><tr><th>Company</th><th>Signal</th><th>Score</th><th>Verified Jobs</th><th>New 7d</th><th>Trend</th><th>Top Hiring</th><th>Verification</th><th>Checked</th><th/></tr></thead>
           <tbody>
             {filtered.map((company) => <tr key={company.companyId}>
               <td><button className={styles.companyButton} type="button" onClick={() => setSelected(company)}><strong>{company.name}</strong><small><MapPin size={11}/>{company.country === "Saudi Arabia" ? "KSA" : "UAE"}{company.domain ? ` · ${company.domain}` : ""}</small></button></td>
-              <td><span className={`${styles.statusPill} ${statusTone(company.hiringStatus)}`}>{company.hiringStatus}</span>{company.scanStatus !== "success" && <small className={styles.scanNote}>{company.scanStatus}</small>}</td>
+              <td><span className={`${styles.statusPill} ${statusTone(company.hiringStatus)}`}>{company.hiringStatus}</span>{company.verificationMethod === "inconclusive" && <small className={styles.scanNote}>verifying</small>}</td>
               <td><span className={`${styles.score} ${company.hiringScore >= 80 ? styles.scoreHot : company.hiringScore >= 60 ? styles.scoreStrong : ""}`}>{company.hiringScore}</span></td>
-              <td><strong>{company.activeJobs}</strong></td>
+              <td><strong>{company.activeJobs}</strong>{company.rawActiveJobs !== company.activeJobs && <small className={styles.scanNote}>{company.rawActiveJobs} raw</small>}</td>
               <td><strong className={company.newJobs7d > 0 ? styles.positive : ""}>{company.newJobs7d > 0 ? `+${company.newJobs7d}` : "0"}</strong></td>
               <td><span className={`${styles.trend} ${company.trend === "Cooling" ? styles.cooling : ""}`}><TrendIcon trend={company.trend}/>{company.trend}</span></td>
               <td><div className={styles.tags}>{company.topDepartments.slice(0, 2).map((item) => <span key={item}>{item}</span>)}{!company.topDepartments.length && <span>—</span>}</div></td>
-              <td><strong className={styles.source}>{company.ats || sourceLabel(company.sourceKind)}</strong><small className={styles.confidence}>{company.sourceConfidence} confidence</small></td>
+              <td><strong className={styles.source}>{verificationLabel(company.verificationMethod)}</strong><small className={styles.confidence}>{company.verificationConfidence} · {company.verificationCoverage}</small></td>
               <td><span>{ageLabel(company.lastCheckedAt)}</span></td>
               <td><button className={styles.detailButton} type="button" onClick={() => setSelected(company)} aria-label={`Open ${company.name}`}><ChevronRight size={17}/></button></td>
             </tr>)}
@@ -273,7 +298,7 @@ export function HiringIntelligence({ onBack }: { onBack: () => void }) {
           </tbody>
         </table>
       </div>
-      {loading && <div className={styles.loading}><RefreshCw size={18}/><span>Loading hiring intelligence…</span></div>}
+      {loading && <div className={styles.loading}><RefreshCw size={18}/><span>Loading verified hiring intelligence…</span></div>}
     </section>
 
     {selected && <div className={styles.drawerBackdrop} onMouseDown={(event) => { if (event.currentTarget === event.target) setSelected(null); }}>
@@ -285,30 +310,35 @@ export function HiringIntelligence({ onBack }: { onBack: () => void }) {
 
         <div className={styles.drawerScore}>
           <div><span>Hiring Score</span><strong>{selected.hiringScore}<small>/100</small></strong></div>
-          <div><span>Active Jobs</span><strong>{selected.activeJobs}</strong></div>
+          <div><span>Verified Jobs</span><strong>{selected.activeJobs}</strong></div>
           <div><span>New · 7d</span><strong className={selected.newJobs7d ? styles.positive : ""}>{selected.newJobs7d ? `+${selected.newJobs7d}` : "0"}</strong></div>
           <div><span>Trend</span><strong className={styles.drawerTrend}><TrendIcon trend={selected.trend}/>{selected.trend}</strong></div>
         </div>
 
         <div className={styles.drawerSection}>
-          <h3>Signal evidence</h3>
+          <h3>Verification evidence</h3>
           <div className={styles.evidenceGrid}>
-            <div><span>ATS / Source</span><strong>{selected.ats || sourceLabel(selected.sourceKind)}</strong></div>
-            <div><span>Collector</span><strong>{sourceLabel(selected.sourceKind)}</strong></div>
-            <div><span>Confidence</span><strong>{selected.sourceConfidence}</strong></div>
-            <div><span>Last checked</span><strong>{formatDate(selected.lastCheckedAt)}</strong></div>
+            <div><span>ATS / Collector</span><strong>{selected.ats || sourceLabel(selected.sourceKind)}</strong></div>
+            <div><span>Truth method</span><strong>{verificationLabel(selected.verificationMethod)}</strong></div>
+            <div><span>Confidence</span><strong>{selected.verificationConfidence}</strong></div>
+            <div><span>Coverage</span><strong>{selected.verificationCoverage}</strong></div>
+            <div><span>Raw candidates</span><strong>{selected.rawJobsDetected}</strong></div>
+            <div><span>Stale / unverified removed</span><strong>{selected.staleJobsExcluded}</strong></div>
+            <div><span>Last collector check</span><strong>{formatDate(selected.lastCheckedAt)}</strong></div>
+            <div><span>OpenRouter web</span><strong>{selected.webSearchVerified ? "Used" : "Not needed"}</strong></div>
           </div>
-          {selected.error && <div className={styles.drawerWarning}><CircleAlert size={15}/>{selected.error}</div>}
+          {selected.verificationNote && <div className={styles.drawerWarning}><ShieldCheck size={15}/>{selected.verificationNote}</div>}
+          {selected.error && selected.error !== selected.verificationNote && <div className={styles.drawerWarning}><CircleAlert size={15}/>{selected.error}</div>}
         </div>
 
         <div className={styles.drawerSection}>
-          <h3>Where they are hiring</h3>
-          <div className={styles.tagsLarge}>{selected.topDepartments.map((item) => <span key={item}>{item}</span>)}{selected.topLocations.map((item) => <span key={item}><MapPin size={11}/>{item}</span>)}{!selected.topDepartments.length && !selected.topLocations.length && <span>No structured department/location data yet</span>}</div>
+          <h3>Where verified hiring is happening</h3>
+          <div className={styles.tagsLarge}>{selected.topDepartments.map((item) => <span key={item}>{item}</span>)}{selected.topLocations.map((item) => <span key={item}><MapPin size={11}/>{item}</span>)}{!selected.topDepartments.length && !selected.topLocations.length && <span>No verified department/location evidence yet</span>}</div>
         </div>
 
         <div className={styles.drawerSection}>
-          <div className={styles.sectionTitle}><h3>Latest active jobs</h3><span>{selected.jobs.length ? `Showing ${selected.jobs.length}` : "No job rows yet"}</span></div>
-          <div className={styles.jobList}>{selected.jobs.map((job) => <a key={job.externalId} href={job.url || selected.careerPageUrl} target="_blank" rel="noreferrer"><div><strong>{job.title}</strong><span>{[job.department, job.location].filter(Boolean).join(" · ") || "Job details"}</span></div><ExternalLink size={14}/></a>)}{!selected.jobs.length && <div className={styles.noJobs}>The company is still monitored. A structured job list has not been captured yet.</div>}</div>
+          <div className={styles.sectionTitle}><h3>Verified current jobs</h3><span>{selected.jobs.length ? `Showing ${selected.jobs.length}${selected.verificationCoverage === "partial" ? " verified minimum" : ""}` : "No verified job rows"}</span></div>
+          <div className={styles.jobList}>{selected.jobs.map((job) => <a key={job.externalId} href={job.url || selected.careerPageUrl} target="_blank" rel="noreferrer"><div><strong>{job.title}</strong><span>{[job.department, job.location, job.postedAt ? formatDate(job.postedAt) : ""].filter(Boolean).join(" · ") || "Verified current opening"}</span></div><ExternalLink size={14}/></a>)}{!selected.jobs.length && <div className={styles.noJobs}>Nothing is counted until current official evidence is verified. This is intentionally conservative.</div>}</div>
         </div>
 
         <div className={styles.drawerActions}>
