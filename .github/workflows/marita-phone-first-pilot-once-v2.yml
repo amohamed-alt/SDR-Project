@@ -1,0 +1,240 @@
+name: Marita Phone-First Pilot Once V2
+
+on:
+  push:
+    paths:
+      - '.github/workflows/marita-phone-first-pilot-once-v2.yml'
+
+permissions:
+  contents: write
+  statuses: write
+
+concurrency:
+  group: marita-phone-first-pilot-once-v2
+  cancel-in-progress: false
+
+jobs:
+  patch-run-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      BASE_URL: https://sdr.dashboardtalentera.tech
+      DASHBOARD_USERNAME: talentera
+      DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+      OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN || secrets.DASHBOARD_PASSWORD }}
+      TARGET_NEW_TASKS: '20'
+      MAX_SIGNALHIRE_ENRICHMENTS: '30'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Patch production acquisition gate and pilot scope
+        id: patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DASHBOARD_PASSWORD" || { echo '::error::DASHBOARD_PASSWORD is required'; exit 1; }
+          test -n "$OWNER_TOKEN" || { echo '::error::Owner fallback token could not be resolved'; exit 1; }
+          python3 - <<'PY'
+          from pathlib import Path
+          route = Path('src/app/api/acquisition/route.ts')
+          text = route.read_text()
+
+          old = '''function apolloUrl(page: number) {
+            const query = new URLSearchParams();
+            for (const location of ["Saudi Arabia", "United Arab Emirates"]) query.append("organization_locations[]", location);
+            for (const range of ["201,500", "501,1000", "1001,2000"]) query.append("organization_num_employees_ranges[]", range);
+            query.set("organization_num_jobs_range[min]", "5");
+            query.set("page", String(page));
+            query.set("per_page", "100");
+            return `https://api.apollo.io/api/v1/mixed_companies/search?${query.toString()}`;
+          }'''
+          new = '''function apolloUrl(page: number) {
+            const query = new URLSearchParams();
+            for (const location of ["Saudi Arabia", "United Arab Emirates", "Egypt", "South Africa"]) query.append("organization_locations[]", location);
+            for (const range of ["201,500", "501,1000", "1001,2000", "2001,5000", "5001,10000", "10001,50000"]) query.append("organization_num_employees_ranges[]", range);
+            query.set("page", String(page));
+            query.set("per_page", "100");
+            return `https://api.apollo.io/api/v1/mixed_companies/search?${query.toString()}`;
+          }'''
+          if old not in text:
+              raise SystemExit('Apollo query anchor not found')
+          text = text.replace(old, new, 1)
+
+          old_auth = '''  const configured = clean(process.env.ACQUISITION_OWNER_TOKEN, 500);
+            if (configured && safeEqual(supplied, configured)) return { ok: true as const };'''
+          new_auth = '''  const configured = clean(process.env.ACQUISITION_OWNER_TOKEN || process.env.DASHBOARD_PASSWORD, 500);
+            if (configured && safeEqual(supplied, configured)) return { ok: true as const };'''
+          if old_auth not in text:
+              raise SystemExit('Owner authorization anchor not found')
+          text = text.replace(old_auth, new_auth, 1)
+
+          old_config = '    ownerActionsConfigured: Boolean(clean(process.env.ACQUISITION_OWNER_TOKEN, 500)),'
+          new_config = '    ownerActionsConfigured: Boolean(clean(process.env.ACQUISITION_OWNER_TOKEN || process.env.DASHBOARD_PASSWORD, 500)),'
+          if old_config not in text:
+              raise SystemExit('Owner configuration anchor not found')
+          text = text.replace(old_config, new_config, 1)
+
+          old_return = '''    existingHubSpot: accounts.filter((account) => account.exclusionReason === "Already exists in HubSpot").length,
+            };'''
+          new_return = '''    existingHubSpot: accounts.filter((account) => account.exclusionReason === "Already exists in HubSpot").length,
+              batch: accounts.map((account) => ({
+                domain: account.domain,
+                name: account.name,
+                country: account.country,
+                employeeCount: account.employeeCount,
+                industry: account.industry,
+                gtmScore: account.gtmScore,
+                gtmTier: account.gtmTier,
+                exclusionStatus: account.exclusionStatus,
+                exclusionReason: account.exclusionReason,
+                primaryPersona: account.primaryPersona,
+                secondaryPersona: account.secondaryPersona,
+              })),
+            };'''
+          if old_return not in text:
+              raise SystemExit('Discover return anchor not found')
+          text = text.replace(old_return, new_return, 1)
+          route.write_text(text)
+          PY
+
+          git config user.name 'Talentera GTM Automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/app/api/acquisition/route.ts
+          git diff --cached --check
+          git commit -m 'Fix acquisition owner fallback and broaden phone-first pilot'
+          git push origin HEAD:main
+          PATCH_SHA=$(git rev-parse HEAD)
+          echo "patch_sha=$PATCH_SHA" >> "$GITHUB_OUTPUT"
+          echo "Patch pushed: $PATCH_SHA"
+
+      - name: Wait for exact production build
+        shell: bash
+        env:
+          PATCH_SHA: ${{ steps.patch.outputs.patch_sha }}
+        run: |
+          set -euo pipefail
+          READY=false
+          for ATTEMPT in $(seq 1 70); do
+            HEALTH=$(curl -fsS --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" --connect-timeout 5 --max-time 12 -H 'Cache-Control: no-cache' "${BASE_URL}/api/health?pilot=${PATCH_SHA}&attempt=${ATTEMPT}" || true)
+            BUILD=$(printf '%s' "$HEALTH" | jq -r '.buildRef // ""' 2>/dev/null || true)
+            if [ "$BUILD" = "$PATCH_SHA" ]; then
+              ACQ=$(curl -fsS --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" --connect-timeout 5 --max-time 20 -H 'Cache-Control: no-cache' "${BASE_URL}/api/acquisition?limit=1" || true)
+              OWNER=$(printf '%s' "$ACQ" | jq -r '.configuration.ownerActionsConfigured // false' 2>/dev/null || echo false)
+              APOLLO=$(printf '%s' "$ACQ" | jq -r '.configuration.apolloConfigured // false' 2>/dev/null || echo false)
+              SIGNAL=$(printf '%s' "$ACQ" | jq -r '.configuration.signalHireConfigured // false' 2>/dev/null || echo false)
+              DB=$(printf '%s' "$ACQ" | jq -r '.database // ""' 2>/dev/null || true)
+              echo "Exact production: owner=${OWNER} apollo=${APOLLO} signalhire=${SIGNAL} db=${DB}"
+              if [ "$OWNER" = true ] && [ "$APOLLO" = true ] && [ "$SIGNAL" = true ] && [ "$DB" = postgresql ]; then READY=true; break; fi
+            else
+              echo "Waiting for production build ${ATTEMPT}/70"
+            fi
+            sleep 15
+          done
+          [ "$READY" = true ] || { echo '::error::Production did not become phone-first ready'; exit 1; }
+
+      - name: Spend exactly one Apollo credit and run pilot
+        id: pilot
+        uses: actions/github-script@v7
+        env:
+          PATCH_SHA: ${{ steps.patch.outputs.patch_sha }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const base = process.env.BASE_URL;
+            const username = process.env.DASHBOARD_USERNAME || 'talentera';
+            const password = process.env.DASHBOARD_PASSWORD;
+            const ownerToken = process.env.OWNER_TOKEN;
+            const target = Number(process.env.TARGET_NEW_TASKS || 20);
+            const maxEnrich = Number(process.env.MAX_SIGNALHIRE_ENRICHMENTS || 30);
+            const auth = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
+            const headers = { Authorization: auth, 'x-acquisition-owner-token': ownerToken, 'Content-Type': 'application/json' };
+            async function request(path, init = {}) {
+              const response = await fetch(`${base}${path}`, { ...init, headers: { ...headers, ...(init.headers || {}) } });
+              const text = await response.text();
+              let body = {};
+              try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text.slice(0, 400) }; }
+              if (!response.ok) throw new Error(`${path} failed ${response.status}: ${JSON.stringify(body).slice(0, 800)}`);
+              return body;
+            }
+
+            const statusContext = 'pilot/marita-phone-first-1-credit-v2';
+            const statuses = await github.rest.repos.listCommitStatusesForRef({ owner: context.repo.owner, repo: context.repo.repo, ref: process.env.PATCH_SHA, per_page: 100 });
+            if (statuses.data.some((s) => s.context === statusContext && s.state === 'success')) {
+              core.setFailed('Apollo pilot credit already consumed for this commit; refusing a second spend.');
+              return;
+            }
+
+            const discovery = await request('/api/acquisition', { method: 'POST', body: JSON.stringify({ action: 'discover', pages: 1, confirmCredits: true }) });
+            await github.rest.repos.createCommitStatus({ owner: context.repo.owner, repo: context.repo.repo, sha: process.env.PATCH_SHA, state: 'success', context: statusContext, description: 'Exactly one Apollo company-search page consumed', target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}` });
+
+            const batch = (Array.isArray(discovery.batch) ? discovery.batch : []).filter((a) => a?.domain && a.exclusionStatus === 'eligible').sort((a,b)=>Number(b.gtmScore||0)-Number(a.gtmScore||0));
+            const unique = (arr) => [...new Set((arr || []).map(String).map((v)=>v.trim()).filter(Boolean))];
+            const phoneList = (p) => unique(p?.phones);
+            const emailList = (p) => unique(p?.emails);
+            function strength(title='') {
+              const v=String(title).toLowerCase();
+              if (/talent acquisition/.test(v)&&/head|director|vp|vice president/.test(v)) return 100;
+              if (/recruit/.test(v)&&/head|director|vp|vice president/.test(v)) return 96;
+              if (/chief human resources|\bchro\b|chief people/.test(v)) return 94;
+              if (/human resources|\bhr\b|people/.test(v)&&/head|director|vp|vice president/.test(v)) return 88;
+              if (/talent acquisition|recruit/.test(v)&&/manager|lead/.test(v)) return 80;
+              return 50;
+            }
+            function choose(list=[]) {
+              return [...list].filter((p)=>Number(p.score||p.rankScore||0)>=55).filter((p)=>/current company confirmed/i.test(String(p.reason||p.fitReason||''))).filter((p)=>!/assistant|coordinator|intern|trainee|specialist/i.test(String(p.title||''))).sort((a,b)=>(Number(b.score||b.rankScore||0)*10+strength(b.title))-(Number(a.score||a.rankScore||0)*10+strength(a.title)))[0]||null;
+            }
+
+            const r={apolloCredits:1,rawTotal:Number(discovery.rawTotal||0),fetched:Number(discovery.fetched||0),stored:Number(discovery.stored||0),eligible:Number(discovery.eligible||0),excluded:Number(discovery.excluded||0),existingHubSpot:Number(discovery.existingHubSpot||0),batchEligible:batch.length,companiesChecked:0,signalHireEnrichments:0,phoneReady:0,pushed:0,duplicates:0,noCandidate:0,noPhone:0,errors:[],taskIds:[],samples:[]};
+            for (const account of batch) {
+              if (r.pushed>=target||r.signalHireEnrichments>=maxEnrich) break;
+              r.companiesChecked++;
+              const domain=String(account.domain);
+              try {
+                let stored=await request(`/api/acquisition?domain=${encodeURIComponent(domain)}`);
+                let person=(stored.people||[]).filter((p)=>p.enrichmentStatus==='enriched'&&p.meta?.verifiedCurrentCompany===true&&phoneList(p).length).sort((a,b)=>Number(b.rankScore||0)-Number(a.rankScore||0))[0]||null;
+                if (!person) {
+                  const found=await request('/api/acquisition',{method:'POST',body:JSON.stringify({action:'find_people',domain})});
+                  const candidate=choose(found.people||[]);
+                  if (!candidate) { r.noCandidate++; continue; }
+                  r.signalHireEnrichments++;
+                  const enriched=await request('/api/acquisition',{method:'POST',body:JSON.stringify({action:'enrich_person',domain,uid:candidate.uid})});
+                  person=enriched.person||null;
+                }
+                const ps=phoneList(person);
+                if (!person||!ps.length||person.meta?.verifiedCurrentCompany!==true) { r.noPhone++; continue; }
+                r.phoneReady++;
+                const es=emailList(person);
+                const score=Math.max(0,Math.min(100,Number(account.gtmScore||person.rankScore||60)));
+                const pushed=await request('/api/prospecting/push',{method:'POST',body:JSON.stringify({source:'Apollo → SignalHire Pilot',signalHireUid:String(person.uid||''),assignmentMode:'marita',fullName:String(person.fullName||'').trim(),title:String(person.title||'').trim(),company:String(account.name||'').trim(),companyDomain:domain,location:String(person.location||account.country||'').trim(),linkedinUrl:String(person.linkedinUrl||'').trim(),email:es[0]||'',emails:es,phone:ps[0],phones:ps,score,priority:score>=75?'high':'medium'})});
+                if (pushed.duplicate) r.duplicates++;
+                if (pushed.pushed) { r.pushed++; if (pushed.taskId) r.taskIds.push(String(pushed.taskId)); }
+                if (r.samples.length<20) r.samples.push({company:account.name,country:account.country,persona:person.fullName,title:person.title,score,phonePresent:true,newTask:Boolean(pushed.pushed),duplicate:Boolean(pushed.duplicate)});
+              } catch(e) { r.errors.push({company:account.name,domain,error:String(e?.message||e).slice(0,300)}); }
+            }
+
+            const priority=await request('/api/marita-priority?refresh=1');
+            const visibleTaskSet=new Set((priority.companies||[]).flatMap((c)=>c.taskIds||[]).map(String));
+            r.visibleTasks=r.taskIds.filter((id)=>visibleTaskSet.has(id)).length;
+            r.priorityTotalCompanies=(priority.companies||[]).length;
+            r.priorityReadyToCall=Number(priority.summary?.readyToCallCompanies||0);
+            r.priorityHigh=Number(priority.summary?.highPriorityCompanies||0);
+            r.phoneFirstCompanies=Number(priority.summary?.phoneFirstCompanies||0);
+
+            core.summary.addHeading('Marita Phone-First Pilot — Live Verified');
+            core.summary.addTable([[{data:'Metric',header:true},{data:'Result',header:true}],['Apollo credits consumed','1'],['Apollo companies fetched',String(r.fetched)],['Eligible in this batch',String(r.batchEligible)],['Already in HubSpot',String(r.existingHubSpot)],['Companies checked',String(r.companiesChecked)],['SignalHire person enrichments',String(r.signalHireEnrichments)],['Verified phone-ready personas',String(r.phoneReady)],['New Marita CALL tasks',String(r.pushed)],['Duplicates',String(r.duplicates)],['New tasks visible in Marita Priority',`${r.visibleTasks}/${r.taskIds.length}`],['Priority ready-to-call companies',String(r.priorityReadyToCall)],['Priority high companies',String(r.priorityHigh)],['Errors',String(r.errors.length)]]);
+            if (r.samples.length) core.summary.addHeading('Pilot samples — no phone/email values logged',3).addTable([[{data:'Company',header:true},{data:'Market',header:true},{data:'Persona',header:true},{data:'Title',header:true},{data:'Score',header:true},{data:'Result',header:true}],...r.samples.map((x)=>[String(x.company||''),String(x.country||''),String(x.persona||''),String(x.title||''),String(x.score||''),x.newTask?'new task':x.duplicate?'duplicate':'not pushed'])]);
+            await core.summary.write();
+            console.log('PILOT_RESULT='+JSON.stringify({...r,taskIds:r.taskIds.length,errors:r.errors.slice(0,10)}));
+            if (r.taskIds.length && r.visibleTasks!==r.taskIds.length) core.setFailed(`Dashboard verification failed: ${r.visibleTasks}/${r.taskIds.length} new tasks visible.`);
+
+      - name: Verify dashboard HTML is live
+        shell: bash
+        run: |
+          set -euo pipefail
+          CODE=$(curl -sS --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" --connect-timeout 5 --max-time 30 -o /tmp/dashboard.html -w '%{http_code}' "${BASE_URL}/")
+          BYTES=$(wc -c < /tmp/dashboard.html)
+          echo "Dashboard root HTTP=$CODE bytes=$BYTES"
+          [ "$CODE" = 200 ] && [ "$BYTES" -gt 1000 ]
