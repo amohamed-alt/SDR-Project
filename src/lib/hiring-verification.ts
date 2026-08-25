@@ -19,6 +19,8 @@ export type HiringVerificationResult = {
   note: string;
 };
 
+type CandidateJob = DiscoveredJob & { validThrough?: string };
+
 type AiJob = {
   id?: string;
   title?: string;
@@ -35,7 +37,7 @@ type AiVerification = {
 const DAY_MS = 86_400_000;
 const FUTURE_DATE_GRACE_DAYS = 2;
 const DEFAULT_MAX_AGE_DAYS = 120;
-const MAX_AI_JOBS = 25;
+const MAX_AI_JOBS = 10;
 
 function numberEnv(name: string, fallback: number, min: number, max: number) {
   const parsed = Number(process.env[name]);
@@ -80,6 +82,10 @@ function hostname(value: string) {
   }
 }
 
+function validThrough(job: DiscoveredJob) {
+  return clean((job as CandidateJob).validThrough, 100);
+}
+
 function sameJob(a: DiscoveredJob, b: DiscoveredJob) {
   const aUrl = normalizeUrl(a.url);
   const bUrl = normalizeUrl(b.url);
@@ -102,10 +108,10 @@ function uniqueJobs(jobs: DiscoveredJob[]) {
 
 function deterministicFreshness(job: DiscoveredJob, nowMs: number, maxAgeDays: number) {
   const postedAt = validTimestamp(job.postedAt);
-  const validThrough = validTimestamp(job.validThrough || "");
+  const expiresAt = validTimestamp(validThrough(job));
 
-  if (validThrough && validThrough < nowMs) return "stale" as const;
-  if (validThrough && validThrough >= nowMs) return "fresh" as const;
+  if (expiresAt && expiresAt < nowMs) return "stale" as const;
+  if (expiresAt && expiresAt >= nowMs) return "fresh" as const;
   if (!postedAt) return "ambiguous" as const;
   if (postedAt > nowMs + FUTURE_DATE_GRACE_DAYS * DAY_MS) return "ambiguous" as const;
   if (postedAt < nowMs - maxAgeDays * DAY_MS) return "stale" as const;
@@ -148,10 +154,8 @@ function aiJobsToDiscovered(ai: AiVerification, candidates: DiscoveredJob[]) {
     const title = clean(item.title, 300);
     const url = normalizeUrl(clean(item.url, 1_000));
     if (!title || !url) continue;
-    const existing = candidates.find((candidate) => {
-      const candidateUrl = normalizeUrl(candidate.url);
-      return candidateUrl && candidateUrl === url;
-    }) || candidates.find((candidate) => clean(candidate.title, 300).toLowerCase() === title.toLowerCase());
+    const existing = candidates.find((candidate) => normalizeUrl(candidate.url) === url)
+      || candidates.find((candidate) => clean(candidate.title, 300).toLowerCase() === title.toLowerCase());
     jobs.push({
       externalId: clean(item.id, 500) || existing?.externalId || url,
       title,
@@ -159,7 +163,6 @@ function aiJobsToDiscovered(ai: AiVerification, candidates: DiscoveredJob[]) {
       department: existing?.department || "",
       url,
       postedAt: normalizedIsoDate(clean(item.postedAt, 100)) || existing?.postedAt || "",
-      validThrough: existing?.validThrough || "",
     });
   }
   return uniqueJobs(jobs);
@@ -237,25 +240,25 @@ export async function verifyGenericHiringJobs(args: {
   }
 
   const candidateEvidence = [...ambiguous, ...stale]
-    .slice(0, 40)
+    .slice(0, 30)
     .map((job, index) => ({
       index,
       id: clean(job.externalId, 300),
       title: clean(job.title, 220),
       url: normalizeUrl(job.url),
       postedAt: clean(job.postedAt, 100),
-      validThrough: clean(job.validThrough, 100),
+      validThrough: validThrough(job),
       location: clean(job.location, 160),
     }));
 
   const system = [
     "You verify current job openings for Talentera SDR hiring intelligence.",
     "Precision is more important than recall: false positives are unacceptable.",
-    "Use the web-search tool and rely only on official company career pages or official ATS pages within the allowed domains.",
+    "Use web search and rely only on official company career pages or official ATS pages within the allowed domains.",
     "Do not use LinkedIn, Indeed, Glassdoor, job aggregators, cached snippets, SEO result counts, or guessed totals as proof.",
     "A job is verified only if current official evidence shows the role is still open/applyable, or an official ATS listing is currently live.",
     "Exclude archive pages, expired roles, filled roles, closed applications, and old undated pages that cannot be proven current.",
-    "Return ONLY valid JSON with status, jobs, note. status must be verified, none, or uncertain.",
+    "Return ONLY valid compact JSON with status, jobs, note. status must be verified, none, or uncertain.",
     "jobs must contain only directly verified current roles and each job must have title and official url; include postedAt only when directly supported.",
     "Never estimate a total job count. If evidence is insufficient, use uncertain.",
   ].join(" ");
@@ -267,9 +270,9 @@ export async function verifyGenericHiringJobs(args: {
     careerPageUrl: normalizeUrl(args.careerPageUrl),
     sourceUrl: normalizeUrl(args.sourceUrl),
     allowedOfficialDomains: domains,
-    alreadyAcceptedFreshJobs: fresh.slice(0, 15).map((job) => ({ title: job.title, url: job.url, postedAt: job.postedAt })),
+    alreadyAcceptedFreshJobs: fresh.slice(0, 10).map((job) => ({ title: job.title, url: job.url, postedAt: job.postedAt })),
     ambiguousOrStaleCandidates: candidateEvidence,
-    instruction: "Search the allowed official domains for current hiring evidence. Return up to 25 directly verified current jobs. If you cannot prove a role is current, omit it.",
+    instruction: `Search the allowed official domains and return at most ${MAX_AI_JOBS} directly verified current jobs. If you cannot prove a role is current, omit it.`,
   });
 
   try {
@@ -278,7 +281,7 @@ export async function verifyGenericHiringJobs(args: {
       system,
       user,
       mode: "fast",
-      maxOutputTokens: 360,
+      maxOutputTokens: 220,
       temperature: 0,
       serverTools: [{
         type: "openrouter:web_search",
