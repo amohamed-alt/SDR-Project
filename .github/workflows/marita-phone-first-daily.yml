@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       target_phones:
-        description: Phone-ready prospects to push
+        description: New Marita phone-ready CALL tasks to create
         required: false
         default: '20'
       max_enrichments:
@@ -166,13 +166,13 @@ jobs:
             };
 
             for (const account of accounts) {
-              if (result.phoneReady >= targetPhones || result.signalHireEnrichments >= maxEnrichments) break;
+              if (result.pushed >= targetPhones || result.signalHireEnrichments >= maxEnrichments) break;
               const domain = String(account.domain || '').trim();
               if (!domain) continue;
               result.companiesChecked += 1;
 
               try {
-                let peoplePayload = await request(`/api/acquisition?domain=${encodeURIComponent(domain)}`);
+                const peoplePayload = await request(`/api/acquisition?domain=${encodeURIComponent(domain)}`);
                 let person = (Array.isArray(peoplePayload.people) ? peoplePayload.people : [])
                   .filter((candidate) => candidate.enrichmentStatus === 'enriched' && candidate.meta?.verifiedCurrentCompany === true)
                   .filter((candidate) => phoneList(candidate).length > 0)
