@@ -247,7 +247,8 @@ export async function getOpenRouterStatus() {
     configured: Boolean(String(process.env.OPENROUTER_API_KEY || "").trim()),
     fastModel: cfg.fastModel,
     deepModel: cfg.deepModel,
-    policy: "nano-first, mini-explicit-only, web-search-bounded",
+    policy: "nano-first, mini-explicit-only",
+    webSearchBounded: true,
     cacheTtlSeconds: cfg.cacheTtlSeconds,
     maxInputChars: cfg.maxInputChars,
     limits: {
