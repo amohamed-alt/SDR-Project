@@ -59,6 +59,8 @@ type EnrichmentOutcome = {
   detail?: string;
 };
 
+type ContactUpdate = { id: string; properties: Record<string, string> };
+
 function clean(value: unknown, max = 2000) {
   return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 }
@@ -79,6 +81,10 @@ function createdAfterMillis(value: string) {
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) throw new Error("createdAfter must be a valid ISO date/time.");
   return String(parsed);
+}
+
+function enrichmentDate() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function normalizeLinkedInUrl(raw: string) {
@@ -177,7 +183,7 @@ async function mapConcurrent<T, R>(
   return output;
 }
 
-async function hubspotBatchUpdate(inputs: Array<{ id: string; properties: Record<string, string> }>) {
+async function hubspotBatchUpdate(inputs: ContactUpdate[]) {
   if (!inputs.length) return;
   const token = clean(process.env.HUBSPOT_PRIVATE_APP_TOKEN, 2000);
   if (!token) throw new Error("HUBSPOT_PRIVATE_APP_TOKEN is not configured.");
@@ -218,7 +224,7 @@ async function loadCandidateContacts(createdAfter: string, retryPreviouslyEnrich
   const minimum = createdAfterMillis(createdAfter);
 
   for (const field of linkedinFields) {
-    const filters = [
+    const filters: Array<{ propertyName: string; operator: string; value?: string }> = [
       { propertyName: "createdate", operator: "GTE", value: minimum },
       { propertyName: "phone", operator: "NOT_HAS_PROPERTY" },
       { propertyName: "mobilephone", operator: "NOT_HAS_PROPERTY" },
@@ -400,7 +406,7 @@ async function enrichOne(
   record: HubSpotRecord,
   apiKey: string,
   execute: boolean,
-): Promise<{ outcome: EnrichmentOutcome; update?: { id: string; properties: Record<string, string> } }> {
+): Promise<{ outcome: EnrichmentOutcome; update?: ContactUpdate }> {
   const contactId = String(record.id);
   const name = contactName(record);
   const linkedinUrl = linkedinFrom(record);
@@ -410,6 +416,9 @@ async function enrichOne(
     if (!resolved.candidate) {
       return {
         outcome: { contactId, name, linkedinUrl, status: "not_found", creditsLeft: resolved.creditsLeft },
+        ...(execute
+          ? { update: { id: contactId, properties: { signalhire_last_enriched_at: enrichmentDate() } } }
+          : {}),
       };
     }
 
@@ -439,6 +448,9 @@ async function enrichOne(
           signalHireUid: clean(resolved.candidate.uid, 160),
           creditsLeft: resolved.creditsLeft,
         },
+        ...(execute
+          ? { update: { id: contactId, properties: { signalhire_last_enriched_at: enrichmentDate() } } }
+          : {}),
       };
     }
 
@@ -481,7 +493,9 @@ async function enrichOne(
       };
     }
 
-    const properties: Record<string, string> = {};
+    const properties: Record<string, string> = {
+      signalhire_last_enriched_at: enrichmentDate(),
+    };
     if (phone) properties.phone = phone;
     if (mobilephone) properties.mobilephone = mobilephone;
     if (!properties.phone && !properties.mobilephone) {
