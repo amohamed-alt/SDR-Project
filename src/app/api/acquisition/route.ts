@@ -123,7 +123,7 @@ function ownerAuthorized(request: NextRequest) {
   const supplied = clean(request.headers.get("x-acquisition-owner-token"), 500);
   if (!supplied) return { ok: false as const, status: 401, error: "Owner PIN is required for this action." };
 
-  const configured = clean(process.env.ACQUISITION_OWNER_TOKEN, 500);
+  const configured = clean(process.env.ACQUISITION_OWNER_TOKEN || process.env.DASHBOARD_PASSWORD, 500);
   if (configured && safeEqual(supplied, configured)) return { ok: true as const };
 
   const rateKey = ownerRateKey(request);
@@ -144,7 +144,7 @@ function configuration() {
   return {
     apolloConfigured: Boolean(clean(process.env.APOLLO_API_KEY, 1000)),
     signalHireConfigured: Boolean(clean(process.env.SIGNALHIRE_API_KEY, 1000)),
-    ownerActionsConfigured: Boolean(clean(process.env.ACQUISITION_OWNER_TOKEN, 500)),
+    ownerActionsConfigured: Boolean(clean(process.env.ACQUISITION_OWNER_TOKEN || process.env.DASHBOARD_PASSWORD, 500)),
     apolloCost: "1 credit per results page; up to 100 companies per page",
     signalHirePolicy: "Search first; spend Person API credits only on the selected persona",
   };
@@ -209,9 +209,8 @@ async function existingHubSpotDomains(domains: string[]) {
 
 function apolloUrl(page: number) {
   const query = new URLSearchParams();
-  for (const location of ["Saudi Arabia", "United Arab Emirates"]) query.append("organization_locations[]", location);
-  for (const range of ["201,500", "501,1000", "1001,2000"]) query.append("organization_num_employees_ranges[]", range);
-  query.set("organization_num_jobs_range[min]", "5");
+  for (const location of ["Saudi Arabia", "United Arab Emirates", "Egypt", "South Africa"]) query.append("organization_locations[]", location);
+  for (const range of ["201,500", "501,1000", "1001,2000", "2001,5000", "5001,10000", "10001,50000"]) query.append("organization_num_employees_ranges[]", range);
   query.set("page", String(page));
   query.set("per_page", "100");
   return `https://api.apollo.io/api/v1/mixed_companies/search?${query.toString()}`;
@@ -326,6 +325,19 @@ async function discoverAccounts(pages: number) {
     review: accounts.filter((account) => account.exclusionStatus === "review").length,
     excluded: accounts.filter((account) => account.exclusionStatus === "excluded").length,
     existingHubSpot: accounts.filter((account) => account.exclusionReason === "Already exists in HubSpot").length,
+    batch: accounts.map((account) => ({
+      domain: account.domain,
+      name: account.name,
+      country: account.country,
+      employeeCount: account.employeeCount,
+      industry: account.industry,
+      gtmScore: account.gtmScore,
+      gtmTier: account.gtmTier,
+      exclusionStatus: account.exclusionStatus,
+      exclusionReason: account.exclusionReason,
+      primaryPersona: account.primaryPersona,
+      secondaryPersona: account.secondaryPersona,
+    })),
   };
 }
 
