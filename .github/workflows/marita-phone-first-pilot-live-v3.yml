@@ -1,0 +1,108 @@
+name: Marita Phone-First Pilot Live V3
+
+on:
+  push:
+    paths:
+      - '.github/workflows/marita-phone-first-pilot-live-v3.yml'
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: marita-phone-first-pilot-live-v3
+  cancel-in-progress: false
+
+jobs:
+  run-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      BASE_URL: https://sdr.dashboardtalentera.tech
+      DASHBOARD_USERNAME: talentera
+      DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+      OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN || secrets.DASHBOARD_PASSWORD }}
+      TARGET_NEW_TASKS: '20'
+      MAX_SIGNALHIRE_ENRICHMENTS: '30'
+    steps:
+      - name: Wait for this exact commit on production
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DASHBOARD_PASSWORD"
+          test -n "$OWNER_TOKEN"
+          READY=false
+          for ATTEMPT in $(seq 1 70); do
+            HEALTH=$(curl -fsS --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" --connect-timeout 5 --max-time 12 -H 'Cache-Control: no-cache' "${BASE_URL}/api/health?pilot=${GITHUB_SHA}&attempt=${ATTEMPT}" || true)
+            BUILD=$(printf '%s' "$HEALTH" | jq -r '.buildRef // ""' 2>/dev/null || true)
+            if [ "$BUILD" = "$GITHUB_SHA" ]; then
+              ACQ=$(curl -fsS --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" --connect-timeout 5 --max-time 20 -H 'Cache-Control: no-cache' "${BASE_URL}/api/acquisition?limit=1" || true)
+              OWNER=$(printf '%s' "$ACQ" | jq -r '.configuration.ownerActionsConfigured // false' 2>/dev/null || echo false)
+              APOLLO=$(printf '%s' "$ACQ" | jq -r '.configuration.apolloConfigured // false' 2>/dev/null || echo false)
+              SIGNAL=$(printf '%s' "$ACQ" | jq -r '.configuration.signalHireConfigured // false' 2>/dev/null || echo false)
+              DB=$(printf '%s' "$ACQ" | jq -r '.database // ""' 2>/dev/null || true)
+              echo "Production ready: build=$BUILD owner=$OWNER apollo=$APOLLO signalhire=$SIGNAL db=$DB"
+              if [ "$OWNER" = true ] && [ "$APOLLO" = true ] && [ "$SIGNAL" = true ] && [ "$DB" = postgresql ]; then READY=true; break; fi
+            else
+              echo "Waiting ${ATTEMPT}/70 for exact production build"
+            fi
+            sleep 15
+          done
+          [ "$READY" = true ] || { echo '::error::Production did not become phone-first ready'; exit 1; }
+
+      - name: Spend exactly one Apollo credit, enrich phones, push Marita, verify priority
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const base=process.env.BASE_URL;
+            const auth=`Basic ${Buffer.from(`${process.env.DASHBOARD_USERNAME}:${process.env.DASHBOARD_PASSWORD}`).toString('base64')}`;
+            const headers={Authorization:auth,'x-acquisition-owner-token':process.env.OWNER_TOKEN,'Content-Type':'application/json'};
+            const target=Number(process.env.TARGET_NEW_TASKS||20), maxEnrich=Number(process.env.MAX_SIGNALHIRE_ENRICHMENTS||30);
+            async function req(path,init={}){const res=await fetch(`${base}${path}`,{...init,headers:{...headers,...(init.headers||{})}});const txt=await res.text();let body={};try{body=txt?JSON.parse(txt):{}}catch{body={raw:txt.slice(0,400)}}if(!res.ok)throw new Error(`${path} ${res.status}: ${JSON.stringify(body).slice(0,800)}`);return body}
+
+            const contextName='pilot/marita-phone-first-live-v3';
+            const existing=await github.rest.repos.listCommitStatusesForRef({owner:context.repo.owner,repo:context.repo.repo,ref:context.sha,per_page:100});
+            if(existing.data.some(s=>s.context===contextName&&s.state==='success')){core.setFailed('Apollo credit already consumed for this exact pilot commit.');return}
+
+            const discovery=await req('/api/acquisition',{method:'POST',body:JSON.stringify({action:'discover',pages:1,confirmCredits:true})});
+            await github.rest.repos.createCommitStatus({owner:context.repo.owner,repo:context.repo.repo,sha:context.sha,state:'success',context:contextName,description:'Exactly one Apollo discovery page consumed',target_url:`${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
+
+            const batch=(Array.isArray(discovery.batch)?discovery.batch:[]).filter(a=>a?.domain&&a.exclusionStatus==='eligible').sort((a,b)=>Number(b.gtmScore||0)-Number(a.gtmScore||0));
+            const uniq=a=>[...new Set((a||[]).map(String).map(v=>v.trim()).filter(Boolean))];
+            const phones=p=>uniq(p?.phones), emails=p=>uniq(p?.emails);
+            function role(title=''){const v=String(title).toLowerCase();if(/talent acquisition/.test(v)&&/head|director|vp|vice president/.test(v))return 100;if(/recruit/.test(v)&&/head|director|vp|vice president/.test(v))return 96;if(/chief human resources|\bchro\b|chief people/.test(v))return 94;if(/human resources|\bhr\b|people/.test(v)&&/head|director|vp|vice president/.test(v))return 88;if(/talent acquisition|recruit/.test(v)&&/manager|lead/.test(v))return 80;return 50}
+            function choose(list=[]){return [...list].filter(p=>Number(p.score||p.rankScore||0)>=55).filter(p=>/current company confirmed/i.test(String(p.reason||p.fitReason||''))).filter(p=>!/assistant|coordinator|intern|trainee|specialist/i.test(String(p.title||''))).sort((a,b)=>(Number(b.score||b.rankScore||0)*10+role(b.title))-(Number(a.score||a.rankScore||0)*10+role(a.title)))[0]||null}
+
+            const r={apolloCredits:1,rawTotal:Number(discovery.rawTotal||0),fetched:Number(discovery.fetched||0),stored:Number(discovery.stored||0),eligible:Number(discovery.eligible||0),review:Number(discovery.review||0),excluded:Number(discovery.excluded||0),existingHubSpot:Number(discovery.existingHubSpot||0),batchEligible:batch.length,companiesChecked:0,signalHireEnrichments:0,phoneReady:0,pushed:0,duplicates:0,noCandidate:0,noPhone:0,errors:[],taskIds:[],samples:[]};
+            for(const account of batch){
+              if(r.pushed>=target||r.signalHireEnrichments>=maxEnrich)break;
+              r.companiesChecked++;const domain=String(account.domain);
+              try{
+                let saved=await req(`/api/acquisition?domain=${encodeURIComponent(domain)}`);
+                let person=(saved.people||[]).filter(p=>p.enrichmentStatus==='enriched'&&p.meta?.verifiedCurrentCompany===true&&phones(p).length).sort((a,b)=>Number(b.rankScore||0)-Number(a.rankScore||0))[0]||null;
+                if(!person){const found=await req('/api/acquisition',{method:'POST',body:JSON.stringify({action:'find_people',domain})});const candidate=choose(found.people||[]);if(!candidate){r.noCandidate++;continue}r.signalHireEnrichments++;const enriched=await req('/api/acquisition',{method:'POST',body:JSON.stringify({action:'enrich_person',domain,uid:candidate.uid})});person=enriched.person||null}
+                const ps=phones(person);if(!person||!ps.length||person.meta?.verifiedCurrentCompany!==true){r.noPhone++;continue}r.phoneReady++;
+                const es=emails(person),score=Math.max(0,Math.min(100,Number(account.gtmScore||person.rankScore||60)));
+                const pushed=await req('/api/prospecting/push',{method:'POST',body:JSON.stringify({source:'Apollo → SignalHire Pilot',signalHireUid:String(person.uid||''),assignmentMode:'marita',fullName:String(person.fullName||'').trim(),title:String(person.title||'').trim(),company:String(account.name||'').trim(),companyDomain:domain,location:String(person.location||account.country||'').trim(),linkedinUrl:String(person.linkedinUrl||'').trim(),email:es[0]||'',emails:es,phone:ps[0],phones:ps,score,priority:score>=75?'high':'medium'})});
+                if(pushed.duplicate)r.duplicates++;if(pushed.pushed){r.pushed++;if(pushed.taskId)r.taskIds.push(String(pushed.taskId))}
+                if(r.samples.length<20)r.samples.push({company:account.name,country:account.country,persona:person.fullName,title:person.title,score,newTask:Boolean(pushed.pushed),duplicate:Boolean(pushed.duplicate)});
+              }catch(e){r.errors.push({company:account.name,domain,error:String(e?.message||e).slice(0,300)})}
+            }
+
+            const priority=await req('/api/marita-priority?refresh=1');
+            const visible=new Set((priority.companies||[]).flatMap(c=>c.taskIds||[]).map(String));
+            r.visibleTasks=r.taskIds.filter(id=>visible.has(id)).length;r.priorityTotalCompanies=(priority.companies||[]).length;r.priorityReadyToCall=Number(priority.summary?.readyToCallCompanies||0);r.priorityHigh=Number(priority.summary?.highPriorityCompanies||0);r.phoneFirstCompanies=Number(priority.summary?.phoneFirstCompanies||0);
+            core.summary.addHeading('Marita Phone-First Pilot — Live Verified').addTable([[{data:'Metric',header:true},{data:'Result',header:true}],['Apollo credits consumed','1'],['Apollo companies fetched',String(r.fetched)],['Eligible in new batch',String(r.batchEligible)],['Already in HubSpot',String(r.existingHubSpot)],['Companies persona-checked',String(r.companiesChecked)],['SignalHire person enrichments',String(r.signalHireEnrichments)],['Verified phone-ready personas',String(r.phoneReady)],['New Marita CALL tasks',String(r.pushed)],['Duplicates',String(r.duplicates)],['New tasks visible in Marita Priority',`${r.visibleTasks}/${r.taskIds.length}`],['Priority ready-to-call companies',String(r.priorityReadyToCall)],['Priority high companies',String(r.priorityHigh)],['Errors',String(r.errors.length)]]);
+            if(r.samples.length)core.summary.addHeading('Samples — phone/email values intentionally omitted',3).addTable([[{data:'Company',header:true},{data:'Market',header:true},{data:'Persona',header:true},{data:'Title',header:true},{data:'Score',header:true},{data:'Result',header:true}],...r.samples.map(x=>[String(x.company||''),String(x.country||''),String(x.persona||''),String(x.title||''),String(x.score||''),x.newTask?'new task':x.duplicate?'duplicate':'not pushed'])]);
+            await core.summary.write();console.log('PILOT_RESULT='+JSON.stringify({...r,taskIds:r.taskIds.length,errors:r.errors.slice(0,10)}));
+            if(r.taskIds.length&&r.visibleTasks!==r.taskIds.length)core.setFailed(`Dashboard priority verification failed: ${r.visibleTasks}/${r.taskIds.length} visible.`);
+
+      - name: Verify live dashboard HTML
+        shell: bash
+        run: |
+          set -euo pipefail
+          CODE=$(curl -sS --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" --connect-timeout 5 --max-time 30 -o /tmp/dashboard.html -w '%{http_code}' "${BASE_URL}/")
+          BYTES=$(wc -c < /tmp/dashboard.html)
+          echo "Dashboard root HTTP=$CODE bytes=$BYTES"
+          [ "$CODE" = 200 ] && [ "$BYTES" -gt 1000 ]
