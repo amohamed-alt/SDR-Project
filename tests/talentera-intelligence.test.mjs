@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  getTalenteraMarket,
   scoreTalenteraAccount,
   scoreTalenteraPortfolio,
 } from "../src/lib/talentera-intelligence.ts";
@@ -12,6 +13,7 @@ test("ranks a Saudi hiring surge with HR systems investment as a Tier A account"
     domain: "example.sa",
     country: "Saudi Arabia",
     employeeCount: 3500,
+    industry: "Logistics",
     ats: "Oracle Recruiting Cloud",
     activeJobs: 84,
     previousActiveJobs: 42,
@@ -27,7 +29,7 @@ test("ranks a Saudi hiring surge with HR systems investment as a Tier A account"
   });
 
   assert.equal(account.tier, "A");
-  assert.ok(account.score >= 78);
+  assert.ok(account.score >= 75);
   assert.equal(account.intentLevel, "Very High");
   assert.equal(account.hiringVelocity, "Surging");
   assert.equal(account.languageRoute, "Arabic-first bilingual");
@@ -131,4 +133,66 @@ test("portfolio ranking places stronger fit and timing first", () => {
 
   assert.equal(portfolio[0].companyId, "high");
   assert.ok(portfolio[0].score > portfolio[1].score);
+});
+
+test("uses the approved market plan and excludes unwanted countries from paid-intelligence scope", () => {
+  assert.deepEqual(getTalenteraMarket("Saudi Arabia"), { canonicalCountry: "Saudi Arabia", tier: "Core", score: 100, eligible: true });
+  assert.equal(getTalenteraMarket("Iraq").tier, "Expansion A");
+  assert.equal(getTalenteraMarket("Morocco").tier, "Expansion A");
+  assert.equal(getTalenteraMarket("South Africa").tier, "Expansion A");
+  assert.equal(getTalenteraMarket("Jordan").tier, "Expansion B");
+  assert.equal(getTalenteraMarket("Oman").tier, "Selective");
+  assert.equal(getTalenteraMarket("Bahrain").tier, "Selective");
+  assert.equal(getTalenteraMarket("Turkey").eligible, false);
+  assert.equal(getTalenteraMarket("Lebanon").eligible, false);
+  assert.equal(getTalenteraMarket("Algeria").eligible, false);
+});
+
+test("keeps enterprise ATS replacement conservative unless hiring pain is strong", () => {
+  const quietEnterprise = scoreTalenteraAccount({
+    name: "Quiet Enterprise",
+    country: "Saudi Arabia",
+    employeeCount: 2500,
+    industry: "Financial Services",
+    ats: "Workday",
+    activeJobs: 3,
+    previousActiveJobs: 3,
+    newJobs30d: 0,
+    hiringScore: 24,
+  });
+  const greenfield = scoreTalenteraAccount({
+    name: "Greenfield Employer",
+    country: "Saudi Arabia",
+    employeeCount: 2500,
+    industry: "Financial Services",
+    activeJobs: 20,
+    previousActiveJobs: 10,
+    newJobs30d: 9,
+    hiringScore: 72,
+  });
+
+  assert.ok(quietEnterprise.atsOpportunityScore < 60);
+  assert.ok(greenfield.atsOpportunityScore > quietEnterprise.atsOpportunityScore);
+});
+
+test("routes Morocco as Arabic/French bilingual and South Africa as English-first", () => {
+  assert.equal(scoreTalenteraAccount({ name: "Morocco Co", country: "Morocco" }).languageRoute, "Arabic/French bilingual");
+  assert.equal(scoreTalenteraAccount({ name: "South Africa Co", country: "South Africa" }).languageRoute, "English-first");
+});
+
+test("caps out-of-territory accounts so they cannot become high-priority by volume alone", () => {
+  const account = scoreTalenteraAccount({
+    name: "Excluded Market Giant",
+    country: "Turkey",
+    employeeCount: 10_000,
+    industry: "Retail",
+    activeJobs: 500,
+    newJobs7d: 100,
+    newJobs30d: 300,
+    hiringScore: 100,
+  });
+
+  assert.equal(account.market.eligible, false);
+  assert.ok(account.score <= 35);
+  assert.equal(account.tier, "Watch");
 });

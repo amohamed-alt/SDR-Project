@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { getHiringStore } from "@/lib/hiring-signals";
+import { getMaritaExtensiveAccountScope } from "@/lib/marita-account-scope";
 import { getOpenRouterStatus, openRouterCompletion } from "@/lib/openrouter-low-cost";
 import { scoreTalenteraAccount } from "@/lib/talentera-intelligence";
 
@@ -41,7 +41,7 @@ function parseBrief(raw: string): Brief | null {
       discoveryQuestions: questions,
       validationRisk: clean(parsed.validationRisk, 320),
     };
-    if (!result.whyNow || !result.openingLine || !result.outreachAngle) return null;
+    if (!result.whyNow || !result.openingLine || !result.outreachAngle || result.discoveryQuestions.length !== 3) return null;
     return result;
   } catch {
     return null;
@@ -65,6 +65,7 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     feature: "account-brief",
+    scope: "Marita open Extensive-Lighter accounts in approved markets only",
     ...status,
   }, { headers: { "Cache-Control": "private, no-store, max-age=0" } });
 }
@@ -77,31 +78,11 @@ export async function POST(request: NextRequest) {
     const parsed = requestSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) return NextResponse.json({ error: "Invalid account brief request", details: parsed.error.flatten() }, { status: 400 });
 
-    const store = await getHiringStore();
-    const company = store.companies.find((item) => item.companyId === parsed.data.companyId);
-    if (!company) return NextResponse.json({ error: "Company not found in Hiring Intelligence." }, { status: 404 });
+    const scope = await getMaritaExtensiveAccountScope();
+    const company = scope.companies.find((item) => String(item.companyId) === parsed.data.companyId);
+    if (!company) return NextResponse.json({ error: "Company is outside the active Marita Extensive-Lighter intelligence scope." }, { status: 404 });
 
-    const account = scoreTalenteraAccount({
-      companyId: company.companyId,
-      name: company.name,
-      domain: company.domain,
-      country: company.country,
-      careerPageUrl: company.careerPageUrl,
-      ats: company.ats,
-      activeJobs: company.activeJobs,
-      previousActiveJobs: company.previousActiveJobs,
-      newJobs7d: company.newJobs7d,
-      newJobs30d: company.newJobs30d,
-      closedJobs7d: company.closedJobs7d,
-      hiringScore: company.hiringScore,
-      topDepartments: company.topDepartments,
-      topLocations: company.topLocations,
-      jobs: company.jobs
-        .filter((job) => job.status === "active")
-        .slice(0, 12)
-        .map((job) => ({ title: job.title, location: job.location, department: job.department, postedAt: job.postedAt })),
-    });
-
+    const account = scoreTalenteraAccount(company);
     if (parsed.data.mode === "deep" && !["A", "B"].includes(account.tier)) {
       return NextResponse.json({ error: "Deep mode is reserved for Tier A/B accounts to control cost." }, { status: 400 });
     }
@@ -109,6 +90,7 @@ export async function POST(request: NextRequest) {
     const evidence = {
       company: account.name,
       country: account.country,
+      marketTier: account.market.tier,
       domain: account.domain,
       tier: account.tier,
       score: account.score,
@@ -116,36 +98,44 @@ export async function POST(request: NextRequest) {
       intentScore: account.intentScore,
       intentLevel: account.intentLevel,
       hiringVelocity: account.hiringVelocity,
-      activeJobs: company.activeJobs,
-      newJobs7d: company.newJobs7d,
-      newJobs30d: company.newJobs30d,
+      activeJobs: company.activeJobs || 0,
+      newJobs7d: company.newJobs7d || 0,
+      newJobs30d: company.newJobs30d || 0,
+      employeeCount: company.employeeCount || 0,
+      industry: company.industry || "",
+      taskCount: company.taskCount,
+      contactCount: company.contactCount,
       ats: account.competitorMotion.currentSystem,
+      atsStatus: company.atsStatus,
+      atsConfidence: company.atsConfidence,
       atsOpportunity: account.atsOpportunity,
       primaryPersona: account.personas.primary,
       secondaryPersona: account.personas.secondary,
       languageRoute: account.languageRoute,
       deterministicAngle: account.recommendedAngle,
-      strongestSignals: account.signals.slice(0, 4).map((signal) => ({ label: signal.label, evidence: signal.evidence })),
-      topLocations: company.topLocations.slice(0, 6),
-      topDepartments: company.topDepartments.slice(0, 6),
-      activeJobTitles: company.jobs.filter((job) => job.status === "active").slice(0, 10).map((job) => job.title),
-      knownRisks: account.risks.slice(0, 4),
+      deterministicReasonToReachOut: company.reasonToReachOut,
+      strongestSignals: account.signals.slice(0, 5).map((signal) => ({ label: signal.label, evidence: signal.evidence })),
+      topLocations: (company.topLocations || []).slice(0, 6),
+      topDepartments: (company.topDepartments || []).slice(0, 6),
+      activeJobTitles: (company.jobs || []).slice(0, 10).map((job) => job.title),
+      knownRisks: account.risks.slice(0, 5),
     };
 
     const system = [
       "You are the Talentera SDR account-brief assistant.",
-      "Use ONLY the evidence supplied by the system. Never invent pain, budget, technology, headcount, decision makers, or intent.",
-      "Do not change the recommended primary persona. Treat detected ATS as evidence only when it is supplied.",
-      "Keep the output concise and commercially useful for a B2B SDR in KSA/UAE.",
+      "Use ONLY the supplied evidence. Never invent pain, budget, technology, headcount, decision makers, intent, job counts, expansion or market facts.",
+      "Do not change the recommended primary persona. Treat detected ATS as evidence only when supplied and respect validation risks.",
+      "Write for a professional B2B SDR selling Talentera in the approved Middle East / North Africa territory, with South Africa as an English-first expansion experiment.",
+      "For Arabic-first routes, use concise natural business Arabic for the opener without slang or exaggerated familiarity. For Morocco, keep the opener neutral and usable in Arabic/French context. For South Africa, use English.",
       "Return ONLY valid JSON with keys: whyNow, openingLine, outreachAngle, discoveryQuestions, validationRisk.",
-      "discoveryQuestions must be an array with exactly 3 short questions.",
-      "For Saudi Arabia, the opening line may be natural Arabic-first business language; otherwise follow the supplied language route.",
+      "discoveryQuestions must contain exactly 3 short evidence-led questions.",
+      "If evidence is weak, say what must be validated instead of fabricating a hook.",
     ].join(" ");
 
-    const user = `Create a short evidence-backed SDR brief from this account object:\n${JSON.stringify(evidence)}`;
+    const user = `Create a concise evidence-backed SDR brief from this account object:\n${JSON.stringify(evidence)}`;
     const fingerprint = JSON.stringify(evidence);
     const completion = await openRouterCompletion({
-      cacheKey: `account-brief:${company.companyId}:${fingerprint}`,
+      cacheKey: `marita-account-brief:v2:${company.companyId}:${fingerprint}`,
       system,
       user,
       mode: parsed.data.mode,
@@ -162,6 +152,7 @@ export async function POST(request: NextRequest) {
         tier: account.tier,
         score: account.score,
         primaryPersona: account.personas.primary,
+        marketTier: account.market.tier,
       },
       brief,
       raw: brief ? undefined : completion.content,
