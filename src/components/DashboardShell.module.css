@@ -29,7 +29,7 @@
 .toolsDock {
   position: fixed;
   right: 24px;
-  bottom: 22px;
+  bottom: 38px;
   z-index: 122;
   display: flex;
   flex-direction: column;
@@ -80,7 +80,7 @@
 
 .toolsMenu {
   width: min(360px, calc(100vw - 32px));
-  max-height: min(620px, calc(100vh - 94px));
+  max-height: min(620px, calc(100vh - 112px));
   overflow: hidden;
   border: 1px solid rgba(88, 112, 136, 0.18);
   border-radius: 22px;
@@ -136,9 +136,17 @@
 }
 
 .toolList {
-  max-height: min(540px, calc(100vh - 164px));
+  max-height: min(540px, calc(100vh - 182px));
   overflow-y: auto;
-  padding: 7px;
+  padding: 8px;
+}
+
+.toolSectionLabel {
+  padding: 6px 10px 4px;
+  color: #8a9aaa;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
 }
 
 .toolItem {
@@ -197,6 +205,54 @@
   white-space: nowrap;
 }
 
+.advancedToggle {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+  border: 1px solid #e3eaf0;
+  border-radius: 13px;
+  background: #f8fafc;
+  color: #53687a;
+  font: inherit;
+  cursor: pointer;
+}
+
+.advancedToggle > span {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 1px;
+  text-align: left;
+}
+
+.advancedToggle strong {
+  color: #29465a;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.advancedToggle small {
+  grid-column: 2;
+  color: #8493a1;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.advancedList {
+  margin-top: 5px;
+  padding: 4px;
+  border: 1px solid #edf1f4;
+  border-radius: 15px;
+  background: #fbfcfd;
+}
+
 .companyIcon { background: #e8f1fa; color: #2f5f8a; }
 .brainIcon { background: #e7f5f2; color: #0d675e; }
 .gtmIcon { background: #e8f3f7; color: #0f5f7a; }
@@ -210,16 +266,16 @@
 @media (max-width: 720px) {
   .toolsDock {
     right: 14px;
-    bottom: 14px;
+    bottom: 26px;
   }
 
   .toolsMenu {
     width: min(350px, calc(100vw - 28px));
-    max-height: calc(100vh - 82px);
+    max-height: calc(100vh - 96px);
   }
 
   .toolList {
-    max-height: calc(100vh - 152px);
+    max-height: calc(100vh - 166px);
   }
 
   .toolsToggle {
