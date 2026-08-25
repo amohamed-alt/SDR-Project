@@ -7,7 +7,7 @@ import { Activity, BrainCircuit, Building2, Flame, ListTodo, LoaderCircle, MailC
 import { Dashboard as ExistingDashboard } from "@/components/DashboardMotion";
 import styles from "@/components/DashboardShell.module.css";
 
-type ShellView = "core" | "maqsam" | "hiring" | "career" | "ats-intent" | "marita-priority" | "smartlead" | "team-activity" | "net-new";
+type ShellView = "core" | "maqsam" | "hiring" | "career" | "ats-intent" | "marita-priority" | "smartlead" | "team-activity" | "net-new" | "gtm-brain";
 
 function ViewLoading() {
   return <main className={styles.viewLoading}><LoaderCircle size={24}/><strong>Loading workspace…</strong></main>;
@@ -45,6 +45,10 @@ const BestAccounts = dynamic(
   () => import("@/components/BestAccounts").then((module) => module.BestAccounts),
   { ssr: false, loading: ViewLoading },
 );
+const AccountIntelligence = dynamic(
+  () => import("@/components/AccountIntelligence").then((module) => module.AccountIntelligence),
+  { ssr: false, loading: ViewLoading },
+);
 
 function viewFromUrl(): ShellView {
   const view = new URLSearchParams(window.location.search).get("view");
@@ -56,6 +60,7 @@ function viewFromUrl(): ShellView {
   if (view === "smartlead") return "smartlead";
   if (view === "team-activity") return "team-activity";
   if (view === "net-new") return "net-new";
+  if (view === "gtm-brain") return "gtm-brain";
   return "core";
 }
 
@@ -111,6 +116,7 @@ export function Dashboard() {
   if (view === "smartlead") return <SmartleadCommandCenter onBack={() => changeView("core")}/>;
   if (view === "team-activity") return <TeamActivity onBack={() => changeView("core")}/>;
   if (view === "net-new") return <BestAccounts onBack={() => changeView("core")}/>;
+  if (view === "gtm-brain") return <AccountIntelligence onBack={() => changeView("core")}/>;
 
   return <div className={styles.shell}>
     <ExistingDashboard/>
@@ -127,17 +133,17 @@ export function Dashboard() {
           </div>
 
           <div className={styles.toolList}>
+            <button className={styles.toolItem} type="button" onClick={() => changeView("gtm-brain")}>
+              <span className={`${styles.toolIcon} ${styles.brainIcon}`}><BrainCircuit size={17}/></span>
+              <span className={styles.toolCopy}><strong>Talentera Intelligence</strong><small>Marita · Extensive-Lighter · call priority</small></span>
+            </button>
             <button className={styles.toolItem} type="button" onClick={() => changeView("net-new")}>
               <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Target size={17}/></span>
-              <span className={styles.toolCopy}><strong>Best Accounts</strong><small>Ranked accounts · evidence · AI briefs</small></span>
+              <span className={styles.toolCopy}><strong>Best Accounts</strong><small>Ranked net-new accounts · evidence · AI briefs</small></span>
             </button>
             <Link className={styles.toolItem} href="/company-enrichment" onClick={() => trackFeature("company-repair")}>
               <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Building2 size={17}/></span>
               <span className={styles.toolCopy}><strong>Company Repair</strong><small>HubSpot enrichment & property fixes</small></span>
-            </Link>
-            <Link className={styles.toolItem} href="/account-intelligence" onClick={() => trackFeature("gtm-brain")}>
-              <span className={`${styles.toolIcon} ${styles.brainIcon}`}><BrainCircuit size={17}/></span>
-              <span className={styles.toolCopy}><strong>GTM Brain</strong><small>Account scoring & intelligence</small></span>
             </Link>
             <button className={styles.toolItem} type="button" onClick={() => changeView("team-activity")}>
               <span className={`${styles.toolIcon} ${styles.gtmIcon}`}><Activity size={17}/></span>
@@ -169,7 +175,7 @@ export function Dashboard() {
             </Link>
             <button className={styles.toolItem} type="button" onClick={() => changeView("hiring")}>
               <span className={`${styles.toolIcon} ${styles.hiringIcon}`}><Flame size={17}/></span>
-              <span className={styles.toolCopy}><strong>Hiring Signals</strong><small>KSA + UAE hiring activity</small></span>
+              <span className={styles.toolCopy}><strong>Hiring Signals</strong><small>Current hiring evidence</small></span>
             </button>
             <button className={styles.toolItem} type="button" onClick={() => changeView("ats-intent")}>
               <span className={`${styles.toolIcon} ${styles.intentIcon}`}><Search size={17}/></span>
