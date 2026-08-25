@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 25
     env:
       BASE_URL: https://sdr.dashboardtalentera.tech
-      OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN }}
+      OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN || secrets.DASHBOARD_PASSWORD }}
       DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
       TARGET_PHONES: ${{ inputs.target_phones || '20' }}
       MAX_ENRICHMENTS: ${{ inputs.max_enrichments || '30' }}
@@ -35,7 +35,7 @@ jobs:
       - name: Validate required secrets
         run: |
           set -euo pipefail
-          test -n "$OWNER_TOKEN" || { echo "::error::ACQUISITION_OWNER_TOKEN is required"; exit 1; }
+          test -n "$OWNER_TOKEN" || { echo "::error::ACQUISITION_OWNER_TOKEN or DASHBOARD_PASSWORD is required"; exit 1; }
           test -n "$DASHBOARD_PASSWORD" || { echo "::error::DASHBOARD_PASSWORD is required"; exit 1; }
 
       - name: Build Marita phone-ready priority queue
