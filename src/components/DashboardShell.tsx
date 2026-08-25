@@ -3,7 +3,25 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { Activity, BrainCircuit, Building2, Flame, ListTodo, LoaderCircle, MailCheck, Menu, PhoneCall, Radar, Search, Target, UserPlus, X } from "lucide-react";
+import {
+  Activity,
+  BrainCircuit,
+  Building2,
+  ChevronDown,
+  ChevronUp,
+  Flame,
+  ListTodo,
+  LoaderCircle,
+  MailCheck,
+  Menu,
+  PhoneCall,
+  Radar,
+  Search,
+  Target,
+  UserPlus,
+  Wrench,
+  X,
+} from "lucide-react";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardMotion";
 import styles from "@/components/DashboardShell.module.css";
 
@@ -73,6 +91,7 @@ function trackFeature(feature: string) {
 export function Dashboard() {
   const [view, setView] = useState<ShellView>("core");
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const toolsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -127,60 +146,69 @@ export function Dashboard() {
           <div className={styles.toolsHeader}>
             <div>
               <span>SDR WORKSPACE</span>
-              <strong>Tools & Intelligence</strong>
+              <strong>Daily workflow</strong>
             </div>
             <button type="button" onClick={() => setToolsOpen(false)} aria-label="Close tools menu"><X size={16}/></button>
           </div>
 
           <div className={styles.toolList}>
+            <div className={styles.toolSectionLabel}>CORE WORK</div>
             <button className={styles.toolItem} type="button" onClick={() => changeView("gtm-brain")}>
               <span className={`${styles.toolIcon} ${styles.brainIcon}`}><BrainCircuit size={17}/></span>
-              <span className={styles.toolCopy}><strong>Talentera Intelligence</strong><small>Marita · Extensive-Lighter · call priority</small></span>
+              <span className={styles.toolCopy}><strong>Talentera Intelligence</strong><small>Account priority · evidence · call strategy</small></span>
             </button>
             <button className={styles.toolItem} type="button" onClick={() => changeView("net-new")}>
               <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Target size={17}/></span>
-              <span className={styles.toolCopy}><strong>Best Accounts</strong><small>Ranked net-new accounts · evidence · AI briefs</small></span>
-            </button>
-            <Link className={styles.toolItem} href="/company-enrichment" onClick={() => trackFeature("company-repair")}>
-              <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Building2 size={17}/></span>
-              <span className={styles.toolCopy}><strong>Company Repair</strong><small>HubSpot enrichment & property fixes</small></span>
-            </Link>
-            <button className={styles.toolItem} type="button" onClick={() => changeView("team-activity")}>
-              <span className={`${styles.toolIcon} ${styles.gtmIcon}`}><Activity size={17}/></span>
-              <span className={styles.toolCopy}><strong>Team Activity</strong><small>Live users & workspace adoption</small></span>
-            </button>
-            <Link className={styles.toolItem} href="/salesnav-prospecting" onClick={() => trackFeature("sales-nav")}>
-              <span className={`${styles.toolIcon} ${styles.salesIcon}`}><Radar size={17}/></span>
-              <span className={styles.toolCopy}><strong>Sales Nav</strong><small>Net-new prospecting</small></span>
-            </Link>
-            <Link className={styles.toolItem} href="/signalhire-queue" onClick={() => trackFeature("signalhire-queue")}>
-              <span className={`${styles.toolIcon} ${styles.salesIcon}`}><UserPlus size={17}/></span>
-              <span className={styles.toolCopy}><strong>SignalHire Queue</strong><small>List → HubSpot check → Push + Task</small></span>
-            </Link>
-            <button className={styles.toolItem} type="button" onClick={() => changeView("career")}>
-              <span className={`${styles.toolIcon} ${styles.careerIcon}`}><Search size={17}/></span>
-              <span className={styles.toolCopy}><strong>Career Intelligence</strong><small>Career pages & ATS detection</small></span>
-            </button>
-            <button className={styles.toolItem} type="button" onClick={() => changeView("marita-priority")}>
-              <span className={`${styles.toolIcon} ${styles.priorityIcon}`}><ListTodo size={17}/></span>
-              <span className={styles.toolCopy}><strong>Marita Priority</strong><small>Call-next queue</small></span>
+              <span className={styles.toolCopy}><strong>Prospecting</strong><small>Apollo discovery · ranked net-new accounts</small></span>
             </button>
             <button className={styles.toolItem} type="button" onClick={() => changeView("smartlead")}>
               <span className={`${styles.toolIcon} ${styles.priorityIcon}`}><MailCheck size={17}/></span>
-              <span className={styles.toolCopy}><strong>Smartlead Outreach</strong><small>Verified daily send + live execution</small></span>
+              <span className={styles.toolCopy}><strong>Outreach</strong><small>Verified Smartlead queue · live execution</small></span>
             </button>
-            <Link className={styles.toolItem} href="/marita-calls" onClick={() => trackFeature("marita-calls")}>
+            <button className={styles.toolItem} type="button" onClick={() => changeView("maqsam")}>
               <span className={`${styles.toolIcon} ${styles.callsIcon}`}><PhoneCall size={17}/></span>
-              <span className={styles.toolCopy}><strong>Marita Calls</strong><small>Maqsam call activity</small></span>
-            </Link>
-            <button className={styles.toolItem} type="button" onClick={() => changeView("hiring")}>
-              <span className={`${styles.toolIcon} ${styles.hiringIcon}`}><Flame size={17}/></span>
-              <span className={styles.toolCopy}><strong>Hiring Signals</strong><small>Current hiring evidence</small></span>
+              <span className={styles.toolCopy}><strong>Calls</strong><small>Maqsam call intelligence · transcripts · sync</small></span>
             </button>
-            <button className={styles.toolItem} type="button" onClick={() => changeView("ats-intent")}>
-              <span className={`${styles.toolIcon} ${styles.intentIcon}`}><Search size={17}/></span>
-              <span className={styles.toolCopy}><strong>ATS Intent</strong><small>LinkedIn signals + SignalHire</small></span>
+
+            <button className={styles.advancedToggle} type="button" onClick={() => setAdvancedOpen((current) => !current)} aria-expanded={advancedOpen}>
+              <span><Wrench size={14}/><strong>Advanced & Data Ops</strong><small>Sources, verification and admin tools</small></span>
+              {advancedOpen ? <ChevronUp size={16}/> : <ChevronDown size={16}/>} 
             </button>
+
+            {advancedOpen ? <div className={styles.advancedList}>
+              <Link className={styles.toolItem} href="/salesnav-prospecting" onClick={() => trackFeature("sales-nav")}>
+                <span className={`${styles.toolIcon} ${styles.salesIcon}`}><Radar size={17}/></span>
+                <span className={styles.toolCopy}><strong>Sales Nav Source</strong><small>Chrome companion · net-new people</small></span>
+              </Link>
+              <Link className={styles.toolItem} href="/signalhire-queue" onClick={() => trackFeature("signalhire-queue")}>
+                <span className={`${styles.toolIcon} ${styles.salesIcon}`}><UserPlus size={17}/></span>
+                <span className={styles.toolCopy}><strong>SignalHire Source</strong><small>List → HubSpot precheck → controlled enrich</small></span>
+              </Link>
+              <button className={styles.toolItem} type="button" onClick={() => changeView("marita-priority")}>
+                <span className={`${styles.toolIcon} ${styles.priorityIcon}`}><ListTodo size={17}/></span>
+                <span className={styles.toolCopy}><strong>Call Queue Ops</strong><small>Marita Extensive-Lighter scheduling</small></span>
+              </button>
+              <button className={styles.toolItem} type="button" onClick={() => changeView("hiring")}>
+                <span className={`${styles.toolIcon} ${styles.hiringIcon}`}><Flame size={17}/></span>
+                <span className={styles.toolCopy}><strong>Hiring Verification</strong><small>Verified current jobs · stale cleanup</small></span>
+              </button>
+              <button className={styles.toolItem} type="button" onClick={() => changeView("ats-intent")}>
+                <span className={`${styles.toolIcon} ${styles.intentIcon}`}><Search size={17}/></span>
+                <span className={styles.toolCopy}><strong>ATS Intent Signals</strong><small>Public buying / replacement signals</small></span>
+              </button>
+              <button className={styles.toolItem} type="button" onClick={() => changeView("career")}>
+                <span className={`${styles.toolIcon} ${styles.careerIcon}`}><Search size={17}/></span>
+                <span className={styles.toolCopy}><strong>Career & ATS Data</strong><small>Career discovery · ATS review · HubSpot sync</small></span>
+              </button>
+              <Link className={styles.toolItem} href="/company-enrichment" onClick={() => trackFeature("company-repair")}>
+                <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Building2 size={17}/></span>
+                <span className={styles.toolCopy}><strong>Company Repair</strong><small>Evidence-backed HubSpot property fixes</small></span>
+              </Link>
+              <button className={styles.toolItem} type="button" onClick={() => changeView("team-activity")}>
+                <span className={`${styles.toolIcon} ${styles.gtmIcon}`}><Activity size={17}/></span>
+                <span className={styles.toolCopy}><strong>Team Activity</strong><small>Usage · adoption · workspace health</small></span>
+              </button>
+            </div> : null}
           </div>
         </div>
       ) : null}
@@ -192,7 +220,7 @@ export function Dashboard() {
         aria-expanded={toolsOpen}
         aria-controls="sdr-tools-menu"
       >
-        {toolsOpen ? <X size={18}/> : <Menu size={18}/>}<span>{toolsOpen ? "Close" : "SDR Tools"}</span><small>12</small>
+        {toolsOpen ? <X size={18}/> : <Menu size={18}/>}<span>{toolsOpen ? "Close" : "SDR Tools"}</span><small>4</small>
       </button>
     </div>
   </div>;
