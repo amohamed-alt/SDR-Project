@@ -4,10 +4,16 @@ import path from "node:path";
 
 export type OpenRouterMode = "fast" | "deep";
 
+export type OpenRouterServerTool = {
+  type: "openrouter:web_search" | string;
+  parameters?: Record<string, unknown>;
+};
+
 export type OpenRouterUsage = {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  webSearchRequests: number;
   estimatedCostUsd: number;
   reportedCostUsd: number | null;
 };
@@ -31,6 +37,7 @@ type CostState = {
   day: string;
   fastRequests: number;
   deepRequests: number;
+  webSearchRequests: number;
   promptTokens: number;
   completionTokens: number;
   estimatedCostUsd: number;
@@ -38,13 +45,17 @@ type CostState = {
   cache: Record<string, CacheEntry>;
 };
 
-type CompletionInput = {
+export type OpenRouterCompletionInput = {
   cacheKey: string;
   system: string;
   user: string;
   mode?: OpenRouterMode;
   maxOutputTokens?: number;
   temperature?: number;
+  serverTools?: OpenRouterServerTool[];
+  maxToolCalls?: number;
+  forceServerTool?: boolean;
+  estimatedServerToolCostUsdPerUse?: number;
 };
 
 type OpenRouterPayload = {
@@ -55,6 +66,9 @@ type OpenRouterPayload = {
     completion_tokens?: number;
     total_tokens?: number;
     cost?: number;
+    server_tool_use?: {
+      web_search_requests?: number;
+    };
   };
   error?: { message?: string };
   message?: string;
@@ -85,6 +99,7 @@ function config() {
     deepModel: DEEP_MODEL,
     fastDailyLimit: numberEnv("OPENROUTER_FAST_DAILY_LIMIT", 150, 1, 10_000),
     deepDailyLimit: numberEnv("OPENROUTER_DEEP_DAILY_LIMIT", 10, 0, 1_000),
+    webSearchDailyLimit: numberEnv("OPENROUTER_WEB_SEARCH_DAILY_LIMIT", 60, 0, 2_000),
     fastMaxOutputTokens: numberEnv("OPENROUTER_FAST_MAX_OUTPUT_TOKENS", 220, 32, 1_000),
     deepMaxOutputTokens: numberEnv("OPENROUTER_DEEP_MAX_OUTPUT_TOKENS", 360, 64, 2_000),
     maxInputChars: numberEnv("OPENROUTER_MAX_INPUT_CHARS", 12_000, 1_000, 100_000),
@@ -104,6 +119,7 @@ function emptyState(): CostState {
     day: todayUtc(),
     fastRequests: 0,
     deepRequests: 0,
+    webSearchRequests: 0,
     promptTokens: 0,
     completionTokens: 0,
     estimatedCostUsd: 0,
@@ -112,17 +128,35 @@ function emptyState(): CostState {
   };
 }
 
+function normalizeResult(result: OpenRouterResult): OpenRouterResult {
+  return {
+    ...result,
+    usage: {
+      promptTokens: Math.max(0, Number(result?.usage?.promptTokens || 0)),
+      completionTokens: Math.max(0, Number(result?.usage?.completionTokens || 0)),
+      totalTokens: Math.max(0, Number(result?.usage?.totalTokens || 0)),
+      webSearchRequests: Math.max(0, Number(result?.usage?.webSearchRequests || 0)),
+      estimatedCostUsd: Math.max(0, Number(result?.usage?.estimatedCostUsd || 0)),
+      reportedCostUsd: result?.usage?.reportedCostUsd === null || result?.usage?.reportedCostUsd === undefined
+        ? null
+        : Math.max(0, Number(result.usage.reportedCostUsd || 0)),
+    },
+  };
+}
+
 function normalizeState(input: Partial<CostState> | null | undefined): CostState {
   const state: CostState = {
     ...emptyState(),
     ...(input || {}),
     version: 1,
+    webSearchRequests: Math.max(0, Number(input?.webSearchRequests || 0)),
     cache: input?.cache && typeof input.cache === "object" ? input.cache : {},
   };
   if (state.day !== todayUtc()) {
     state.day = todayUtc();
     state.fastRequests = 0;
     state.deepRequests = 0;
+    state.webSearchRequests = 0;
     state.promptTokens = 0;
     state.completionTokens = 0;
     state.estimatedCostUsd = 0;
@@ -130,7 +164,11 @@ function normalizeState(input: Partial<CostState> | null | undefined): CostState
   }
   const now = Date.now();
   for (const [key, entry] of Object.entries(state.cache)) {
-    if (!entry || entry.expiresAt <= now) delete state.cache[key];
+    if (!entry || entry.expiresAt <= now) {
+      delete state.cache[key];
+      continue;
+    }
+    entry.result = normalizeResult(entry.result);
   }
   return state;
 }
@@ -163,9 +201,19 @@ async function withStateLock<T>(callback: () => Promise<T>) {
   }
 }
 
-function cacheHash(input: CompletionInput, model: string, maxOutputTokens: number) {
+function cacheHash(input: OpenRouterCompletionInput, model: string, maxOutputTokens: number) {
   return createHash("sha256")
-    .update(JSON.stringify({ input: input.cacheKey, model, mode: input.mode || "fast", maxOutputTokens, system: input.system, user: input.user }))
+    .update(JSON.stringify({
+      input: input.cacheKey,
+      model,
+      mode: input.mode || "fast",
+      maxOutputTokens,
+      system: input.system,
+      user: input.user,
+      serverTools: input.serverTools || [],
+      maxToolCalls: input.maxToolCalls || 0,
+      forceServerTool: Boolean(input.forceServerTool),
+    }))
     .digest("hex");
 }
 
@@ -199,12 +247,13 @@ export async function getOpenRouterStatus() {
     configured: Boolean(String(process.env.OPENROUTER_API_KEY || "").trim()),
     fastModel: cfg.fastModel,
     deepModel: cfg.deepModel,
-    policy: "nano-first, mini-explicit-only",
+    policy: "nano-first, mini-explicit-only, web-search-bounded",
     cacheTtlSeconds: cfg.cacheTtlSeconds,
     maxInputChars: cfg.maxInputChars,
     limits: {
       fastDaily: cfg.fastDailyLimit,
       deepDaily: cfg.deepDailyLimit,
+      webSearchDaily: cfg.webSearchDailyLimit,
       fastOutputTokens: cfg.fastMaxOutputTokens,
       deepOutputTokens: cfg.deepMaxOutputTokens,
     },
@@ -212,6 +261,7 @@ export async function getOpenRouterStatus() {
       day: state.day,
       fastRequests: state.fastRequests,
       deepRequests: state.deepRequests,
+      webSearchRequests: state.webSearchRequests,
       promptTokens: state.promptTokens,
       completionTokens: state.completionTokens,
       estimatedCostUsd: Number(state.estimatedCostUsd.toFixed(6)),
@@ -221,7 +271,7 @@ export async function getOpenRouterStatus() {
   };
 }
 
-export async function openRouterCompletion(input: CompletionInput): Promise<OpenRouterResult> {
+export async function openRouterCompletion(input: OpenRouterCompletionInput): Promise<OpenRouterResult> {
   const apiKey = String(process.env.OPENROUTER_API_KEY || "").trim();
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is not configured.");
 
@@ -232,13 +282,15 @@ export async function openRouterCompletion(input: CompletionInput): Promise<Open
   const maxOutputTokens = Math.min(hardOutputCap, Math.max(32, Math.round(input.maxOutputTokens || hardOutputCap)));
   const system = String(input.system || "").slice(0, Math.floor(cfg.maxInputChars * 0.35));
   const user = String(input.user || "").slice(0, cfg.maxInputChars - system.length);
-  const key = cacheHash({ ...input, mode, system, user }, model, maxOutputTokens);
+  const serverTools = Array.isArray(input.serverTools) ? input.serverTools.slice(0, 4) : [];
+  const usesWebSearch = serverTools.some((tool) => tool?.type === "openrouter:web_search");
+  const key = cacheHash({ ...input, mode, system, user, serverTools }, model, maxOutputTokens);
 
   const cached = await withStateLock(async () => {
     const state = normalizeState(await readState());
     const hit = state.cache[key];
     if (!hit) return null;
-    return { ...hit.result, cached: true } satisfies OpenRouterResult;
+    return { ...normalizeResult(hit.result), cached: true } satisfies OpenRouterResult;
   });
   if (cached) return cached;
 
@@ -249,8 +301,13 @@ export async function openRouterCompletion(input: CompletionInput): Promise<Open
     if (current >= limit) {
       throw new Error(`OpenRouter ${mode} daily safety limit reached (${limit}).`);
     }
+    if (usesWebSearch && state.webSearchRequests >= cfg.webSearchDailyLimit) {
+      throw new Error(`OpenRouter web-search daily safety limit reached (${cfg.webSearchDailyLimit}).`);
+    }
     if (mode === "deep") state.deepRequests += 1;
     else state.fastRequests += 1;
+    // Reserve one search when a web tool is required. The actual usage is reconciled below.
+    if (usesWebSearch && input.forceServerTool) state.webSearchRequests += 1;
     await writeState(state);
   });
 
@@ -270,6 +327,9 @@ export async function openRouterCompletion(input: CompletionInput): Promise<Open
       ],
       max_tokens: maxOutputTokens,
       temperature: Math.min(0.7, Math.max(0, input.temperature ?? 0.15)),
+      ...(serverTools.length ? { tools: serverTools } : {}),
+      ...(serverTools.length && input.forceServerTool ? { tool_choice: "required" } : {}),
+      ...(serverTools.length ? { max_tool_calls: Math.min(5, Math.max(1, Math.round(input.maxToolCalls || 1))) } : {}),
     }),
     cache: "no-store",
     signal: AbortSignal.timeout(cfg.timeoutMs),
@@ -287,7 +347,12 @@ export async function openRouterCompletion(input: CompletionInput): Promise<Open
   const promptTokens = Math.max(0, Number(payload.usage?.prompt_tokens || 0));
   const completionTokens = Math.max(0, Number(payload.usage?.completion_tokens || 0));
   const totalTokens = Math.max(promptTokens + completionTokens, Number(payload.usage?.total_tokens || 0));
-  const estimatedCostUsd = estimateOpenRouterCostUsd(model, promptTokens, completionTokens);
+  const webSearchRequests = Math.max(0, Number(payload.usage?.server_tool_use?.web_search_requests || 0));
+  const serverToolCostPerUse = Math.max(0, Number(input.estimatedServerToolCostUsdPerUse || 0));
+  const estimatedCostUsd = Number((
+    estimateOpenRouterCostUsd(model, promptTokens, completionTokens)
+    + webSearchRequests * serverToolCostPerUse
+  ).toFixed(8));
   const reportedRaw = Number(payload.usage?.cost);
   const reportedCostUsd = Number.isFinite(reportedRaw) && reportedRaw >= 0 ? reportedRaw : null;
   const result: OpenRouterResult = {
@@ -295,13 +360,17 @@ export async function openRouterCompletion(input: CompletionInput): Promise<Open
     model: String(payload.model || model),
     mode,
     cached: false,
-    usage: { promptTokens, completionTokens, totalTokens, estimatedCostUsd, reportedCostUsd },
+    usage: { promptTokens, completionTokens, totalTokens, webSearchRequests, estimatedCostUsd, reportedCostUsd },
   };
 
   await withStateLock(async () => {
     const state = normalizeState(await readState());
     state.promptTokens += promptTokens;
     state.completionTokens += completionTokens;
+    if (usesWebSearch) {
+      const reserved = input.forceServerTool ? 1 : 0;
+      state.webSearchRequests += Math.max(0, webSearchRequests - reserved);
+    }
     state.estimatedCostUsd += estimatedCostUsd;
     if (reportedCostUsd !== null) state.reportedCostUsd += reportedCostUsd;
     state.cache[key] = {

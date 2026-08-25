@@ -1,5 +1,5 @@
 import { batchRead, readAssociations, searchAll } from "@/lib/hubspot";
-import { getHiringStore } from "@/lib/hiring-signals";
+import { getVerifiedHiringStore as getHiringStore } from "@/lib/verified-hiring-store";
 import {
   getTalenteraMarket,
   type TalenteraAccountInput,
