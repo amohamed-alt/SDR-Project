@@ -10,8 +10,11 @@ export function proxy(request: NextRequest) {
   // request.nextUrl against the internal container host. For acquisition POSTs,
   // normalize Origin only when the browser itself has already classified the
   // request as same-origin/same-site. Cross-site requests keep their original
-  // Origin and continue to be rejected by the acquisition route.
-  if (request.method === "POST" && request.nextUrl.pathname === "/api/acquisition") {
+  // Origin and continue to be rejected by the protected route.
+  const proxySafePost = request.method === "POST"
+    && ["/api/acquisition", "/api/target-account-pool"].includes(request.nextUrl.pathname);
+
+  if (proxySafePost) {
     const fetchSite = request.headers.get("sec-fetch-site");
     if (fetchSite && ["same-origin", "same-site", "none"].includes(fetchSite)) {
       const requestHeaders = new Headers(request.headers);
