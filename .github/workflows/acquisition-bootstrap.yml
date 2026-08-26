@@ -1,0 +1,56 @@
+name: Manual Acquisition Safety Check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  safety-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify acquisition endpoint without spending credits
+        env:
+          DASHBOARD_USERNAME: ${{ secrets.DASHBOARD_USERNAME }}
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+        run: |
+          set -euo pipefail
+          URL='https://sdr.dashboardtalentera.tech/api/acquisition?limit=1'
+          OUT='/tmp/acquisition-safety.json'
+          HTTP_CODE=''
+
+          for ATTEMPT in 1 2 3 4 5; do
+            HTTP_CODE=$(curl --silent --show-error \
+              --connect-timeout 10 \
+              --max-time 60 \
+              --output "$OUT" \
+              --write-out '%{http_code}' \
+              --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
+              -H 'Cache-Control: no-cache' \
+              "$URL" || true)
+
+            if [ "$HTTP_CODE" = '200' ]; then
+              break
+            fi
+
+            if ! [[ "$HTTP_CODE" =~ ^(408|429|5[0-9][0-9])$ ]] || [ "$ATTEMPT" -eq 5 ]; then
+              break
+            fi
+
+            echo "::warning::Read-only acquisition safety check returned HTTP ${HTTP_CODE:-none}; retrying."
+            sleep $((ATTEMPT * 5))
+          done
+
+          echo "Acquisition safety check HTTP: ${HTTP_CODE:-none}"
+          jq '{database, generatedAt, summary, configuration}' "$OUT" 2>/dev/null || cat "$OUT" || true
+
+          if [ "$HTTP_CODE" != '200' ]; then
+            echo '::error::Read-only acquisition safety check failed.'
+            exit 1
+          fi
+
+          # This workflow is intentionally diagnostic only. It never calls
+          # discovery, people-scan, person enrichment, recovery, or HubSpot write endpoints.
+          echo 'Manual read-only safety check passed; zero acquisition credits spent by this workflow.'
