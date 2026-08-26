@@ -1,0 +1,99 @@
+name: Fix HubSpot Associations Fallback Once
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-hubspot-associations-fallback-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Add v3 association fallback with dual response parsing
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/lib/hubspot.ts')
+          text = p.read_text()
+          old_type = '''interface AssociationResponse {
+            results: Array<{
+              from: { id: string };
+              to: Array<{ toObjectId: string }>;
+            }>;
+          }'''
+          new_type = '''interface AssociationResponse {
+            results: Array<{
+              from: { id: string };
+              to: Array<{ toObjectId?: string; id?: string }>;
+            }>;
+          }'''
+          if old_type not in text:
+              raise SystemExit('AssociationResponse anchor not found')
+          text = text.replace(old_type, new_type, 1)
+
+          old_read = '''  const readBatch = async (batch: string[]) => {
+            const body = JSON.stringify({ inputs: batch.map((id) => ({ id })) });
+            try {
+              return await hubspotRequest<AssociationResponse>(
+                `/crm/v4/associations/${fromObjectType}/${toObjectType}/batch/read`,
+                { method: "POST", body },
+              );
+            } catch (error) {
+              if (!(error instanceof HubSpotApiError)) throw error;
+              return hubspotRequest<AssociationResponse>(
+                `/crm/associations/2026-03/${fromObjectType}/${toObjectType}/batch/read`,
+                { method: "POST", body },
+              );
+            }
+          };'''
+          new_read = '''  const readBatch = async (batch: string[]) => {
+            const body = JSON.stringify({ inputs: batch.map((id) => ({ id })) });
+            const paths = [
+              `/crm/v4/associations/${fromObjectType}/${toObjectType}/batch/read`,
+              `/crm/associations/2026-03/${fromObjectType}/${toObjectType}/batch/read`,
+              `/crm/v3/associations/${fromObjectType}/${toObjectType}/batch/read`,
+            ];
+            let lastError: unknown;
+            for (const path of paths) {
+              try {
+                return await hubspotRequest<AssociationResponse>(path, { method: "POST", body });
+              } catch (error) {
+                lastError = error;
+                if (!(error instanceof HubSpotApiError)) throw error;
+              }
+            }
+            throw lastError instanceof Error ? lastError : new Error("Unable to read HubSpot associations");
+          };'''
+          if old_read not in text:
+              raise SystemExit('readBatch anchor not found')
+          text = text.replace(old_read, new_read, 1)
+
+          old_map = '''      associationMap.set(item.from.id, (item.to ?? []).map((target) => String(target.toObjectId)));'''
+          new_map = '''      associationMap.set(
+                item.from.id,
+                (item.to ?? [])
+                  .map((target) => String(target.toObjectId || target.id || ""))
+                  .filter(Boolean),
+              );'''
+          if old_map not in text:
+              raise SystemExit('association map anchor not found')
+          text = text.replace(old_map, new_map, 1)
+          p.write_text(text)
+          PY
+          npm ci --ignore-scripts
+          npm run typecheck
+          git diff --check
+          git config user.name 'Talentera GTM Automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/lib/hubspot.ts
+          git commit -m 'Add resilient HubSpot associations v3 fallback'
+          git push origin HEAD:main
