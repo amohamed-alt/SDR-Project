@@ -143,6 +143,45 @@ function inferredIndustry(org: ApolloOrganization) {
   return clean(org.industry, 300) || "Target industry";
 }
 
+function industryBucket(value: string) {
+  const text = value.toLowerCase();
+  if (/manufactur|industrial|fmcg|consumer goods|food production/.test(text)) return "manufacturing";
+  if (/retail|supermarket|consumer retail|e-?commerce/.test(text)) return "retail";
+  if (/logistic|transport|supply chain|freight|shipping/.test(text)) return "logistics";
+  if (/aviation|airline|airport|air transport/.test(text)) return "aviation";
+  if (/health|hospital|medical|pharma|clinic/.test(text)) return "healthcare";
+  if (/hotel|hospitality|restaurant|food & beverages|leisure|travel/.test(text)) return "hospitality";
+  if (/construction|civil engineering|building materials|engineering & construction/.test(text)) return "construction";
+  if (/real estate|property|facilities services/.test(text)) return "real estate";
+  if (/bank|financial|fintech|insurance|investment|capital markets/.test(text)) return "financial services";
+  if (/education|university|college|school|higher education/.test(text)) return "education";
+  if (/telecom|wireless|communications/.test(text)) return "telecommunications";
+  if (/software|information technology|internet|technology|computer/.test(text)) return "technology";
+  if (/bpo|outsourcing|contact center|call center/.test(text)) return "bpo";
+  return text.replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function matchesTargetIndustry(org: ApolloOrganization, country: TargetAccountCountry) {
+  const market = targetMarket(country);
+  if (!market) return false;
+  const targetCodes = market.naics.map(String);
+  const codes = (org.naics_codes || []).map(String);
+  if (codes.some((code) => targetCodes.some((target) => code.startsWith(target) || target.startsWith(code)))) return true;
+
+  const observed = industryBucket([
+    inferredIndustry(org),
+    clean(org.industry, 300),
+    ...(org.keywords || []).map((value) => clean(value, 160)),
+    clean(org.short_description, 700),
+    clean(org.seo_description, 700),
+  ].join(" "));
+  const targets = new Set(market.industries.map((value) => industryBucket(value)));
+  if (targets.has(observed)) return true;
+
+  const text = accountText(org).toLowerCase();
+  return [...targets].some((target) => target.length >= 4 && text.includes(target));
+}
+
 async function existingHubSpotDomains(domains: string[]) {
   const result = new Map<string, string>();
   const unique = [...new Set(domains.map(normalizeCompanyDomain).filter(Boolean))];
@@ -175,13 +214,10 @@ async function getAccount(domain: string) {
 }
 
 function apolloUrl(country: TargetAccountCountry, page: number) {
-  const market = targetMarket(country);
-  if (!market) throw new Error(`Unsupported target market: ${country}`);
+  if (!targetMarket(country)) throw new Error(`Unsupported target market: ${country}`);
   const query = new URLSearchParams();
   query.append("organization_locations[]", country);
   for (const range of TARGET_EMPLOYEE_RANGES) query.append("organization_num_employees_ranges[]", range);
-  for (const code of market.naics) query.append("organization_naics_codes[]", code);
-  query.append("not_organization_naics_codes[]", "92");
   query.set("page", String(page));
   query.set("per_page", "100");
   return `https://api.apollo.io/api/v1/mixed_companies/search?${query.toString()}`;
@@ -217,7 +253,7 @@ async function discoverMarket(country: TargetAccountCountry, pages: number) {
   const market = targetMarket(country);
   if (!market) throw new Error(`Unsupported target market: ${country}`);
   const raw: ApolloOrganization[] = [];
-  let marketTotal = market.marketSize;
+  let marketTotal: number = market.marketSize;
   for (let page = 1; page <= pages; page += 1) {
     const result = await apolloPage(country, page);
     marketTotal = Math.max(marketTotal, result.total);
@@ -225,8 +261,9 @@ async function discoverMarket(country: TargetAccountCountry, pages: number) {
     if (!result.organizations.length) break;
   }
 
+  const industryMatched = raw.filter((org) => matchesTargetIndustry(org, country));
   const deduped = new Map<string, ApolloOrganization>();
-  for (const org of raw) {
+  for (const org of industryMatched) {
     const domain = organizationDomain(org);
     if (domain && !deduped.has(domain)) deduped.set(domain, org);
   }
@@ -299,6 +336,7 @@ async function discoverMarket(country: TargetAccountCountry, pages: number) {
         rawIndustry: org.industry || "",
         rawNaics: org.naics_codes || [],
         discoveredAt: new Date().toISOString(),
+        discoveryPolicy: "Apollo location + employee-size discovery; target industry qualified locally from NAICS/industry/keywords before storage",
         hiringCountPolicy: "Apollo job counts ignored; verify hiring separately",
         feedMaritaRequested: false,
       },
@@ -311,6 +349,7 @@ async function discoverMarket(country: TargetAccountCountry, pages: number) {
     marketTotal,
     pagesUsed: pages,
     fetched: raw.length,
+    industryMatched: industryMatched.length,
     uniqueDomains: accounts.length,
     eligible: accounts.filter((item) => item.exclusionStatus === "eligible").length,
     review: accounts.filter((item) => item.exclusionStatus === "review").length,
