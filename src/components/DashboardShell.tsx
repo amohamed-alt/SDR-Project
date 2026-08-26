@@ -63,8 +63,8 @@ const BestAccounts = dynamic(
   () => import("@/components/BestAccounts").then((module) => module.BestAccounts),
   { ssr: false, loading: ViewLoading },
 );
-const AccountIntelligence = dynamic(
-  () => import("@/components/AccountIntelligence").then((module) => module.AccountIntelligence),
+const TalenteraIntelligenceWorkspace = dynamic(
+  () => import("@/components/TalenteraIntelligenceWorkspace").then((module) => module.TalenteraIntelligenceWorkspace),
   { ssr: false, loading: ViewLoading },
 );
 
@@ -135,7 +135,7 @@ export function Dashboard() {
   if (view === "smartlead") return <SmartleadCommandCenter onBack={() => changeView("core")}/>;
   if (view === "team-activity") return <TeamActivity onBack={() => changeView("core")}/>;
   if (view === "net-new") return <BestAccounts onBack={() => changeView("core")}/>;
-  if (view === "gtm-brain") return <AccountIntelligence onBack={() => changeView("core")}/>;
+  if (view === "gtm-brain") return <TalenteraIntelligenceWorkspace onBack={() => changeView("core")}/>;
 
   return <div className={styles.shell}>
     <ExistingDashboard/>
@@ -155,7 +155,7 @@ export function Dashboard() {
             <div className={styles.toolSectionLabel}>CORE WORK</div>
             <button className={styles.toolItem} type="button" onClick={() => changeView("gtm-brain")}>
               <span className={`${styles.toolIcon} ${styles.brainIcon}`}><BrainCircuit size={17}/></span>
-              <span className={styles.toolCopy}><strong>Talentera Intelligence</strong><small>Account priority · evidence · call strategy</small></span>
+              <span className={styles.toolCopy}><strong>Talentera Intelligence</strong><small>Account priority · target pool · call strategy</small></span>
             </button>
             <button className={styles.toolItem} type="button" onClick={() => changeView("net-new")}>
               <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Target size={17}/></span>
