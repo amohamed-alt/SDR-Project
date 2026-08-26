@@ -113,7 +113,8 @@ export const TARGET_EMPLOYEE_RANGES = [
 ] as const;
 
 export function targetMarket(country: string) {
-  return TARGET_ACCOUNT_MARKETS.find((market) => market.country === country) || null;
+  const market = TARGET_ACCOUNT_MARKETS.find((item) => item.country === country);
+  return market ? { ...market, marketSize: Number(market.marketSize), priority: Number(market.priority) } : null;
 }
 
 export function targetMarketNames() {
