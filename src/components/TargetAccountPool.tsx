@@ -160,7 +160,10 @@ export function TargetAccountPool() {
     }
   }, [country, showExcluded]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
 
   const selected = useMemo(
     () => payload?.accounts.find((account) => account.domain === selectedDomain) || null,
