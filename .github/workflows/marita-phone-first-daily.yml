@@ -97,14 +97,22 @@ jobs:
               return 50;
             }
 
+            function normalizedScore(person = {}) {
+              return Number(person.score || person.rankScore || 0);
+            }
+
+            function reason(person = {}) {
+              return String(person.reason || person.fitReason || '');
+            }
+
             function chooseCandidate(people = []) {
               return [...people]
-                .filter((person) => Number(person.score || 0) >= 60)
-                .filter((person) => /current company confirmed/i.test(String(person.reason || '')))
+                .filter((person) => normalizedScore(person) >= 60)
+                .filter((person) => /current company confirmed/i.test(reason(person)))
                 .filter((person) => !/assistant|coordinator|intern|trainee|specialist/i.test(String(person.title || '')))
                 .sort((a, b) => {
-                  const left = Number(a.score || 0) * 10 + personaStrength(a.title);
-                  const right = Number(b.score || 0) * 10 + personaStrength(b.title);
+                  const left = normalizedScore(a) * 10 + personaStrength(a.title);
+                  const right = normalizedScore(b) * 10 + personaStrength(b.title);
                   return right - left;
                 })[0] || null;
             }
@@ -121,15 +129,32 @@ jobs:
               const phones = phoneList(person);
               if (!phones.length) return { pushed: false, reason: 'no_phone' };
               const emails = emailList(person);
-              const score = Math.max(0, Math.min(100, Number(account.priorityScore || account.gtmScore || person.score || 60)));
+              const score = Math.max(0, Math.min(100, Number(account.priorityScore || account.gtmScore || normalizedScore(person) || 60)));
               const payload = {
-                source: 'Apollo → SignalHire Daily',
+                source: 'Target Account Pool → SignalHire',
                 signalHireUid: String(person.uid || ''),
                 assignmentMode: 'marita',
                 fullName: String(person.fullName || '').trim(),
                 title: String(person.title || '').trim(),
                 company: String(account.name || '').trim(),
                 companyDomain: String(account.domain || '').trim(),
+                companyWebsite: String(account.evidence?.officialWebsite || `https://${account.domain || ''}`).trim(),
+                careerPageUrl: String(account.careerPageUrl || '').trim(),
+                detectedAts: String(account.detectedAts || '').trim(),
+                atsConfidence: String(account.evidence?.atsConfidence || '').trim(),
+                companyEvidenceUrl: String(account.evidence?.careerEvidenceUrl || account.careerPageUrl || '').trim(),
+                companyVerificationReason: String(account.evidence?.verificationReason || account.strongestSignal || '').trim(),
+                hiring: {
+                  status: 'Unknown',
+                  activeJobs: 0,
+                  hiringScore: 0,
+                  hiringLabel: 'Verified hiring required',
+                  hasHrJobs: false,
+                  source: 'Target Account Pool',
+                  sourceUrl: String(account.careerPageUrl || '').trim(),
+                  checkedAt: new Date().toISOString(),
+                  jobsSample: [],
+                },
                 location: String(person.location || account.country || '').trim(),
                 linkedinUrl: String(person.linkedinUrl || '').trim(),
                 email: emails[0] || '',
@@ -146,6 +171,8 @@ jobs:
             const queue = await request('/api/acquisition?limit=1000');
             const accounts = (Array.isArray(queue.accounts) ? queue.accounts : [])
               .filter((account) => account && account.exclusionStatus === 'eligible')
+              .filter((account) => account.status !== 'pushed')
+              .filter((account) => account.evidence?.feedMaritaRequested === true)
               .filter((account) => ['A', 'B', 'A+', ''].includes(String(account.priorityTier || account.gtmTier || '')) || Number(account.gtmScore || 0) >= 55)
               .sort((a, b) => accountScore(b) - accountScore(a));
 
@@ -161,6 +188,7 @@ jobs:
               duplicates: 0,
               noCandidate: 0,
               noPhone: 0,
+              maxTwoRevealsReached: 0,
               errors: [],
               prospects: [],
             };
@@ -173,17 +201,28 @@ jobs:
 
               try {
                 const peoplePayload = await request(`/api/acquisition?domain=${encodeURIComponent(domain)}`);
-                let person = (Array.isArray(peoplePayload.people) ? peoplePayload.people : [])
+                const storedPeople = Array.isArray(peoplePayload.people) ? peoplePayload.people : [];
+                let person = storedPeople
                   .filter((candidate) => candidate.enrichmentStatus === 'enriched' && candidate.meta?.verifiedCurrentCompany === true)
                   .filter((candidate) => phoneList(candidate).length > 0)
-                  .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))[0] || null;
+                  .sort((a, b) => normalizedScore(b) - normalizedScore(a))[0] || null;
 
                 if (!person) {
-                  const found = await request('/api/acquisition', {
-                    method: 'POST',
-                    body: JSON.stringify({ action: 'find_people', domain }),
-                  });
-                  const candidate = chooseCandidate(found.people || []);
+                  const paidAttempts = storedPeople.filter((candidate) => candidate.enrichmentStatus === 'enriched').length;
+                  if (paidAttempts >= 2) {
+                    result.maxTwoRevealsReached += 1;
+                    result.noPhone += 1;
+                    continue;
+                  }
+
+                  let candidate = chooseCandidate(storedPeople.filter((candidate) => candidate.enrichmentStatus === 'search_only'));
+                  if (!candidate && storedPeople.length === 0) {
+                    const found = await request('/api/acquisition', {
+                      method: 'POST',
+                      body: JSON.stringify({ action: 'find_people', domain }),
+                    });
+                    candidate = chooseCandidate(found.people || []);
+                  }
                   if (!candidate) {
                     result.noCandidate += 1;
                     continue;
@@ -207,13 +246,19 @@ jobs:
                 const pushed = await pushPhoneReady(account, person);
                 if (pushed.duplicate) result.duplicates += 1;
                 if (pushed.pushed) result.pushed += 1;
+                if (pushed.pushed || pushed.duplicate) {
+                  await request('/api/target-account-pool', {
+                    method: 'POST',
+                    body: JSON.stringify({ action: 'complete_feed', domain, taskId: String(pushed.taskId || '') }),
+                  });
+                }
                 result.prospects.push({
                   company: account.name,
                   country: account.country,
                   person: person.fullName,
                   title: person.title,
                   phones: phones.length,
-                  score: account.priorityScore || account.gtmScore || person.score || 0,
+                  score: account.priorityScore || account.gtmScore || normalizedScore(person) || 0,
                   taskId: pushed.taskId || '',
                   duplicate: Boolean(pushed.duplicate),
                 });
@@ -226,14 +271,15 @@ jobs:
               .addHeading('Marita Phone-First Daily')
               .addTable([
                 [{ data: 'Metric', header: true }, { data: 'Result', header: true }],
-                ['Eligible accounts', String(result.eligibleAccounts)],
+                ['Explicitly queued accounts', String(result.eligibleAccounts)],
                 ['Companies checked', String(result.companiesChecked)],
-                ['SignalHire enrichments', String(result.signalHireEnrichments)],
+                ['SignalHire paid reveal attempts', String(result.signalHireEnrichments)],
                 ['Phone-ready personas', String(result.phoneReady)],
                 ['New Marita tasks', String(result.pushed)],
                 ['Existing/duplicate tasks', String(result.duplicates)],
                 ['No safe persona', String(result.noCandidate)],
                 ['No phone after enrichment', String(result.noPhone)],
+                ['Two-reveal cap reached', String(result.maxTwoRevealsReached)],
                 ['Errors', String(result.errors.length)],
               ]);
 
