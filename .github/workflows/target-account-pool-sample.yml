@@ -14,12 +14,32 @@ jobs:
   seed-sample:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'Seed Saudi Target Pool sample')
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       DASHBOARD_USERNAME: ${{ secrets.DASHBOARD_USERNAME || 'talentera' }}
       DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
       OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN || secrets.DASHBOARD_PASSWORD }}
     steps:
+      - name: Wait for this exact build to reach production
+        run: |
+          set -euo pipefail
+          READY=false
+          for ATTEMPT in $(seq 1 30); do
+            BODY=$(curl --silent --show-error \
+              --connect-timeout 5 \
+              --max-time 10 \
+              -H 'Cache-Control: no-cache' \
+              "https://sdr.dashboardtalentera.tech/api/health?sample_seed=${GITHUB_SHA}&attempt=${ATTEMPT}" || true)
+            BUILD=$(printf '%s' "$BODY" | jq -r '.buildRef // ""' 2>/dev/null || true)
+            echo "Production build check ${ATTEMPT}/30: ${BUILD:-none}"
+            if [ "$BUILD" = "$GITHUB_SHA" ]; then
+              READY=true
+              break
+            fi
+            sleep 20
+          done
+          test "$READY" = 'true' || { echo "::error::Exact build did not reach production before seed window closed"; exit 1; }
+
       - name: Seed exactly one Saudi Apollo page
         run: |
           set -euo pipefail
