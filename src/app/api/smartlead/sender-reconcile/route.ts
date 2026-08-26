@@ -215,7 +215,7 @@ async function configureEspMatching(lane: OutreachLane, campaign: Campaign) {
       enable_ai_esp_matching: true,
       auto_pause_domain_leads_on_reply: true,
       ignore_ss_mailbox_sending_limit: false,
-      bounce_autopause_threshold: "2",
+      bounce_autopause_threshold: "10",
       domain_level_rate_limit: true,
       add_unsubscribe_tag: true,
       out_of_office_detection_settings: { ignoreOOOasReply: false, autoReactivateOOO: false, reactivateOOOwithDelay: 0, autoCategorizeOOO: true },

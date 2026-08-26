@@ -33,10 +33,25 @@ test("sequence copy stays plain, short and free of common spam patterns", () => 
       assert.ok(!/https?:\/\/|www\./i.test(touch.body), `${lane.lane} contains a link`);
       assert.ok(!/[!?]{2,}/.test(touch.subject + touch.body), `${lane.lane} has excessive punctuation`);
       assert.ok(touch.body.includes("{{first_name}}"), `${lane.lane} is missing first-name personalization`);
-      assert.ok(touch.body.split(/\s+/).filter(Boolean).length <= 125, `${lane.lane} body is too long`);
+      assert.ok(touch.body.split(/\s+/).filter(Boolean).length <= 85, `${lane.lane} body is too long`);
+      assert.equal(touch.body.includes("{{opening_line}}"), false, `${lane.lane} must not inject a generic AI opening line`);
       const lower = `${touch.subject} ${touch.body}`.toLowerCase();
       for (const trigger of spamTriggers) assert.ok(!lower.includes(trigger), `${lane.lane} contains spam trigger: ${trigger}`);
     }
+  }
+});
+
+test("the first touch avoids duplicated pain language and keeps one clear CTA", () => {
+  for (const lane of Object.values(VISIBLE_SEQUENCE_LANES)) {
+    const body = lane.touches[0].body;
+    assert.equal((body.match(/\{\{industry_pain\}\}/g) || []).length, 1, `${lane.lane} duplicates the pain field`);
+    assert.equal((body.match(/[?؟]/g) || []).length, 2, `${lane.lane} should contain one diagnostic question and one CTA`);
+  }
+});
+
+test("managed campaigns use a clean V2 migration instead of inheriting V1 bounce history", () => {
+  for (const lane of Object.values(VISIBLE_SEQUENCE_LANES)) {
+    assert.match(lane.campaignName, /\| V2$/);
   }
 });
 

@@ -42,8 +42,8 @@ Keep `SMARTLEAD_AUTOPILOT_ENABLED=false` until every enforced launch gate below 
 - Open and click tracking off; no links or images.
 - Stop on reply, auto-pause same-domain leads on reply, add unsubscribe tags, respect mailbox sending limits, and keep domain-level rate limiting on.
 - Send Sunday-Thursday, 09:30-16:30 Asia/Riyadh, with at least 15 minutes between emails.
-- Smartlead high-bounce auto-protection is 2%. The orchestrator also blocks at 2% bounce after 50 sends and pauses all managed campaigns on the first recorded spam complaint.
-- Four campaigns are the visible managed topology: Talentera Arabic, Talentera English, Evalufy Arabic, and Evalufy English. Any other Talentera/Evalufy `Marita SDR` campaign is legacy, is reported in setup, and is paused when empty; active legacy leads block the new autopilot to prevent duplicate sends.
+- Smartlead's built-in emergency auto-protection is 10% so one policy rejection in a small opening batch does not repeatedly stop a clean campaign. The orchestrator remains stricter after a usable sample: it deduplicates bounce events by recipient and pauses the affected lane when at least three unique recipients have bounced, the deduplicated rate is at least 2%, and at least 50 emails have been sent. The first recorded spam complaint still pauses its affected lane.
+- Four V2 campaigns are the visible managed topology: Talentera Arabic, Talentera English, Evalufy Arabic, and Evalufy English. Any other Talentera/Evalufy `Marita SDR` campaign is legacy and is confirmed paused on every setup. Cross-campaign duplicate protection and the local send ledger remain enforced during version migrations.
 
 ## Golden Hours
 
@@ -58,7 +58,7 @@ Keep `SMARTLEAD_AUTOPILOT_ENABLED=false` until every enforced launch gate below 
 3. Run the workflow in `dry-run` mode and review all 50 masked product/language/campaign decisions.
 4. Run the workflow in `setup` mode. It must pass sender inventory, sender reconciliation, four-campaign parity, and legacy-campaign safety with zero blocking warnings.
 5. Confirm MillionVerifier has credits and SignalHire is configured.
-6. Review all four sequence variants.
+6. Review all four sequence variants. The deterministic V2 copy must remain plain text, concise, and free of generic AI opening lines.
 7. Set the repository variable `SMARTLEAD_AUTOPILOT_ENABLED=true` and deploy.
 8. Watch the first 50 new recipients manually. Pause immediately on any spam complaint, unusual provider block, bounce spike, or reply-stop failure.
 

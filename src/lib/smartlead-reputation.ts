@@ -68,3 +68,78 @@ export function reputationHealth(sent: number, bounces: number, spamComplaints =
         : "Bounce and spam complaint rates are within the configured safety thresholds",
   };
 }
+
+type CampaignLeadRow = Record<string, unknown>;
+
+function rowObject(value: unknown): CampaignLeadRow {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as CampaignLeadRow : {};
+}
+
+function truthyFlag(value: unknown) {
+  return value === true || value === 1 || /^(?:true|1|yes)$/i.test(String(value ?? "").trim());
+}
+
+function bouncedRow(row: CampaignLeadRow) {
+  const lead = rowObject(row.lead);
+  const flags = [
+    row.is_bounced,
+    row.is_bounce,
+    row.has_bounced,
+    row.is_sender_bounced,
+    lead.is_bounced,
+    lead.is_bounce,
+    lead.has_bounced,
+    lead.is_sender_bounced,
+  ];
+  if (flags.some(truthyFlag)) return true;
+  const status = [row.email_status, row.lead_status, row.category, lead.email_status, lead.lead_status, lead.category]
+    .map((value) => String(value ?? "").trim())
+    .join(" ");
+  return /(?:^|[_ -])bounc(?:e|ed)(?:$|[_ -])/i.test(status);
+}
+
+function leadEmail(row: CampaignLeadRow) {
+  const lead = rowObject(row.lead);
+  return String(row.email ?? lead.email ?? "").trim().toLowerCase();
+}
+
+export function uniqueBouncedLeadEmails(rows: CampaignLeadRow[]) {
+  const emails = new Set<string>();
+  for (const row of rows) {
+    if (!bouncedRow(row)) continue;
+    const email = leadEmail(row);
+    if (email) emails.add(email);
+  }
+  return [...emails];
+}
+
+export function campaignReputationHealth(
+  sent: number,
+  rawBounceEvents: number,
+  leadRows: CampaignLeadRow[],
+  options: { minSent?: number; maxBounceRate?: number; minUniqueBounces?: number } = {},
+) {
+  const minSent = Math.max(1, Math.floor(options.minSent ?? 50));
+  const maxBounceRate = Math.max(0, Number(options.maxBounceRate ?? 0.02));
+  const minUniqueBounces = Math.max(1, Math.floor(options.minUniqueBounces ?? 3));
+  const detectedEmails = uniqueBouncedLeadEmails(leadRows);
+  const rawEvents = Math.max(0, Math.floor(Number(rawBounceEvents) || 0));
+  const uniqueBounces = detectedEmails.length || rawEvents;
+  const rate = bounceRate(sent, uniqueBounces);
+  const enoughVolume = sent >= minSent;
+  const enoughUniqueFailures = uniqueBounces >= minUniqueBounces;
+  const unsafe = enoughVolume && enoughUniqueFailures && rate >= maxBounceRate;
+
+  return {
+    healthy: !unsafe,
+    rawBounceEvents: rawEvents,
+    uniqueBounces,
+    duplicateBounceEvents: Math.max(0, rawEvents - uniqueBounces),
+    uniqueBounceEmails: detectedEmails,
+    bounceRate: rate,
+    countSource: detectedEmails.length ? "campaign_leads" as const : "analytics_fallback" as const,
+    reason: unsafe
+      ? `${uniqueBounces} unique bounced recipients produced a ${(rate * 100).toFixed(1)}% deduplicated bounce rate`
+      : "Unique-recipient bounce volume is below the campaign pause threshold",
+  };
+}

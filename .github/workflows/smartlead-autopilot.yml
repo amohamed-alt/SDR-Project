@@ -240,6 +240,11 @@ jobs:
             cat /tmp/smartlead-orchestrator.json || true
             exit 1
           fi
+          if [ "$(jq -r '.blocked // false' /tmp/smartlead-orchestrator.json)" = "true" ]; then
+            echo "::error::Smartlead ${MODE} engine returned blocked=true; no successful send completion was recorded."
+            jq '{reason, warnings, state}' /tmp/smartlead-orchestrator.json || cat /tmp/smartlead-orchestrator.json || true
+            exit 1
+          fi
 
       - name: Audit first 50 recipient routes without sending
         if: steps.mode.outputs.mode == 'setup'

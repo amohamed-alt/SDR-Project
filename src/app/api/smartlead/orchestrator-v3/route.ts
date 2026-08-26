@@ -27,6 +27,7 @@ import {
   type OutreachLane,
 } from "@/lib/smartlead-visible-sequences";
 import { inspectSenderAccount, validateApprovedSenderInventory } from "@/lib/smartlead-sender-routing";
+import { campaignReputationHealth } from "@/lib/smartlead-reputation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,12 +46,14 @@ const LEDGER_PATH = process.env.SMARTLEAD_V2_LEDGER_PATH || "/app/data/smartlead
 const BUSINESS_DAYS = new Set(["Sun", "Mon", "Tue", "Wed", "Thu"]);
 const BOUNCE_GUARD_MIN_SENT = 50;
 const BOUNCE_GUARD_RATE = 0.02;
+const BOUNCE_GUARD_MIN_UNIQUE_RECIPIENTS = 3;
+const SMARTLEAD_EMERGENCY_BOUNCE_THRESHOLD = 10;
 const LANES = Object.keys(VISIBLE_SEQUENCE_LANES) as OutreachLane[];
 const MANAGED_CAMPAIGN_NAMES = new Set(LANES.map((lane) => VISIBLE_SEQUENCE_LANES[lane].campaignName));
 
 type JsonObject = Record<string, unknown>;
 type Campaign = { id: number; name: string; status: string };
-type LegacyCampaign = Campaign & { activeLeads: number; action: "blocked_active" | "paused" | "already_paused" | "pause_failed" };
+type LegacyCampaign = Campaign & { activeLeads: number; action: "paused" | "already_paused" | "pause_failed" };
 type Sender = { id: number; email: string; brand: OutreachProduct | "unknown"; capacity: number; eligible: boolean; reasons: string[] };
 type LedgerEntry = { email: string; contactId: string; companyId: string; product: OutreachProduct; campaignId: number; queuedAt: string; lastKnownStatus: string };
 type Ledger = { version: 1; entries: LedgerEntry[] };
@@ -147,6 +150,10 @@ function isMaritaOutreachCampaignName(name: string) {
 
 async function pauseManagedCampaigns() {
   const campaigns = (await listCampaigns()).filter((campaign) => isMaritaOutreachCampaignName(campaign.name));
+  return pauseCampaigns(campaigns);
+}
+
+async function pauseCampaigns(campaigns: Campaign[]) {
   let paused = 0;
   for (const campaign of campaigns) {
     if (/pause|stop/i.test(campaign.status)) continue;
@@ -193,7 +200,7 @@ async function configureCampaign(lane: OutreachLane, campaign: Campaign, campaig
       enable_ai_esp_matching: true,
       auto_pause_domain_leads_on_reply: true,
       ignore_ss_mailbox_sending_limit: false,
-      bounce_autopause_threshold: "2",
+      bounce_autopause_threshold: String(SMARTLEAD_EMERGENCY_BOUNCE_THRESHOLD),
       domain_level_rate_limit: true,
       add_unsubscribe_tag: true,
       out_of_office_detection_settings: {
@@ -282,9 +289,27 @@ async function campaignAnalytics(campaign: Campaign) {
     leadRows.push(...batch);
     if (batch.length < 100) break;
   }
-  const sent = numberFrom(payload, ["sent_count", "sent", "total_sent", "emails_sent"]); const bounces = numberFrom(payload, ["bounce_count", "bounces", "total_bounces"]);
+  const sent = numberFrom(payload, ["sent_count", "sent", "total_sent", "emails_sent"]);
+  const rawBounceEvents = numberFrom(payload, ["bounce_count", "bounces", "total_bounces"]);
+  const bounceHealth = campaignReputationHealth(sent, rawBounceEvents, leadRows, {
+    minSent: BOUNCE_GUARD_MIN_SENT,
+    maxBounceRate: BOUNCE_GUARD_RATE,
+    minUniqueBounces: BOUNCE_GUARD_MIN_UNIQUE_RECIPIENTS,
+  });
   const spamComplaints = leadRows.filter((row) => Boolean(row.is_spam) || /(?:^|[_ -])spam(?:$|[_ -])/i.test(clean(row.status || row.lead_status || row.email_status || row.category))).length;
-  return { sent, bounces, bounceRate: sent ? bounces / sent : 0, spamComplaints, spamRate: sent ? spamComplaints / sent : 0, replies: numberFrom(payload, ["reply_count", "replies", "total_replies"]) };
+  return {
+    sent,
+    bounces: bounceHealth.uniqueBounces,
+    rawBounceEvents: bounceHealth.rawBounceEvents,
+    duplicateBounceEvents: bounceHealth.duplicateBounceEvents,
+    bounceRate: bounceHealth.bounceRate,
+    bounceCountSource: bounceHealth.countSource,
+    uniqueBounceEmails: bounceHealth.uniqueBounceEmails,
+    reputationHealthy: bounceHealth.healthy,
+    spamComplaints,
+    spamRate: sent ? spamComplaints / sent : 0,
+    replies: numberFrom(payload, ["reply_count", "replies", "total_replies"]),
+  };
 }
 
 async function freshHealthySnapshot(context: string) {
@@ -303,7 +328,7 @@ async function freshHealthySnapshot(context: string) {
 }
 
 function inactiveLead(row: JsonObject) {
-  return /complete|stopp|paus|unsub|bounce|repl/i.test(clean(row.status || row.lead_status || row.email_status || row.category));
+  return /complete|stopp|paus|unsub|bounce|repl|block|fail/i.test(clean(row.status || row.lead_status || row.email_status || row.category));
 }
 
 async function campaignLeadRows(campaign: Campaign) {
@@ -360,11 +385,6 @@ async function legacySafety() {
   const all = await listCampaigns(); const warnings: string[] = []; const campaigns: LegacyCampaign[] = [];
   for (const campaign of all.filter((item) => isMaritaOutreachCampaignName(item.name) && !MANAGED_CAMPAIGN_NAMES.has(item.name))) {
     const activeLeads = await activeCampaignLeadCount(campaign);
-    if (activeLeads > 0) {
-      warnings.push(`${campaign.name} contains ${activeLeads} active lead(s); visible-sequence autopilot is locked to avoid double sending.`);
-      campaigns.push({ ...campaign, activeLeads, action: "blocked_active" });
-      continue;
-    }
     if (/pause|stop/i.test(campaign.status)) {
       campaigns.push({ ...campaign, activeLeads, action: "already_paused" });
       continue;
@@ -373,7 +393,7 @@ async function legacySafety() {
       await smartleadRequest(`/campaigns/${campaign.id}/status`, { method: "POST", body: JSON.stringify({ status: "PAUSED" }) });
       campaigns.push({ ...campaign, status: "PAUSED", activeLeads, action: "paused" });
     } catch {
-      warnings.push(`${campaign.name} has no active leads but could not be paused; autopilot remains locked.`);
+      warnings.push(`${campaign.name} could not be paused; autopilot remains locked to prevent a legacy campaign from sending beside the managed V2 lanes.`);
       campaigns.push({ ...campaign, activeLeads, action: "pause_failed" });
     }
   }
@@ -506,7 +526,7 @@ async function autopilot(millionVerifierApiKey = "") {
   try {
     const setup = await setupOnly();
     if (setup.legacyWarnings.length) {
-      const state: AutopilotState = { ...EMPTY_STATE, status: "blocked", riyadhDate: clock.date, startedAt, finishedAt: new Date().toISOString(), lastSuccessfulDate: previous.lastSuccessfulDate, message: "Legacy Smartlead campaign still has active leads; new lane autopilot is locked.", warnings: setup.legacyWarnings };
+      const state: AutopilotState = { ...EMPTY_STATE, status: "blocked", riyadhDate: clock.date, startedAt, finishedAt: new Date().toISOString(), lastSuccessfulDate: previous.lastSuccessfulDate, message: "A legacy Smartlead campaign could not be confirmed paused; new lane autopilot is locked.", warnings: setup.legacyWarnings };
       await writeJson(STATE_PATH, state); return { ok: true, blocked: true, state, warnings: setup.legacyWarnings };
     }
     const campaigns = Object.fromEntries(LANES.map((lane) => [lane, { ...(setup.campaigns[lane] as { id: number; name: string }), status: "" }])) as Record<OutreachLane, Campaign>;
@@ -516,14 +536,21 @@ async function autopilot(millionVerifierApiKey = "") {
 
     const analytics = {} as Record<OutreachLane, Awaited<ReturnType<typeof campaignAnalytics>>>;
     const reputationWarnings: string[] = [];
+    const unsafeLanes = new Set<OutreachLane>();
     for (const lane of LANES) {
       analytics[lane] = await campaignAnalytics(campaigns[lane]);
-      if (analytics[lane].sent >= BOUNCE_GUARD_MIN_SENT && analytics[lane].bounceRate >= BOUNCE_GUARD_RATE) reputationWarnings.push(`${VISIBLE_SEQUENCE_LANES[lane].label} bounce rate is ${(analytics[lane].bounceRate * 100).toFixed(1)}% after ${analytics[lane].sent} sends (2% guardrail).`);
-      if (analytics[lane].spamComplaints > 0) reputationWarnings.push(`${VISIBLE_SEQUENCE_LANES[lane].label} has ${analytics[lane].spamComplaints} recorded spam complaint(s); zero-complaint guardrail engaged.`);
+      if (!analytics[lane].reputationHealthy) {
+        unsafeLanes.add(lane);
+        reputationWarnings.push(`${VISIBLE_SEQUENCE_LANES[lane].label} has ${analytics[lane].bounces} unique bounced recipient(s) after ${analytics[lane].sent} sends (${(analytics[lane].bounceRate * 100).toFixed(1)}% deduplicated; ${analytics[lane].rawBounceEvents} raw event(s)).`);
+      }
+      if (analytics[lane].spamComplaints > 0) {
+        unsafeLanes.add(lane);
+        reputationWarnings.push(`${VISIBLE_SEQUENCE_LANES[lane].label} has ${analytics[lane].spamComplaints} recorded spam complaint(s); zero-complaint guardrail engaged.`);
+      }
     }
     if (reputationWarnings.length) {
-      const pausedCampaigns = await pauseManagedCampaigns();
-      const state: AutopilotState = { ...EMPTY_STATE, status: "blocked", riyadhDate: clock.date, startedAt, finishedAt: new Date().toISOString(), lastSuccessfulDate: previous.lastSuccessfulDate, message: "Reputation guard blocked new outreach.", warnings: reputationWarnings };
+      const pausedCampaigns = await pauseCampaigns([...unsafeLanes].map((lane) => campaigns[lane]));
+      const state: AutopilotState = { ...EMPTY_STATE, status: "blocked", riyadhDate: clock.date, startedAt, finishedAt: new Date().toISOString(), lastSuccessfulDate: previous.lastSuccessfulDate, message: "Reputation guard blocked only the affected campaign lane(s).", warnings: reputationWarnings };
       await writeJson(STATE_PATH, state); return { ok: true, blocked: true, pausedCampaigns, state, warnings: reputationWarnings };
     }
 
@@ -638,6 +665,7 @@ export async function GET() {
     autopilotEnabled: autopilotEnabled(),
     dailyNewLeadTarget: GLOBAL_NEW_LEADS_PER_DAY,
     verification: { provider: "MillionVerifier", fallback: "SignalHire", buffer: VERIFICATION_BUFFER, policy: "Every send candidate is freshly reverified; only current-company work emails with a fresh valid result may enter Smartlead." },
+    bounceGuard: { minSent: BOUNCE_GUARD_MIN_SENT, maxUniqueRecipientRate: BOUNCE_GUARD_RATE, minUniqueRecipients: BOUNCE_GUARD_MIN_UNIQUE_RECIPIENTS, smartleadEmergencyRate: SMARTLEAD_EMERGENCY_BOUNCE_THRESHOLD / 100, scope: "affected campaign only" },
     capacityModel: { perMailboxCampaignEmails: MAX_CAMPAIGN_EMAILS_PER_MAILBOX, peakTouchMultiplier: PEAK_TOUCH_MULTIPLIER, safetyFactor: CAPACITY_SAFETY_FACTOR, laneDailyNewCaps: DAILY_LANE_NEW_CAPS },
     campaigns: Object.fromEntries(LANES.map((lane) => [lane, VISIBLE_SEQUENCE_LANES[lane].campaignName])),
     sequences: Object.fromEntries(LANES.map((lane) => [lane, VISIBLE_SEQUENCE_LANES[lane].touches])),

@@ -24,18 +24,14 @@ const TALENTERA_AR: VisibleSequenceTouch[] = [
     step: 1,
     delayDays: 0,
     framework: "AIDA",
-    subject: "سؤال سريع يا {{first_name}}",
+    subject: "سؤال عن التوظيف يا {{first_name}}",
     body: `هلا {{first_name}},
 
-{{opening_line}}
+سؤال سريع: هل يأخذ {{industry_pain}} وقتا كبيرا من الفريق؟
 
-كنت حابة أسألك عن نقطة في التوظيف عندكم.
+Talentera تجمع رحلة التوظيف من التقديم إلى العرض في مسار واحد، وتقلل المتابعة اليدوية بين فريق التوظيف والمديرين.
 
-غالبا أكثر شيء يستهلك وقت الفريق هو متابعة المرشح بين المراحل، خصوصا لما يكون التحدي هو {{industry_pain}}.
-
-Talentera تجمع رحلة التوظيف في مكان واحد وتخفف المتابعة اليدوية على الفريق.
-
-إذا هذا قريب من اللي عندكم، يناسبك أعرض لك الفكرة في 10 دقايق؟
+هل يناسبك نستعرضها في 10 دقائق؟
 
 ماريتا شديد
 Talentera`,
@@ -47,11 +43,11 @@ Talentera`,
     subject: "",
     body: `هلا {{first_name}},
 
-بس أوضح قصدي: مو المقصود إنكم تغيرون طريقتكم بالكامل.
+أرجع لك بخصوص رسالتي السابقة.
 
-الفكرة إن رحلة المرشح تكون أوضح للفريق من أول التقديم لحد العرض، بدل المتابعة بين أكثر من مكان.
+الفكرة ببساطة إن مراحل التوظيف والموافقات تكون واضحة في مكان واحد، بدون تغيير مفاجئ لطريقة عمل الفريق.
 
-إذا هذا شيء تبغون تحسنونه، نرتب 10 دقايق؟
+هل هذا ضمن الأشياء اللي تبغون تحسنونها حاليا؟
 
 ماريتا شديد
 Talentera`,
@@ -63,11 +59,9 @@ Talentera`,
     subject: "",
     body: `هلا {{first_name}},
 
-ما ودي أزعجك بكثرة المتابعة.
+أقفل الموضوع من جهتي حتى ما أكثر عليك الرسائل.
 
-إذا تطوير رحلة التوظيف مو ضمن الأولويات حاليا أقفلها من جهتي.
-
-وإذا يستاهل نظرة سريعة، رد بكلمة "مناسب" وأنا أرتبها معك.
+إذا تنظيم رحلة التوظيف صار أولوية، رد بكلمة "مناسب" وأرسل لك موعدا يناسبك.
 
 ماريتا شديد
 Talentera`,
@@ -79,18 +73,14 @@ const TALENTERA_EN: VisibleSequenceTouch[] = [
     step: 1,
     delayDays: 0,
     framework: "AIDA",
-    subject: "Quick question, {{first_name}}",
+    subject: "Hiring process, {{first_name}}",
     body: `Hi {{first_name}},
 
-{{opening_line}}
+Quick question: how are you currently handling {{industry_pain}}?
 
-I wanted to ask you about one part of the hiring process.
+Talentera brings the journey from application to offer into one workflow, reducing manual follow-up between recruiters, hiring managers and approvers.
 
-With {{industry_pain}}, a lot of recruiter time can disappear in the handoffs between screening, interviews, approvals and offers.
-
-Talentera brings that journey into one recruitment flow and reduces the manual follow-up around it.
-
-If that sounds relevant, worth a quick 10-minute look?
+Would a 10-minute walkthrough be useful?
 
 Marita Chedid
 Talentera`,
@@ -102,11 +92,11 @@ Talentera`,
     subject: "",
     body: `Hi {{first_name}},
 
-Just to clarify: I am not suggesting you change everything you already do.
+Following up on my earlier note.
 
-The idea is simply to give the recruitment team a cleaner path from application through offer, with fewer manual handoffs.
+The idea is a clearer path from application to offer, without forcing the team to rebuild its current process.
 
-If that is something you are looking to improve, worth 10 minutes?
+Is that something you are looking to improve this quarter?
 
 Marita Chedid
 Talentera`,
@@ -118,11 +108,9 @@ Talentera`,
     subject: "",
     body: `Hi {{first_name}},
 
-I do not want to keep filling your inbox.
+I'll close the loop here so I don't keep filling your inbox.
 
-If improving the hiring flow is not a priority right now, I will close this on my side.
-
-If it is worth a quick look, reply "yes" and I will arrange it with you.
+If improving the hiring flow becomes a priority, reply "yes" and I'll send over a suitable time.
 
 Marita Chedid
 Talentera`,
@@ -134,18 +122,14 @@ const EVALUFY_AR: VisibleSequenceTouch[] = [
     step: 1,
     delayDays: 0,
     framework: "AIDA",
-    subject: "سؤال سريع يا {{first_name}}",
+    subject: "سؤال عن التوظيف يا {{first_name}}",
     body: `هلا {{first_name}},
 
-{{opening_line}}
+سؤال سريع: كيف تتعاملون مع {{industry_pain}} حاليا؟
 
-كنت حابة أسألك عن خطوة قبل المقابلات.
+Evalufy تضيف التقييم والفرز قبل المقابلات بدون تغيير نظام التوظيف الحالي، عشان يتركز وقت الفريق على المرشحين الأنسب.
 
-بما إن عندكم نظام توظيف قائم، غالبا الفرصة تكون في {{industry_pain}} قبل ما يستهلك الفريق وقته في المقابلات.
-
-Evalufy تضيف التقييم والفرز قبل المقابلات فوق نظام التوظيف الحالي بدون ما تحتاجون تغيرونه.
-
-إذا الفكرة قريبة من احتياجكم، يناسبك أعرضها لك في 10 دقايق؟
+هل يناسبك نستعرضها في 10 دقائق؟
 
 ماريتا شديد
 Evalufy`,
@@ -157,11 +141,11 @@ Evalufy`,
     subject: "",
     body: `هلا {{first_name}},
 
-بس أوضح قصدي: نظام التوظيف الحالي يظل مثل ما هو.
+أرجع لك بخصوص رسالتي السابقة.
 
-Evalufy تضيف طبقة تقييم وفرز قبل المقابلات، بحيث وقت الفريق يروح على قائمة مرشحين أنسب بدل ما يبدأ التقييم داخل المقابلة نفسها.
+الفكرة ما هي استبدال النظام الحالي. Evalufy تضيف خطوة تقييم موحدة قبل المقابلات، عشان يقابل الفريق قائمة أقوى من المرشحين.
 
-إذا هذا تحدي عندكم، نرتب 10 دقايق؟
+هل هذا ضمن الأشياء اللي تبغون تحسنونها حاليا؟
 
 ماريتا شديد
 Evalufy`,
@@ -173,11 +157,9 @@ Evalufy`,
     subject: "",
     body: `هلا {{first_name}},
 
-ما ودي أزعجك بكثرة المتابعة.
+أقفل الموضوع من جهتي حتى ما أكثر عليك الرسائل.
 
-إذا الفرز والتقييم مو ضمن الأولويات حاليا أقفل الموضوع من جهتي.
-
-وإذا يستاهل نظرة سريعة، رد بكلمة "مناسب" وأنا أرتبها معك.
+إذا التقييم قبل المقابلات صار أولوية، رد بكلمة "مناسب" وأرسل لك موعدا يناسبك.
 
 ماريتا شديد
 Evalufy`,
@@ -189,18 +171,14 @@ const EVALUFY_EN: VisibleSequenceTouch[] = [
     step: 1,
     delayDays: 0,
     framework: "AIDA",
-    subject: "Quick question, {{first_name}}",
+    subject: "Hiring process, {{first_name}}",
     body: `Hi {{first_name}},
 
-{{opening_line}}
+Quick question: how are you currently handling {{industry_pain}}?
 
-I wanted to ask about one step before interviews.
+Evalufy adds assessments and screening before interviews while your current recruitment system stays in place, helping the team focus interview time on stronger candidates.
 
-Since you already have a recruitment system in place, the opportunity is often in {{industry_pain}} before interview time is used.
-
-Evalufy adds assessment and screening before interviews without replacing your current recruitment system.
-
-If that sounds relevant, worth a quick 10-minute look?
+Would a 10-minute walkthrough be useful?
 
 Marita Chedid
 Evalufy`,
@@ -212,11 +190,11 @@ Evalufy`,
     subject: "",
     body: `Hi {{first_name}},
 
-Just to clarify: your current recruitment system stays where it is.
+Following up on my earlier note.
 
-Evalufy adds an assessment and screening layer before interviews, so recruiter and hiring-manager time goes to a stronger shortlist.
+The idea is not to replace your recruitment system. Evalufy adds a consistent assessment step before interviews, so recruiters and hiring managers review a stronger shortlist.
 
-If that is something you are trying to improve, worth 10 minutes?
+Is that worth exploring?
 
 Marita Chedid
 Evalufy`,
@@ -228,11 +206,9 @@ Evalufy`,
     subject: "",
     body: `Hi {{first_name}},
 
-I do not want to keep filling your inbox.
+I'll close the loop here so I don't keep filling your inbox.
 
-If screening and assessment are not a priority right now, I will close this on my side.
-
-If it is worth a quick look, reply "yes" and I will arrange it with you.
+If pre-interview assessment becomes a priority, reply "yes" and I'll send over a suitable time.
 
 Marita Chedid
 Evalufy`,
@@ -240,10 +216,10 @@ Evalufy`,
 ];
 
 export const VISIBLE_SEQUENCE_LANES: Record<OutreachLane, VisibleSequenceLane> = {
-  talentera_ar: { lane: "talentera_ar", product: "talentera", language: "ar", campaignName: "Talentera | Marita SDR | Arabic KSA-GCC | V1", label: "Talentera Arabic", touches: TALENTERA_AR },
-  talentera_en: { lane: "talentera_en", product: "talentera", language: "en", campaignName: "Talentera | Marita SDR | English | V1", label: "Talentera English", touches: TALENTERA_EN },
-  evalufy_ar: { lane: "evalufy_ar", product: "evalify", language: "ar", campaignName: "Evalufy | Marita SDR | Arabic KSA-GCC | V1", label: "Evalufy Arabic", touches: EVALUFY_AR },
-  evalufy_en: { lane: "evalufy_en", product: "evalify", language: "en", campaignName: "Evalufy | Marita SDR | English | V1", label: "Evalufy English", touches: EVALUFY_EN },
+  talentera_ar: { lane: "talentera_ar", product: "talentera", language: "ar", campaignName: "Talentera | Marita SDR | Arabic KSA-GCC | V2", label: "Talentera Arabic", touches: TALENTERA_AR },
+  talentera_en: { lane: "talentera_en", product: "talentera", language: "en", campaignName: "Talentera | Marita SDR | English | V2", label: "Talentera English", touches: TALENTERA_EN },
+  evalufy_ar: { lane: "evalufy_ar", product: "evalify", language: "ar", campaignName: "Evalufy | Marita SDR | Arabic KSA-GCC | V2", label: "Evalufy Arabic", touches: EVALUFY_AR },
+  evalufy_en: { lane: "evalufy_en", product: "evalify", language: "en", campaignName: "Evalufy | Marita SDR | English | V2", label: "Evalufy English", touches: EVALUFY_EN },
 };
 
 export function laneFor(product: OutreachProduct, locale: RecipientLocale): OutreachLane {

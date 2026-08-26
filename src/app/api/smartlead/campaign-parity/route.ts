@@ -162,7 +162,7 @@ function expectedSettings(lane: OutreachLane, settings: CampaignAudit["settings"
     && settings.stopOnReply === true
     && settings.pauseDomainOnReply !== false
     && settings.respectMailboxLimit !== false
-    && (settings.bounceAutopauseThreshold === null || settings.bounceAutopauseThreshold === 2)
+    && (settings.bounceAutopauseThreshold === null || settings.bounceAutopauseThreshold === 10)
     && settings.domainRateLimit !== false
     && settings.unsubscribeTag !== false
     && settings.followUpPercentage === 100

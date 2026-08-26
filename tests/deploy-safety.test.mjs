@@ -139,6 +139,20 @@ test("Smartlead topology detects every non-visible Marita campaign and reports i
   assert.match(workflow, /campaignTopology, legacyCampaigns/);
 });
 
+test("Smartlead V2 migration pauses legacy campaigns and deduplicates bounce recipients", async () => {
+  const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
+  const reputation = await read("src/lib/smartlead-reputation.ts");
+  const workflow = await read(".github/workflows/smartlead-autopilot.yml");
+
+  assert.match(orchestrator, /pauseCampaigns\(\[\.\.\.unsafeLanes\]/);
+  assert.match(orchestrator, /BOUNCE_GUARD_MIN_UNIQUE_RECIPIENTS = 3/);
+  assert.match(orchestrator, /SMARTLEAD_EMERGENCY_BOUNCE_THRESHOLD = 10/);
+  assert.match(orchestrator, /managed V2 lanes/);
+  assert.match(reputation, /uniqueBouncedLeadEmails/);
+  assert.match(reputation, /duplicateBounceEvents/);
+  assert.match(workflow, /returned blocked=true/);
+});
+
 test("Golden Hours runs three idempotent attempts before the Riyadh send window", async () => {
   const workflow = await read(".github/workflows/smartlead-autopilot.yml");
   const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");

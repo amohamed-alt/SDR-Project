@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { calculateReputationPlan, isSafeTalenteraSender, reputationHealth } from "../src/lib/smartlead-reputation.ts";
+import { calculateReputationPlan, campaignReputationHealth, isSafeTalenteraSender, reputationHealth, uniqueBouncedLeadEmails } from "../src/lib/smartlead-reputation.ts";
 
 function sender(overrides = {}) {
   return {
@@ -50,4 +50,29 @@ test("reputation safety locks at two percent bounce or 0.3 percent spam", () => 
   assert.equal(reputationHealth(100, 2).healthy, false);
   assert.equal(reputationHealth(1_000, 0, 2).healthy, true);
   assert.equal(reputationHealth(1_000, 0, 3).healthy, false);
+});
+
+test("campaign bounce health deduplicates repeated events for the same recipient", () => {
+  const rows = [
+    { email: "former@example.com", is_bounced: true },
+    { email: "former@example.com", is_bounced: true },
+    { lead: { email: "FORMER@example.com", is_sender_bounced: true } },
+  ];
+  assert.deepEqual(uniqueBouncedLeadEmails(rows), ["former@example.com"]);
+  const health = campaignReputationHealth(51, 4, rows);
+  assert.equal(health.uniqueBounces, 1);
+  assert.equal(health.duplicateBounceEvents, 3);
+  assert.equal(health.healthy, true);
+});
+
+test("campaign bounce health pauses only after three unique failures", () => {
+  const rows = [
+    { email: "one@example.com", email_status: "BOUNCED" },
+    { email: "two@example.com", is_bounced: true },
+    { lead: { email: "three@example.com", lead_status: "sender-bounced" } },
+  ];
+  const health = campaignReputationHealth(100, 3, rows);
+  assert.equal(health.uniqueBounces, 3);
+  assert.equal(health.bounceRate, 0.03);
+  assert.equal(health.healthy, false);
 });
