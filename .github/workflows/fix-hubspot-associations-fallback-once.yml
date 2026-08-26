@@ -24,37 +24,19 @@ jobs:
           from pathlib import Path
           p = Path('src/lib/hubspot.ts')
           text = p.read_text()
-          old_type = '''interface AssociationResponse {
-            results: Array<{
-              from: { id: string };
-              to: Array<{ toObjectId: string }>;
-            }>;
-          }'''
-          new_type = '''interface AssociationResponse {
-            results: Array<{
-              from: { id: string };
-              to: Array<{ toObjectId?: string; id?: string }>;
-            }>;
-          }'''
+
+          old_type = 'to: Array<{ toObjectId: string }>;'
+          new_type = 'to: Array<{ toObjectId?: string; id?: string }>;'
           if old_type not in text:
-              raise SystemExit('AssociationResponse anchor not found')
+              raise SystemExit('AssociationResponse field anchor not found')
           text = text.replace(old_type, new_type, 1)
 
-          old_read = '''  const readBatch = async (batch: string[]) => {
-            const body = JSON.stringify({ inputs: batch.map((id) => ({ id })) });
-            try {
-              return await hubspotRequest<AssociationResponse>(
-                `/crm/v4/associations/${fromObjectType}/${toObjectType}/batch/read`,
-                { method: "POST", body },
-              );
-            } catch (error) {
-              if (!(error instanceof HubSpotApiError)) throw error;
-              return hubspotRequest<AssociationResponse>(
-                `/crm/associations/2026-03/${fromObjectType}/${toObjectType}/batch/read`,
-                { method: "POST", body },
-              );
-            }
-          };'''
+          start_marker = '  const readBatch = async (batch: string[]) => {'
+          end_marker = '\n\n  const responses = await mapConcurrent('
+          start = text.find(start_marker)
+          end = text.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit('readBatch structural markers not found')
           new_read = '''  const readBatch = async (batch: string[]) => {
             const body = JSON.stringify({ inputs: batch.map((id) => ({ id })) });
             const paths = [
@@ -73,12 +55,10 @@ jobs:
             }
             throw lastError instanceof Error ? lastError : new Error("Unable to read HubSpot associations");
           };'''
-          if old_read not in text:
-              raise SystemExit('readBatch anchor not found')
-          text = text.replace(old_read, new_read, 1)
+          text = text[:start] + new_read + text[end:]
 
-          old_map = '''      associationMap.set(item.from.id, (item.to ?? []).map((target) => String(target.toObjectId)));'''
-          new_map = '''      associationMap.set(
+          old_map = 'associationMap.set(item.from.id, (item.to ?? []).map((target) => String(target.toObjectId)));'
+          new_map = '''associationMap.set(
                 item.from.id,
                 (item.to ?? [])
                   .map((target) => String(target.toObjectId || target.id || ""))
