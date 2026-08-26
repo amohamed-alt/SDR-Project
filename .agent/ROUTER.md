@@ -4,46 +4,51 @@ Use this router after reading `AGENTS.md` and the relevant local project documen
 
 The goal is not to maximize the number of references consulted. The goal is to select the smallest set of high-value references that improves the decision for the current task.
 
-The tier hierarchy is documented in `.agent/TIERS.md` and the machine-readable source registry is `.agent/skill-sources.json`.
+The tier hierarchy is documented in `.agent/TIERS.md`.
+The broad registry is `.agent/skill-sources.json`.
+The opinionated SDR shortlist is `.agent/approved-stack.json` and `.agent/APPROVED_STACK.md`.
+Meaningful design/frontend tasks must also follow `.agent/UI_UX_RULES.md`.
 
 ## Authority order
 
 Use this order when guidance conflicts:
 
 1. Current SDR project requirements, business rules, code, tests, and verified production behavior.
-2. Tier 0 official vendor/framework skills and documentation.
+2. Official upstream/vendor/framework documentation and Tier 0 references.
 3. Tier 1 engineering-core skills.
-4. Tier 2 SDR specialist skills.
-5. Tier 3 UI/UX specialist skills.
-6. Tier 4 discovery catalogs/ecosystems.
-7. Tier 5 optional/fallback references.
+4. Approved SDR specialist references that match the task.
+5. Tier 2 SDR specialist skills.
+6. Tier 3 UI/UX specialist skills.
+7. Tier 4 discovery catalogs/ecosystems.
+8. Tier 5 optional/fallback references.
 
 Do not let a generic or popular external skill override verified SDR-specific behavior.
 
 ## Routing sequence
 
-1. Identify the task domain and the exact SDR outcome requested.
+1. Identify the task domain and exact SDR outcome requested.
 2. Identify the local code/docs/workflows that currently own the behavior.
 3. Read those local sources first and inspect current callers/tests/configuration.
-4. Select a Tier 0 official source when the task involves a supported platform/framework.
+4. Select an official upstream/platform source when the task involves a supported platform or approved stack component.
 5. Select a Tier 1 engineering skill when planning, debugging, TDD, review, or architecture discipline is useful.
-6. Add one Tier 2 or Tier 3 specialist only when the task clearly matches that specialty.
-7. Use Tier 4 discovery only when the needed approach/tool is not already known.
-8. Use Tier 5 only as a justified fallback or broad technical reference.
-9. Normally consult no more than three external sources per task.
-10. Decide, implement, and verify using the existing project architecture.
+6. Add one task-specific specialist only when it materially improves the solution.
+7. For meaningful UI/design work, read `.agent/UI_UX_RULES.md` and use the design route below.
+8. Use discovery catalogs only when the needed approach/tool is not already known.
+9. Use fallback references only when preferred paths do not adequately solve the problem.
+10. Normally consult no more than three external sources per task unless broader research is genuinely needed.
+11. Decide, implement, and verify using the existing project architecture.
 
 ## Default engineering route
 
 For any meaningful code change:
 
-- Method: `obra/superpowers`
-- Engineering/specification: `mattpocock/skills`
-- Agent/skill standards when relevant: `anthropics/skills`
+- Method: `obra/superpowers`.
+- Engineering/specification: `mattpocock/skills`.
+- Agent/skill standards when relevant: `anthropics/skills`.
 
 Do not automatically use all three if one is enough.
 
-## Tier 0 platform routes
+## Platform and approved-stack routes
 
 ### HubSpot / CRM
 
@@ -51,11 +56,19 @@ Use `HubSpot/agent-cli-skills` as the preferred external skill source after insp
 
 Verify exact internal property names, object types, enum values, association types, and write semantics before live mutations.
 
-### Next.js / React
+### Next.js / React / frontend
 
 Use `vercel-labs/agent-skills` for frontend engineering guidance and `vercel/next.js` for framework/version behavior.
 
-The current project stack wins over recommendations that assume another framework or version.
+For meaningful design changes, also follow `.agent/UI_UX_RULES.md` and consult UI UX Pro Max. Add Taste Skill only when a visual-quality review materially improves the result.
+
+### n8n
+
+n8n is the preferred orchestration platform for this project.
+
+Use `n8n-io/n8n` and current upstream n8n documentation as implementation authority. `Awesome n8n Workflows` is discovery only.
+
+Do not add Windmill or another automation platform unless a concrete code-heavy/internal-ops workload makes it materially better than the existing n8n/application path.
 
 ### Postgres / reporting data model
 
@@ -65,40 +78,96 @@ Do not move HubSpot system-of-record behavior into Postgres merely because a dat
 
 ### Browser automation / E2E
 
-Use `microsoft/playwright` as the official browser/testing reference. Use `magnus919/agent-skills` only for additional agent-oriented Playwright patterns.
+Use `microsoft/playwright` as the official deterministic browser/testing reference.
 
-### Observability
+Use `browser-use/browser-use` only when interactive/agentic browser reasoning is genuinely needed. Use `magnus919/agent-skills` only for additional agent-oriented Playwright patterns.
+
+### Production observability
 
 Use `getsentry/sentry-for-ai` when production debugging, tracing, monitoring, or AI observability is materially part of the solution. Do not introduce Sentry merely for a local bug that can be diagnosed directly.
+
+### Public research / company research / ATS intelligence
+
+Preferred route:
+
+1. Inspect local research/evidence rules first.
+2. Verify SearXNG health with `/healthz` and verify at least one real JSON search response.
+3. Use SearXNG for broad discovery when healthy.
+4. Use Firecrawl for clean page/site crawl and structured extraction.
+5. Use Browser Use only when the target requires interactive/agentic browser navigation.
+6. Use Playwright for deterministic browser semantics/testing/automation.
+7. Preserve source URLs and evidence provenance.
+8. Use Apify when a scalable supported public-web workflow is more appropriate.
+9. Use HasData/Scrapfly only as justified fallbacks.
+
+A healthy SearXNG application can still have broken upstream engines. Never convert engine timeouts/errors into a valid-looking “zero results” conclusion.
+
+### Email verification
+
+Preferred reference route for future verification implementation:
+
+1. Preserve existing verified status and provenance.
+2. Reacher (`reacherhq/check-if-email-exists`) is the preferred open-source first-pass verification reference.
+3. MillionVerifier remains the paid fallback according to project rules for risky, unknown, ambiguous, or confidence-sensitive results.
+4. Review SMTP/network limitations and current Reacher licensing before production self-hosting.
+5. Never let a weaker/open-source result overwrite a stronger verified result.
+
+Adding the reference does not itself change live sequence eligibility.
+
+### AI / agents / research engineering
+
+Use the existing application and n8n path first when sufficient.
+
+- OpenAI-specific agents/tool calling/structured output/evals/RAG: current official OpenAI docs + `openai/openai-cookbook`.
+- Dedicated AI app/agent/RAG platform: Dify only when the platform itself solves a real gap.
+- Multi-provider model gateway/routing/quotas: LiteLLM only when provider abstraction is justified.
+- AI tracing/evaluations/experiments/cost observability: Langfuse when production complexity justifies operating it.
+- Deep AI/RAG/ML methods: existing AI Research Skills / Scientific Agent Skills when relevant.
+
+Do not add Dify, LiteLLM, or Langfuse merely because a feature calls an LLM.
+
+### Internal operations / operational data UI
+
+- n8n remains default for orchestration.
+- Windmill is an optional reference for code-heavy internal tools/scripts/jobs.
+- NocoDB is an optional UI for operational/manual-review data and never replaces HubSpot as CRM authority.
+
+### Outbound sender alternatives
+
+Listmonk, Mautic, and Quickly are reference-only.
+
+SmartLead remains the current production sender. Any migration requires a controlled deliverability pilot covering inbox placement, bounce behavior, reply handling, mailbox rotation, rate limiting, OAuth/token stability, observability, rollback, and comparison against the current production baseline.
 
 ## Task matrix
 
 | Task | Local sources first | Preferred route |
 |---|---|---|
-| Bug / regression | affected code, tests, callers, logs | Tier 0 platform source if relevant + Superpowers systematic debugging |
-| New backend feature | architecture, API routes, adapters, tests | relevant Tier 0 + Matt Pocock/Superpowers; System Design Primer only if needed |
-| HubSpot integration | CRM adapters, property mappings, associations, workflows | HubSpot Agent CLI Skills + official HubSpot docs + one Tier 1 method skill |
-| HubSpot data quality / enrichment | current provenance/status fields and workflows | HubSpot Agent CLI Skills; Apify only if new web research is actually required |
-| SmartLead automation | SmartLead workflows, eligibility/status logic | official SmartLead docs + Tier 1 engineering; discovery only if an integration gap exists |
-| SignalHire enrichment | `chrome-companion/`, enrichment workflows, mappings | vendor behavior first; Playwright only for browser-flow testing/automation |
-| Career / ATS research | `docs/CAREER_INTELLIGENCE.md`, existing search/evidence code | Apify Agent Skills; Playwright when browser automation is required; Last 30 Days only when recency/community signal matters |
-| Prospecting / public web data | current data model, dedupe and source tracking | Apify Agent Skills first; HasData/Scrapfly only as fallback |
-| Dashboard / UI / charts | existing components and dashboard guide | Vercel/Next.js + UI UX Pro Max or Taste when material UX/design work is involved |
-| UX redesign | dashboard workflow, user actions, current visual system | Vercel Agent Skills + UI UX Pro Max/Taste; preserve operational density |
-| n8n automation | existing workflow/data model/idempotency | Tier 1 engineering + Awesome n8n Workflows for discovery, not authority |
-| GitHub Actions | `.github/workflows/`, scripts, secrets model | Superpowers + official GitHub behavior; Secret Knowledge only as optional reference |
-| Docker / VPS / networking | Dockerfiles, compose, ops docs | Tier 1 engineering + Secret Knowledge/Awesome Selfhosted if needed |
-| Scaling / caching | architecture, measurements, cache/query path | relevant Tier 0 + Matt Pocock/Superpowers; System Design Primer as optional architecture reference |
+| Bug / regression | affected code, tests, callers, logs | platform source if relevant + Superpowers systematic debugging |
+| New backend feature | architecture, API routes, adapters, tests | relevant official source + Matt Pocock/Superpowers; System Design Primer only if needed |
+| HubSpot integration | CRM adapters, mappings, associations, workflows | HubSpot Agent CLI Skills + official HubSpot docs + one Tier 1 method skill |
+| HubSpot data quality / enrichment | current provenance/status fields and workflows | HubSpot Agent CLI Skills; research stack only if new public-web evidence is required |
+| SmartLead automation | SmartLead workflows, eligibility/status logic | official SmartLead behavior + Tier 1 engineering |
+| Email verification | current verification fields, send eligibility, provenance | Reacher first-pass reference + MillionVerifier fallback rules; targeted tests before live change |
+| SignalHire enrichment | `chrome-companion/`, workflows, mappings | vendor behavior first; browser automation only if required |
+| Career / ATS research | `docs/CAREER_INTELLIGENCE.md`, search/evidence code | SearXNG health/search → Firecrawl → Browser Use if interactive → Playwright; Apify when scalable workflow fits |
+| Prospecting / public web data | data model, dedupe, provenance | SearXNG/Firecrawl preferred; Browser Use/Playwright as needed; Apify for scalable supported jobs |
+| Dashboard / UI / charts | existing components + dashboard guide + UI_UX_RULES | Vercel/Next.js + UI UX Pro Max; Taste for polish review |
+| UX redesign | user workflow, current visual system, UI_UX_RULES | Vercel Agent Skills + UI UX Pro Max + optional Taste; preserve operational density |
+| n8n automation | existing workflow/data model/idempotency | upstream n8n + Tier 1 engineering; community workflows discovery only |
+| Internal ops tool | current app/n8n capabilities | n8n first; Windmill only if code-heavy tool/job is a clear fit |
+| Manual-review data UI | HubSpot/Postgres boundaries | NocoDB optional; never make it CRM authority |
+| AI agent / tool calling | current data policy and code path | official model docs + OpenAI Cookbook when OpenAI-specific; Dify only for real platform need |
+| Multi-model AI gateway | existing provider calls and secrets | LiteLLM only when routing/quotas/abstraction justify it |
+| AI observability | existing logs/traces | Langfuse when evaluation/tracing complexity warrants it; Sentry as relevant |
+| GitHub Actions | `.github/workflows/`, scripts, secrets model | Superpowers + official GitHub behavior |
+| Docker / VPS / networking | Dockerfiles, compose, ops docs | Tier 1 engineering + official upstream service docs |
+| Scaling / caching | architecture, measurements, cache/query path | relevant official source + Matt Pocock/Superpowers; System Design Primer optional |
 | Postgres reporting layer | architecture and HubSpot source-of-truth boundaries | Supabase Agent Skills + Tier 1 engineering |
-| Browser E2E test | current UI/API behavior | Microsoft Playwright + Playwright Agent Skills when useful |
-| Production observability | logs, runtime path, current monitoring | Sentry for AI + relevant platform source |
-| AI/RAG/ML feature | data policy, project boundary, current architecture | AI Research Skills; Scientific Agent Skills only when the task requires deeper analytical methods |
+| Browser E2E test | current UI/API behavior | Microsoft Playwright + optional Playwright Agent Skills |
+| Production observability | logs, runtime path, current monitoring | Sentry + relevant platform source |
 | Large codebase understanding | repo tree, callers, tests, docs | Understand Anything after normal code search/navigation |
-| Presentation generation | requested content/source data | Frontend Slides |
-| Customer-facing/outreach copy | product facts, SDR terminology, actual workflow | Humanizer only as a style aid; never invent claims |
-| New tool/API discovery | requirements and existing stack | Vercel Skills Ecosystem, Composio, Awesome catalogs, Public APIs |
-| New self-hosted service | VPS architecture, threat model, maintenance burden | Awesome Selfhosted + Secret Knowledge; validate official project docs before adoption |
-| New MCP/tool connector | exact integration requirement and security | Awesome MCP Servers/Composio for discovery; verify selected server/tool independently |
+| Customer-facing/outreach copy | product facts, terminology, actual workflow | Humanizer only as style aid; never invent claims |
+| New tool/API discovery | requirements and existing stack | approved stack first, then Vercel Skills/Composio/Awesome/Public APIs only if needed |
 
 ## SDR decision checklist
 
@@ -106,108 +175,72 @@ Before implementation, answer these questions from evidence:
 
 - What exact user/SDR problem is being solved?
 - Which current module/workflow owns this behavior?
-- Is HubSpot, SmartLead, SignalHire, Calendar, GitHub Actions, n8n, or another system the source of truth for this operation?
+- Which system is the source of truth for the operation?
 - What existing business rule must remain unchanged?
-- Which tier/source is relevant, and why is it needed?
+- Which approved/tiered source is relevant, and why is it needed?
+- Is the proposed new service actually necessary, or can current code/n8n solve the problem more simply?
 - What data can be written, and is the write idempotent/reversible?
 - Could the change create duplicate sends, tasks, meetings, contacts, enrichments, or CRM writes?
 - Could it expose a token, CRM data, personal data, or browser/session data?
 - What is the smallest change that solves the root cause?
-- How will success be verified?
+- How will success be verified with real evidence?
 
-## Skill selection examples
+## Design example
 
-### Dashboard card is wrong
+### Add or redesign a dashboard area
 
-Route:
+1. Inspect the existing component, neighboring components, styles, responsive behavior, and actions.
+2. Read `docs/DASHBOARD_GUIDE_AR.md` plus `.agent/UI_UX_RULES.md`.
+3. Define user goal, primary action, information hierarchy, states, and what must remain consistent.
+4. Use Vercel/Next.js guidance for framework behavior.
+5. Use UI UX Pro Max for meaningful UX/design-system decisions.
+6. Use Taste only when an additional visual-quality pass helps.
+7. Verify functional, responsive, loading/error/empty, and accessibility behavior.
 
-1. `docs/METRICS.md`.
-2. Relevant aggregation/API code and test.
-3. Vercel/Next.js only if framework behavior is relevant.
-4. Superpowers systematic debugging.
+Do not start by imposing a new generic design system.
 
-Do not start with UI redesign.
-
-### Add a new HubSpot property workflow
-
-Route:
-
-1. Inspect current property mappings, object ownership, associations, and workflow code.
-2. Read HubSpot Agent CLI Skills and official HubSpot behavior.
-3. Verify the exact internal property name and valid values.
-4. Use a Tier 1 implementation/review pattern if the change is meaningful.
-5. Test a safe target before any broad write.
-
-### Add WhatsApp action
-
-Route:
-
-1. Inspect contact phone/mobile normalization and dashboard action patterns.
-2. Inspect security and browser behavior.
-3. Use Vercel/Next.js for the UI/framework path if relevant.
-4. Use integration/discovery catalogs only if a new provider/tool is actually needed.
-5. Test both phone fields, missing-number behavior, normalization, and URL encoding.
-
-### Speed up HubSpot dashboard
-
-Route:
-
-1. Measure existing request/caching/query fan-out.
-2. Read `docs/ARCHITECTURE.md` and `docs/FAST_DASHBOARD_ARCHITECTURE.md`.
-3. Use relevant Vercel/Next.js guidance for server/cache behavior.
-4. Use Supabase Postgres skills only if the measured solution involves the reporting database path.
-5. Use System Design Primer only as a supporting architecture reference.
+## Research example
 
 ### Research ATS / career pages
 
-Route:
+1. Inspect `docs/CAREER_INTELLIGENCE.md` and current evidence/status rules.
+2. Verify company identity and preserve evidence provenance.
+3. Check SearXNG health and a real JSON search.
+4. Use SearXNG for discovery and Firecrawl for extraction.
+5. Use Browser Use only for genuinely interactive pages and Playwright for deterministic browser behavior/tests.
+6. Use Apify when its supported scalable workflow is a better fit.
+7. Use fallbacks only after preferred paths fail.
 
-1. Inspect `docs/CAREER_INTELLIGENCE.md` and existing evidence/status rules.
-2. Keep company identity and evidence provenance explicit.
-3. Use Apify Agent Skills when scalable public-web extraction is appropriate.
-4. Use Microsoft Playwright for browser semantics/testing when browser automation is required.
-5. Use HasData/Scrapfly only if the preferred path cannot reliably extract the needed public data.
+## Verification example
 
-### Production failure
+### Introduce Reacher-assisted verification
 
-Route:
-
-1. Reproduce or trace the failure through the actual local path.
-2. Inspect logs, code, recent changes, config, and dependencies.
-3. Read the relevant Tier 0 platform/framework source.
-4. Apply Superpowers systematic debugging.
-5. Use Sentry guidance only when observability/tracing materially helps diagnosis or prevention.
+1. Inspect current MillionVerifier fields, sequence eligibility, and status mapping.
+2. Define an explicit truth table for Reacher outputs and paid fallback conditions.
+3. Preserve provenance for both verifiers.
+4. Do not mark risky/unknown/catch-all as safe without the explicit business rule.
+5. Run targeted tests/dry-runs before any broad sequence change.
 
 ## Discovery rules
 
-Tier 4 catalogs are not trusted implementation sources by default.
+Discovery catalogs are not trusted implementation sources by default.
 
-When a discovery catalog suggests a tool, MCP server, workflow, or skill:
+When a catalog suggests a tool, MCP server, workflow, or skill:
 
 1. Find the upstream/original project.
 2. Check maintenance and current compatibility.
 3. Read official documentation.
-4. Review permissions, secrets, data handling, and license.
-5. Prefer an existing project dependency/integration when it already solves the need.
+4. Review permissions, secrets, data handling, operational burden, and license.
+5. Prefer an approved existing project dependency/integration when it already solves the need.
 6. Do not install or execute copied commands without inspection.
-
-## Fallback rules
-
-Tier 5 exists to solve gaps, not to compete with the normal route.
-
-Examples:
-
-- Apify preferred for a supported scraping/data workflow; HasData/Scrapfly are fallbacks.
-- Existing VPS services preferred over adding another self-hosted product just because it appears in Awesome Selfhosted.
-- Current architecture and measured bottlenecks preferred over generic System Design patterns.
 
 ## Conflict resolution
 
-If an external skill conflicts with the repository:
+If an external skill or approved reference conflicts with the repository:
 
 1. security and data integrity win;
 2. explicit current SDR project requirements win;
 3. verified current vendor/API/framework behavior wins;
 4. existing project architecture wins unless there is a documented reason to change it;
-5. higher-trust tiers beat lower-trust tiers for the same question;
+5. higher-trust sources beat lower-trust sources for the same question;
 6. external patterns are adapted rather than copied blindly.
