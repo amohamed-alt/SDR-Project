@@ -179,7 +179,7 @@ jobs:
             jq -r '.results[]?.url // empty' /tmp/tavily-career-test.json | head -5
           fi
 
-      - name: Validate OpenRouter low-cost model
+      - name: Report OpenRouter low-cost model availability
         env:
           OPENROUTER_KEY: ${{ secrets.OPENROUTER_API_KEY || secrets.GTM_RESEARCH_OPENROUTER_API_KEY }}
         run: |
@@ -199,8 +199,8 @@ jobs:
             -d '{"model":"openai/gpt-4.1-nano","messages":[{"role":"user","content":"Reply OK"}],"max_tokens":4,"temperature":0}' || true)
           if [ "$HTTP_CODE" != "200" ]; then
             OPENROUTER_ERROR=$(jq -r '.error.message // .message // "unknown OpenRouter error"' /tmp/openrouter-test.json 2>/dev/null || true)
-            echo "::error::OpenRouter Nano validation failed (HTTP $HTTP_CODE): $OPENROUTER_ERROR"
-            exit 1
+            echo "::warning::OpenRouter Nano is temporarily unavailable (HTTP $HTTP_CODE): $OPENROUTER_ERROR. Deterministic Smartlead copy and routing remain available, so deployment will continue."
+            exit 0
           fi
           MODEL=$(jq -r '.model // "unknown"' /tmp/openrouter-test.json 2>/dev/null || echo unknown)
           echo "OpenRouter low-cost route: configured and responding via $MODEL"
