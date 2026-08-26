@@ -40,7 +40,7 @@ interface BatchResponse {
 interface AssociationResponse {
   results: Array<{
     from: { id: string };
-    to: Array<{ toObjectId: string }>;
+    to: Array<{ toObjectId?: string; id?: string }>;
   }>;
 }
 
@@ -255,20 +255,23 @@ export async function readAssociations(
   if (!fromIds.length) return associationMap;
 
   const readBatch = async (batch: string[]) => {
-    const body = JSON.stringify({ inputs: batch.map((id) => ({ id })) });
+  const body = JSON.stringify({ inputs: batch.map((id) => ({ id })) });
+  const paths = [
+    `/crm/v4/associations/${fromObjectType}/${toObjectType}/batch/read`,
+    `/crm/associations/2026-03/${fromObjectType}/${toObjectType}/batch/read`,
+    `/crm/v3/associations/${fromObjectType}/${toObjectType}/batch/read`,
+  ];
+  let lastError: unknown;
+  for (const path of paths) {
     try {
-      return await hubspotRequest<AssociationResponse>(
-        `/crm/v4/associations/${fromObjectType}/${toObjectType}/batch/read`,
-        { method: "POST", body },
-      );
+      return await hubspotRequest<AssociationResponse>(path, { method: "POST", body });
     } catch (error) {
+      lastError = error;
       if (!(error instanceof HubSpotApiError)) throw error;
-      return hubspotRequest<AssociationResponse>(
-        `/crm/associations/2026-03/${fromObjectType}/${toObjectType}/batch/read`,
-        { method: "POST", body },
-      );
     }
-  };
+  }
+  throw lastError instanceof Error ? lastError : new Error("Unable to read HubSpot associations");
+};
 
   const responses = await mapConcurrent(
     chunks([...new Set(fromIds)]),
@@ -278,7 +281,12 @@ export async function readAssociations(
 
   for (const response of responses) {
     for (const item of response.results ?? []) {
-      associationMap.set(item.from.id, (item.to ?? []).map((target) => String(target.toObjectId)));
+      associationMap.set(
+      item.from.id,
+      (item.to ?? [])
+        .map((target) => String(target.toObjectId || target.id || ""))
+        .filter(Boolean),
+    );
     }
   }
 
