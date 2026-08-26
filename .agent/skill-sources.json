@@ -1,0 +1,181 @@
+{
+  "version": 1,
+  "updatedAt": "2026-08-26",
+  "policy": {
+    "localProjectWins": true,
+    "readRelevantOnly": true,
+    "doNotBlindlyCopy": true,
+    "verifyBeforeCompletion": true,
+    "preferOfficialVendorDocsForExternalAPIs": true
+  },
+  "sources": [
+    {
+      "name": "Superpowers",
+      "repo": "https://github.com/obra/superpowers",
+      "tier": "core",
+      "mode": "consult",
+      "useFor": ["planning", "brainstorming", "systematic-debugging", "tdd", "parallel-agents", "code-review", "verification", "git-workflows"]
+    },
+    {
+      "name": "Matt Pocock Skills",
+      "repo": "https://github.com/mattpocock/skills",
+      "tier": "core",
+      "mode": "consult",
+      "useFor": ["specification", "implementation", "codebase-design", "architecture", "debugging", "tdd", "research", "handoffs"]
+    },
+    {
+      "name": "Anthropic Skills",
+      "repo": "https://github.com/anthropics/skills",
+      "tier": "core",
+      "mode": "consult",
+      "useFor": ["skill-design", "agent-instructions", "documents", "technical-workflows", "enterprise-workflows"]
+    },
+    {
+      "name": "UI UX Pro Max Skill",
+      "repo": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",
+      "tier": "specialist",
+      "mode": "consult",
+      "useFor": ["ui", "ux", "dashboards", "saas", "design-systems", "react", "responsive-design", "charts"]
+    },
+    {
+      "name": "Taste Skill",
+      "repo": "https://github.com/Leonxlnx/taste-skill",
+      "tier": "specialist",
+      "mode": "consult",
+      "useFor": ["visual-quality", "frontend-quality", "ui-polish"]
+    },
+    {
+      "name": "Understand Anything",
+      "repo": "https://github.com/Lum1104/Understand-Anything",
+      "tier": "specialist",
+      "mode": "consult",
+      "useFor": ["codebase-understanding", "knowledge-graphs", "large-repository-navigation"]
+    },
+    {
+      "name": "Awesome Claude Skills by Composio",
+      "repo": "https://github.com/ComposioHQ/awesome-claude-skills",
+      "tier": "discovery",
+      "mode": "discover",
+      "useFor": ["crm", "hubspot", "whatsapp", "linkedin", "github", "supabase", "google-workspace", "n8n", "automation", "mcp"]
+    },
+    {
+      "name": "Last 30 Days Skill",
+      "repo": "https://github.com/mvanhorn/last30days-skill",
+      "tier": "specialist",
+      "mode": "consult",
+      "useFor": ["current-research", "market-research", "community-signal"]
+    },
+    {
+      "name": "Awesome Claude Code",
+      "repo": "https://github.com/hesreallyhim/awesome-claude-code",
+      "tier": "discovery",
+      "mode": "discover",
+      "useFor": ["agents", "skills", "plugins", "developer-tooling"]
+    },
+    {
+      "name": "Humanizer",
+      "repo": "https://github.com/blader/humanizer",
+      "tier": "specialist",
+      "mode": "consult",
+      "useFor": ["copy", "human-readable-writing", "customer-facing-text"]
+    },
+    {
+      "name": "Scientific Agent Skills",
+      "repo": "https://github.com/K-Dense-AI/claude-scientific-skills",
+      "tier": "specialist",
+      "mode": "consult",
+      "useFor": ["research", "data-analysis", "scientific-workflows"]
+    },
+    {
+      "name": "Frontend Slides",
+      "repo": "https://github.com/zarazhangrui/frontend-slides",
+      "tier": "specialist",
+      "mode": "consult",
+      "useFor": ["presentations", "frontend-generated-slides"]
+    },
+    {
+      "name": "AI Research Skills",
+      "repo": "https://github.com/Orchestra-Research/AI-Research-SKILLs",
+      "tier": "specialist",
+      "mode": "consult",
+      "useFor": ["ai", "ml", "rag", "embeddings", "mlops", "prompt-engineering", "observability"]
+    },
+    {
+      "name": "Awesome Agent Skills 2026",
+      "repo": "https://github.com/saudeglobal/awesome-agent-skills2026",
+      "tier": "discovery",
+      "mode": "discover",
+      "useFor": ["skill-discovery", "agent-patterns"]
+    },
+    {
+      "name": "Awesome Agent Skills",
+      "repo": "https://github.com/khasky/awesome-agent-skills",
+      "tier": "discovery",
+      "mode": "discover",
+      "useFor": ["skill-discovery", "engineering-skills"]
+    },
+    {
+      "name": "Awesome n8n Workflows",
+      "repo": "https://github.com/metehanulusoy/awesome-n8n-workflows",
+      "tier": "automation",
+      "mode": "discover",
+      "useFor": ["n8n", "crm-automation", "sales-automation", "ai-workflows", "google-workspace", "devops"]
+    },
+    {
+      "name": "Awesome MCP Servers",
+      "repo": "https://github.com/BrethofAI/awesome-mcp-servers",
+      "tier": "automation",
+      "mode": "discover",
+      "useFor": ["mcp", "tool-integration", "agent-connectors", "databases", "browser-automation"]
+    },
+    {
+      "name": "Awesome Selfhosted",
+      "repo": "https://github.com/awesome-selfhosted/awesome-selfhosted",
+      "tier": "reference",
+      "mode": "discover",
+      "useFor": ["self-hosting", "vps", "open-source-alternatives", "monitoring", "databases", "automation"]
+    },
+    {
+      "name": "Public APIs",
+      "repo": "https://github.com/public-apis/public-apis",
+      "tier": "reference",
+      "mode": "discover",
+      "useFor": ["apis", "data-sources", "enrichment", "validation", "integration-discovery"]
+    },
+    {
+      "name": "The Book of Secret Knowledge",
+      "repo": "https://github.com/trimstray/the-book-of-secret-knowledge",
+      "tier": "reference",
+      "mode": "consult",
+      "useFor": ["linux", "devops", "networking", "security", "cli", "debugging"]
+    },
+    {
+      "name": "Build Your Own X",
+      "repo": "https://github.com/codecrafters-io/build-your-own-x",
+      "tier": "reference",
+      "mode": "consult",
+      "useFor": ["fundamentals", "implementation-patterns", "learning"]
+    },
+    {
+      "name": "System Design Primer",
+      "repo": "https://github.com/donnemartin/system-design-primer",
+      "tier": "reference",
+      "mode": "consult",
+      "useFor": ["system-design", "scalability", "caching", "queues", "databases", "reliability"]
+    },
+    {
+      "name": "Developer Roadmap",
+      "repo": "https://github.com/kamranahmedse/developer-roadmap",
+      "tier": "reference",
+      "mode": "discover",
+      "useFor": ["gap-analysis", "engineering-roadmaps", "technology-selection"]
+    },
+    {
+      "name": "Awesome",
+      "repo": "https://github.com/sindresorhus/awesome",
+      "tier": "discovery",
+      "mode": "discover",
+      "useFor": ["curated-lists", "technology-discovery", "specialist-references"]
+    }
+  ]
+}
