@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "updatedAt": "2026-08-26",
+  "purpose": "Curated, high-value open-source skills and upstream references approved for SDR work. This supplements skill-sources.json and is intentionally smaller and more opinionated.",
+  "policy": {
+    "localProjectWins": true,
+    "officialUpstreamBeforeCommunity": true,
+    "doNotInstallByDefault": true,
+    "verifyHealthBeforeUse": true,
+    "preserveHubSpotAsSystemOfRecord": true,
+    "preserveSmartLeadAsCurrentProductionSender": true,
+    "readRelevantOnly": true
+  },
+  "defaults": {
+    "orchestration": "n8n",
+    "publicResearchDiscovery": "SearXNG",
+    "webExtraction": "Firecrawl",
+    "interactiveBrowserAgent": "Browser Use",
+    "deterministicBrowserAutomation": "Microsoft Playwright",
+    "emailPreverification": "Reacher",
+    "paidEmailVerificationFallback": "MillionVerifier",
+    "uiFrameworkReference": "Vercel / Next.js",
+    "uiDesignSpecialists": ["UI UX Pro Max Skill", "Taste Skill"]
+  },
+  "sources": [
+    {
+      "name": "n8n",
+      "repo": "https://github.com/n8n-io/n8n",
+      "kind": "official-upstream-reference",
+      "status": "preferred-existing-system",
+      "useFor": ["workflow-automation", "orchestration", "webhooks", "scheduled-jobs", "integrations", "ai-workflows"],
+      "notes": "This is the preferred automation/orchestration platform for this project. Community workflow catalogs are discovery only; upstream n8n behavior wins."
+    },
+    {
+      "name": "SearXNG",
+      "repo": "https://github.com/searxng/searxng",
+      "kind": "official-upstream-reference",
+      "status": "preferred-self-hosted-research-discovery",
+      "useFor": ["metasearch", "public-web-research", "research-discovery", "company-research", "ats-research"],
+      "notes": "Never assume the instance is healthy. Check /healthz and a JSON search request before relying on it. Treat empty results caused by upstream engine failures as an error, not evidence that nothing exists."
+    },
+    {
+      "name": "Firecrawl",
+      "repo": "https://github.com/firecrawl/firecrawl",
+      "kind": "official-upstream-reference",
+      "status": "preferred-web-extraction-reference",
+      "useFor": ["crawl", "scrape", "structured-extraction", "career-pages", "company-websites", "research-ingestion", "llm-ready-content"],
+      "notes": "Use after discovery when clean page/site extraction is needed. Preserve source URLs and evidence provenance."
+    },
+    {
+      "name": "Browser Use",
+      "repo": "https://github.com/browser-use/browser-use",
+      "kind": "official-upstream-reference",
+      "status": "preferred-agentic-browser-reference",
+      "useFor": ["browser-agents", "interactive-research", "dynamic-sites", "multi-step-browser-tasks", "agentic-navigation"],
+      "notes": "Use only when deterministic HTTP/Firecrawl/Playwright paths are insufficient. Do not expose authenticated sessions or production credentials without explicit need and safeguards."
+    },
+    {
+      "name": "Reacher",
+      "repo": "https://github.com/reacherhq/check-if-email-exists",
+      "kind": "official-upstream-reference",
+      "status": "preferred-email-preverification-reference",
+      "useFor": ["email-verification", "syntax", "mx", "smtp", "catch-all", "disposable-email", "role-email"],
+      "notes": "Default reference for inexpensive first-pass verification. Ambiguous/risky/unknown results should use the project's paid verifier rules (MillionVerifier) when confidence is required. Review current licensing and SMTP/network constraints before self-hosted production use."
+    },
+    {
+      "name": "OpenAI Cookbook",
+      "repo": "https://github.com/openai/openai-cookbook",
+      "kind": "official-ai-reference",
+      "status": "preferred-openai-reference",
+      "useFor": ["agents", "tool-calling", "structured-outputs", "evals", "rag", "embeddings", "ai-workflows"],
+      "notes": "Use for OpenAI-specific implementation patterns together with current official API documentation."
+    },
+    {
+      "name": "Dify",
+      "repo": "https://github.com/langgenius/dify",
+      "kind": "ai-platform-reference",
+      "status": "optional-specialist",
+      "useFor": ["agent-platform", "ai-workflows", "rag", "prompt-apps", "knowledge-bases"],
+      "notes": "Reference when a dedicated AI application/workflow platform is justified. Do not add it when existing code or n8n is simpler."
+    },
+    {
+      "name": "LiteLLM",
+      "repo": "https://github.com/BerriAI/litellm",
+      "kind": "ai-gateway-reference",
+      "status": "optional-specialist",
+      "useFor": ["multi-provider-llm", "ai-gateway", "model-routing", "budgets", "provider-abstraction"],
+      "notes": "Use only when multi-provider routing, centralized keys, quotas, or model abstraction materially helps."
+    },
+    {
+      "name": "Langfuse",
+      "repo": "https://github.com/langfuse/langfuse",
+      "kind": "ai-observability-reference",
+      "status": "optional-specialist",
+      "useFor": ["llm-tracing", "prompt-observability", "evaluations", "experiments", "cost-tracking", "agent-observability"],
+      "notes": "Use when AI/agent behavior reaches production complexity where traces and evaluations are worth operating."
+    },
+    {
+      "name": "NocoDB",
+      "repo": "https://github.com/nocodb/nocodb",
+      "kind": "internal-data-ui-reference",
+      "status": "optional-specialist",
+      "useFor": ["internal-data-ui", "postgres-ui", "operations-tables", "manual-review-queues"],
+      "notes": "May provide an internal UI over operational data, but HubSpot remains the CRM system of record. Review current licensing before adoption."
+    },
+    {
+      "name": "Windmill",
+      "repo": "https://github.com/windmill-labs/windmill",
+      "kind": "internal-ops-reference",
+      "status": "optional-specialist",
+      "useFor": ["internal-tools", "developer-automation", "scripts-as-jobs", "admin-operations", "background-jobs"],
+      "notes": "Use for code-heavy internal operations when it is materially better than the existing n8n + application path. It is not the default orchestration platform."
+    },
+    {
+      "name": "Listmonk",
+      "repo": "https://github.com/knadh/listmonk",
+      "kind": "outbound-reference",
+      "status": "reference-only",
+      "useFor": ["email-campaign-architecture", "mailing-lists", "self-hosted-email"],
+      "notes": "Reference only. It does not replace SmartLead production sending without a dedicated deliverability pilot."
+    },
+    {
+      "name": "Mautic",
+      "repo": "https://github.com/mautic/mautic",
+      "kind": "marketing-automation-reference",
+      "status": "reference-only",
+      "useFor": ["marketing-automation", "segmentation", "campaign-automation", "email-architecture"],
+      "notes": "Reference only. Do not introduce it simply to duplicate existing n8n/SmartLead/HubSpot behavior."
+    },
+    {
+      "name": "Quickly",
+      "repo": "https://github.com/AbdelftahZowail/Quickly",
+      "kind": "cold-email-reference",
+      "status": "experimental-reference-only",
+      "useFor": ["cold-email", "multi-inbox", "sequences", "reply-handling", "self-hosted-outreach"],
+      "notes": "Experimental reference only. Never migrate production sending from SmartLead based on feature parity alone; require a controlled deliverability pilot and rollback plan."
+    }
+  ]
+}
