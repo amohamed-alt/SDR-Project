@@ -1,0 +1,152 @@
+name: Marita SignalHire Clean Pilot V5
+
+on:
+  push:
+    paths:
+      - '.github/workflows/marita-signalhire-clean-pilot-v5.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BASE_URL: https://sdr.dashboardtalentera.tech
+      DASHBOARD_USERNAME: talentera
+      DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+      OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN || secrets.DASHBOARD_PASSWORD }}
+      SIGNALHIRE_API_KEY: ${{ secrets.SIGNALHIRE_API_KEY }}
+    steps:
+      - name: SignalHire phone-first on verified net-new companies
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const companies = [
+              { name: 'Sumerge', domain: 'sumerge.com', country: 'Egypt', expected: /talent acquisition|recruit|human resources|\bhr\b|people/i },
+              { name: 'Canal Sugar', domain: 'canalsugar.com', country: 'Egypt', expected: /chief human resources|\bchro\b|hr director|human resources director|talent acquisition|recruit/i },
+              { name: 'OTRAC Heavy Equipment', domain: 'otracheavy.com', country: 'Egypt', expected: /chief human resources|\bchro\b|hr director|human resources director|talent acquisition|recruit/i },
+            ];
+            const signalKey = process.env.SIGNALHIRE_API_KEY;
+            if (!signalKey) throw new Error('SIGNALHIRE_API_KEY is not configured');
+            const auth = `Basic ${Buffer.from(`${process.env.DASHBOARD_USERNAME}:${process.env.DASHBOARD_PASSWORD}`).toString('base64')}`;
+            const appHeaders = { Authorization: auth, 'x-acquisition-owner-token': process.env.OWNER_TOKEN, 'Content-Type': 'application/json' };
+            const titleQuery = '("Talent Acquisition" OR Recruitment OR Recruiting OR "Human Resources" OR HR OR "People") AND (Head OR Director OR Manager OR Lead OR VP OR Chief OR CHRO)';
+            const clean = v => String(v || '').replace(/\s+/g, ' ').trim();
+            const norm = v => clean(v).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+            const unique = arr => [...new Set((arr || []).map(clean).filter(Boolean))];
+            function companyMatch(candidate, target) {
+              const c = norm(candidate), t = norm(target);
+              if (!c || !t) return false;
+              return c === t || c.includes(t) || t.includes(c) || t.split(' ').filter(w => w.length > 3).every(w => c.includes(w));
+            }
+            function roleScore(title) {
+              const v = clean(title).toLowerCase();
+              if (/talent acquisition/.test(v) && /head|director|vp|vice president/.test(v)) return 100;
+              if (/recruit/.test(v) && /head|director|vp|vice president/.test(v)) return 96;
+              if (/chief human resources|\bchro\b|chief people/.test(v)) return 94;
+              if (/human resources|\bhr\b|people/.test(v) && /head|director|vp|vice president/.test(v)) return 90;
+              if (/talent acquisition|recruit/.test(v) && /manager|lead/.test(v)) return 82;
+              if (/human resources|\bhr\b|people/.test(v) && /manager|lead/.test(v)) return 75;
+              return 0;
+            }
+            async function app(path, init={}) {
+              const res = await fetch(`${process.env.BASE_URL}${path}`, { ...init, headers: { ...appHeaders, ...(init.headers || {}) } });
+              const text = await res.text();
+              let body = {}; try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text.slice(0,500) }; }
+              if (!res.ok) throw new Error(`${path} failed ${res.status}: ${JSON.stringify(body).slice(0,800)}`);
+              return body;
+            }
+            async function signal(path, body) {
+              const res = await fetch(`https://www.signalhire.com${path}`, {
+                method: 'POST', headers: { apikey: signalKey, 'Content-Type': 'application/json' },
+                body: JSON.stringify(body), signal: AbortSignal.timeout(30000),
+              });
+              const credits = res.headers.get('x-credits-left');
+              const payload = await res.json().catch(() => null);
+              if (!res.ok) throw new Error(`SignalHire ${path} failed ${res.status}`);
+              return { payload, creditsLeft: credits ? Number(credits) : null };
+            }
+            const result = { companies: companies.length, searches: 0, enrichments: 0, phoneReady: 0, pushed: 0, duplicates: 0, visible: 0, noCandidate: 0, noPhone: 0, errors: [], rows: [] };
+            for (const company of companies) {
+              try {
+                result.searches++;
+                const search = await signal('/api/v1/candidate/searchByQuery', {
+                  currentTitle: titleQuery,
+                  currentCompany: `"${company.name}"`,
+                  location: company.country,
+                  size: 10,
+                });
+                const profiles = Array.isArray(search.payload?.profiles) ? search.payload.profiles : [];
+                const ranked = profiles.map(p => {
+                  const current = (p.experience || []).find(e => e.current) || (p.experience || [])[0] || {};
+                  const title = clean(current.title || current.position);
+                  const currentCompany = clean(current.company);
+                  return { uid: clean(p.uid), fullName: clean(p.fullName), title, currentCompany, location: clean(p.location), score: roleScore(title), companyOk: companyMatch(currentCompany, company.name) };
+                }).filter(p => p.uid && p.fullName && p.companyOk && p.score >= 75 && company.expected.test(p.title)).sort((a,b) => b.score-a.score);
+                const selected = ranked[0];
+                if (!selected) {
+                  result.noCandidate++;
+                  result.rows.push({ company: company.name, result: 'no safe candidate' });
+                  continue;
+                }
+                result.enrichments++;
+                const enrichedResp = await signal('/api/v1/candidate/search', { items: [selected.uid], withoutWaterfall: true });
+                const first = Array.isArray(enrichedResp.payload) ? enrichedResp.payload[0] : null;
+                const candidate = first?.status === 'success' ? first.candidate : null;
+                if (!candidate) throw new Error('SignalHire selected candidate enrichment returned no candidate');
+                const current = (candidate.experience || []).find(e => e.current) || (candidate.experience || [])[0] || {};
+                const verifiedTitle = clean(current.position || candidate.headLine || selected.title);
+                const verifiedCompany = clean(current.company);
+                if (!companyMatch(verifiedCompany, company.name) || roleScore(verifiedTitle) < 75) throw new Error(`Enriched profile failed current-company/persona verification`);
+                const contacts = Array.isArray(candidate.contacts) ? candidate.contacts : [];
+                const phones = unique(contacts.filter(c => c.type === 'phone' && c.value).sort((a,b) => (b.subType === 'mobile' ? 1000 : 0) + Number(b.rating||0) - (a.subType === 'mobile' ? 1000 : 0) - Number(a.rating||0)).map(c => c.value));
+                const emails = unique(contacts.filter(c => c.type === 'email' && c.value).sort((a,b) => (b.subType === 'work' ? 1000 : 0) + Number(b.rating||0) - (a.subType === 'work' ? 1000 : 0) - Number(a.rating||0)).map(c => c.value));
+                if (!phones.length) {
+                  result.noPhone++;
+                  result.rows.push({ company: company.name, persona: clean(candidate.fullName), title: verifiedTitle, result: 'no phone' });
+                  continue;
+                }
+                result.phoneReady++;
+                const linkedin = clean((candidate.social || []).find(s => /linkedin/i.test(clean(s.type)))?.link);
+                const pushed = await app('/api/prospecting/push', { method: 'POST', body: JSON.stringify({
+                  source: 'Apollo People 0-credit → SignalHire Clean Pilot',
+                  signalHireUid: clean(candidate.uid || selected.uid),
+                  assignmentMode: 'marita',
+                  fullName: clean(candidate.fullName || selected.fullName),
+                  title: verifiedTitle,
+                  company: company.name,
+                  companyDomain: company.domain,
+                  companyWebsite: `https://${company.domain}`,
+                  location: clean((candidate.locations || []).map(x => x.name).filter(Boolean).join(' · ') || current.location || company.country),
+                  linkedinUrl: linkedin,
+                  email: emails[0] || '', emails,
+                  phone: phones[0], phones,
+                  score: selected.score >= 90 ? 85 : 78,
+                  priority: 'high',
+                }) });
+                if (pushed.pushed) result.pushed++;
+                if (pushed.duplicate) result.duplicates++;
+                result.rows.push({ company: company.name, persona: clean(candidate.fullName), title: verifiedTitle, phonePresent: true, pushed: Boolean(pushed.pushed), duplicate: Boolean(pushed.duplicate), taskId: clean(pushed.taskId) });
+              } catch (error) {
+                result.errors.push({ company: company.name, error: String(error?.message || error).slice(0,350) });
+              }
+            }
+            await new Promise(r => setTimeout(r, 3000));
+            const priority = await app('/api/marita-priority?refresh=1');
+            const taskSet = new Set((priority.companies || []).flatMap(c => c.taskIds || []).map(String));
+            for (const row of result.rows) if (row.taskId && taskSet.has(String(row.taskId))) { row.visible = true; result.visible++; }
+            result.priority = {
+              totalCompanies: (priority.companies || []).length,
+              readyToCall: Number(priority.summary?.readyToCallCompanies || 0),
+              highPriority: Number(priority.summary?.highPriorityCompanies || 0),
+              phoneFirstCompanies: Number(priority.summary?.phoneFirstCompanies || 0),
+              openExtensiveTasks: Number(priority.summary?.openExtensiveTasks || 0),
+            };
+            core.summary.addHeading('SignalHire Clean Pilot — Net-New Live Verification');
+            core.summary.addTable([[{data:'Metric',header:true},{data:'Result',header:true}],['Companies tested',String(result.companies)],['SignalHire searches',String(result.searches)],['SignalHire person enrichments',String(result.enrichments)],['Phone-ready verified personas',String(result.phoneReady)],['New Marita CALL tasks',String(result.pushed)],['Duplicates',String(result.duplicates)],['New tasks visible in Marita Priority',`${result.visible}/${result.pushed}`],['No safe candidate',String(result.noCandidate)],['No phone',String(result.noPhone)],['Errors',String(result.errors.length)],['Priority total companies',String(result.priority.totalCompanies)],['Priority ready-to-call',String(result.priority.readyToCall)],['Priority high-priority',String(result.priority.highPriority)]]);
+            if (result.rows.length) core.summary.addHeading('Results — phone/email values omitted',3).addTable([[{data:'Company',header:true},{data:'Persona',header:true},{data:'Title',header:true},{data:'Phone',header:true},{data:'Task',header:true},{data:'Dashboard',header:true}],...result.rows.map(x => [x.company||'',x.persona||'',x.title||'',x.phonePresent?'yes':'-',x.pushed?'new':x.duplicate?'existing':x.result||'-',x.visible?'visible':'-'])]);
+            await core.summary.write();
+            console.log('CLEAN_PILOT_RESULT=' + JSON.stringify({ ...result, rows: result.rows.map(({taskId,...r})=>r) }));
+            if (result.pushed > 0 && result.visible !== result.pushed) core.setFailed(`Only ${result.visible}/${result.pushed} new tasks visible in Marita Priority`);
