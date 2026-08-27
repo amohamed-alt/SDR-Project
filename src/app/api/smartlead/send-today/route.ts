@@ -80,7 +80,7 @@ export async function GET() {
     ownerActionsConfigured: smartleadActionAuthConfigured(),
     autopilotEnabled: process.env.SMARTLEAD_AUTOPILOT_ENABLED === "true",
     languagePolicy: "Deterministic English fallback wins; Arabic requires an Arabic-script greeting and a safe GCC Arabic-name decision.",
-    dailyTarget: Number(process.env.SMARTLEAD_DAILY_NEW_LEADS || 50),
+    dailyTarget: Number(process.env.SMARTLEAD_DAILY_NEW_LEADS || 75),
     minTimeBetweenEmails: Math.max(15, Number(process.env.SMARTLEAD_MIN_TIME_BETWEEN_EMAILS || 15) || 15),
   }, { headers: { "Cache-Control": "no-store" } });
 }

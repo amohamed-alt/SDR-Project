@@ -3,10 +3,10 @@ import { laneFor, type OutreachLane } from "./smartlead-visible-sequences.ts";
 import { isPersonalEmail } from "./email-domain-policy.ts";
 
 export const DAILY_LANE_NEW_CAPS: Record<OutreachLane, number> = {
-  talentera_ar: 15,
-  talentera_en: 15,
-  evalufy_ar: 10,
-  evalufy_en: 10,
+  talentera_ar: 23,
+  talentera_en: 22,
+  evalufy_ar: 15,
+  evalufy_en: 15,
 };
 
 export type DailyRoutingLead = {

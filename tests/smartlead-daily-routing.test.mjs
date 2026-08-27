@@ -11,16 +11,16 @@ function lead(index, product, locale, eligible = true) {
   return { email: `lead-${index}@example.com`, product, locale, eligible, blockReason: eligible ? "" : "Invalid or unsafe email" };
 }
 
-test("15 inbox capacity resolves to the explicit 15/15/10/10 daily lane plan", () => {
-  assert.deepEqual(buildDailyLaneTargets(50, { talentera: 30, evalify: 20 }), DAILY_LANE_NEW_CAPS);
+test("15 inbox safe-ramp capacity resolves to about five new leads per inbox", () => {
+  assert.deepEqual(buildDailyLaneTargets(75, { talentera: 45, evalify: 30 }), DAILY_LANE_NEW_CAPS);
 });
 
 test("lower global capacity is reduced proportionally without exceeding a lane", () => {
-  assert.deepEqual(buildDailyLaneTargets(40, { talentera: 30, evalify: 20 }), {
-    talentera_ar: 12,
-    talentera_en: 12,
-    evalufy_ar: 8,
-    evalufy_en: 8,
+  assert.deepEqual(buildDailyLaneTargets(50, { talentera: 45, evalify: 30 }), {
+    talentera_ar: 15,
+    talentera_en: 15,
+    evalufy_ar: 10,
+    evalufy_en: 10,
   });
 });
 
@@ -33,12 +33,12 @@ test("verified selection enforces every lane cap even when the queue is language
   ];
   const verified = new Set(queue.map((item) => item.email));
   const result = selectVerifiedDailyBatch(queue, verified, {
-    globalLimit: 50,
-    productLimits: { talentera: 30, evalify: 20 },
+    globalLimit: 75,
+    productLimits: { talentera: 45, evalify: 30 },
   });
-  assert.equal(result.selected.length, 50);
+  assert.equal(result.selected.length, 75);
   assert.deepEqual(result.laneCounts, DAILY_LANE_NEW_CAPS);
-  assert.deepEqual(result.productCounts, { talentera: 30, evalify: 20 });
+  assert.deepEqual(result.productCounts, { talentera: 45, evalify: 30 });
 });
 
 test("verification candidates are isolated by lane and exclude sales or duplicate blocks", () => {

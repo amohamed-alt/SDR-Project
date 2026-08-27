@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { DAILY_LANE_NEW_CAPS } from "@/lib/smartlead-daily-routing";
 import { VISIBLE_SEQUENCE_LANES, type OutreachLane } from "@/lib/smartlead-visible-sequences";
 
 export const runtime = "nodejs";
@@ -229,8 +230,8 @@ async function audit() {
       days: [0, 1, 2, 3, 4],
       sendWindow: "09:30-16:30",
       minimumGapMinutes: 15,
-      laneDailyCaps: { talentera_ar: 15, talentera_en: 15, evalufy_ar: 10, evalufy_en: 10 },
-      globalDailyCap: 50,
+      laneDailyCaps: DAILY_LANE_NEW_CAPS,
+      globalDailyCap: Object.values(DAILY_LANE_NEW_CAPS).reduce((sum, value) => sum + value, 0),
       signatures: "Localized plain text in each touch; sender-account signature blank",
     },
     campaigns: audits,

@@ -9,8 +9,8 @@ Keep `SMARTLEAD_AUTOPILOT_ENABLED=false` until every enforced launch gate below 
 - Evalufy: `getevalufy.com`, `evalufyhq.com`.
 - Never attach the core `talentera.com` domain or any unlisted domain.
 - Every inbox must report healthy SMTP and IMAP, warmup enabled with an active/ready state or reputation at least 90, and an explicit daily limit.
-- Campaign-email capacity is capped at 20 per inbox. The global new-lead cap is 50 per business day, split 15/15 across Talentera Arabic/English and 10/10 across Evalufy Arabic/English.
-- `15 inboxes x 20` means 300 total campaign emails, not 300 new recipients. New touches and follow-ups share that capacity. At a steady 50 new recipients, the three-touch sequence can produce up to about 150 scheduled campaign emails on a collision day; the remaining capacity is deliberate safety headroom.
+- Campaign-email capacity is capped at 20 per inbox. The global new-lead cap is 75 per business day, split 23/22 across Talentera Arabic/English and 15/15 across Evalufy Arabic/English.
+- `15 inboxes x 20` means 300 total campaign emails, not 300 new recipients. New touches and follow-ups share that capacity. At a steady 75 new recipients, the three-touch sequence can produce up to about 225 scheduled campaign emails on a collision day; the remaining capacity is deliberate safety headroom.
 
 ## DNS and credentials
 
@@ -26,7 +26,7 @@ Keep `SMARTLEAD_AUTOPILOT_ENABLED=false` until every enforced launch gate below 
 - A SignalHire replacement is accepted only when it is a work email, matches the current employer, and independently passes MillionVerifier.
 - Persistent verification history is display/audit data only. Every daily send run bypasses old HubSpot and local statuses and makes a fresh MillionVerifier request for each unique email it considers. Only duplicate use of the same email inside that one run may reuse the newly returned result.
 - Global blocklist, unsubscribe list, community bounce list, cross-campaign duplicate checks, HubSpot Sales activity, and the local send ledger all remain enforced.
-- Verification runs independently per language/product lane. Final selection re-enforces 15/15/10/10, so a language-skewed queue cannot overflow one campaign and create an accidental next-day backlog.
+- Verification runs independently per language/product lane. Final selection re-enforces 23/22/15/15, so a language-skewed queue cannot overflow one campaign and create an accidental next-day backlog.
 
 ## Recipient routing
 
@@ -48,7 +48,7 @@ Keep `SMARTLEAD_AUTOPILOT_ENABLED=false` until every enforced launch gate below 
 ## Golden Hours
 
 - GitHub Actions makes idempotent attempts at 08:45, 09:05, and 09:25 Riyadh time, Sunday-Thursday.
-- These are retries for one daily batch, not three batches. A successful date lock prevents the same 50 from being processed twice.
+- These are retries for one daily batch, not three batches. A successful date lock prevents the same daily batch from being processed twice.
 - Smartlead controls the actual 09:30-16:30 Riyadh sending window and applies the 15-minute minimum gap plus ESP matching.
 
 ## Launch order
@@ -60,7 +60,7 @@ Keep `SMARTLEAD_AUTOPILOT_ENABLED=false` until every enforced launch gate below 
 5. Confirm MillionVerifier has credits and SignalHire is configured.
 6. Review all four sequence variants. The deterministic V2 copy must remain plain text, concise, and free of generic AI opening lines.
 7. Set the repository variable `SMARTLEAD_AUTOPILOT_ENABLED=true` and deploy.
-8. Watch the first 50 new recipients manually. Pause immediately on any spam complaint, unusual provider block, bounce spike, or reply-stop failure.
+8. Watch the first 75 new recipients manually. Pause immediately on any spam complaint, unusual provider block, bounce spike, or reply-stop failure.
 
 Primeforge health is reported as an advisory only. Every setup and daily run still independently enforces the Smartlead inventory: exactly three eligible inboxes on each approved domain (15 total), healthy SMTP/IMAP, active warmup, sending limits, sender-to-brand routing, campaign parity, HubSpot Sales activity, MillionVerifier validity, bounce rate, and spam complaints.
 

@@ -23,7 +23,7 @@ export async function GET() {
         end: String(process.env.SMARTLEAD_END_HOUR || "16:30"),
       },
       minTimeBetweenEmails: Math.max(15, Number(process.env.SMARTLEAD_MIN_TIME_BETWEEN_EMAILS || 15) || 15),
-      dailyNewLeadTarget: Number(process.env.SMARTLEAD_DAILY_NEW_LEADS || 50),
+      dailyNewLeadTarget: Number(process.env.SMARTLEAD_DAILY_NEW_LEADS || 75),
       buildRef: String(process.env.SDR_BUILD_REF || "unknown"),
       timestamp: new Date().toISOString(),
     },
