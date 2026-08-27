@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Dry-run routing, setup only, run today's safe batch, or safe-ramp top-up"
+        description: "Dry-run routing, setup only, or run today's safe batch"
         required: true
         default: "setup"
         type: choice
@@ -21,7 +21,6 @@ on:
           - dry-run
           - setup
           - autopilot
-          - topup
 
 permissions:
   contents: read
@@ -106,7 +105,7 @@ jobs:
           MANUAL_MODE: ${{ inputs.mode }}
         run: |
           if [ "$EVENT_NAME" = "workflow_run" ]; then
-            MODE="topup"
+            MODE="setup"
           elif [ "$EVENT_NAME" = "schedule" ]; then
             MODE="autopilot"
           else
@@ -221,18 +220,6 @@ jobs:
               -H "X-MillionVerifier-API-Key: ${MILLIONVERIFIER_API_KEY}" \
               -H 'Content-Type: application/json' \
               -d '{"mode":"setup"}')
-          elif [ "$MODE" = "topup" ]; then
-            ENDPOINT='https://sdr.dashboardtalentera.tech/api/smartlead/orchestrator-v3'
-            HTTP_CODE=$(curl --silent --show-error \
-              --connect-timeout 10 \
-              --max-time 300 \
-              --output /tmp/smartlead-orchestrator.json \
-              --write-out '%{http_code}' \
-              -X POST "$ENDPOINT" \
-              -H "Authorization: Bearer ${SMARTLEAD_API_KEY}" \
-              -H "X-MillionVerifier-API-Key: ${MILLIONVERIFIER_API_KEY}" \
-              -H 'Content-Type: application/json' \
-              -d '{"mode":"topup"}')
           else
             ENDPOINT='https://sdr.dashboardtalentera.tech/api/smartlead/send-today'
             HTTP_CODE=$(curl --silent --show-error \
@@ -354,13 +341,11 @@ jobs:
               repo: context.repo.repo,
               sha: process.env.TARGET_SHA,
               state: 'success',
-              context: mode === 'dry-run' ? 'smartlead/dry-run' : mode === 'setup' ? 'smartlead/setup' : mode === 'topup' ? 'smartlead/topup' : 'smartlead/autopilot',
+              context: mode === 'dry-run' ? 'smartlead/dry-run' : mode === 'setup' ? 'smartlead/setup' : 'smartlead/autopilot',
               description: mode === 'dry-run'
                 ? 'Read-only recipient routing sample verified'
                 : mode === 'setup'
                   ? 'Sequences, sender pools and campaign parity verified'
-                  : mode === 'topup'
-                    ? 'Safe-ramp top-up processed'
                   : 'Language-safe verified Smartlead daily batch processed',
               target_url: process.env.RUN_URL,
             });
@@ -380,13 +365,11 @@ jobs:
               repo: context.repo.repo,
               sha: process.env.TARGET_SHA,
               state: 'failure',
-              context: mode === 'dry-run' ? 'smartlead/dry-run' : mode === 'setup' ? 'smartlead/setup' : mode === 'topup' ? 'smartlead/topup' : 'smartlead/autopilot',
+              context: mode === 'dry-run' ? 'smartlead/dry-run' : mode === 'setup' ? 'smartlead/setup' : 'smartlead/autopilot',
               description: mode === 'dry-run'
                 ? 'Read-only recipient routing sample failed'
                 : mode === 'setup'
                   ? 'Smartlead setup, sender routing or parity failed'
-                  : mode === 'topup'
-                    ? 'Safe-ramp top-up failed'
                   : 'Language-safe verified Smartlead daily batch failed',
               target_url: process.env.RUN_URL,
             });
