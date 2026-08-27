@@ -156,7 +156,7 @@ function normalizeCampaign(lane: OutreachLane, row: JsonObject, sequencePayload:
 }
 
 function expectedSettings(lane: OutreachLane, settings: CampaignAudit["settings"]) {
-  const dailyCap = lane.startsWith("talentera") ? 15 : 10;
+  const dailyCap = DAILY_LANE_NEW_CAPS[lane];
   return settings.plainText === true
     && settings.forcePlainText !== false
     && settings.trackingOff === true
