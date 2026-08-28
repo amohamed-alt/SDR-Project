@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./tailwind.css";
 import "./ui-polish.css";
 import { UsageTracker } from "@/components/UsageTracker";
 
