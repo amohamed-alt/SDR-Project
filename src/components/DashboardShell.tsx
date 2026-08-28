@@ -17,7 +17,6 @@ import {
   PhoneCall,
   Radar,
   Search,
-  Sparkles,
   Target,
   UserPlus,
   Wrench,
@@ -26,16 +25,12 @@ import {
 import { Dashboard as ExistingDashboard } from "@/components/DashboardMotion";
 import styles from "@/components/DashboardShell.module.css";
 
-type ShellView = "core" | "ultimate" | "maqsam" | "hiring" | "career" | "ats-intent" | "marita-priority" | "smartlead" | "team-activity" | "net-new" | "gtm-brain";
+type ShellView = "core" | "maqsam" | "hiring" | "career" | "ats-intent" | "marita-priority" | "smartlead" | "team-activity" | "net-new" | "gtm-brain";
 
 function ViewLoading() {
   return <main className={styles.viewLoading}><LoaderCircle size={24}/><strong>Loading workspace…</strong></main>;
 }
 
-const UltimateDashboard = dynamic(
-  () => import("@/components/UltimateDashboard").then((module) => module.UltimateDashboard),
-  { ssr: false, loading: ViewLoading },
-);
 const AtsIntentSearch = dynamic(
   () => import("@/components/AtsIntentSearch").then((module) => module.AtsIntentSearch),
   { ssr: false, loading: ViewLoading },
@@ -75,7 +70,6 @@ const TalenteraIntelligenceWorkspace = dynamic(
 
 function viewFromUrl(): ShellView {
   const view = new URLSearchParams(window.location.search).get("view");
-  if (view === "ultimate") return "ultimate";
   if (view === "maqsam") return "maqsam";
   if (view === "hiring") return "hiring";
   if (view === "career") return "career";
@@ -133,7 +127,6 @@ export function Dashboard() {
     trackFeature(next === "core" ? "dashboard" : next);
   }
 
-  if (view === "ultimate") return <UltimateDashboard onBack={() => changeView("core")}/>;
   if (view === "maqsam") return <MaqsamCallsDashboard onBack={() => changeView("core")}/>;
   if (view === "hiring") return <HiringIntelligence onBack={() => changeView("core")}/>;
   if (view === "career") return <CareerIntelligence onBack={() => changeView("core")}/>;
@@ -160,10 +153,6 @@ export function Dashboard() {
 
           <div className={styles.toolList}>
             <div className={styles.toolSectionLabel}>CORE WORK</div>
-            <button className={styles.toolItem} type="button" onClick={() => changeView("ultimate")}>
-              <span className={`${styles.toolIcon} ${styles.ultimateIcon}`}><Sparkles size={17}/></span>
-              <span className={styles.toolCopy}><strong>Ultimate Dashboard</strong><small>Motion · GSAP · ECharts · Three.js · premium UI</small></span>
-            </button>
             <button className={styles.toolItem} type="button" onClick={() => changeView("gtm-brain")}>
               <span className={`${styles.toolIcon} ${styles.brainIcon}`}><BrainCircuit size={17}/></span>
               <span className={styles.toolCopy}><strong>Talentera Intelligence</strong><small>Account priority · target pool · call strategy</small></span>
@@ -231,7 +220,7 @@ export function Dashboard() {
         aria-expanded={toolsOpen}
         aria-controls="sdr-tools-menu"
       >
-        {toolsOpen ? <X size={18}/> : <Menu size={18}/>}<span>{toolsOpen ? "Close" : "SDR Tools"}</span><small>5</small>
+        {toolsOpen ? <X size={18}/> : <Menu size={18}/>}<span>{toolsOpen ? "Close" : "SDR Tools"}</span><small>4</small>
       </button>
     </div>
   </div>;
