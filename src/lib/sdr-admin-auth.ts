@@ -26,6 +26,7 @@ export function sdrAdminCookieName() {
   return ADMIN_COOKIE;
 }
 
+// Browser admin access is represented only by a signed HttpOnly cookie token.
 export function sdrAdminCookieToken() {
   const secret = sdrAdminSecret();
   if (!secret) return "";
