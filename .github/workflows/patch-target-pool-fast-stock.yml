@@ -1,0 +1,33 @@
+name: Patch Target Pool Fast Stock
+
+on:
+  push:
+    branches:
+      - fix/target-pool-empty-response
+    paths:
+      - scripts/patch-target-pool-fast-stock.py
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/target-pool-empty-response
+      - name: Apply fast-stock patch
+        run: python scripts/patch-target-pool-fast-stock.py
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/app/api/target-account-pool/route.ts src/components/TargetAccountPool.tsx
+          if git diff --cached --quiet; then
+            echo 'No patch changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Make Target Pool stocking fast and timeout-safe'
+          git push origin HEAD:fix/target-pool-empty-response
