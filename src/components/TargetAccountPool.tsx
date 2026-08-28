@@ -11,7 +11,6 @@ import {
   Crosshair,
   Database,
   Filter,
-  KeyRound,
   LoaderCircle,
   Phone,
   RefreshCw,
@@ -97,13 +96,6 @@ type Payload = {
   };
 };
 
-const OWNER_STORAGE_KEY = "sdr-acquisition-owner-token";
-
-function savedOwnerToken() {
-  if (typeof window === "undefined") return "";
-  return window.sessionStorage.getItem(OWNER_STORAGE_KEY) || "";
-}
-
 function fmt(value: number) {
   return new Intl.NumberFormat("en-US").format(value || 0);
 }
@@ -140,8 +132,7 @@ export function TargetAccountPool() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [ownerToken, setOwnerToken] = useState(savedOwnerToken);
-  const [ownerDraft, setOwnerDraft] = useState(savedOwnerToken);
+  const [adminUnlocked, setAdminUnlocked] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -164,6 +155,22 @@ export function TargetAccountPool() {
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
   }, [load]);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/sdr-admin", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data: { unlocked?: boolean }) => { if (active) setAdminUnlocked(Boolean(data.unlocked)); })
+      .catch(() => { if (active) setAdminUnlocked(false); });
+    const sync = () => {
+      fetch("/api/sdr-admin", { cache: "no-store" })
+        .then((response) => response.json())
+        .then((data: { unlocked?: boolean }) => { if (active) setAdminUnlocked(Boolean(data.unlocked)); })
+        .catch(() => { if (active) setAdminUnlocked(false); });
+    };
+    window.addEventListener("sdr:admin-auth-changed", sync);
+    return () => { active = false; window.removeEventListener("sdr:admin-auth-changed", sync); };
+  }, []);
 
   const selected = useMemo(
     () => payload?.accounts.find((account) => account.domain === selectedDomain) || null,
@@ -202,22 +209,18 @@ export function TargetAccountPool() {
     };
   }, [payload]);
 
-  function saveOwnerKey() {
-    const value = ownerDraft.trim();
-    setOwnerToken(value);
-    if (value) window.sessionStorage.setItem(OWNER_STORAGE_KEY, value);
-    else window.sessionStorage.removeItem(OWNER_STORAGE_KEY);
-    setNotice(value ? "Owner key saved for this browser session." : "Owner key cleared.");
-  }
-
   async function ownerAction(url: string, body: Record<string, unknown>) {
-    if (!ownerToken) throw new Error("Enter the Owner key first.");
     const response = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-acquisition-owner-token": ownerToken },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
     const data = await response.json() as Record<string, unknown> & { error?: string };
+    if (response.status === 401) {
+      setAdminUnlocked(false);
+      window.dispatchEvent(new CustomEvent("sdr:admin-auth-changed"));
+      throw new Error("Admin access is locked. Open SDR Tools → Advanced & Data Ops and enter the admin password.");
+    }
     if (!response.ok) throw new Error(data.error || "Target Pool action failed.");
     return data;
   }
@@ -406,12 +409,11 @@ export function TargetAccountPool() {
         <div className={styles.controlStat}><span>Apollo market universe</span><strong>{fmt(currentMarket?.marketSize || 0)}</strong></div>
         <label className={styles.pages}><span>Pages to load</span><select value={pages} onChange={(event) => setPages(Number(event.target.value))}>{[1,2,3,4,5,6].map((page) => <option value={page} key={page}>{page} · up to {page * 100} companies</option>)}</select></label>
         <div className={styles.cost}><Coins size={14}/><span>Up to <strong>{pages}</strong> Apollo credit{pages === 1 ? "" : "s"}. Domain dedupe happens before the account becomes eligible.</span></div>
-        <button className={styles.stock} type="button" onClick={() => void discoverMarket()} disabled={busy === "discover" || !payload?.configuration.apolloConfigured || !ownerToken}>{busy === "discover" ? <LoaderCircle className={styles.spin} size={16}/> : <Sparkles size={16}/>} Load market page</button>
+        <button className={styles.stock} type="button" onClick={() => void discoverMarket()} disabled={busy === "discover" || !payload?.configuration.apolloConfigured || !adminUnlocked}>{busy === "discover" ? <LoaderCircle className={styles.spin} size={16}/> : <Sparkles size={16}/>} Load market page</button>
 
         <div className={styles.divider}/>
-        <label className={styles.owner}><span><KeyRound size={14}/> Owner key</span><input type="password" value={ownerDraft} onChange={(event) => setOwnerDraft(event.target.value)} placeholder="Session-only key"/></label>
-        <button className={styles.save} type="button" onClick={saveOwnerKey}><ShieldCheck size={15}/> Save key</button>
-        <div className={styles.guard}><BadgeCheck size={15}/><span><strong>Credit guard</strong> Dormant pool accounts trigger zero SignalHire reveals. Marita queue is explicit.</span></div>
+        <div className={styles.guard}><BadgeCheck size={15}/><span><strong>{adminUnlocked ? "Admin unlocked" : "Admin locked"}</strong>{adminUnlocked ? " Administrative actions are ready. No browser key is required." : " Open SDR Tools → Advanced & Data Ops and enter the admin password."}</span></div>
+        <div className={styles.guard}><ShieldCheck size={15}/><span><strong>Credit guard</strong> Dormant pool accounts trigger zero SignalHire reveals. Marita queue is explicit.</span></div>
       </aside>
     </div>
 
@@ -432,7 +434,7 @@ export function TargetAccountPool() {
           <div className={styles.sectionTitle}><Building2 size={16}/><div><span>ACCOUNT VERIFICATION</span><strong>Career, ATS & HubSpot recheck</strong></div></div>
           <p>{selected.strongestSignal}</p>
           {selected.careerPageUrl ? <a href={selected.careerPageUrl} target="_blank" rel="noreferrer">Open verified career destination ↗</a> : null}
-          <button className={styles.secondaryAction} type="button" disabled={busy === "verify" || !ownerToken || selected.exclusionStatus === "excluded"} onClick={() => void verifyCompany()}>{busy === "verify" ? <LoaderCircle className={styles.spin} size={15}/> : <ShieldCheck size={15}/>} Verify company now</button>
+          <button className={styles.secondaryAction} type="button" disabled={busy === "verify" || !adminUnlocked || selected.exclusionStatus === "excluded"} onClick={() => void verifyCompany()}>{busy === "verify" ? <LoaderCircle className={styles.spin} size={15}/> : <ShieldCheck size={15}/>} Verify company now</button>
         </section>
 
         <section className={styles.drawerSection}>
@@ -441,14 +443,14 @@ export function TargetAccountPool() {
         </section>
 
         <section className={styles.drawerSection}>
-          <div className={styles.peopleHead}><div className={styles.sectionTitle}><UserRoundSearch size={16}/><div><span>SIGNALHIRE</span><strong>Search first · reveal one person</strong></div></div><button type="button" disabled={busy === "people" || !ownerToken || selected.exclusionStatus !== "eligible"} onClick={() => void findPeople()}>{busy === "people" ? <LoaderCircle className={styles.spin} size={14}/> : <Search size={14}/>} Search personas</button></div>
+          <div className={styles.peopleHead}><div className={styles.sectionTitle}><UserRoundSearch size={16}/><div><span>SIGNALHIRE</span><strong>Search first · reveal one person</strong></div></div><button type="button" disabled={busy === "people" || !adminUnlocked || selected.exclusionStatus !== "eligible"} onClick={() => void findPeople()}>{busy === "people" ? <LoaderCircle className={styles.spin} size={14}/> : <Search size={14}/>} Search personas</button></div>
           {!people.length ? <div className={styles.peopleEmpty}>No persona search stored yet. This step does not request contact reveal.</div> : <div className={styles.peopleList}>{people.map((person, index) => <div className={styles.person} key={person.uid}>
-            <div className={styles.personRank}>{index + 1}</div><div className={styles.personCopy}><strong>{person.fullName}</strong><span>{person.title}</span><small>{person.fitReason}</small></div><div className={styles.personContact}>{person.phones.length ? <b><Phone size={12}/>{person.phones[0]}</b> : person.enrichmentStatus === "enriched" ? <em>No phone</em> : <button type="button" disabled={busy === `reveal:${person.uid}` || !ownerToken} onClick={() => void revealPhone(person)}>{busy === `reveal:${person.uid}` ? <LoaderCircle className={styles.spin} size={13}/> : <Coins size={13}/>} Reveal selected</button>}</div>
+            <div className={styles.personRank}>{index + 1}</div><div className={styles.personCopy}><strong>{person.fullName}</strong><span>{person.title}</span><small>{person.fitReason}</small></div><div className={styles.personContact}>{person.phones.length ? <b><Phone size={12}/>{person.phones[0]}</b> : person.enrichmentStatus === "enriched" ? <em>No phone</em> : <button type="button" disabled={busy === `reveal:${person.uid}` || !adminUnlocked} onClick={() => void revealPhone(person)}>{busy === `reveal:${person.uid}` ? <LoaderCircle className={styles.spin} size={13}/> : <Coins size={13}/>} Reveal selected</button>}</div>
           </div>)}</div>}
         </section>
 
         <footer className={styles.drawerFooter}>
-          {feedRequested(selected) ? <button className={styles.cancelFeed} type="button" disabled={busy === "cancel-feed"} onClick={() => void cancelMaritaFeed()}>Cancel Marita queue</button> : <button className={styles.feed} type="button" disabled={busy === "feed" || !ownerToken || selected.exclusionStatus !== "eligible" || !verified(selected)} onClick={() => void requestMaritaFeed()}>{busy === "feed" ? <LoaderCircle className={styles.spin} size={16}/> : <Phone size={16}/>} Feed Marita</button>}
+          {feedRequested(selected) ? <button className={styles.cancelFeed} type="button" disabled={busy === "cancel-feed"} onClick={() => void cancelMaritaFeed()}>Cancel Marita queue</button> : <button className={styles.feed} type="button" disabled={busy === "feed" || !adminUnlocked || selected.exclusionStatus !== "eligible" || !verified(selected)} onClick={() => void requestMaritaFeed()}>{busy === "feed" ? <LoaderCircle className={styles.spin} size={16}/> : <Phone size={16}/>} Feed Marita</button>}
           <p>{!verified(selected) ? "Verify the company first. " : ""}Feed Marita is the only state that allows the daily worker to reveal a persona and create a HubSpot CALL task.</p>
         </footer>
       </aside>
