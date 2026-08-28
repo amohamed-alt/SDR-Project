@@ -1,0 +1,224 @@
+name: Patch Target Pool People Discovery
+
+on:
+  push:
+    branches: [feat/target-pool-people-discovery]
+    paths: ['.github/workflows/patch-target-pool-people-discovery.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feat/target-pool-people-discovery
+      - name: Patch discovery backend and UI
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/app/api/target-account-pool/route.ts')
+          s = p.read_text()
+
+          marker = 'type ApolloOrganization = Record<string, unknown> & {'
+          insert = '''type ApolloPeopleOrganization = {\n  name?: string;\n  has_industry?: boolean;\n  has_employee_count?: boolean;\n};\n\ntype ApolloPersonSearchRow = {\n  id?: string;\n  first_name?: string;\n  last_name_obfuscated?: string;\n  title?: string;\n  organization?: ApolloPeopleOrganization;\n};\n\n'''
+          if insert not in s:
+              s = s.replace(marker, insert + marker)
+
+          old = '''function apolloUrl(country: TargetAccountCountry, page: number) {\n  if (!targetMarket(country)) throw new Error(`Unsupported target market: ${country}`);\n  const query = new URLSearchParams();\n  query.append("organization_locations[]", country);\n  for (const range of TARGET_EMPLOYEE_RANGES) query.append("organization_num_employees_ranges[]", range);\n  query.set("page", String(page));\n  query.set("per_page", "100");\n  return `https://api.apollo.io/api/v1/mixed_companies/search?${query.toString()}`;\n}\n\nasync function apolloPage(country: TargetAccountCountry, page: number) {\n  const apiKey = clean(process.env.APOLLO_API_KEY, 1000);\n  if (!apiKey) throw new Error("APOLLO_API_KEY is not configured.");\n  const response = await fetch(apolloUrl(country, page), {\n    method: "POST",\n    headers: { "x-api-key": apiKey, Accept: "application/json", "Content-Type": "application/json" },\n    cache: "no-store",\n    signal: AbortSignal.timeout(45_000),\n  });\n  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;\n  if (!response.ok) {\n    const message = clean((payload.error as Record<string, unknown> | undefined)?.message || payload.message || `HTTP ${response.status}`);\n    throw new Error(`Apollo market search failed: ${message}`);\n  }\n  const organizations = Array.isArray(payload.organizations)\n    ? payload.organizations as ApolloOrganization[]\n    : Array.isArray(payload.accounts)\n      ? payload.accounts as ApolloOrganization[]\n      : [];\n  const pagination = (payload.pagination || {}) as Record<string, unknown>;\n  return {\n    organizations,\n    total: numberValue(pagination.total_entries, pagination.total, payload.total_entries, organizations.length),\n  };\n}\n'''
+
+          new = '''const TARGET_PERSON_TITLES = [\n  "talent acquisition",\n  "human resources",\n  "hr director",\n  "head of hr",\n  "recruitment",\n  "chief human resources officer",\n  "chief people officer",\n] as const;\n\nconst TARGET_PERSON_SENIORITIES = ["manager", "director", "vp", "head", "c_suite"] as const;\n\nfunction apolloPeopleUrl(country: TargetAccountCountry, page: number) {\n  const market = targetMarket(country);\n  if (!market) throw new Error(`Unsupported target market: ${country}`);\n  const query = new URLSearchParams();\n  query.append("organization_locations[]", country);\n  for (const range of TARGET_EMPLOYEE_RANGES) query.append("organization_num_employees_ranges[]", range);\n  for (const code of market.naics) query.append("organization_naics_codes[]", String(code));\n  for (const seniority of TARGET_PERSON_SENIORITIES) query.append("person_seniorities[]", seniority);\n  for (const title of TARGET_PERSON_TITLES) query.append("person_titles[]", title);\n  query.set("include_similar_titles", "true");\n  query.set("page", String(page));\n  query.set("per_page", "100");\n  return `https://api.apollo.io/api/v1/mixed_people/api_search?${query.toString()}`;\n}\n\nasync function apolloPeoplePage(country: TargetAccountCountry, page: number) {\n  const apiKey = clean(process.env.APOLLO_API_KEY, 1000);\n  if (!apiKey) throw new Error("APOLLO_API_KEY is not configured.");\n  const response = await fetch(apolloPeopleUrl(country, page), {\n    method: "POST",\n    headers: {\n      "x-api-key": apiKey,\n      Accept: "application/json",\n      "Content-Type": "application/json",\n      "Cache-Control": "no-cache",\n    },\n    cache: "no-store",\n    signal: AbortSignal.timeout(45_000),\n  });\n  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;\n  if (!response.ok) {\n    const message = clean((payload.error as Record<string, unknown> | undefined)?.message || payload.message || `HTTP ${response.status}`);\n    throw new Error(`Apollo zero-credit people search failed: ${message}`);\n  }\n  const people = Array.isArray(payload.people) ? payload.people as ApolloPersonSearchRow[] : [];\n  return { people, total: numberValue(payload.total_entries, people.length) };\n}\n\nasync function existingHubSpotCompanyNames(names: string[]) {\n  const result = new Map<string, string>();\n  const unique = [...new Set(names.map((name) => clean(name, 300)).filter(Boolean))];\n  for (let index = 0; index < unique.length; index += 100) {\n    const chunk = unique.slice(index, index + 100);\n    try {\n      const matches = await searchAll("companies", ["name", "domain", "account_type", "account_status"], [\n        { propertyName: "name", operator: "IN", values: chunk },\n      ]);\n      for (const match of matches) {\n        const name = clean(match.properties.name, 300).toLowerCase();\n        if (name) result.set(name, String(match.id));\n      }\n    } catch {\n      for (const name of chunk) {\n        const matches = await searchAll("companies", ["name", "domain"], [{ propertyName: "name", operator: "EQ", value: name }]);\n        if (matches[0]) result.set(name.toLowerCase(), String(matches[0].id));\n      }\n    }\n  }\n  return result;\n}\n\nasync function mapWithConcurrency<T, R>(items: T[], concurrency: number, worker: (item: T) => Promise<R>) {\n  const results = new Array<R>(items.length);\n  let cursor = 0;\n  const runners = Array.from({ length: Math.min(Math.max(1, concurrency), Math.max(1, items.length)) }, async () => {\n    while (cursor < items.length) {\n      const index = cursor++;\n      results[index] = await worker(items[index]);\n    }\n  });\n  await Promise.all(runners);\n  return results;\n}\n'''
+          if old not in s:
+              raise SystemExit('Apollo company-search block not found')
+          s = s.replace(old, new)
+
+          start = s.index('async function discoverMarket(country: TargetAccountCountry, pages: number) {')
+          end = s.index('\nasync function verifyAccount(account: AcquisitionAccount)', start)
+          replacement = r'''async function discoverMarket(country: TargetAccountCountry, pages: number) {
+  const market = targetMarket(country);
+  if (!market) throw new Error(`Unsupported target market: ${country}`);
+
+  const existingPool = await listAcquisitionAccounts({ limit: 1000, country, includeExcluded: true });
+  const previousPages = existingPool.accounts
+    .map((account) => Number(account.evidence?.apolloPeoplePage || 0))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const startPage = previousPages.length ? Math.max(...previousPages) + 1 : 1;
+  const maxCandidateCompanies = Math.max(20, Math.min(100, Number(process.env.TARGET_POOL_RESOLVE_LIMIT || 70)));
+
+  const people: Array<ApolloPersonSearchRow & { __page: number }> = [];
+  let peopleTotal = 0;
+  let pagesUsed = 0;
+  const companyNames = new Set<string>();
+  for (let offset = 0; offset < pages; offset += 1) {
+    const page = startPage + offset;
+    const result = await apolloPeoplePage(country, page);
+    peopleTotal = Math.max(peopleTotal, result.total);
+    pagesUsed += 1;
+    for (const person of result.people) {
+      const companyName = clean(person.organization?.name, 300);
+      if (!companyName) continue;
+      people.push({ ...person, __page: page });
+      companyNames.add(companyName);
+    }
+    if (!result.people.length || companyNames.size >= maxCandidateCompanies) break;
+  }
+
+  const seedByCompany = new Map<string, ApolloPersonSearchRow & { __page: number }>();
+  for (const person of people) {
+    const companyName = clean(person.organization?.name, 300);
+    if (!companyName || seedByCompany.has(companyName.toLowerCase())) continue;
+    seedByCompany.set(companyName.toLowerCase(), person);
+    if (seedByCompany.size >= maxCandidateCompanies) break;
+  }
+
+  const names = [...seedByCompany.values()].map((person) => clean(person.organization?.name, 300)).filter(Boolean);
+  const hubspotByName = await existingHubSpotCompanyNames(names);
+  const netNewSeeds = [...seedByCompany.values()].filter((person) => {
+    const name = clean(person.organization?.name, 300).toLowerCase();
+    return name && !hubspotByName.has(name);
+  });
+
+  const resolved = await mapWithConcurrency(netNewSeeds, 4, async (person) => {
+    const name = clean(person.organization?.name, 300);
+    if (!name) return null;
+    try {
+      const intelligence = await inspectProspectCompany({ companyName: name, website: "", emails: [] });
+      const domain = normalizeCompanyDomain(intelligence.domain || intelligence.website);
+      if (!domain) return null;
+      return { person, name, domain, intelligence };
+    } catch {
+      return null;
+    }
+  });
+
+  const uniqueResolved = new Map<string, NonNullable<(typeof resolved)[number]>>();
+  for (const item of resolved) {
+    if (!item || uniqueResolved.has(item.domain)) continue;
+    uniqueResolved.set(item.domain, item);
+  }
+  const hubspotByDomain = await existingHubSpotDomains([...uniqueResolved.keys()]);
+
+  const accounts: AcquisitionAccount[] = [...uniqueResolved.values()].map(({ person, name, domain, intelligence }) => {
+    const industry = "Apollo target industry";
+    const exclusion = classifyExclusion({ name, website_url: intelligence.website }, domain);
+    const hubspotCompanyId = hubspotByDomain.get(domain) || "";
+    const finalExclusion = hubspotCompanyId ? { status: "excluded" as const, reason: "Already exists in HubSpot" } : exclusion;
+    const scored = scoreTalenteraAccount({
+      companyId: clean(person.id, 160) || domain,
+      name,
+      domain,
+      country,
+      employeeCount: 0,
+      industry,
+      activeJobs: 0,
+      newJobs30d: 0,
+      ats: intelligence.detectedAts || "",
+    });
+    const marketBonus = market.priority >= 88 ? 8 : market.priority >= 74 ? 5 : 2;
+    const gtmScore = Math.min(100, scored.score + marketBonus + 5);
+    const gtmTier = gtmScore >= 75 ? "A" : gtmScore >= 55 ? "B" : gtmScore >= 40 ? "C" : "Watch";
+    return {
+      domain,
+      name,
+      source: `Apollo People Target Pool · ${country}`,
+      sourceId: clean(person.id, 160),
+      country,
+      employeeCount: 0,
+      industry,
+      activeJobs: 0,
+      headcountGrowth: 0,
+      hrHeadcount: 0,
+      careerPageUrl: intelligence.careerPageUrl || "",
+      detectedAts: intelligence.detectedAts || "",
+      gtmScore,
+      gtmTier,
+      fitScore: scored.fitScore,
+      intentScore: scored.intentScore,
+      atsOpportunityScore: scored.atsOpportunityScore,
+      exclusionStatus: finalExclusion.status,
+      exclusionReason: finalExclusion.reason,
+      hubspotCompanyId,
+      status: finalExclusion.status === "excluded" ? "excluded" : "candidate",
+      primaryPersona: scored.personas.primary,
+      secondaryPersona: scored.personas.secondary,
+      economicBuyer: scored.personas.economicBuyer,
+      technicalInfluencer: scored.personas.technicalInfluencer,
+      strongestSignal: `${country} target account · 201+ employee filter · senior HR/TA persona present${intelligence.careerPageUrl ? " · career verified" : ""}`,
+      recommendedAngle: scored.recommendedAngle,
+      assignedOwnerId: "",
+      assignedOwnerName: "",
+      evidence: {
+        targetPool: true,
+        targetCountry: country,
+        marketPhase: market.phase,
+        marketPriority: market.priority,
+        marketUniverse: market.marketSize,
+        targetIndustries: market.industries,
+        targetNaics: market.naics,
+        apolloPeopleDiscovery: true,
+        apolloPeoplePage: Number(person.__page || startPage),
+        apolloPeopleTotal: peopleTotal,
+        apolloSeedPersonId: clean(person.id, 160),
+        apolloSeedFirstName: clean(person.first_name, 120),
+        apolloSeedLastNameMasked: clean(person.last_name_obfuscated, 120),
+        apolloSeedTitle: clean(person.title, 300),
+        resolvedOfficialDomain: domain,
+        officialWebsite: intelligence.website,
+        careerEvidenceUrl: intelligence.evidenceUrl,
+        careerConfidence: intelligence.careerConfidence,
+        atsConfidence: intelligence.atsConfidence,
+        verificationReason: intelligence.verificationReason,
+        rawHiringObservation: intelligence.hiring,
+        targetPoolVerifiedAt: new Date().toISOString(),
+        targetPoolVerificationStatus: hubspotCompanyId ? "hubspot-existing" : "verified",
+        discoveredAt: new Date().toISOString(),
+        discoveryPolicy: "Apollo People Search (0 credits) using target country + 201+ employees + target NAICS + senior HR/TA persona; official domain and Career/ATS are verified before storage",
+        hiringCountPolicy: "Hiring observation stored as evidence only; raw Apollo job counts do not boost Target Pool score",
+        feedMaritaRequested: false,
+      },
+    };
+  });
+
+  await upsertAcquisitionAccounts(accounts);
+  const alreadyHubSpotByName = hubspotByName.size;
+  return {
+    country,
+    marketTotal: market.marketSize,
+    peopleTotal,
+    startPage,
+    pagesUsed,
+    peopleScanned: people.length,
+    companyCandidates: seedByCompany.size,
+    existingHubSpotByName: alreadyHubSpotByName,
+    resolvedDomains: uniqueResolved.size,
+    unresolvedCompanies: Math.max(0, netNewSeeds.length - uniqueResolved.size),
+    uniqueDomains: accounts.length,
+    eligible: accounts.filter((item) => item.exclusionStatus === "eligible").length,
+    review: accounts.filter((item) => item.exclusionStatus === "review").length,
+    excluded: accounts.filter((item) => item.exclusionStatus === "excluded").length,
+    existingHubSpot: alreadyHubSpotByName + accounts.filter((item) => item.exclusionReason === "Already exists in HubSpot").length,
+    discoveryMode: "apollo_people_zero_credit",
+  };
+}
+'''
+          s = s[:start] + replacement + s[end:]
+          s = s.replace('return NextResponse.json({ error: "Valid Owner PIN is required." }, { status: 401 });', 'return NextResponse.json({ error: "Admin password access is required." }, { status: 401 });')
+          p.write_text(s)
+
+          ui = Path('src/components/TargetAccountPool.tsx')
+          u = ui.read_text()
+          u = u.replace('`Load up to ${pages * 100} ${currentMarket.country} companies into the dashboard pool? This can consume up to ${pages} Apollo credit${pages === 1 ? "" : "s"}. Nothing will be written to HubSpot.`', '`Scan up to ${pages * 100} senior HR/TA profiles in ${currentMarket.country} and stock verified net-new companies? Apollo People Search uses 0 search credits. Nothing will be written to HubSpot.`')
+          u = u.replace('setNotice(`${currentMarket.country}: ${String(result.uniqueDomains || 0)} domains stored · ${String(result.eligible || 0)} eligible · ${String(result.existingHubSpot || 0)} already in HubSpot.`);', 'setNotice(`${currentMarket.country}: ${String(result.peopleScanned || 0)} HR/TA profiles scanned · ${String(result.uniqueDomains || 0)} domains stored · ${String(result.eligible || 0)} eligible · ${String(result.existingHubSpot || 0)} already in HubSpot · ${String(result.unresolvedCompanies || 0)} unresolved.`);')
+          u = u.replace('<span>Pages to load</span>', '<span>People pages to scan</span>')
+          u = u.replace('{page} · up to {page * 100} companies', '{page} · up to {page * 100} HR/TA profiles')
+          u = u.replace('Up to <strong>{pages}</strong> Apollo credit{pages === 1 ? "" : "s"}. Domain dedupe happens before the account becomes eligible.', '<strong>0 Apollo search credits.</strong> HR/TA-first discovery · domain + Career/ATS verification before storage.')
+          ui.write_text(u)
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/app/api/target-account-pool/route.ts src/components/TargetAccountPool.tsx
+          git commit -m 'Use zero-credit HR people discovery for Target Pool'
+          git push origin HEAD:feat/target-pool-people-discovery
