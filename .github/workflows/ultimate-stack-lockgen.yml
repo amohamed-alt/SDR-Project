@@ -1,0 +1,52 @@
+name: Ultimate dashboard dependency sync
+
+on:
+  push:
+    branches: [feat/ultimate-dashboard-stack-2026-08-28]
+    paths:
+      - .github/workflows/ultimate-stack-lockgen.yml
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/ultimate-dashboard-stack-2026-08-28
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install modern dashboard runtime stack
+        run: >-
+          npm install
+          motion@latest
+          gsap@latest
+          lenis@latest
+          echarts@latest
+          three@latest
+          @react-three/fiber@latest
+          @radix-ui/react-slot@latest
+          class-variance-authority@latest
+          clsx@latest
+          tailwind-merge@latest
+      - name: Install Tailwind tooling
+        run: >-
+          npm install -D
+          tailwindcss@latest
+          @tailwindcss/postcss@latest
+          @types/three@latest
+      - name: Commit synchronized manifests
+        run: |
+          if git diff --quiet -- package.json package-lock.json; then
+            echo "Dependencies already synchronized."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore(ultimate): sync modern dashboard dependencies"
+          git push origin HEAD:feat/ultimate-dashboard-stack-2026-08-28
