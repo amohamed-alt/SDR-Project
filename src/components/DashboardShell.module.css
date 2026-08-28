@@ -331,6 +331,7 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
+.ultimateIcon { background: linear-gradient(135deg, #e7f8f0, #eee9ff); color: #2d7d67; }
 .companyIcon { background: #e8f1fa; color: #2f5f8a; }
 .brainIcon { background: #e7f5f2; color: #0d675e; }
 .gtmIcon { background: #e8f3f7; color: #0f5f7a; }

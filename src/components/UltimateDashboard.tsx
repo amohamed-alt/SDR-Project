@@ -151,7 +151,7 @@ export function UltimateDashboard({ onBack }: { onBack: () => void }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const rootRef = useRef<HTMLElement>(null);
   const reducedMotion = useReducedMotion();
-  const range = useMemo(defaultRange, []);
+  const range = useMemo(() => defaultRange(), []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -170,6 +170,7 @@ export function UltimateDashboard({ onBack }: { onBack: () => void }) {
     }
   }, [range.from, range.to, refreshKey]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
