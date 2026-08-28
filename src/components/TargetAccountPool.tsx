@@ -215,13 +215,19 @@ export function TargetAccountPool() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    const data = await response.json() as Record<string, unknown> & { error?: string };
+    const raw = await response.text();
+    let data: Record<string, unknown> & { error?: string } = {};
+    if (raw.trim()) {
+      try { data = JSON.parse(raw) as Record<string, unknown> & { error?: string }; }
+      catch { throw new Error(`Target Pool returned an invalid response (${response.status}). Refresh and retry.`); }
+    }
     if (response.status === 401) {
       setAdminUnlocked(false);
       window.dispatchEvent(new CustomEvent("sdr:admin-auth-changed"));
       throw new Error("Admin access is locked. Open SDR Tools → Advanced & Data Ops and enter the admin password.");
     }
-    if (!response.ok) throw new Error(data.error || "Target Pool action failed.");
+    if (!response.ok) throw new Error(data.error || `Target Pool request failed (${response.status}).`);
+    if (!raw.trim()) throw new Error("Target Pool server returned an empty response. The request may have timed out; refresh and retry.");
     return data;
   }
 
@@ -245,7 +251,7 @@ export function TargetAccountPool() {
   async function discoverMarket() {
     if (!currentMarket) return;
     const approved = window.confirm(
-      `Scan up to ${pages * 100} senior HR/TA profiles in ${currentMarket.country} and stock verified net-new companies? Apollo People Search uses 0 search credits. Nothing will be written to HubSpot.`,
+      `Scan up to ${pages * 100} senior HR/TA profiles in ${currentMarket.country} and stock net-new companies? Apollo People Search uses 0 search credits. Fast official-domain + HubSpot checks run now; Career/ATS deep verification runs later on Verify. Nothing will be written to HubSpot.`,
     );
     if (!approved) return;
     setBusy("discover");
@@ -408,7 +414,7 @@ export function TargetAccountPool() {
         <p>{currentMarket?.industries.join(" · ")}</p>
         <div className={styles.controlStat}><span>Apollo market universe</span><strong>{fmt(currentMarket?.marketSize || 0)}</strong></div>
         <label className={styles.pages}><span>People pages to scan</span><select value={pages} onChange={(event) => setPages(Number(event.target.value))}>{[1,2,3,4,5,6].map((page) => <option value={page} key={page}>{page} · up to {page * 100} HR/TA profiles</option>)}</select></label>
-        <div className={styles.cost}><Coins size={14}/><span><strong>0 Apollo search credits.</strong> HR/TA-first discovery · domain + Career/ATS verification before storage.</span></div>
+        <div className={styles.cost}><Coins size={14}/><span><strong>0 Apollo search credits.</strong> HR/TA-first discovery · fast official-domain + HubSpot check now · Career/ATS on Verify.</span></div>
         <button className={styles.stock} type="button" onClick={() => void discoverMarket()} disabled={busy === "discover" || !payload?.configuration.apolloConfigured || !adminUnlocked}>{busy === "discover" ? <LoaderCircle className={styles.spin} size={16}/> : <Sparkles size={16}/>} Load market page</button>
 
         <div className={styles.divider}/>
