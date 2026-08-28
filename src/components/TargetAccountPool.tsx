@@ -245,7 +245,7 @@ export function TargetAccountPool() {
   async function discoverMarket() {
     if (!currentMarket) return;
     const approved = window.confirm(
-      `Load up to ${pages * 100} ${currentMarket.country} companies into the dashboard pool? This can consume up to ${pages} Apollo credit${pages === 1 ? "" : "s"}. Nothing will be written to HubSpot.`,
+      `Scan up to ${pages * 100} senior HR/TA profiles in ${currentMarket.country} and stock verified net-new companies? Apollo People Search uses 0 search credits. Nothing will be written to HubSpot.`,
     );
     if (!approved) return;
     setBusy("discover");
@@ -257,7 +257,7 @@ export function TargetAccountPool() {
         pages,
         confirmCredits: true,
       });
-      setNotice(`${currentMarket.country}: ${String(result.uniqueDomains || 0)} domains stored · ${String(result.eligible || 0)} eligible · ${String(result.existingHubSpot || 0)} already in HubSpot.`);
+      setNotice(`${currentMarket.country}: ${String(result.peopleScanned || 0)} HR/TA profiles scanned · ${String(result.uniqueDomains || 0)} domains stored · ${String(result.eligible || 0)} eligible · ${String(result.existingHubSpot || 0)} already in HubSpot · ${String(result.unresolvedCompanies || 0)} unresolved.`);
       await load();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Apollo market load failed.");
@@ -407,8 +407,8 @@ export function TargetAccountPool() {
         <div className={styles.controlTitle}><Crosshair size={17}/><div><span>MARKET STOCKING</span><strong>{country}</strong></div></div>
         <p>{currentMarket?.industries.join(" · ")}</p>
         <div className={styles.controlStat}><span>Apollo market universe</span><strong>{fmt(currentMarket?.marketSize || 0)}</strong></div>
-        <label className={styles.pages}><span>Pages to load</span><select value={pages} onChange={(event) => setPages(Number(event.target.value))}>{[1,2,3,4,5,6].map((page) => <option value={page} key={page}>{page} · up to {page * 100} companies</option>)}</select></label>
-        <div className={styles.cost}><Coins size={14}/><span>Up to <strong>{pages}</strong> Apollo credit{pages === 1 ? "" : "s"}. Domain dedupe happens before the account becomes eligible.</span></div>
+        <label className={styles.pages}><span>People pages to scan</span><select value={pages} onChange={(event) => setPages(Number(event.target.value))}>{[1,2,3,4,5,6].map((page) => <option value={page} key={page}>{page} · up to {page * 100} HR/TA profiles</option>)}</select></label>
+        <div className={styles.cost}><Coins size={14}/><span><strong>0 Apollo search credits.</strong> HR/TA-first discovery · domain + Career/ATS verification before storage.</span></div>
         <button className={styles.stock} type="button" onClick={() => void discoverMarket()} disabled={busy === "discover" || !payload?.configuration.apolloConfigured || !adminUnlocked}>{busy === "discover" ? <LoaderCircle className={styles.spin} size={16}/> : <Sparkles size={16}/>} Load market page</button>
 
         <div className={styles.divider}/>
