@@ -6,6 +6,7 @@ on:
       - fix/target-pool-bigger-batches
     paths:
       - scripts/patch-target-pool-bigger-batches.py
+      - .github/workflows/patch-target-pool-bigger-batches.yml
 
 permissions:
   contents: write
