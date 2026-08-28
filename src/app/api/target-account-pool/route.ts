@@ -33,7 +33,12 @@ const actionSchema = z.discriminatedUnion("action", [
 ]);
 
 type ApolloPeopleOrganization = {
+  id?: string;
   name?: string;
+  primary_domain?: string;
+  domain?: string;
+  website_url?: string;
+  website?: string;
   has_industry?: boolean;
   has_employee_count?: boolean;
 };
@@ -282,6 +287,23 @@ async function quickResolveCompanyIdentity(companyName: string): Promise<QuickId
       .sort((a, b) => b.score - a.score);
 
     for (const candidate of candidates.slice(0, 2)) {
+      const fastDomain = normalizeCompanyDomain(candidate.url);
+      const fastIdentityScore = quickIdentityScore(
+        companyName,
+        candidate.url,
+        `${candidate.result.title || ""} ${candidate.result.content || ""}`,
+      );
+      if (fastDomain && !isThirdPartyCompanyDomain(fastDomain, companyName) && fastIdentityScore >= 4) {
+        try {
+          const parsed = new URL(candidate.url);
+          return {
+            domain: fastDomain,
+            website: `${parsed.protocol}//${parsed.host}/`,
+            evidenceUrl: candidate.url,
+            reason: "Fast market stocking resolved the official company identity from a high-confidence web-search result. Career/ATS deep verification is deferred to Verify.",
+          };
+        } catch {}
+      }
       try {
         const live = await fetch(candidate.url, {
           redirect: "follow", cache: "no-store",
@@ -307,6 +329,29 @@ async function quickResolveCompanyIdentity(companyName: string): Promise<QuickId
     }
   } catch {}
   return null;
+}
+
+function quickIdentityFromApolloPerson(person: ApolloPersonSearchRow & { __page?: number }): QuickIdentity | null {
+  const organization = person.organization;
+  if (!organization) return null;
+  const raw = clean(organization.primary_domain || organization.domain || organization.website_url || organization.website, 1000);
+  const domain = normalizeCompanyDomain(raw);
+  const companyName = clean(organization.name, 300);
+  if (!domain || isThirdPartyCompanyDomain(domain, companyName)) return null;
+  let website = `https://${domain}/`;
+  const suppliedWebsite = clean(organization.website_url || organization.website, 1000);
+  if (suppliedWebsite) {
+    try {
+      const parsed = new URL(/^https?:\/\//i.test(suppliedWebsite) ? suppliedWebsite : `https://${suppliedWebsite}`);
+      website = `${parsed.protocol}//${parsed.host}/`;
+    } catch {}
+  }
+  return {
+    domain,
+    website,
+    evidenceUrl: suppliedWebsite || website,
+    reason: "Apollo People Search supplied the company domain directly; HubSpot dedupe runs before storage and Career/ATS deep verification is deferred to Verify.",
+  };
 }
 
 async function apolloPeoplePage(country: TargetAccountCountry, page: number) {
@@ -400,8 +445,13 @@ async function discoverMarket(country: TargetAccountCountry, pages: number) {
     .map((account) => Number(account.evidence?.apolloPeoplePage || 0))
     .filter((value) => Number.isFinite(value) && value > 0);
   const startPage = previousPages.length ? Math.max(...previousPages) + 1 : 1;
-  const configuredResolveLimit = Number(process.env.TARGET_POOL_RESOLVE_LIMIT || 6);
-  const resolveLimit = Math.max(3, Math.min(12, Number.isFinite(configuredResolveLimit) ? Math.round(configuredResolveLimit) : 6));
+  const configuredCompaniesPerPage = Number(process.env.TARGET_POOL_COMPANIES_PER_PAGE || 25);
+  const companiesPerPage = Math.max(15, Math.min(40, Number.isFinite(configuredCompaniesPerPage) ? Math.round(configuredCompaniesPerPage) : 25));
+  const desiredResolveLimit = Math.min(100, pages * companiesPerPage);
+  const configuredResolveLimit = Number(process.env.TARGET_POOL_RESOLVE_LIMIT || desiredResolveLimit);
+  const resolveLimit = Math.max(10, Math.min(100, Number.isFinite(configuredResolveLimit) ? Math.round(configuredResolveLimit) : desiredResolveLimit));
+  const configuredTavilyFallbackLimit = Number(process.env.TARGET_POOL_TAVILY_FALLBACK_LIMIT || 25);
+  const tavilyFallbackLimit = Math.max(8, Math.min(30, Number.isFinite(configuredTavilyFallbackLimit) ? Math.round(configuredTavilyFallbackLimit) : 25));
 
   const people: Array<ApolloPersonSearchRow & { __page: number }> = [];
   let peopleTotal = 0;
@@ -440,13 +490,33 @@ async function discoverMarket(country: TargetAccountCountry, pages: number) {
     return name && !hubspotByName.has(name);
   });
 
-  const resolved = await mapWithConcurrency(netNewSeeds, 4, async (person) => {
+  const directResolved: Array<{
+    person: ApolloPersonSearchRow & { __page: number };
+    name: string;
+    domain: string;
+    identity: QuickIdentity;
+  }> = [];
+  const tavilySeeds: Array<ApolloPersonSearchRow & { __page: number }> = [];
+
+  for (const person of netNewSeeds) {
+    const name = clean(person.organization?.name, 300);
+    if (!name) continue;
+    const identity = quickIdentityFromApolloPerson(person);
+    if (identity?.domain) {
+      directResolved.push({ person, name, domain: identity.domain, identity });
+    } else {
+      tavilySeeds.push(person);
+    }
+  }
+
+  const fallbackResolved = await mapWithConcurrency(tavilySeeds.slice(0, tavilyFallbackLimit), 8, async (person) => {
     const name = clean(person.organization?.name, 300);
     if (!name) return null;
     const identity = await quickResolveCompanyIdentity(name);
     if (!identity?.domain) return null;
     return { person, name, domain: identity.domain, identity };
   });
+  const resolved = [...directResolved, ...fallbackResolved];
 
   const uniqueResolved = new Map<string, NonNullable<(typeof resolved)[number]>>();
   for (const item of resolved) {
@@ -552,6 +622,8 @@ async function discoverMarket(country: TargetAccountCountry, pages: number) {
     companyCandidates: seedByCompany.size,
     existingHubSpotByName: hubspotByName.size,
     resolvedDomains: uniqueResolved.size,
+    directApolloDomains: directResolved.length,
+    tavilyFallbackAttempted: Math.min(tavilySeeds.length, tavilyFallbackLimit),
     unresolvedCompanies: Math.max(0, netNewSeeds.length - uniqueResolved.size),
     uniqueDomains: accounts.length,
     eligible: accounts.filter((item) => item.exclusionStatus === "eligible").length,
