@@ -1,5 +1,7 @@
 .shell {
   min-height: 100vh;
+  position: relative;
+  isolation: isolate;
 }
 
 .viewLoading {
@@ -9,7 +11,9 @@
   align-items: center;
   justify-content: center;
   gap: 12px;
-  background: #f6faf8;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(8, 122, 80, 0.08), transparent 18rem),
+    #f6faf8;
   color: #28453a;
 }
 
@@ -29,7 +33,7 @@
 .toolsDock {
   position: fixed;
   right: 24px;
-  bottom: 38px;
+  bottom: 86px;
   z-index: 122;
   display: flex;
   flex-direction: column;
@@ -44,26 +48,44 @@
   justify-content: center;
   gap: 9px;
   padding: 0 16px;
-  border: 1px solid rgba(255, 255, 255, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.3);
   border-radius: 16px;
-  background: linear-gradient(135deg, #173f63, #116f67);
-  box-shadow: 0 16px 40px rgba(30, 65, 92, 0.3);
+  background: linear-gradient(135deg, #173f63 0%, #116f67 58%, #0c5f59 100%);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.18) inset,
+    0 16px 40px rgba(30, 65, 92, 0.28);
   color: #fff;
   font: inherit;
   font-size: 11px;
   font-weight: 900;
   cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+  transform: translateZ(0);
+  transition:
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 200ms ease,
+    filter 200ms ease,
+    background 200ms ease;
 }
 
 .toolsToggle:hover {
   transform: translateY(-2px);
-  filter: brightness(0.98);
-  box-shadow: 0 20px 48px rgba(30, 65, 92, 0.34);
+  filter: brightness(1.03);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.2) inset,
+    0 20px 48px rgba(30, 65, 92, 0.34);
+}
+
+.toolsToggle:active {
+  transform: translateY(0) scale(0.99);
+}
+
+.toolsToggle:focus-visible {
+  outline: 3px solid rgba(17, 111, 103, 0.24);
+  outline-offset: 3px;
 }
 
 .toolsToggleOpen {
-  background: #173249;
+  background: linear-gradient(135deg, #173249, #0f514e);
 }
 
 .toolsToggle small {
@@ -71,27 +93,32 @@
   height: 20px;
   display: grid;
   place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
-  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.94);
   font-size: 9px;
   font-weight: 900;
 }
 
 .toolsMenu {
   width: min(360px, calc(100vw - 32px));
-  max-height: min(620px, calc(100vh - 112px));
+  max-height: min(620px, calc(100vh - 172px));
   overflow: hidden;
-  border: 1px solid rgba(88, 112, 136, 0.18);
+  border: 1px solid rgba(70, 102, 128, 0.17);
   border-radius: 22px;
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 28px 80px rgba(27, 48, 68, 0.22);
-  backdrop-filter: blur(18px);
-  animation: toolsMenuIn 0.18s ease-out;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.92) inset,
+    0 30px 84px rgba(27, 48, 68, 0.23);
+  backdrop-filter: blur(22px) saturate(145%);
+  -webkit-backdrop-filter: blur(22px) saturate(145%);
+  transform-origin: bottom right;
+  animation: toolsMenuIn 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @keyframes toolsMenuIn {
-  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  from { opacity: 0; transform: translateY(10px) scale(0.975); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
@@ -101,8 +128,8 @@
   justify-content: space-between;
   gap: 16px;
   padding: 15px 16px 13px;
-  border-bottom: 1px solid #e8eef4;
-  background: #f8fafc;
+  border-bottom: 1px solid rgba(63, 92, 117, 0.1);
+  background: linear-gradient(180deg, rgba(248, 251, 252, 0.98), rgba(245, 249, 250, 0.92));
 }
 
 .toolsHeader > div {
@@ -121,6 +148,7 @@
   color: #173249;
   font-size: 14px;
   font-weight: 900;
+  letter-spacing: -0.01em;
 }
 
 .toolsHeader button {
@@ -130,15 +158,44 @@
   place-items: center;
   border: 1px solid #dce4ed;
   border-radius: 10px;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.9);
   color: #64778a;
   cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.toolsHeader button:hover {
+  border-color: #c5d4df;
+  background: #fff;
+  color: #173f63;
+  transform: rotate(3deg);
+}
+
+.toolsHeader button:focus-visible,
+.toolItem:focus-visible,
+.advancedToggle:focus-visible {
+  outline: 3px solid rgba(17, 111, 103, 0.18);
+  outline-offset: 1px;
 }
 
 .toolList {
-  max-height: min(540px, calc(100vh - 182px));
+  max-height: min(540px, calc(100vh - 242px));
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(84, 111, 133, 0.28) transparent;
+}
+
+.toolList::-webkit-scrollbar {
+  width: 8px;
+}
+
+.toolList::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: rgba(84, 111, 133, 0.28);
+  background-clip: padding-box;
 }
 
 .toolSectionLabel {
@@ -156,7 +213,7 @@
   align-items: center;
   gap: 11px;
   padding: 8px 10px;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 14px;
   background: transparent;
   color: #173249;
@@ -164,12 +221,18 @@
   text-align: left;
   text-decoration: none;
   cursor: pointer;
-  transition: background 0.16s ease, transform 0.16s ease;
+  transition:
+    background 180ms ease,
+    border-color 180ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 180ms ease;
 }
 
 .toolItem:hover {
-  background: #f3f7fa;
-  transform: translateX(-2px);
+  border-color: rgba(52, 92, 118, 0.08);
+  background: linear-gradient(100deg, #f3f7fa, #f7fafb);
+  transform: translateX(2px);
+  box-shadow: 0 5px 14px rgba(31, 62, 84, 0.04);
 }
 
 .toolIcon {
@@ -179,6 +242,7 @@
   display: grid;
   place-items: center;
   border-radius: 11px;
+  box-shadow: inset 0 0 0 1px rgba(30, 62, 83, 0.04);
 }
 
 .toolCopy {
@@ -201,6 +265,7 @@
   color: #7a8b9e;
   font-size: 9px;
   font-weight: 700;
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -216,10 +281,17 @@
   padding: 9px 11px;
   border: 1px solid #e3eaf0;
   border-radius: 13px;
-  background: #f8fafc;
+  background: linear-gradient(180deg, #f9fbfc, #f6f9fb);
   color: #53687a;
   font: inherit;
   cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.advancedToggle:hover {
+  border-color: #d2dee7;
+  background: #f5f9fb;
+  box-shadow: 0 5px 14px rgba(31, 62, 84, 0.04);
 }
 
 .advancedToggle > span {
@@ -250,7 +322,13 @@
   padding: 4px;
   border: 1px solid #edf1f4;
   border-radius: 15px;
-  background: #fbfcfd;
+  background: linear-gradient(180deg, #fbfcfd, #f8fafb);
+  animation: advancedIn 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes advancedIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .companyIcon { background: #e8f1fa; color: #2f5f8a; }
@@ -266,20 +344,36 @@
 @media (max-width: 720px) {
   .toolsDock {
     right: 14px;
-    bottom: 26px;
+    bottom: 74px;
   }
 
   .toolsMenu {
     width: min(350px, calc(100vw - 28px));
-    max-height: calc(100vh - 96px);
+    max-height: calc(100vh - 144px);
+    border-radius: 19px;
   }
 
   .toolList {
-    max-height: calc(100vh - 166px);
+    max-height: calc(100vh - 214px);
   }
 
   .toolsToggle {
     min-height: 46px;
     padding: 0 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viewLoading svg,
+  .toolsMenu,
+  .advancedList {
+    animation: none;
+  }
+
+  .toolsToggle,
+  .toolsHeader button,
+  .toolItem,
+  .advancedToggle {
+    transition: none;
   }
 }
