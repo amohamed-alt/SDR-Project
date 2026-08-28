@@ -377,3 +377,5 @@
     transition: none;
   }
 }
+
+.adminGate{margin:6px 4px 3px;padding:12px;border:1px solid #d7e4dd;border-radius:13px;background:linear-gradient(180deg,#f8fcfa,#f2f8f5);display:grid;gap:7px}.adminGate strong{color:#234f3b;font-size:10px;font-weight:900}.adminGate small{color:#72837a;font-size:8px;line-height:1.4}.adminGate input{width:100%;box-sizing:border-box;border:1px solid #cfdcd5;border-radius:9px;background:#fff;padding:9px 10px;color:#173249;font:inherit;font-size:10px;outline:none}.adminGate input:focus{border-color:#55a47c;box-shadow:0 0 0 3px rgba(37,149,95,.1)}.adminGate button{border:0;border-radius:9px;background:#177f4c;color:#fff;padding:9px 10px;font:inherit;font-size:9px;font-weight:900;cursor:pointer}.adminGate button:disabled{opacity:.5;cursor:not-allowed}.adminError{color:#a33c3c;font-size:8px;font-weight:800}

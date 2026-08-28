@@ -1,4 +1,3 @@
-import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
@@ -10,6 +9,7 @@ import { searchAll } from "@/lib/hubspot";
 import { inspectProspectCompany } from "@/lib/prospecting-company-intelligence-gemini";
 import { normalizeCompanyDomain } from "@/lib/prospecting-company-intelligence";
 import { scoreTalenteraAccount } from "@/lib/talentera-intelligence";
+import { sdrAdminAuthorized, sdrAdminConfigured } from "@/lib/sdr-admin-auth";
 import {
   TARGET_ACCOUNT_MARKETS,
   TARGET_ACCOUNT_TOTAL,
@@ -63,12 +63,6 @@ function numberValue(...values: unknown[]) {
   return 0;
 }
 
-function safeEqual(left: string, right: string) {
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
 function sameOrigin(request: NextRequest) {
   const site = request.headers.get("sec-fetch-site");
   if (site && !["same-origin", "same-site", "none"].includes(site)) return false;
@@ -78,16 +72,14 @@ function sameOrigin(request: NextRequest) {
 }
 
 function ownerAuthorized(request: NextRequest) {
-  const supplied = clean(request.headers.get("x-acquisition-owner-token"), 500);
-  const configured = clean(process.env.ACQUISITION_OWNER_TOKEN || process.env.DASHBOARD_PASSWORD, 500);
-  return Boolean(supplied && configured && safeEqual(supplied, configured));
+  return sdrAdminAuthorized(request);
 }
 
 function configuration() {
   return {
     apolloConfigured: Boolean(clean(process.env.APOLLO_API_KEY, 1000)),
     signalHireConfigured: Boolean(clean(process.env.SIGNALHIRE_API_KEY, 1000)),
-    ownerActionsConfigured: Boolean(clean(process.env.ACQUISITION_OWNER_TOKEN || process.env.DASHBOARD_PASSWORD, 500)),
+    ownerActionsConfigured: sdrAdminConfigured(),
     hubspotWritePolicy: "No HubSpot write from the pool. HubSpot write happens only after an explicit Marita feed request.",
     signalHirePolicy: "No SignalHire search/reveal for dormant pool accounts. Search and one-person reveal start only after explicit Marita feed selection.",
   };

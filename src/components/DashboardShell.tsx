@@ -92,6 +92,12 @@ export function Dashboard() {
   const [view, setView] = useState<ShellView>("core");
   const [toolsOpen, setToolsOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [adminUnlocked, setAdminUnlocked] = useState(false);
+  const [adminChecked, setAdminChecked] = useState(false);
+  const [adminPrompt, setAdminPrompt] = useState(false);
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminError, setAdminError] = useState("");
+  const [adminBusy, setAdminBusy] = useState(false);
   const toolsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -100,6 +106,31 @@ export function Dashboard() {
     window.addEventListener("popstate", syncFromUrl);
     return () => window.removeEventListener("popstate", syncFromUrl);
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/sdr-admin", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data: { unlocked?: boolean }) => {
+        if (!active) return;
+        setAdminUnlocked(Boolean(data.unlocked));
+        setAdminChecked(true);
+      })
+      .catch(() => { if (active) setAdminChecked(true); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!adminChecked || adminUnlocked) return;
+    const adminViews: ShellView[] = ["hiring", "career", "ats-intent", "marita-priority", "team-activity"];
+    if (!adminViews.includes(view)) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("view");
+    window.history.replaceState({}, "", url);
+    setView("core");
+    setToolsOpen(true);
+    setAdminPrompt(true);
+  }, [adminChecked, adminUnlocked, view]);
 
   useEffect(() => {
     if (!toolsOpen) return;
@@ -117,7 +148,46 @@ export function Dashboard() {
     };
   }, [toolsOpen]);
 
+  async function unlockAdmin(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAdminBusy(true);
+    setAdminError("");
+    try {
+      const response = await fetch("/api/sdr-admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: adminPassword }),
+      });
+      const data = await response.json() as { unlocked?: boolean; error?: string };
+      if (!response.ok || !data.unlocked) throw new Error(data.error || "Incorrect admin password.");
+      setAdminUnlocked(true);
+      setAdminChecked(true);
+      setAdminPrompt(false);
+      setAdvancedOpen(true);
+      setAdminPassword("");
+      window.dispatchEvent(new CustomEvent("sdr:admin-auth-changed"));
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : "Unable to unlock admin tools.");
+    } finally {
+      setAdminBusy(false);
+    }
+  }
+
+  function toggleAdvanced() {
+    if (advancedOpen) { setAdvancedOpen(false); return; }
+    if (adminUnlocked) { setAdvancedOpen(true); setAdminPrompt(false); return; }
+    setAdminPrompt(true);
+    setAdvancedOpen(false);
+  }
+
   function changeView(next: ShellView) {
+    const adminViews: ShellView[] = ["hiring", "career", "ats-intent", "marita-priority", "team-activity"];
+    if (adminViews.includes(next) && !adminUnlocked) {
+      setView("core");
+      setToolsOpen(true);
+      setAdminPrompt(true);
+      return;
+    }
     const url = new URL(window.location.href);
     if (next === "core") url.searchParams.delete("view");
     else url.searchParams.set("view", next);
@@ -170,12 +240,20 @@ export function Dashboard() {
               <span className={styles.toolCopy}><strong>Calls</strong><small>Maqsam call intelligence · transcripts · sync</small></span>
             </button>
 
-            <button className={styles.advancedToggle} type="button" onClick={() => setAdvancedOpen((current) => !current)} aria-expanded={advancedOpen}>
-              <span><Wrench size={14}/><strong>Advanced & Data Ops</strong><small>Sources, verification and admin tools</small></span>
+            <button className={styles.advancedToggle} type="button" onClick={toggleAdvanced} aria-expanded={advancedOpen}>
+              <span><Wrench size={14}/><strong>Advanced & Data Ops</strong><small>{adminUnlocked ? "Admin unlocked · sources, verification and ops" : "Password protected admin tools"}</small></span>
               {advancedOpen ? <ChevronUp size={16}/> : <ChevronDown size={16}/>} 
             </button>
 
-            {advancedOpen ? <div className={styles.advancedList}>
+            {adminPrompt && !adminUnlocked ? <form className={styles.adminGate} onSubmit={(event) => void unlockAdmin(event)}>
+              <strong>Admin password</strong>
+              <small>Enter it once to unlock administrative SDR tools. No Owner key is needed.</small>
+              <input autoFocus type="password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} placeholder="Admin password" autoComplete="current-password"/>
+              {adminError ? <span className={styles.adminError}>{adminError}</span> : null}
+              <button type="submit" disabled={adminBusy || !adminPassword.trim()}>{adminBusy ? "Unlocking…" : "Unlock admin tools"}</button>
+            </form> : null}
+
+            {advancedOpen && adminUnlocked ? <div className={styles.advancedList}>
               <Link className={styles.toolItem} href="/salesnav-prospecting" onClick={() => trackFeature("sales-nav")}>
                 <span className={`${styles.toolIcon} ${styles.salesIcon}`}><Radar size={17}/></span>
                 <span className={styles.toolCopy}><strong>Sales Nav Source</strong><small>Chrome companion · net-new people</small></span>
