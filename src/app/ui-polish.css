@@ -1,0 +1,441 @@
+/*
+ * SDR Command Center — progressive visual polish layer.
+ *
+ * This file intentionally sits on top of globals.css instead of replacing the
+ * established dashboard stylesheet. It improves hierarchy, interaction feedback,
+ * accessibility and responsive behavior without changing business logic or data UI.
+ */
+
+:root {
+  --surface-elevated: rgba(255, 255, 255, 0.96);
+  --surface-glass: rgba(255, 255, 255, 0.88);
+  --border-strong: rgba(39, 82, 63, 0.18);
+  --focus-ring: rgba(8, 122, 80, 0.24);
+  --shadow: 0 1px 2px rgba(15, 49, 36, 0.035), 0 12px 32px rgba(15, 49, 36, 0.07);
+  --shadow-hover: 0 2px 5px rgba(15, 49, 36, 0.05), 0 18px 42px rgba(15, 49, 36, 0.11);
+  --ease-out-smooth: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background:
+    radial-gradient(circle at 88% -8%, rgba(8, 122, 80, 0.075), transparent 28rem),
+    radial-gradient(circle at 18% 24%, rgba(58, 125, 224, 0.035), transparent 34rem),
+    var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgba(8, 122, 80, 0.18);
+  color: var(--text);
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.sidebar button:focus-visible,
+.sidebar a:focus-visible {
+  outline-color: rgba(255, 255, 255, 0.45);
+}
+
+/* App chrome */
+.topbar {
+  border-bottom-color: rgba(36, 77, 59, 0.11);
+  background: var(--surface-glass);
+  box-shadow: 0 1px 0 rgba(35, 70, 55, 0.04), 0 8px 28px rgba(30, 64, 49, 0.035);
+  backdrop-filter: blur(20px) saturate(145%);
+  -webkit-backdrop-filter: blur(20px) saturate(145%);
+}
+
+.sidebar {
+  background:
+    radial-gradient(circle at 12% 4%, rgba(77, 192, 145, 0.18), transparent 18rem),
+    linear-gradient(180deg, #0c493c 0%, #0b4036 55%, #09372f 100%);
+  box-shadow: 14px 0 38px rgba(8, 46, 36, 0.08);
+}
+
+.brand {
+  border-bottom-color: rgba(255, 255, 255, 0.11);
+}
+
+.sidebar nav button {
+  position: relative;
+  transition:
+    color 180ms var(--ease-out-smooth),
+    background 180ms var(--ease-out-smooth),
+    transform 180ms var(--ease-out-smooth),
+    box-shadow 180ms var(--ease-out-smooth);
+}
+
+.sidebar nav button:hover {
+  transform: translateX(2px);
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.sidebar nav button.active {
+  background: linear-gradient(135deg, #f2faf6 0%, #dff2e8 100%);
+  box-shadow: 0 8px 22px rgba(2, 31, 23, 0.16), inset 0 0 0 1px rgba(8, 122, 80, 0.08);
+}
+
+.owner-card,
+.sync-card {
+  background: rgba(255, 255, 255, 0.075);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* Primary surfaces */
+.kpi-card,
+.panel,
+.source-audit > button,
+.execution-focus,
+.mini-metric,
+.quality-card,
+.workspace-stat,
+.workspace-card {
+  border-color: rgba(41, 79, 63, 0.13);
+  box-shadow: var(--shadow);
+}
+
+.kpi-card,
+.source-audit > button,
+.focus-metric,
+.mini-metric,
+.quality-card,
+.workspace-stat {
+  transition:
+    transform 220ms var(--ease-out-smooth),
+    border-color 220ms var(--ease-out-smooth),
+    box-shadow 220ms var(--ease-out-smooth),
+    background 220ms var(--ease-out-smooth);
+}
+
+.kpi-card {
+  border-radius: 16px;
+}
+
+.kpi-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0.52;
+  transform: scaleX(0.24);
+  transform-origin: left center;
+  transition: transform 320ms var(--ease-out-smooth), opacity 220ms ease;
+}
+
+.kpi-card:hover::before,
+.kpi-card:focus-visible::before {
+  opacity: 0.78;
+  transform: scaleX(1);
+}
+
+.panel,
+.execution-focus,
+.workspace-card {
+  border-radius: 16px;
+}
+
+.section-intro {
+  border-color: rgba(8, 122, 80, 0.16);
+  background: linear-gradient(100deg, rgba(226, 242, 233, 0.82), rgba(255, 255, 255, 0.78));
+}
+
+.filter-drawer {
+  border-radius: 17px;
+  box-shadow: var(--shadow-hover);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.page-mode-tabs {
+  border-color: rgba(41, 79, 63, 0.13);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 7px 22px rgba(23, 67, 50, 0.055);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.page-mode-tabs button,
+.queue-tabs button,
+.preset-row button {
+  transition:
+    color 180ms var(--ease-out-smooth),
+    background 180ms var(--ease-out-smooth),
+    border-color 180ms var(--ease-out-smooth),
+    box-shadow 180ms var(--ease-out-smooth),
+    transform 180ms var(--ease-out-smooth);
+}
+
+.page-mode-tabs button.active {
+  box-shadow: 0 7px 18px rgba(8, 122, 80, 0.2);
+}
+
+/* Interactive feedback */
+.icon-button,
+.refresh-button,
+.secondary-button,
+.primary-button,
+.queue-view-all,
+.calendar-connection-actions a,
+.calendar-connection-actions button {
+  transition:
+    transform 170ms var(--ease-out-smooth),
+    box-shadow 170ms var(--ease-out-smooth),
+    background 170ms ease,
+    border-color 170ms ease,
+    color 170ms ease;
+}
+
+.refresh-button,
+.primary-button {
+  box-shadow: 0 7px 18px rgba(8, 122, 80, 0.17);
+}
+
+.refresh-button:hover,
+.primary-button:hover {
+  box-shadow: 0 10px 24px rgba(8, 122, 80, 0.22);
+}
+
+:is(.icon-button, .refresh-button, .secondary-button, .primary-button, .queue-view-all):active {
+  transform: translateY(1px) scale(0.99);
+}
+
+@media (hover: hover) {
+  .kpi-card:hover,
+  .source-audit > button:hover,
+  .focus-metric:hover,
+  .mini-metric:hover,
+  .quality-card:hover,
+  .workspace-stat:hover {
+    transform: translateY(-3px);
+    border-color: rgba(8, 122, 80, 0.28);
+    box-shadow: var(--shadow-hover);
+  }
+
+  .queue-item:hover,
+  .alert-item:hover,
+  .recommendation-list > div:hover {
+    border-color: rgba(8, 122, 80, 0.22);
+    background: #f4faf7;
+  }
+}
+
+/* Forms */
+.filter-field input,
+.filter-field select,
+.meeting-composer input,
+.meeting-composer select,
+.meeting-composer textarea {
+  border-color: rgba(41, 79, 63, 0.16);
+  background: rgba(251, 253, 252, 0.95);
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.filter-field input:hover,
+.filter-field select:hover,
+.meeting-composer input:hover,
+.meeting-composer select:hover,
+.meeting-composer textarea:hover {
+  border-color: rgba(8, 122, 80, 0.27);
+}
+
+.filter-field input:focus,
+.filter-field select:focus,
+.meeting-composer input:focus,
+.meeting-composer select:focus,
+.meeting-composer textarea:focus {
+  background: #fff;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+/* Data surfaces */
+.table-wrap {
+  border-color: rgba(41, 79, 63, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  scrollbar-gutter: stable;
+}
+
+.table-wrap th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(244, 248, 246, 0.96);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: inset 0 -1px 0 rgba(41, 79, 63, 0.08);
+}
+
+.table-wrap tbody tr {
+  transition: background 140ms ease;
+}
+
+.chart-tooltip {
+  border-color: rgba(41, 79, 63, 0.13);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 46px rgba(13, 55, 39, 0.16);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.progress {
+  box-shadow: inset 0 1px 2px rgba(22, 58, 43, 0.08);
+}
+
+.progress i {
+  background: linear-gradient(90deg, #087a50 0%, #1c9b6a 52%, #35ad7b 100%);
+}
+
+/* Workspace */
+.workspace-hero {
+  border-color: rgba(122, 203, 168, 0.46);
+  box-shadow: 0 20px 50px rgba(14, 75, 62, 0.18);
+}
+
+.calendar-connection {
+  background: rgba(255, 255, 255, 0.11);
+  backdrop-filter: blur(14px) saturate(130%);
+  -webkit-backdrop-filter: blur(14px) saturate(130%);
+}
+
+.queue-item,
+.alert-item,
+.recommendation-list > div {
+  transition: border-color 170ms ease, background 170ms ease, transform 170ms var(--ease-out-smooth);
+}
+
+/* Scrollbars stay subtle in dense operational lists. */
+.table-wrap,
+.preset-row,
+.drilldown-list {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(73, 111, 95, 0.32) transparent;
+}
+
+.table-wrap::-webkit-scrollbar,
+.preset-row::-webkit-scrollbar,
+.drilldown-list::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.table-wrap::-webkit-scrollbar-thumb,
+.preset-row::-webkit-scrollbar-thumb,
+.drilldown-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: rgba(73, 111, 95, 0.3);
+  background-clip: padding-box;
+}
+
+/* Progressive entrance motion: presentation only, never required for state. */
+@keyframes sdr-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(9px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .page-title,
+  .page-mode-tabs,
+  .kpi-grid,
+  .execution-focus,
+  .source-audit,
+  .two-column,
+  .three-column,
+  .activity-kpis,
+  .quality-grid,
+  .marita-workspace {
+    animation: sdr-rise-in 440ms var(--ease-out-smooth) both;
+  }
+
+  .page-mode-tabs { animation-delay: 25ms; }
+  .kpi-grid,
+  .marita-workspace { animation-delay: 45ms; }
+  .execution-focus,
+  .activity-kpis { animation-delay: 70ms; }
+  .source-audit,
+  .quality-grid { animation-delay: 90ms; }
+  .two-column,
+  .three-column { animation-delay: 110ms; }
+}
+
+@media (max-width: 900px) {
+  .sidebar {
+    box-shadow: 10px 0 28px rgba(8, 46, 36, 0.08);
+  }
+
+  .sidebar nav button:hover {
+    transform: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .topbar {
+    box-shadow: 0 4px 18px rgba(27, 62, 46, 0.06);
+  }
+
+  .sidebar {
+    height: calc(60px + env(safe-area-inset-bottom));
+    padding-bottom: calc(7px + env(safe-area-inset-bottom));
+    box-shadow: 0 -8px 26px rgba(8, 46, 36, 0.13);
+    backdrop-filter: blur(18px) saturate(130%);
+    -webkit-backdrop-filter: blur(18px) saturate(130%);
+  }
+
+  .content {
+    padding-bottom: calc(82px + env(safe-area-inset-bottom));
+  }
+
+  .kpi-card,
+  .panel,
+  .execution-focus,
+  .workspace-card {
+    border-radius: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
