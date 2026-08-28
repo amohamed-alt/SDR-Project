@@ -8,6 +8,7 @@ import {
 import { searchAll } from "@/lib/hubspot";
 import { inspectProspectCompany } from "@/lib/prospecting-company-intelligence-gemini";
 import { normalizeCompanyDomain } from "@/lib/prospecting-company-intelligence";
+import { isThirdPartyCompanyDomain } from "@/lib/company-domain-safety";
 import { scoreTalenteraAccount } from "@/lib/talentera-intelligence";
 import { sdrAdminAuthorized, sdrAdminConfigured } from "@/lib/sdr-admin-auth";
 import {
@@ -231,6 +232,83 @@ const TARGET_PERSON_TITLES = [
 
 const TARGET_PERSON_SENIORITIES = ["manager", "director", "vp", "head", "c_suite"] as const;
 
+const QUICK_DOMAIN_STOP_WORDS = new Set([
+  "group", "company", "companies", "holding", "holdings", "limited", "ltd", "llc", "inc", "corp", "corporation",
+  "saudi", "arabia", "ksa", "egypt", "uae", "the", "and", "for", "international", "services",
+]);
+
+type QuickIdentity = { domain: string; website: string; evidenceUrl: string; reason: string };
+type TavilyLiteResult = { title?: string; url?: string; content?: string; score?: number };
+
+function quickCompanyTokens(companyName: string) {
+  return companyName.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/)
+    .filter((word) => word.length >= 3 && !QUICK_DOMAIN_STOP_WORDS.has(word));
+}
+
+function quickIdentityScore(companyName: string, url: string, text: string) {
+  const tokens = quickCompanyTokens(companyName);
+  if (!tokens.length) return 0;
+  const domain = normalizeCompanyDomain(url).replace(/[^a-z0-9]/g, "");
+  const haystack = `${url} ${text}`.toLowerCase();
+  let score = 0;
+  for (const token of tokens) {
+    if (haystack.includes(token)) score += 2;
+    if (domain.includes(token.replace(/[^a-z0-9]/g, ""))) score += 2;
+  }
+  return score;
+}
+
+async function quickResolveCompanyIdentity(companyName: string): Promise<QuickIdentity | null> {
+  const apiKey = clean(process.env.TAVILY_API_KEY, 1000);
+  if (!apiKey || !companyName.trim()) return null;
+  try {
+    const response = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: `\"${companyName}\" official company website`, topic: "general", search_depth: "basic",
+        max_results: 6, include_answer: false, include_raw_content: false,
+      }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) return null;
+    const payload = await response.json().catch(() => ({})) as { results?: TavilyLiteResult[] };
+    const candidates = (payload.results || []).map((result) => ({
+      result,
+      url: clean(result.url, 1000),
+      score: Number(result.score || 0) + quickIdentityScore(companyName, clean(result.url, 1000), `${result.title || ""} ${result.content || ""}`),
+    })).filter((item) => item.url && !isThirdPartyCompanyDomain(item.url, companyName) && item.score >= 2)
+      .sort((a, b) => b.score - a.score);
+
+    for (const candidate of candidates.slice(0, 2)) {
+      try {
+        const live = await fetch(candidate.url, {
+          redirect: "follow", cache: "no-store",
+          headers: { "User-Agent": "Mozilla/5.0 (compatible; TalenteraGTM/2.5; +https://talentera.com)" },
+          signal: AbortSignal.timeout(4_000),
+        });
+        if (!live.ok) continue;
+        const contentType = live.headers.get("content-type") || "";
+        if (!/html|text/i.test(contentType)) continue;
+        const html = (await live.text()).slice(0, 350_000);
+        const finalUrl = live.url || candidate.url;
+        const domain = normalizeCompanyDomain(finalUrl);
+        if (!domain || isThirdPartyCompanyDomain(domain, companyName)) continue;
+        if (quickIdentityScore(companyName, finalUrl, `${candidate.result.title || ""} ${candidate.result.content || ""} ${html}`) < 3) continue;
+        const parsed = new URL(finalUrl);
+        return {
+          domain,
+          website: `${parsed.protocol}//${parsed.host}/`,
+          evidenceUrl: candidate.url,
+          reason: "Fast market stocking resolved the official company identity from web search and a live brand check. Career/ATS deep verification is deferred to Verify.",
+        };
+      } catch {}
+    }
+  } catch {}
+  return null;
+}
+
 async function apolloPeoplePage(country: TargetAccountCountry, page: number) {
   const market = targetMarket(country);
   if (!market) throw new Error(`Unsupported target market: ${country}`);
@@ -322,8 +400,8 @@ async function discoverMarket(country: TargetAccountCountry, pages: number) {
     .map((account) => Number(account.evidence?.apolloPeoplePage || 0))
     .filter((value) => Number.isFinite(value) && value > 0);
   const startPage = previousPages.length ? Math.max(...previousPages) + 1 : 1;
-  const configuredResolveLimit = Number(process.env.TARGET_POOL_RESOLVE_LIMIT || 12);
-  const resolveLimit = Math.max(5, Math.min(30, Number.isFinite(configuredResolveLimit) ? Math.round(configuredResolveLimit) : 12));
+  const configuredResolveLimit = Number(process.env.TARGET_POOL_RESOLVE_LIMIT || 6);
+  const resolveLimit = Math.max(3, Math.min(12, Number.isFinite(configuredResolveLimit) ? Math.round(configuredResolveLimit) : 6));
 
   const people: Array<ApolloPersonSearchRow & { __page: number }> = [];
   let peopleTotal = 0;
@@ -362,17 +440,12 @@ async function discoverMarket(country: TargetAccountCountry, pages: number) {
     return name && !hubspotByName.has(name);
   });
 
-  const resolved = await mapWithConcurrency(netNewSeeds, 6, async (person) => {
+  const resolved = await mapWithConcurrency(netNewSeeds, 4, async (person) => {
     const name = clean(person.organization?.name, 300);
     if (!name) return null;
-    try {
-      const intelligence = await inspectProspectCompany({ companyName: name, website: "", emails: [] });
-      const domain = normalizeCompanyDomain(intelligence.domain || intelligence.website);
-      if (!domain) return null;
-      return { person, name, domain, intelligence };
-    } catch {
-      return null;
-    }
+    const identity = await quickResolveCompanyIdentity(name);
+    if (!identity?.domain) return null;
+    return { person, name, domain: identity.domain, identity };
   });
 
   const uniqueResolved = new Map<string, NonNullable<(typeof resolved)[number]>>();
@@ -382,12 +455,12 @@ async function discoverMarket(country: TargetAccountCountry, pages: number) {
   }
 
   const hubspotByDomain = await existingHubSpotDomains([...uniqueResolved.keys()]);
-  const accounts: AcquisitionAccount[] = [...uniqueResolved.values()].map(({ person, name, domain, intelligence }) => {
+  const accounts: AcquisitionAccount[] = [...uniqueResolved.values()].map(({ person, name, domain, identity }) => {
     const industry = "Target industry";
     const exclusion = classifyExclusion({
       name,
-      website_url: intelligence.website,
-      seo_description: intelligence.verificationReason,
+      website_url: identity.website,
+      seo_description: identity.reason,
     }, domain);
     const hubspotCompanyId = hubspotByDomain.get(domain) || "";
     const finalExclusion = hubspotCompanyId
@@ -402,7 +475,7 @@ async function discoverMarket(country: TargetAccountCountry, pages: number) {
       industry,
       activeJobs: 0,
       newJobs30d: 0,
-      ats: intelligence.detectedAts || "",
+      ats: "",
     });
     const marketBonus = market.priority >= 88 ? 8 : market.priority >= 74 ? 5 : 2;
     const gtmScore = Math.min(100, scored.score + marketBonus + 5);
@@ -419,8 +492,8 @@ async function discoverMarket(country: TargetAccountCountry, pages: number) {
       activeJobs: 0,
       headcountGrowth: 0,
       hrHeadcount: 0,
-      careerPageUrl: intelligence.careerPageUrl || "",
-      detectedAts: intelligence.detectedAts || "",
+      careerPageUrl: "",
+      detectedAts: "",
       gtmScore,
       gtmTier,
       fitScore: scored.fitScore,
@@ -434,7 +507,7 @@ async function discoverMarket(country: TargetAccountCountry, pages: number) {
       secondaryPersona: scored.personas.secondary,
       economicBuyer: scored.personas.economicBuyer,
       technicalInfluencer: scored.personas.technicalInfluencer,
-      strongestSignal: `${country} target · 201+ employee filter · senior HR/TA persona present${intelligence.careerPageUrl ? " · career verified" : ""}`,
+      strongestSignal: `${country} target · 201+ employee filter · senior HR/TA persona present · official domain resolved`,
       recommendedAngle: scored.recommendedAngle,
       assignedOwnerId: "",
       assignedOwnerName: "",
@@ -454,16 +527,13 @@ async function discoverMarket(country: TargetAccountCountry, pages: number) {
         apolloSeedLastNameMasked: clean(person.last_name_obfuscated, 120),
         apolloSeedTitle: clean(person.title, 300),
         resolvedOfficialDomain: domain,
-        officialWebsite: intelligence.website,
-        careerEvidenceUrl: intelligence.evidenceUrl,
-        careerConfidence: intelligence.careerConfidence,
-        atsConfidence: intelligence.atsConfidence,
-        verificationReason: intelligence.verificationReason,
-        rawHiringObservation: intelligence.hiring,
-        targetPoolVerifiedAt: new Date().toISOString(),
-        targetPoolVerificationStatus: hubspotCompanyId ? "hubspot-existing" : "verified",
+        officialWebsite: identity.website,
+        identityEvidenceUrl: identity.evidenceUrl,
+        identityResolvedAt: new Date().toISOString(),
+        verificationReason: identity.reason,
+        targetPoolVerificationStatus: hubspotCompanyId ? "hubspot-existing" : "identity-resolved",
         discoveredAt: new Date().toISOString(),
-        discoveryPolicy: "Apollo People Search (0 search credits): target country + 201+ employees + target NAICS + senior HR/TA; official domain and Career/ATS checked before storage",
+        discoveryPolicy: "Apollo People Search (0 search credits): target country + 201+ employees + target NAICS + senior HR/TA; fast official-domain resolution + HubSpot domain gate before storage; Career/ATS deferred to Verify",
         hiringCountPolicy: "Hiring observation stored as evidence only; raw Apollo job counts do not boost Target Pool score",
         feedMaritaRequested: false,
       },
