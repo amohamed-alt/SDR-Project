@@ -1,0 +1,35 @@
+name: Inspect Hostinger Restart Progress
+
+on:
+  push:
+    branches:
+      - inspect/hostinger-post-restart
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      HOSTINGER_TOKEN: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+      VM_ID: "1604210"
+    steps:
+      - name: Inspect current restart progress
+        run: |
+          set -euo pipefail
+          BASE="https://developers.hostinger.com/api/vps/v1/virtual-machines/${VM_ID}"
+          AUTH="Authorization: Bearer ${HOSTINGER_TOKEN}"
+          echo "=== VPS ==="
+          curl -sS --connect-timeout 10 --max-time 30 -H "$AUTH" -H 'Accept: application/json' "$BASE" | jq '{id,hostname,state}'
+          echo "=== LATEST ACTIONS ==="
+          curl -sS --connect-timeout 10 --max-time 30 -H "$AUTH" -H 'Accept: application/json' "$BASE/actions?page=1" | jq '{data: [.data[]? | {id,name,state,created_at,updated_at}][0:6]}'
+          echo "=== METRICS ==="
+          FROM=$(date -u -d '15 minutes ago' '+%Y-%m-%dT%H:%MZ')
+          TO=$(date -u '+%Y-%m-%dT%H:%MZ')
+          curl -sS --connect-timeout 10 --max-time 30 -G -H "$AUTH" -H 'Accept: application/json' --data-urlencode "date_from=$FROM" --data-urlencode "date_to=$TO" "$BASE/metrics" | jq '{cpu_usage,ram_usage,uptime}'
+          echo "=== DASHBOARD ==="
+          STATUS=$(curl -k -sS --connect-timeout 5 --max-time 12 -o /tmp/health.json -w '%{http_code}' -H 'Cache-Control: no-cache' 'https://sdr.dashboardtalentera.tech/api/health' || true)
+          echo "HTTP=$STATUS"
+          cat /tmp/health.json 2>/dev/null || true
