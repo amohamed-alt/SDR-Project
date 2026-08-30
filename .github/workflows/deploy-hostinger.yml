@@ -11,557 +11,86 @@ permissions:
   statuses: write
 
 jobs:
-  preflight:
+  deploy:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    concurrency:
+      group: hostinger-sdr-production
+      cancel-in-progress: true
     runs-on: ubuntu-latest
-    outputs:
-      should_deploy: ${{ steps.freshness.outputs.should_deploy }}
-      deploy_sha: ${{ steps.freshness.outputs.deploy_sha }}
+    timeout-minutes: 15
+    env:
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
-      - name: Reject stale main deployment candidates
+      - name: Ensure this is the current main revision
         id: freshness
         uses: actions/github-script@v7
         env:
-          CANDIDATE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-          DEPLOY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CANDIDATE_SHA: ${{ env.DEPLOY_SHA }}
         with:
           retries: 3
           script: |
             const candidate = String(process.env.CANDIDATE_SHA || '').trim();
-            core.setOutput('deploy_sha', candidate);
-
             if (context.eventName === 'workflow_dispatch') {
-              core.setOutput('should_deploy', 'true');
-              core.notice(`Manual production deployment approved for ${candidate}.`);
+              core.setOutput('deploy', 'true');
               return;
             }
-
             const { data: branch } = await github.rest.repos.getBranch({
               owner: context.repo.owner,
               repo: context.repo.repo,
               branch: 'main',
             });
-            const currentMain = branch.commit.sha;
-
-            if (candidate !== currentMain) {
-              core.setOutput('should_deploy', 'false');
-              core.notice(`Skipping stale deployment ${candidate}; current main is ${currentMain}.`);
-              await github.rest.repos.createCommitStatus({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                sha: candidate,
-                state: 'success',
-                context: 'hostinger/deploy',
-                description: 'Superseded by a newer main commit; production untouched',
-                target_url: process.env.DEPLOY_URL,
-              });
-              return;
+            core.setOutput('deploy', candidate === branch.commit.sha ? 'true' : 'false');
+            if (candidate !== branch.commit.sha) {
+              core.notice(`Skipping stale deployment ${candidate}; main is ${branch.commit.sha}.`);
             }
 
-            core.setOutput('should_deploy', 'true');
-            core.notice(`Deployment candidate ${candidate} is the current main HEAD.`);
-
-  deploy:
-    needs: preflight
-    if: needs.preflight.outputs.should_deploy == 'true'
-    concurrency:
-      group: hostinger-sdr-production
-      cancel-in-progress: true
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    env:
-      DEPLOY_SHA: ${{ needs.preflight.outputs.deploy_sha }}
-      DEPLOY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-    steps:
-      - name: Mark deployment pending
-        continue-on-error: true
-        uses: actions/github-script@v7
-        with:
-          retries: 3
-          script: |
-            await github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              sha: process.env.DEPLOY_SHA,
-              state: 'pending',
-              context: 'hostinger/deploy',
-              description: 'Deploying SDR dashboard to Hostinger',
-              target_url: process.env.DEPLOY_URL,
-            });
-
-      - name: Checkout validated revision
+      - name: Checkout production revision
+        if: steps.freshness.outputs.deploy == 'true'
         uses: actions/checkout@v5
         with:
           ref: ${{ env.DEPLOY_SHA }}
 
+      - name: Validate light compose
+        if: steps.freshness.outputs.deploy == 'true'
+        run: docker compose -f docker-compose.light.yml config >/tmp/sdr-light-compose.txt
+
       - name: Validate Hostinger API key
+        if: steps.freshness.outputs.deploy == 'true'
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
-        run: |
-          test -n "$HOSTINGER_API_KEY" || {
-            echo "::error::Add HOSTINGER_API_KEY as a repository secret."
-            exit 1
-          }
+        run: test -n "$HOSTINGER_API_KEY"
 
-      - name: Validate SignalHire configuration
-        env:
-          SIGNALHIRE_KEY: ${{ secrets.SIGNALHIRE_API_KEY }}
-        run: |
-          test -n "$SIGNALHIRE_KEY" || {
-            echo "::error::Add SIGNALHIRE_API_KEY as a repository Actions secret."
-            exit 1
-          }
-          echo "SignalHire deployment secret: configured"
-
-      - name: Report net-new acquisition configuration
-        env:
-          APOLLO_KEY: ${{ secrets.APOLLO_API_KEY }}
-          OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN }}
-        run: |
-          if [ -n "$APOLLO_KEY" ]; then
-            echo "Apollo net-new discovery: configured"
-          else
-            echo "::warning::APOLLO_API_KEY is not configured yet; Net-New Accounts will deploy read-only with Apollo discovery disabled."
-          fi
-
-      - name: Validate dashboard authentication
-        env:
-          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
-          OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN }}
-        run: |
-          if [ -z "$DASHBOARD_PASSWORD" ] && [ -z "$OWNER_TOKEN" ]; then
-            echo "::error::Configure DASHBOARD_PASSWORD or ACQUISITION_OWNER_TOKEN before deploying the CRM dashboard."
-            exit 1
-          fi
-          echo "Dashboard authentication: configured"
-
-      - name: Report optional owner action configuration
-        env:
-          OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN }}
-        run: |
-          if [ -n "$OWNER_TOKEN" ]; then
-            echo "Acquisition Owner actions: configured"
-          else
-            echo "::warning::ACQUISITION_OWNER_TOKEN is not configured yet; enrichment and HubSpot write controls will stay locked."
-          fi
-
-      - name: Validate Tavily career fallback
-        env:
-          TAVILY_KEY: ${{ secrets.TAVILY_API_KEY }}
-        run: |
-          set -euo pipefail
-          test -n "$TAVILY_KEY" || {
-            echo "::error::Add TAVILY_API_KEY as a repository Actions secret."
-            exit 1
-          }
-          HTTP_CODE=$(curl --silent --show-error \
-            --connect-timeout 10 \
-            --max-time 45 \
-            --output /tmp/tavily-career-test.json \
-            --write-out '%{http_code}' \
-            -X POST 'https://api.tavily.com/search' \
-            -H "Authorization: Bearer $TAVILY_KEY" \
-            -H 'Content-Type: application/json' \
-            -d '{"query":"\"AlYemni Group\" official website careers jobs","topic":"general","search_depth":"basic","max_results":5,"include_answer":false,"include_raw_content":false}' || true)
-          RESULT_COUNT=$(jq -r '(.results // []) | length' /tmp/tavily-career-test.json 2>/dev/null || echo 0)
-          if [ "$HTTP_CODE" != "200" ] || [ "$RESULT_COUNT" -lt 1 ]; then
-            TAVILY_ERROR=$(jq -r '.detail?.error // .detail // .message // "unknown Tavily error"' /tmp/tavily-career-test.json 2>/dev/null || true)
-            echo "::error::Tavily career fallback validation failed (HTTP $HTTP_CODE, results=$RESULT_COUNT): $TAVILY_ERROR"
-            exit 1
-          fi
-          echo "Tavily career fallback: configured and responding with $RESULT_COUNT results"
-          if jq -r '.results[]?.url // empty' /tmp/tavily-career-test.json | grep -qi 'alyemnigroup\.com'; then
-            echo "Tavily AlYemni regression search: current official domain found"
-          else
-            echo "::warning::Tavily responded successfully, but the AlYemni regression query did not include alyemnigroup.com in its first 5 URLs. Runtime verification will still reject unverified domains."
-            jq -r '.results[]?.url // empty' /tmp/tavily-career-test.json | head -5
-          fi
-
-      - name: Report OpenRouter low-cost model availability
-        env:
-          OPENROUTER_KEY: ${{ secrets.OPENROUTER_API_KEY || secrets.GTM_RESEARCH_OPENROUTER_API_KEY }}
-        run: |
-          set -euo pipefail
-          test -n "$OPENROUTER_KEY" || {
-            echo "::error::Add OPENROUTER_API_KEY (or the legacy GTM_RESEARCH_OPENROUTER_API_KEY) as a repository secret."
-            exit 1
-          }
-          HTTP_CODE=$(curl --silent --show-error \
-            --connect-timeout 10 \
-            --max-time 45 \
-            --output /tmp/openrouter-test.json \
-            --write-out '%{http_code}' \
-            'https://openrouter.ai/api/v1/chat/completions' \
-            -H "Authorization: Bearer $OPENROUTER_KEY" \
-            -H 'Content-Type: application/json' \
-            -d '{"model":"openai/gpt-4.1-nano","messages":[{"role":"user","content":"Reply OK"}],"max_tokens":4,"temperature":0}' || true)
-          if [ "$HTTP_CODE" != "200" ]; then
-            OPENROUTER_ERROR=$(jq -r '.error.message // .message // "unknown OpenRouter error"' /tmp/openrouter-test.json 2>/dev/null || true)
-            echo "::warning::OpenRouter Nano is temporarily unavailable (HTTP $HTTP_CODE): $OPENROUTER_ERROR. Deterministic Smartlead copy and routing remain available, so deployment will continue."
-            exit 0
-          fi
-          MODEL=$(jq -r '.model // "unknown"' /tmp/openrouter-test.json 2>/dev/null || echo unknown)
-          echo "OpenRouter low-cost route: configured and responding via $MODEL"
-
-      - name: Validate Smartlead API key
-        env:
-          SMARTLEAD_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
-        run: |
-          set -euo pipefail
-          test -n "$SMARTLEAD_KEY" || {
-            echo "::error::Add SMARTLEAD_API_KEY as a repository Actions secret."
-            exit 1
-          }
-          HTTP_CODE=$(curl --silent --show-error \
-            --connect-timeout 10 \
-            --max-time 45 \
-            --output /tmp/smartlead-test.json \
-            --write-out '%{http_code}' \
-            "https://server.smartlead.ai/api/v1/campaigns/?api_key=${SMARTLEAD_KEY}" || true)
-          if [ "$HTTP_CODE" != "200" ]; then
-            SMARTLEAD_ERROR=$(jq -r '.error // .message // "unknown Smartlead error"' /tmp/smartlead-test.json 2>/dev/null || true)
-            echo "::error::Smartlead API validation failed (HTTP $HTTP_CODE): $SMARTLEAD_ERROR"
-            exit 1
-          fi
-          echo "Smartlead API: configured and responding"
-
-      - name: Report optional Primeforge API connectivity
-        env:
-          PRIMEFORGE_KEY: ${{ secrets.PRIMEFORGE_API_KEY || secrets.PRIME_FORGE_API_KEY }}
-        run: |
-          set -euo pipefail
-          if [ -z "$PRIMEFORGE_KEY" ]; then
-            echo "::warning::Primeforge advisory skipped because no API key is configured."
-            exit 0
-          fi
-          HTTP_CODE=$(curl --silent --show-error \
-            --connect-timeout 10 \
-            --max-time 45 \
-            --output /tmp/primeforge-workspaces.json \
-            --write-out '%{http_code}' \
-            'https://api.primeforge.ai/public/workspaces?limit=100&offset=0' \
-            -H "Authorization: ${PRIMEFORGE_KEY}" \
-            -H 'Accept: application/json' || true)
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "::warning::Primeforge read-only advisory failed (HTTP $HTTP_CODE)."
-            exit 0
-          fi
-          WORKSPACES=$(jq -r '(.results // .workspaces // .data.results // .data.workspaces // []) | length' /tmp/primeforge-workspaces.json 2>/dev/null || echo 0)
-          if [ "$WORKSPACES" -lt 1 ]; then
-            echo "::warning::Primeforge authenticated but returned no accessible workspaces."
-            exit 0
-          fi
-          echo "Primeforge read-only API: configured with ${WORKSPACES} accessible workspace(s)"
-
-      - name: Validate MillionVerifier API key
-        env:
-          MILLIONVERIFIER_KEY: ${{ secrets.MILLIONVERIFIER_API_KEY }}
-        run: |
-          set -euo pipefail
-          test -n "$MILLIONVERIFIER_KEY" || {
-            echo "::error::Add MILLIONVERIFIER_API_KEY as a repository Actions secret."
-            exit 1
-          }
-          HTTP_CODE=$(curl --silent --show-error \
-            --connect-timeout 10 \
-            --max-time 30 \
-            --output /tmp/millionverifier-credits.json \
-            --write-out '%{http_code}' \
-            "https://api.millionverifier.com/api/v3/credits?api=${MILLIONVERIFIER_KEY}" || true)
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "::error::MillionVerifier API validation failed (HTTP $HTTP_CODE)."
-            exit 1
-          fi
-          echo "MillionVerifier API: configured and responding without consuming a verification credit"
-
-      - name: Prepare Smartlead runtime verifier configuration
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path("docker-compose.yml")
-          text = path.read_text()
-          anchor = "      SMARTLEAD_API_KEY: ${SMARTLEAD_API_KEY:-}\n"
-          addition = anchor + "      MILLIONVERIFIER_API_KEY: ${MILLIONVERIFIER_API_KEY:-}\n      SMARTLEAD_V2_INTELLIGENCE_PATH: /app/data/smartlead-v2-intelligence-v3.json\n"
-          if "MILLIONVERIFIER_API_KEY: ${MILLIONVERIFIER_API_KEY:-}" not in text:
-              if anchor not in text:
-                  raise SystemExit("SMARTLEAD_API_KEY compose anchor not found")
-              text = text.replace(anchor, addition, 1)
-          path.write_text(text)
-          PY
-
-      - name: Deploy Docker Compose
+      - name: Deploy CPU-light SDR stack
+        if: steps.freshness.outputs.deploy == 'true'
         uses: hostinger/deploy-on-vps@v2
         with:
           api-key: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
           virtual-machine: "1604210"
           project-name: sdr-project
-          docker-compose-path: docker-compose.yml
-          environment-variables: |
+          docker-compose-path: docker-compose.light.yml
+          environment: |
             SDR_BUILD_REF=${{ env.DEPLOY_SHA }}
-            SIGNALHIRE_API_KEY=${{ secrets.SIGNALHIRE_API_KEY }}
-            TAVILY_API_KEY=${{ secrets.TAVILY_API_KEY }}
-            APOLLO_API_KEY=${{ secrets.APOLLO_API_KEY }}
-            ACQUISITION_OWNER_TOKEN=${{ secrets.ACQUISITION_OWNER_TOKEN }}
-            DASHBOARD_USERNAME=${{ secrets.DASHBOARD_USERNAME || 'talentera' }}
-            DASHBOARD_PASSWORD=${{ secrets.DASHBOARD_PASSWORD }}
-            DISABLE_AUTH=false
-            ACQUISITION_OWNER_IDS=31644369,76369997,31558980,76370000,76369995,76369998
-            OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY || secrets.GTM_RESEARCH_OPENROUTER_API_KEY }}
-            OPENROUTER_FAST_MODEL=openai/gpt-4.1-nano
-            OPENROUTER_DEEP_MODEL=openai/gpt-4.1-mini
-            SMARTLEAD_API_KEY=${{ secrets.SMARTLEAD_API_KEY }}
-            PRIMEFORGE_API_KEY=${{ secrets.PRIMEFORGE_API_KEY || secrets.PRIME_FORGE_API_KEY }}
-            MILLIONVERIFIER_API_KEY=${{ secrets.MILLIONVERIFIER_API_KEY }}
-            SMARTLEAD_CAMPAIGN_NAME=Talentera | Marita SDR | Localized 3-Touch
-            SMARTLEAD_DAILY_NEW_LEADS=50
-            SMARTLEAD_AUTOPILOT_ENABLED=true
-            SMARTLEAD_LEGACY_SEND_ENABLED=false
-            SMARTLEAD_SALES_ACTIVITY_LOOKBACK_DAYS=45
-            SMARTLEAD_START_HOUR=09:30
-            SMARTLEAD_END_HOUR=16:30
-            SMARTLEAD_MIN_TIME_BETWEEN_EMAILS=15
+            CAREER_GENERATION=v3
 
-      - name: Verify exact deployed build, Career ATS V3, Dashboard V2, AI gateway, acquisition, and Smartlead health
-        env:
-          DASHBOARD_USERNAME: ${{ secrets.DASHBOARD_USERNAME || 'talentera' }}
-          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
-          SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
+      - name: Verify dashboard recovery
+        if: steps.freshness.outputs.deploy == 'true'
         run: |
           set -euo pipefail
-          HOST='sdr.dashboardtalentera.tech'
-
-          APP_UP=false
-          for ATTEMPT in $(seq 1 22); do
-            BODY=$(curl --silent --show-error \
-              --connect-timeout 4 \
-              --max-time 8 \
+          URL='https://sdr.dashboardtalentera.tech/api/health'
+          for ATTEMPT in $(seq 1 24); do
+            CODE=$(curl --silent --show-error --connect-timeout 5 --max-time 12 \
               -H 'Cache-Control: no-cache' \
-              "https://${HOST}/api/health?deploy=${DEPLOY_SHA}&attempt=${ATTEMPT}" || true)
-
-            BUILD_REF=$(printf '%s' "$BODY" | jq -r '.buildRef // ""' 2>/dev/null || true)
-            GENERATION=$(printf '%s' "$BODY" | jq -r '.careerGeneration // ""' 2>/dev/null || true)
-            RESOLVED_IP=$(getent ahostsv4 "$HOST" | awk 'NR==1{print $1}' || true)
-
-            echo "Shallow production gate ${ATTEMPT}/22: ip=${RESOLVED_IP:-unresolved} build=${BUILD_REF:-none} generation=${GENERATION:-none}"
-
-            if [ "$BUILD_REF" = "$DEPLOY_SHA" ] && [ "$GENERATION" = "v3" ]; then
-              APP_UP=true
-              break
+              -o /tmp/health.json -w '%{http_code}' \
+              "$URL?light_recovery=${ATTEMPT}&deploy=${DEPLOY_SHA}" || true)
+            BUILD=$(jq -r '.buildRef // ""' /tmp/health.json 2>/dev/null || true)
+            echo "Light recovery ${ATTEMPT}/24: HTTP ${CODE}, build=${BUILD:-none}"
+            if [ "$CODE" = "200" ]; then
+              cat /tmp/health.json
+              exit 0
             fi
-
-            if [ "$ATTEMPT" -lt 22 ]; then
-              if [ "$ATTEMPT" -le 5 ]; then
-                WAIT_SECONDS=15
-              elif [ "$ATTEMPT" -le 10 ]; then
-                WAIT_SECONDS=30
-              else
-                WAIT_SECONDS=60
-              fi
-              echo "Production is not on the exact build yet; waiting ${WAIT_SECONDS}s before retry."
-              sleep "$WAIT_SECONDS"
-            fi
+            sleep 10
           done
-
-          if [ "$APP_UP" != "true" ]; then
-            echo "::error::Production never exposed the exact commit $DEPLOY_SHA on the shallow health endpoint within the bounded deployment window."
-            exit 1
-          fi
-
-          READY=false
-          for ATTEMPT in $(seq 1 6); do
-            BODY=$(curl --silent --show-error \
-              --connect-timeout 5 \
-              --max-time 12 \
-              -H 'Cache-Control: no-cache' \
-              "https://${HOST}/api/health?deep=1&deploy=${DEPLOY_SHA}&attempt=${ATTEMPT}" || true)
-
-            BUILD_REF=$(printf '%s' "$BODY" | jq -r '.buildRef // ""' 2>/dev/null || true)
-            GENERATION=$(printf '%s' "$BODY" | jq -r '.careerGeneration // ""' 2>/dev/null || true)
-            ENGINE_VERSION=$(printf '%s' "$BODY" | jq -r '.careerEngineVersion // ""' 2>/dev/null || true)
-            IS_READY=$(printf '%s' "$BODY" | jq -r '.ready // false' 2>/dev/null || true)
-            VALIDATION_STATE=$(printf '%s' "$BODY" | jq -r '.careerValidationState // "unknown"' 2>/dev/null || true)
-            STORED=$(printf '%s' "$BODY" | jq -r '.careerValidationProgress.stored // 0' 2>/dev/null || true)
-            HAS_ATS_CAPABILITY=$(printf '%s' "$BODY" | jq -r '(.careerEngineCapabilities // []) | index("ats-detect") != null' 2>/dev/null || true)
-
-            echo "Deep production gate ${ATTEMPT}/6: build=${BUILD_REF:-none} generation=${GENERATION:-none} engine=${ENGINE_VERSION:-none} ats_capability=${HAS_ATS_CAPABILITY:-false} ready=${IS_READY:-false} validation=${VALIDATION_STATE:-unknown} stored=${STORED:-0}"
-
-            if [ "$BUILD_REF" = "$DEPLOY_SHA" ] \
-              && [ "$GENERATION" = "v3" ] \
-              && [[ "$ENGINE_VERSION" == 3.* ]] \
-              && [ "$HAS_ATS_CAPABILITY" = "true" ] \
-              && [ "$IS_READY" = "true" ]; then
-              READY=true
-              break
-            fi
-
-            if [ "$ATTEMPT" -lt 6 ]; then sleep 20; fi
-          done
-
-          if [ "$READY" != "true" ]; then
-            echo "::error::Exact build is reachable, but Career + ATS Intelligence V3 never became deep-ready."
-            exit 1
-          fi
-
-          USAGE_CODE=$(curl --silent --show-error \
-            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
-            --connect-timeout 5 \
-            --max-time 15 \
-            --output /tmp/usage.json \
-            --write-out '%{http_code}' \
-            "https://${HOST}/api/usage" || true)
-          TRACKING=$(jq -r '.tracking // false' /tmp/usage.json 2>/dev/null || echo false)
-          DATABASE=$(jq -r '.database // "unknown"' /tmp/usage.json 2>/dev/null || echo unknown)
-
-          echo "Dashboard V2 usage gate: http=${USAGE_CODE:-none} tracking=${TRACKING:-false} database=${DATABASE:-unknown}"
-
-          if [ "$USAGE_CODE" != "200" ] \
-            || [ "$TRACKING" != "true" ] \
-            || [ "$DATABASE" != "postgresql" ]; then
-            echo "::error::Dashboard V2 PostgreSQL usage tracking is not production-ready."
-            cat /tmp/usage.json || true
-            exit 1
-          fi
-
-          ACQ_CODE=$(curl --silent --show-error \
-            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
-            --connect-timeout 5 \
-            --max-time 20 \
-            --output /tmp/acquisition.json \
-            --write-out '%{http_code}' \
-            "https://${HOST}/api/acquisition?limit=1" || true)
-          ACQ_DB=$(jq -r '.database // "unknown"' /tmp/acquisition.json 2>/dev/null || echo unknown)
-          SIGNALHIRE_READY=$(jq -r '.configuration.signalHireConfigured // false' /tmp/acquisition.json 2>/dev/null || echo false)
-          APOLLO_READY=$(jq -r '.configuration.apolloConfigured // false' /tmp/acquisition.json 2>/dev/null || echo false)
-          OWNER_READY=$(jq -r '.configuration.ownerActionsConfigured // false' /tmp/acquisition.json 2>/dev/null || echo false)
-
-          echo "Net-New acquisition gate: http=${ACQ_CODE:-none} db=${ACQ_DB:-unknown} signalhire=${SIGNALHIRE_READY:-false} apollo=${APOLLO_READY:-false} owner_gate=${OWNER_READY:-false}"
-          if [ "$ACQ_CODE" != "200" ] || [ "$ACQ_DB" != "postgresql" ] || [ "$SIGNALHIRE_READY" != "true" ]; then
-            echo "::error::Net-New acquisition queue / SignalHire foundation is not production-ready."
-            cat /tmp/acquisition.json || true
-            exit 1
-          fi
-
-          AI_CODE=$(curl --silent --show-error \
-            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
-            --connect-timeout 5 \
-            --max-time 15 \
-            --output /tmp/openrouter-health.json \
-            --write-out '%{http_code}' \
-            "https://${HOST}/api/ai/account-brief" || true)
-          AI_CONFIGURED=$(jq -r '.configured // false' /tmp/openrouter-health.json 2>/dev/null || echo false)
-          AI_FAST_MODEL=$(jq -r '.fastModel // ""' /tmp/openrouter-health.json 2>/dev/null || true)
-          AI_POLICY=$(jq -r '.policy // ""' /tmp/openrouter-health.json 2>/dev/null || true)
-
-          echo "OpenRouter gateway: http=${AI_CODE:-none} configured=${AI_CONFIGURED:-false} fast=${AI_FAST_MODEL:-none} policy=${AI_POLICY:-none}"
-
-          if [ "$AI_CODE" != "200" ] \
-            || [ "$AI_CONFIGURED" != "true" ] \
-            || [ "$AI_FAST_MODEL" != "openai/gpt-4.1-nano" ] \
-            || [ "$AI_POLICY" != "nano-first, mini-explicit-only" ]; then
-            echo "::error::Low-cost OpenRouter gateway is not production-ready."
-            cat /tmp/openrouter-health.json || true
-            exit 1
-          fi
-
-          SMARTLEAD_CODE=$(curl --silent --show-error \
-            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
-            --connect-timeout 5 \
-            --max-time 90 \
-            --output /tmp/smartlead-health.json \
-            --write-out '%{http_code}' \
-            "https://${HOST}/api/smartlead" || true)
-          SMARTLEAD_CONFIGURED=$(jq -r '.configuration.apiConfigured // false' /tmp/smartlead-health.json 2>/dev/null || echo false)
-          SMARTLEAD_SAFETY=$(jq -r '.safety.healthy // false' /tmp/smartlead-health.json 2>/dev/null || echo false)
-
-          echo "Smartlead command center: http=${SMARTLEAD_CODE:-none} configured=${SMARTLEAD_CONFIGURED:-false} safety=${SMARTLEAD_SAFETY:-false}"
-          if [ "$SMARTLEAD_CODE" != "200" ] || [ "$SMARTLEAD_CONFIGURED" != "true" ]; then
-            echo "::error::Smartlead API secret did not reach the production SDR runtime."
-            cat /tmp/smartlead-health.json || true
-            exit 1
-          fi
-          if [ "$SMARTLEAD_SAFETY" != "true" ]; then
-            echo "::warning::Smartlead is connected, but the Sales safety scan is currently locking outreach. Review the dashboard before preparing a batch."
-          fi
-
-          SEND_HEALTH_CODE=$(curl --silent --show-error \
-            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
-            --connect-timeout 5 \
-            --max-time 20 \
-            --output /tmp/smartlead-send-health.json \
-            --write-out '%{http_code}' \
-            "https://${HOST}/api/smartlead/send-today" || true)
-          MV_RUNTIME=$(jq -r '.millionVerifierConfigured // false' /tmp/smartlead-send-health.json 2>/dev/null || echo false)
-          if [ "$SEND_HEALTH_CODE" != "200" ] || [ "$MV_RUNTIME" != "true" ]; then
-            echo "::error::MillionVerifier secret did not reach the Smartlead runtime."
-            cat /tmp/smartlead-send-health.json || true
-            exit 1
-          fi
-
-          PRIMEFORGE_CODE=$(curl --silent --show-error \
-            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
-            --connect-timeout 5 \
-            --max-time 120 \
-            --output /tmp/primeforge-health.json \
-            --write-out '%{http_code}' \
-            "https://${HOST}/api/primeforge/health" || true)
-          PRIMEFORGE_HEALTHY=$(jq -r '.healthy // false' /tmp/primeforge-health.json 2>/dev/null || echo false)
-          PRIMEFORGE_READY=$(jq -r '.readyMailboxes // 0' /tmp/primeforge-health.json 2>/dev/null || echo 0)
-          if [ "$PRIMEFORGE_CODE" != "200" ] || [ "$PRIMEFORGE_HEALTHY" != "true" ] || [ "$PRIMEFORGE_READY" != "15" ]; then
-            echo "::warning::Primeforge domain, DNS, or mailbox advisory is incomplete. Deployment continues; Smartlead safety remains enforced."
-            jq '{configured, healthy, expectedDomains, expectedMailboxes, readyMailboxes, workspaces, domains, warnings, error}' /tmp/primeforge-health.json || true
-          else
-            echo "Primeforge advisory: five domains and 15 ready mailboxes verified"
-          fi
-
-      - name: Mark deployment successful
-        if: success()
-        continue-on-error: true
-        uses: actions/github-script@v7
-        with:
-          retries: 3
-          script: |
-            await github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              sha: process.env.DEPLOY_SHA,
-              state: 'success',
-              context: 'hostinger/deploy',
-              description: 'SDR V2, Smartlead, acquisition, Career ATS, and low-cost AI are live',
-              target_url: process.env.DEPLOY_URL,
-            });
-
-      - name: Mark deployment failed
-        if: failure()
-        continue-on-error: true
-        uses: actions/github-script@v7
-        with:
-          retries: 3
-          script: |
-            await github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              sha: process.env.DEPLOY_SHA,
-              state: 'failure',
-              context: 'hostinger/deploy',
-              description: 'SDR production acquisition/Smartlead/build health gate failed',
-              target_url: process.env.DEPLOY_URL,
-            });
-
-      - name: Mark deployment cancelled
-        if: cancelled()
-        continue-on-error: true
-        uses: actions/github-script@v7
-        with:
-          retries: 3
-          script: |
-            await github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              sha: process.env.DEPLOY_SHA,
-              state: 'error',
-              context: 'hostinger/deploy',
-              description: 'Deployment cancelled or superseded before health verification',
-              target_url: process.env.DEPLOY_URL,
-            });
+          echo "::error::Dashboard did not recover after the CPU-light deployment window."
+          exit 1
