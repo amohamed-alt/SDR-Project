@@ -1,4 +1,4 @@
-name: Restart Hostinger VPS
+name: Recheck Hostinger Recovery
 
 on:
   push:
@@ -9,72 +9,52 @@ permissions:
   contents: read
 
 jobs:
-  restart:
+  recheck:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 5
     env:
       HOSTINGER_TOKEN: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
       VM_ID: "1604210"
+      STUCK_ACTION_ID: "112058316"
     steps:
-      - name: Restart VPS and verify recovery
+      - name: Read current VPS state, stuck action, CPU and dashboard health
         run: |
           set -euo pipefail
           test -n "$HOSTINGER_TOKEN" || { echo "::error::Hostinger API token is missing"; exit 1; }
           BASE="https://developers.hostinger.com/api/vps/v1/virtual-machines/${VM_ID}"
           AUTH="Authorization: Bearer ${HOSTINGER_TOKEN}"
-
-          echo "=== REQUEST RESTART ==="
-          CODE=$(curl -sS --connect-timeout 10 --max-time 30 -o /tmp/restart.json -w '%{http_code}' \
-            -X POST -H "$AUTH" -H 'Accept: application/json' "$BASE/restart" || true)
-          echo "HTTP $CODE"
-          cat /tmp/restart.json || true
-          if [ "$CODE" != "200" ]; then
-            echo "::error::Hostinger VPS restart request failed"
-            exit 1
-          fi
-
-          ACTION_ID=$(jq -r '.id // empty' /tmp/restart.json)
-          echo "restart_action_id=${ACTION_ID:-unknown}"
-
-          if [ -n "$ACTION_ID" ]; then
-            for ATTEMPT in $(seq 1 30); do
-              BODY=$(curl -sS --connect-timeout 10 --max-time 30 -H "$AUTH" -H 'Accept: application/json' \
-                "$BASE/actions/${ACTION_ID}" || true)
-              STATE=$(printf '%s' "$BODY" | jq -r '.state // "unknown"' 2>/dev/null || echo unknown)
-              echo "Restart action ${ATTEMPT}/30 state=$STATE"
-              if [ "$STATE" = "success" ]; then break; fi
-              if [ "$STATE" = "failed" ]; then echo "$BODY"; exit 1; fi
-              sleep 10
-            done
-          fi
-
-          echo "=== WAIT FOR VPS RUNNING ==="
-          for ATTEMPT in $(seq 1 36); do
-            BODY=$(curl -sS --connect-timeout 5 --max-time 15 -H "$AUTH" -H 'Accept: application/json' "$BASE" || true)
-            STATE=$(printf '%s' "$BODY" | jq -r '.state // "unknown"' 2>/dev/null || echo unknown)
-            echo "VPS ${ATTEMPT}/36 state=$STATE"
-            if [ "$STATE" = "running" ]; then break; fi
-            sleep 10
-          done
-
-          echo "=== METRICS AFTER RESTART ==="
-          FROM=$(date -u -d '15 minutes ago' '+%Y-%m-%dT%H:%MZ')
+          FROM=$(date -u -d '20 minutes ago' '+%Y-%m-%dT%H:%MZ')
           TO=$(date -u '+%Y-%m-%dT%H:%MZ')
+
+          echo "=== VPS ==="
+          curl -sS --connect-timeout 10 --max-time 30 -H "$AUTH" -H 'Accept: application/json' "$BASE" \
+            | jq '{id,hostname,state,memory,disk,uptime}'
+
+          echo "=== STUCK DEPLOY ACTION ==="
+          curl -sS --connect-timeout 10 --max-time 30 -H "$AUTH" -H 'Accept: application/json' \
+            "$BASE/actions/${STUCK_ACTION_ID}" | jq '{id,name,state,created_at,updated_at}'
+
+          echo "=== LATEST ACTIONS ==="
+          curl -sS --connect-timeout 10 --max-time 30 -H "$AUTH" -H 'Accept: application/json' \
+            "$BASE/actions?page=1" | jq '{data: [.data[]? | {id,name,state,created_at,updated_at}][0:8]}'
+
+          echo "=== CPU RAM UPTIME LAST 20 MIN ==="
           curl -sS --connect-timeout 10 --max-time 30 -G -H "$AUTH" -H 'Accept: application/json' \
             --data-urlencode "date_from=$FROM" --data-urlencode "date_to=$TO" "$BASE/metrics" \
-            | jq '{cpu_usage,ram_usage,uptime}' || true
+            | jq '{cpu_usage,ram_usage,uptime}'
 
           echo "=== DASHBOARD HEALTH ==="
-          for ATTEMPT in $(seq 1 24); do
-            STATUS=$(curl -k -sS --connect-timeout 5 --max-time 10 -o /tmp/health.json -w '%{http_code}' \
-              -H 'Cache-Control: no-cache' 'https://sdr.dashboardtalentera.tech/api/health' || true)
-            echo "Dashboard health ${ATTEMPT}/24 HTTP=$STATUS"
-            if [ "$STATUS" = "200" ]; then
-              cat /tmp/health.json
-              exit 0
-            fi
-            sleep 10
-          done
+          STATUS=$(curl -k -sS --connect-timeout 5 --max-time 12 -o /tmp/health.json -w '%{http_code}' \
+            -H 'Cache-Control: no-cache' 'https://sdr.dashboardtalentera.tech/api/health' || true)
+          echo "HTTP=$STATUS"
+          cat /tmp/health.json 2>/dev/null || true
 
-          echo "::error::VPS restarted but dashboard health did not recover in time"
-          exit 1
+          echo "=== HOSTINGER DOCKER ENDPOINT ==="
+          CODE=$(curl -sS --connect-timeout 10 --max-time 30 -o /tmp/containers.json -w '%{http_code}' \
+            -H "$AUTH" -H 'Accept: application/json' "$BASE/docker/sdr-project/containers" || true)
+          echo "HTTP=$CODE"
+          if [ "$CODE" = "200" ]; then
+            jq 'sort_by(.stats.cpu_percentage // 0) | reverse | map({name,state,status,health,cpu_percentage:(.stats.cpu_percentage // 0),memory_percentage:(.stats.memory_percentage // 0)})' /tmp/containers.json
+          else
+            cat /tmp/containers.json || true
+          fi
