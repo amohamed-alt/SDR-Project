@@ -20,6 +20,7 @@ jobs:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
         run: |
           set -euo pipefail
+          echo "Diagnostic run: container state only; no environment values are printed."
           test -n "$HOSTINGER_API_KEY" || { echo "::error::Hostinger token missing"; exit 1; }
 
           AUTH="$HOSTINGER_API_KEY"
