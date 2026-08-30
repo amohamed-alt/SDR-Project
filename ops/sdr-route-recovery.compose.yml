@@ -12,6 +12,11 @@ services:
         server {
           listen 8080;
 
+          location = /_recovery_health {
+            default_type text/plain;
+            return 200 'ok';
+          }
+
           location / {
             proxy_pass http://sdr-dashboard:3000;
             proxy_http_version 1.1;
@@ -37,7 +42,7 @@ services:
       - "traefik.http.routers.sdr-dashboard-recovery.service=sdr-dashboard-recovery"
       - "traefik.http.services.sdr-dashboard-recovery.loadbalancer.server.port=8080"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/_recovery_health | grep -qx ok"]
       interval: 15s
       timeout: 5s
       start_period: 10s
