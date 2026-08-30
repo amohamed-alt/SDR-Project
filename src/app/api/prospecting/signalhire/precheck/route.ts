@@ -243,15 +243,19 @@ async function companyCheck(input: z.infer<typeof schema>, shouldCheckEngagement
   const accountStatus = String(p.account_status || "").trim();
   const openDeals = Math.max(0, Number(p.hs_num_open_deals || 0) || 0);
   const retentionAccount = accountType.toLowerCase() === "retention";
-  const protectedCompany = Boolean(retentionAccount || openDeals > 0);
-  const engagement = shouldCheckEngagement && !protectedCompany
+  const crmProtected = Boolean(retentionAccount || openDeals > 0);
+  const engagement = shouldCheckEngagement && !crmProtected
     ? await companyEngagementCheck(String(match.id))
     : emptyEngagement(false);
-  const protectedReason = retentionAccount
+  const crmProtectedReason = retentionAccount
     ? `Retention account${accountStatus ? ` · ${accountStatus}` : ""}`
     : openDeals > 0
       ? `${openDeals} open deal${openDeals === 1 ? "" : "s"}`
       : "";
+  const engagementUnknown = shouldCheckEngagement && !crmProtected && !engagement.checked;
+  const protectedReason = crmProtectedReason || (engagementUnknown
+    ? engagement.error || engagement.reason || "Company engagement could not be verified. Review before Push."
+    : "");
 
   return {
     inHubSpot: true,
@@ -277,7 +281,7 @@ async function companyCheck(input: z.infer<typeof schema>, shouldCheckEngagement
     latestMeetingAt: engagement.latestMeetingAt,
     latestEngagementAt: engagement.latestEngagementAt,
     engagementReason: engagement.reason,
-    protected: protectedCompany,
+    protected: Boolean(crmProtected || engagementUnknown),
     protectedReason,
   };
 }
@@ -287,8 +291,8 @@ export async function POST(request: NextRequest) {
     const parsed = schema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: "Invalid SignalHire precheck payload." }, { status: 400 });
 
-    // Contact existence is the cheapest decisive guard. Do it first so existing people
-    // never trigger an expensive company-wide calls/meetings scan.
+    // Existing people are decisive: do not run a company-wide activity scan for rows
+    // that will be skipped anyway. This keeps CSV dry-runs responsive and reduces HubSpot load.
     const contact = await contactCheck(parsed.data);
     const company = await companyCheck(parsed.data, !contact.inHubSpot);
 
