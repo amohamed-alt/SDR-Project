@@ -1,0 +1,75 @@
+name: Hostinger Light State Diagnostic
+
+on:
+  push:
+    branches: ["diag/hostinger-light-state"]
+    paths:
+      - ".github/workflows/hostinger-light-state.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect VPS actions and Docker state
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$HOSTINGER_API_KEY" || { echo "::error::Hostinger token missing"; exit 1; }
+
+          AUTH="$HOSTINGER_API_KEY"
+          case "$AUTH" in
+            Bearer\ *) ;;
+            *) AUTH="Bearer $AUTH" ;;
+          esac
+
+          VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
+          header=(-H "Authorization: $AUTH" -H 'Accept: application/json')
+
+          echo '=== VM ==='
+          CODE=$(curl -sS --connect-timeout 8 --max-time 30 "${header[@]}" -o /tmp/vm.json -w '%{http_code}' "$VM" || true)
+          echo "HTTP $CODE"
+          if [ "$CODE" = "200" ]; then
+            jq '{id,hostname,state,status}' /tmp/vm.json
+          else
+            jq '{message,correlation_id}' /tmp/vm.json 2>/dev/null || true
+          fi
+
+          echo '=== Recent VPS actions ==='
+          CODE=$(curl -sS --connect-timeout 8 --max-time 30 "${header[@]}" -o /tmp/actions.json -w '%{http_code}' "$VM/actions?page=1" || true)
+          echo "HTTP $CODE"
+          if [ "$CODE" = "200" ]; then
+            jq -r '(.data // . // []) | .[0:15][] | "id=\(.id) name=\(.name) state=\(.state) created=\(.created_at) updated=\(.updated_at)"' /tmp/actions.json
+          else
+            jq '{message,correlation_id}' /tmp/actions.json 2>/dev/null || true
+          fi
+
+          echo '=== Docker Manager project list ==='
+          CODE=$(curl -sS --connect-timeout 8 --max-time 30 "${header[@]}" -o /tmp/projects.json -w '%{http_code}' "$VM/docker" || true)
+          echo "HTTP $CODE"
+          if [ "$CODE" = "200" ]; then
+            jq -r '.[] | "project=\(.name) state=\(.state // "") status=\(.status // "")"' /tmp/projects.json
+          else
+            jq '{message,correlation_id}' /tmp/projects.json 2>/dev/null || true
+          fi
+
+          for PROJECT in sdr-project sdr-fastapi-dashboard sdr-route-recovery; do
+            echo "=== $PROJECT containers ==="
+            CODE=$(curl -sS --connect-timeout 8 --max-time 30 "${header[@]}" -o "/tmp/${PROJECT}.json" -w '%{http_code}' "$VM/docker/$PROJECT/containers" || true)
+            echo "HTTP $CODE"
+            if [ "$CODE" = "200" ]; then
+              jq -r '.[] | "name=\(.name) image=\(.image) state=\(.state) health=\(.health // "") status=\(.status // "") cpu=\(.stats.cpu_percentage // 0)% memMB=\(((.stats.memory_used // 0) / 1048576) | floor)"' "/tmp/${PROJECT}.json"
+            else
+              jq '{message,correlation_id}' "/tmp/${PROJECT}.json" 2>/dev/null || true
+            fi
+          done
+
+          if [ -s /tmp/sdr-project.json ] && jq -e 'type == "array"' /tmp/sdr-project.json >/dev/null 2>&1; then
+            HEAVY=$(jq -r '[.[] | select((.image // "" | ascii_downcase | contains("ollama")) or ((.name // "") == "career-judge-ollama" and (.image // "" | ascii_downcase | contains("alpine") | not)))] | length' /tmp/sdr-project.json)
+            echo "Heavy local Ollama containers detected: $HEAVY"
+          fi
