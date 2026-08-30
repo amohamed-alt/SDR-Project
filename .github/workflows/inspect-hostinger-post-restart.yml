@@ -24,11 +24,15 @@ jobs:
           echo "=== VPS ==="
           curl -sS --connect-timeout 10 --max-time 30 -H "$AUTH" -H 'Accept: application/json' "$BASE" | jq '{id,hostname,state}'
           echo "=== LATEST ACTIONS ==="
-          curl -sS --connect-timeout 10 --max-time 30 -H "$AUTH" -H 'Accept: application/json' "$BASE/actions?page=1" | jq '{data: [.data[]? | {id,name,state,created_at,updated_at}][0:6]}'
+          curl -sS --connect-timeout 10 --max-time 30 -H "$AUTH" -H 'Accept: application/json' "$BASE/actions?page=1" | jq '{data: [.data[]? | {id,name,state,created_at,updated_at}][0:8]}'
           echo "=== METRICS ==="
-          FROM=$(date -u -d '20 minutes ago' '+%Y-%m-%dT%H:%MZ')
+          FROM=$(date -u -d '25 minutes ago' '+%Y-%m-%dT%H:%MZ')
           TO=$(date -u '+%Y-%m-%dT%H:%MZ')
           curl -sS --connect-timeout 10 --max-time 30 -G -H "$AUTH" -H 'Accept: application/json' --data-urlencode "date_from=$FROM" --data-urlencode "date_to=$TO" "$BASE/metrics" | jq '{cpu_usage,ram_usage,uptime}'
+          echo "=== PORTS ==="
+          for port in 22 80 443; do
+            if timeout 4 bash -c "</dev/tcp/187.77.2.175/$port" 2>/dev/null; then echo "$port OPEN"; else echo "$port CLOSED"; fi
+          done
           echo "=== DOCKER PROJECTS ==="
           CODE=$(curl -sS --connect-timeout 10 --max-time 30 -o /tmp/projects.json -w '%{http_code}' -H "$AUTH" -H 'Accept: application/json' "$BASE/docker" || true)
           echo "HTTP=$CODE"
