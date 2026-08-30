@@ -19,6 +19,7 @@ import {
   UsersRound,
   type LucideIcon,
 } from "lucide-react";
+import { AcquisitionDailyPulse } from "@/components/AcquisitionDailyPulse";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardShell";
 import { DrilldownDrawer, type Drilldown } from "@/components/DrilldownDrawer";
 import type { ActivityRow, DashboardData } from "@/lib/types";
@@ -329,6 +330,7 @@ function RepKpiDashboard({
         {error ? <div className="error-banner"><AlertTriangle size={20}/><div><strong>KPI dashboard failed to load</strong><span>{error}</span></div><button type="button" onClick={() => void loadData()}>Try again</button></div> : null}
 
         {data ? <div className="kpi-grid">{cards.map((card) => <MetricButton key={card.label} {...card}/>)}</div> : null}
+        {data ? <AcquisitionDailyPulse data={data} ownerName={owner.name} onOpen={setDrilldown}/> : null}
 
         {loading ? <div className="loading-overlay"><div className="loader"/><strong>Loading {owner.name.split(" ")[0]} KPIs…</strong><span>Calls, meetings, WhatsApp, and task execution</span></div> : null}
       </div>
