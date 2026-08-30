@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { HubSpotApiError, searchAll } from "@/lib/hubspot";
+import { batchRead, HubSpotApiError, readAssociations, searchAll } from "@/lib/hubspot";
 import { normalizeCompanyDomain } from "@/lib/prospecting-company-intelligence";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const CONNECTED_CALL_DISPOSITIONS = new Set([
+  "f240bbac-87c9-4f6e-bf70-924b57d47db7", // Connected
+  "2e7360c1-6b71-40e9-ab2b-30ae98a4678c", // Meeting booked
+]);
+const MEANINGFUL_MEETING_OUTCOMES = new Set(["SCHEDULED", "COMPLETED", "RESCHEDULED"]);
 
 const schema = z.object({
   name: z.string().trim().max(220).default(""),
@@ -35,6 +41,70 @@ function workDomain(emails: string[]) {
     if (domain && !blocked.test(domain)) return normalizeCompanyDomain(domain);
   }
   return "";
+}
+
+function latestIso(values: Array<string | undefined>) {
+  let latest = 0;
+  for (const value of values) {
+    const parsed = value ? Date.parse(value) : Number.NaN;
+    if (Number.isFinite(parsed)) latest = Math.max(latest, parsed);
+  }
+  return latest ? new Date(latest).toISOString() : "";
+}
+
+async function safeAssociations(fromObjectType: string, toObjectType: string, fromIds: string[]) {
+  if (!fromIds.length) return new Map<string, string[]>();
+  try {
+    return await readAssociations(fromObjectType, toObjectType, fromIds);
+  } catch (error) {
+    if (error instanceof HubSpotApiError && [400, 404].includes(error.status)) return new Map<string, string[]>();
+    throw error;
+  }
+}
+
+async function companyEngagementCheck(companyId: string) {
+  const [companyContacts, companyCalls, companyMeetings] = await Promise.all([
+    safeAssociations("companies", "contacts", [companyId]),
+    safeAssociations("companies", "calls", [companyId]),
+    safeAssociations("companies", "meetings", [companyId]),
+  ]);
+
+  const contactIds = companyContacts.get(companyId) || [];
+  const [contactCalls, contactMeetings] = await Promise.all([
+    safeAssociations("contacts", "calls", contactIds),
+    safeAssociations("contacts", "meetings", contactIds),
+  ]);
+
+  const callIds = new Set(companyCalls.get(companyId) || []);
+  const meetingIds = new Set(companyMeetings.get(companyId) || []);
+  for (const ids of contactCalls.values()) for (const id of ids) callIds.add(id);
+  for (const ids of contactMeetings.values()) for (const id of ids) meetingIds.add(id);
+
+  const [calls, meetings] = await Promise.all([
+    batchRead("calls", [...callIds], ["hs_call_disposition", "hs_call_status", "hs_timestamp"]),
+    batchRead("meetings", [...meetingIds], ["hs_meeting_outcome", "hs_meeting_title", "hs_meeting_start_time", "hs_timestamp"]),
+  ]);
+
+  const connectedCalls = calls.filter((call) => CONNECTED_CALL_DISPOSITIONS.has(String(call.properties.hs_call_disposition || "")));
+  const meaningfulMeetings = meetings.filter((meeting) => MEANINGFUL_MEETING_OUTCOMES.has(String(meeting.properties.hs_meeting_outcome || "").toUpperCase()));
+  const latestConnectedCallAt = latestIso(connectedCalls.map((call) => String(call.properties.hs_timestamp || "")));
+  const latestMeetingAt = latestIso(meaningfulMeetings.map((meeting) => String(meeting.properties.hs_meeting_start_time || meeting.properties.hs_timestamp || "")));
+  const latestEngagementAt = latestIso([latestConnectedCallAt, latestMeetingAt]);
+  const engaged = connectedCalls.length > 0 || meaningfulMeetings.length > 0;
+
+  const reasonParts: string[] = [];
+  if (connectedCalls.length) reasonParts.push(`${connectedCalls.length} connected call${connectedCalls.length === 1 ? "" : "s"}`);
+  if (meaningfulMeetings.length) reasonParts.push(`${meaningfulMeetings.length} meeting${meaningfulMeetings.length === 1 ? "" : "s"}`);
+
+  return {
+    engaged,
+    connectedCallCount: connectedCalls.length,
+    meetingCount: meaningfulMeetings.length,
+    latestConnectedCallAt,
+    latestMeetingAt,
+    latestEngagementAt,
+    reason: reasonParts.join(" · "),
+  };
 }
 
 async function contactCheck(input: z.infer<typeof schema>) {
@@ -90,6 +160,7 @@ async function companyCheck(input: z.infer<typeof schema>) {
     return {
       inHubSpot: false, id: "", matchedBy: "", name: input.company, domain,
       accountType: "", accountStatus: "", openDeals: 0, searchStatus: "", detectedAts: "", atsStatus: "", careerPageUrl: "", leadStatus: "", ownerId: "",
+      engaged: false, connectedCallCount: 0, meetingCount: 0, latestConnectedCallAt: "", latestMeetingAt: "", latestEngagementAt: "", engagementReason: "",
       protected: false, protectedReason: "",
     };
   }
@@ -99,6 +170,7 @@ async function companyCheck(input: z.infer<typeof schema>) {
   const accountStatus = String(p.account_status || "").trim();
   const openDeals = Math.max(0, Number(p.hs_num_open_deals || 0) || 0);
   const retentionAccount = accountType.toLowerCase() === "retention";
+  const engagement = await companyEngagementCheck(String(match.id));
   const protectedReason = retentionAccount
     ? `Retention account${accountStatus ? ` · ${accountStatus}` : ""}`
     : openDeals > 0
@@ -120,6 +192,13 @@ async function companyCheck(input: z.infer<typeof schema>) {
     careerPageUrl: String(p.career_page_url || ""),
     leadStatus: String(p.hs_lead_status || ""),
     ownerId: String(p.hubspot_owner_id || ""),
+    engaged: engagement.engaged,
+    connectedCallCount: engagement.connectedCallCount,
+    meetingCount: engagement.meetingCount,
+    latestConnectedCallAt: engagement.latestConnectedCallAt,
+    latestMeetingAt: engagement.latestMeetingAt,
+    latestEngagementAt: engagement.latestEngagementAt,
+    engagementReason: engagement.reason,
     protected: Boolean(retentionAccount || openDeals > 0),
     protectedReason,
   };
