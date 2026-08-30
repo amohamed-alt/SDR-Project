@@ -11,7 +11,7 @@ permissions:
 jobs:
   inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 5
     env:
       HOSTINGER_TOKEN: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
       VM_ID: "1604210"
@@ -26,9 +26,21 @@ jobs:
           echo "=== LATEST ACTIONS ==="
           curl -sS --connect-timeout 10 --max-time 30 -H "$AUTH" -H 'Accept: application/json' "$BASE/actions?page=1" | jq '{data: [.data[]? | {id,name,state,created_at,updated_at}][0:6]}'
           echo "=== METRICS ==="
-          FROM=$(date -u -d '15 minutes ago' '+%Y-%m-%dT%H:%MZ')
+          FROM=$(date -u -d '20 minutes ago' '+%Y-%m-%dT%H:%MZ')
           TO=$(date -u '+%Y-%m-%dT%H:%MZ')
           curl -sS --connect-timeout 10 --max-time 30 -G -H "$AUTH" -H 'Accept: application/json' --data-urlencode "date_from=$FROM" --data-urlencode "date_to=$TO" "$BASE/metrics" | jq '{cpu_usage,ram_usage,uptime}'
+          echo "=== DOCKER PROJECTS ==="
+          CODE=$(curl -sS --connect-timeout 10 --max-time 30 -o /tmp/projects.json -w '%{http_code}' -H "$AUTH" -H 'Accept: application/json' "$BASE/docker" || true)
+          echo "HTTP=$CODE"
+          if [ "$CODE" = "200" ]; then jq '[.[] | {name,status,state,path}]' /tmp/projects.json; else cat /tmp/projects.json || true; fi
+          echo "=== SDR CONTAINERS ==="
+          CODE=$(curl -sS --connect-timeout 10 --max-time 40 -o /tmp/containers.json -w '%{http_code}' -H "$AUTH" -H 'Accept: application/json' "$BASE/docker/sdr-project/containers" || true)
+          echo "HTTP=$CODE"
+          if [ "$CODE" = "200" ]; then
+            jq 'sort_by(.stats.cpu_percentage // 0) | reverse | map({name,state,status,health,cpu_percentage:(.stats.cpu_percentage // 0),memory_percentage:(.stats.memory_percentage // 0)})' /tmp/containers.json
+          else
+            cat /tmp/containers.json || true
+          fi
           echo "=== DASHBOARD ==="
           STATUS=$(curl -k -sS --connect-timeout 5 --max-time 12 -o /tmp/health.json -w '%{http_code}' -H 'Cache-Control: no-cache' 'https://sdr.dashboardtalentera.tech/api/health' || true)
           echo "HTTP=$STATUS"
