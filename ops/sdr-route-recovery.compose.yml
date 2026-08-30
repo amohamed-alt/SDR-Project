@@ -38,7 +38,9 @@ services:
       - "traefik.http.routers.sdr-dashboard-recovery.entrypoints=websecure"
       - "traefik.http.routers.sdr-dashboard-recovery.tls=true"
       - "traefik.http.routers.sdr-dashboard-recovery.tls.certresolver=mytlschallenge"
-      - "traefik.http.routers.sdr-dashboard-recovery.priority=10000"
+      # Emergency catch-all must outrank any experimental API/router so the
+      # production hostname always falls back to the stable Next.js service.
+      - "traefik.http.routers.sdr-dashboard-recovery.priority=30000"
       - "traefik.http.routers.sdr-dashboard-recovery.service=sdr-dashboard-recovery"
       - "traefik.http.services.sdr-dashboard-recovery.loadbalancer.server.port=8080"
     healthcheck:
