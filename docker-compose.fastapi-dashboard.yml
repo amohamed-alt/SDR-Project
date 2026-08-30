@@ -2,14 +2,13 @@ name: sdr-fastapi-dashboard
 
 services:
   dashboard-fastapi-gateway:
-    build:
-      context: ./services/dashboard-fastapi-gateway
-      dockerfile: Dockerfile
+    image: python:3.13-slim
     restart: unless-stopped
     mem_limit: "512m"
     cpus: 0.75
     pids_limit: 128
     environment:
+      FASTAPI_DASHBOARD_APP_URL: https://raw.githubusercontent.com/amohamed-alt/SDR-Project/2a485c33f06e096fc666e02fb535962f6c302bf1/services/dashboard-fastapi-gateway/app.py
       DASHBOARD_ORIGIN_URL: http://sdr-dashboard:3000/api/dashboard
       FASTAPI_DASHBOARD_DB_PATH: /data/dashboard-gateway.sqlite3
       DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-talentera}
@@ -20,6 +19,28 @@ services:
       FASTAPI_DASHBOARD_SOFT_TTL_SECONDS: ${FASTAPI_DASHBOARD_SOFT_TTL_SECONDS:-120}
       FASTAPI_DASHBOARD_ORIGIN_TIMEOUT_SECONDS: ${FASTAPI_DASHBOARD_ORIGIN_TIMEOUT_SECONDS:-120}
       HUBSPOT_TIMEZONE: ${HUBSPOT_TIMEZONE:-Asia/Riyadh}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        python -m pip install --no-cache-dir \
+          fastapi==0.116.1 \
+          httpx==0.28.1 \
+          uvicorn==0.35.0
+        python - <<'PY'
+        import os
+        import urllib.request
+
+        source = os.environ["FASTAPI_DASHBOARD_APP_URL"]
+        urllib.request.urlretrieve(source, "/tmp/dashboard_gateway.py")
+        PY
+        exec uvicorn dashboard_gateway:app \
+          --app-dir /tmp \
+          --host 0.0.0.0 \
+          --port 8000 \
+          --workers 1 \
+          --no-access-log
     volumes:
       - sdr_fastapi_dashboard_cache:/data
     networks:
@@ -34,6 +55,16 @@ services:
       - "traefik.http.routers.sdr-fastapi-dashboard.priority=20000"
       - "traefik.http.routers.sdr-fastapi-dashboard.service=sdr-fastapi-dashboard"
       - "traefik.http.services.sdr-fastapi-dashboard.loadbalancer.server.port=8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/dashboard-fastapi/health', timeout=3).read()"
+      interval: 20s
+      timeout: 5s
+      start_period: 45s
+      retries: 5
 
 volumes:
   sdr_fastapi_dashboard_cache:
