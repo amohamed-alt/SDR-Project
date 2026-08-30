@@ -1,0 +1,49 @@
+name: sdr-route-recovery
+
+services:
+  route-recovery:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    command:
+      - /bin/sh
+      - -c
+      - |
+        cat >/etc/nginx/conf.d/default.conf <<'EOF'
+        server {
+          listen 8080;
+
+          location / {
+            proxy_pass http://sdr-dashboard:3000;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-Host $host;
+          }
+        }
+        EOF
+        exec nginx -g 'daemon off;'
+    networks:
+      - traefik_proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=n8n_default"
+      - "traefik.http.routers.sdr-dashboard-recovery.rule=Host(`sdr.dashboardtalentera.tech`)"
+      - "traefik.http.routers.sdr-dashboard-recovery.entrypoints=websecure"
+      - "traefik.http.routers.sdr-dashboard-recovery.tls=true"
+      - "traefik.http.routers.sdr-dashboard-recovery.tls.certresolver=mytlschallenge"
+      - "traefik.http.routers.sdr-dashboard-recovery.priority=10000"
+      - "traefik.http.routers.sdr-dashboard-recovery.service=sdr-dashboard-recovery"
+      - "traefik.http.services.sdr-dashboard-recovery.loadbalancer.server.port=8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+
+networks:
+  traefik_proxy:
+    external: true
+    name: n8n_default
