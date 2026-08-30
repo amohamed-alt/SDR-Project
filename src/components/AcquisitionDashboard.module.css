@@ -1,0 +1,200 @@
+.dailyPulse {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.pulseHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.pulseHeader h2 {
+  margin: 0;
+  font: 800 14px/1.25 "Manrope", sans-serif;
+}
+
+.pulseHeader p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.pulseLegend {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 8px;
+  text-align: right;
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.summaryCard {
+  min-width: 0;
+  padding: 12px 13px;
+  border: 1px solid var(--border-soft);
+  border-radius: 11px;
+  background: var(--surface-2);
+}
+
+.summaryCard span {
+  display: block;
+  color: var(--muted);
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.summaryCard strong {
+  display: block;
+  margin-top: 7px;
+  font: 800 20px/1 "Manrope", sans-serif;
+  color: var(--text);
+}
+
+.summaryCard small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.dayList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dayRow {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(135px, 1.25fr) repeat(6, minmax(72px, .72fr));
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 11px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .18s ease, transform .18s ease, background .18s ease;
+}
+
+.dayRow:hover {
+  border-color: #a8c7b8;
+  background: #fbfdfc;
+  transform: translateY(-1px);
+}
+
+.dayIdentity {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.pulseDot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.strong { background: var(--green); }
+.onPace { background: var(--blue); }
+.light { background: var(--amber); }
+.none { background: #a9b5af; }
+
+.dayIdentity div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dayIdentity strong {
+  font-size: 10px;
+  color: var(--text);
+}
+
+.dayIdentity small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dayMetric {
+  min-width: 0;
+  padding: 7px 8px;
+  border-left: 1px solid var(--border-soft);
+}
+
+.dayMetric span {
+  display: block;
+  color: var(--muted);
+  font-size: 7px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.dayMetric strong {
+  display: block;
+  margin-top: 4px;
+  font: 800 13px/1 "Manrope", sans-serif;
+  color: var(--text);
+}
+
+.emptyPulse {
+  padding: 30px 16px;
+  border: 1px dashed var(--border);
+  border-radius: 11px;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+@media (max-width: 1100px) {
+  .dayRow {
+    grid-template-columns: minmax(140px, 1.2fr) repeat(3, minmax(72px, 1fr));
+  }
+
+  .dayMetric:nth-of-type(n+5) {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .pulseHeader {
+    flex-direction: column;
+  }
+
+  .pulseLegend {
+    text-align: left;
+  }
+
+  .summaryGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dayRow {
+    grid-template-columns: minmax(125px, 1.25fr) repeat(2, minmax(66px, 1fr));
+  }
+
+  .dayMetric:nth-of-type(n+4) {
+    display: none;
+  }
+}
