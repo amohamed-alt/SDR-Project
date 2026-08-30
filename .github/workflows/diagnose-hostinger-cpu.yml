@@ -11,92 +11,36 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 4
     env:
       HOSTINGER_TOKEN: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
       VM_ID: "1604210"
+      ACTION_ID: "112058316"
     steps:
-      - name: Validate Hostinger token
+      - name: Recheck Hostinger VPS
         run: |
           set -euo pipefail
           test -n "$HOSTINGER_TOKEN" || { echo "::error::Hostinger API token is missing"; exit 1; }
-          echo "Hostinger token is configured"
-
-      - name: Read VPS details, metrics, actions, and SDR container stats
-        run: |
-          set -euo pipefail
           BASE="https://developers.hostinger.com/api/vps/v1/virtual-machines/${VM_ID}"
           AUTH="Authorization: Bearer ${HOSTINGER_TOKEN}"
-          FROM=$(date -u -d '2 hours ago' '+%Y-%m-%dT%H:%MZ')
+          FROM=$(date -u -d '45 minutes ago' '+%Y-%m-%dT%H:%MZ')
           TO=$(date -u '+%Y-%m-%dT%H:%MZ')
 
-          echo "=== VPS DETAILS ==="
-          DETAILS_CODE=$(curl -sS --connect-timeout 10 --max-time 30 -o /tmp/vm.json -w '%{http_code}' \
-            -H "$AUTH" -H 'Accept: application/json' "$BASE" || true)
-          echo "HTTP $DETAILS_CODE"
-          jq '{id, hostname, state, plan, ipv4, memory, disk}' /tmp/vm.json 2>/dev/null || cat /tmp/vm.json || true
+          echo "=== STUCK ACTION ==="
+          curl -sS --connect-timeout 10 --max-time 30 -H "$AUTH" -H 'Accept: application/json' \
+            "$BASE/actions/${ACTION_ID}" | jq '{id,name,state,created_at,updated_at}'
 
-          echo "=== VPS METRICS LAST 2 HOURS ==="
-          METRICS_CODE=$(curl -sS --connect-timeout 10 --max-time 30 -G -o /tmp/metrics.json -w '%{http_code}' \
-            -H "$AUTH" -H 'Accept: application/json' \
-            --data-urlencode "date_from=$FROM" --data-urlencode "date_to=$TO" \
-            "$BASE/metrics" || true)
-          echo "HTTP $METRICS_CODE from=$FROM to=$TO"
-          jq . /tmp/metrics.json 2>/dev/null || cat /tmp/metrics.json || true
+          echo "=== CPU / RAM LAST 45 MIN ==="
+          curl -sS --connect-timeout 10 --max-time 30 -G -H "$AUTH" -H 'Accept: application/json' \
+            --data-urlencode "date_from=$FROM" --data-urlencode "date_to=$TO" "$BASE/metrics" \
+            | jq '{cpu_usage,ram_usage,uptime}'
 
-          echo "=== RECENT VPS ACTIONS ==="
-          ACTIONS_CODE=$(curl -sS --connect-timeout 10 --max-time 30 -o /tmp/actions.json -w '%{http_code}' \
-            -H "$AUTH" -H 'Accept: application/json' "$BASE/actions?page=1" || true)
-          echo "HTTP $ACTIONS_CODE"
-          jq '{data: [.data[]? | {id,name,state,created_at,updated_at}][0:20], meta}' /tmp/actions.json 2>/dev/null || cat /tmp/actions.json || true
-
-          echo "=== SDR PROJECT CONTENTS ==="
-          CONTENT_CODE=$(curl -sS --connect-timeout 10 --max-time 30 -o /tmp/sdr-project.json -w '%{http_code}' \
-            -H "$AUTH" -H 'Accept: application/json' "$BASE/docker/sdr-project" || true)
-          echo "HTTP $CONTENT_CODE"
-          if [ "$CONTENT_CODE" = "200" ]; then
-            jq '{has_content: (.content != null), content_bytes: (.content | length), environment_bytes: (.environment | length)}' /tmp/sdr-project.json
-          else
-            cat /tmp/sdr-project.json || true
-          fi
-
-          echo "=== SDR PROJECT CONTAINERS ==="
-          CONTAINERS_CODE=$(curl -sS --connect-timeout 10 --max-time 45 -o /tmp/sdr-containers.json -w '%{http_code}' \
+          echo "=== SDR CONTAINERS ENDPOINT ==="
+          CODE=$(curl -sS --connect-timeout 10 --max-time 30 -o /tmp/containers.json -w '%{http_code}' \
             -H "$AUTH" -H 'Accept: application/json' "$BASE/docker/sdr-project/containers" || true)
-          echo "HTTP $CONTAINERS_CODE"
-          if [ "$CONTAINERS_CODE" = "200" ]; then
-            jq 'sort_by(.stats.cpu_percentage // 0) | reverse | map({
-              id,
-              name,
-              image,
-              state,
-              status,
-              health,
-              cpu_percentage: (.stats.cpu_percentage // 0),
-              memory_percentage: (.stats.memory_percentage // 0),
-              memory_used: (.stats.memory_used // 0),
-              memory_total: (.stats.memory_total // 0),
-              net_in: (.stats.net_in // 0),
-              net_out: (.stats.net_out // 0)
-            })' /tmp/sdr-containers.json
-            echo "=== TOP SDR CPU ==="
-            jq -r 'sort_by(.stats.cpu_percentage // 0) | reverse | .[] | "CPU=\(.stats.cpu_percentage // 0)% MEM=\(.stats.memory_percentage // 0)% container=\(.name) state=\(.state) health=\(.health // \"n/a\")"' /tmp/sdr-containers.json
+          echo "HTTP $CODE"
+          if [ "$CODE" = "200" ]; then
+            jq 'sort_by(.stats.cpu_percentage // 0) | reverse | map({name,state,status,health,cpu_percentage:(.stats.cpu_percentage // 0),memory_percentage:(.stats.memory_percentage // 0)})' /tmp/containers.json
           else
-            cat /tmp/sdr-containers.json || true
+            cat /tmp/containers.json || true
           fi
-
-          echo "=== SDR PROJECT LOGS SNAPSHOT ==="
-          LOGS_CODE=$(curl -sS --connect-timeout 10 --max-time 45 -o /tmp/sdr-logs.json -w '%{http_code}' \
-            -H "$AUTH" -H 'Accept: application/json' "$BASE/docker/sdr-project/logs" || true)
-          echo "HTTP $LOGS_CODE"
-          if [ "$LOGS_CODE" = "200" ]; then
-            jq '[.[] | {service, entries: ((.entries // [])[-20:] | map({timestamp,line}))}]' /tmp/sdr-logs.json
-          else
-            cat /tmp/sdr-logs.json || true
-          fi
-
-          echo "=== ALL DOCKER PROJECTS ==="
-          PROJECTS_CODE=$(curl -sS --connect-timeout 10 --max-time 30 -o /tmp/projects.json -w '%{http_code}' \
-            -H "$AUTH" -H 'Accept: application/json' "$BASE/docker" || true)
-          echo "HTTP $PROJECTS_CODE"
-          jq '[.[] | {name,status,state,path,containers: ([.containers[]? | {name,state,status,health}])}]' /tmp/projects.json 2>/dev/null || cat /tmp/projects.json || true
