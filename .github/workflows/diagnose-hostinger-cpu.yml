@@ -1,4 +1,4 @@
-name: Recheck Hostinger Recovery
+name: Inspect Hostinger CPU After Recovery
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  recheck:
+  inspect:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -17,40 +17,40 @@ jobs:
       VM_ID: "1604210"
       STUCK_ACTION_ID: "112058316"
     steps:
-      - name: Read current VPS state, stuck action, CPU and dashboard health
+      - name: Inspect current VPS CPU and Docker state
         run: |
           set -euo pipefail
           test -n "$HOSTINGER_TOKEN" || { echo "::error::Hostinger API token is missing"; exit 1; }
           BASE="https://developers.hostinger.com/api/vps/v1/virtual-machines/${VM_ID}"
           AUTH="Authorization: Bearer ${HOSTINGER_TOKEN}"
-          FROM=$(date -u -d '20 minutes ago' '+%Y-%m-%dT%H:%MZ')
+          FROM=$(date -u -d '30 minutes ago' '+%Y-%m-%dT%H:%MZ')
           TO=$(date -u '+%Y-%m-%dT%H:%MZ')
 
           echo "=== VPS ==="
           curl -sS --connect-timeout 10 --max-time 30 -H "$AUTH" -H 'Accept: application/json' "$BASE" \
-            | jq '{id,hostname,state,memory,disk,uptime}'
+            | jq '{id,hostname,state,memory,disk}'
 
-          echo "=== STUCK DEPLOY ACTION ==="
+          echo "=== PREVIOUS DEPLOY ACTION ==="
           curl -sS --connect-timeout 10 --max-time 30 -H "$AUTH" -H 'Accept: application/json' \
-            "$BASE/actions/${STUCK_ACTION_ID}" | jq '{id,name,state,created_at,updated_at}'
+            "$BASE/actions/${STUCK_ACTION_ID}" | jq '{id,name,state,created_at,updated_at}' || true
 
           echo "=== LATEST ACTIONS ==="
           curl -sS --connect-timeout 10 --max-time 30 -H "$AUTH" -H 'Accept: application/json' \
-            "$BASE/actions?page=1" | jq '{data: [.data[]? | {id,name,state,created_at,updated_at}][0:8]}'
+            "$BASE/actions?page=1" | jq '{data: [.data[]? | {id,name,state,created_at,updated_at}][0:10]}'
 
-          echo "=== CPU RAM UPTIME LAST 20 MIN ==="
+          echo "=== CPU RAM UPTIME LAST 30 MIN ==="
           curl -sS --connect-timeout 10 --max-time 30 -G -H "$AUTH" -H 'Accept: application/json' \
             --data-urlencode "date_from=$FROM" --data-urlencode "date_to=$TO" "$BASE/metrics" \
             | jq '{cpu_usage,ram_usage,uptime}'
 
           echo "=== DASHBOARD HEALTH ==="
-          STATUS=$(curl -k -sS --connect-timeout 5 --max-time 12 -o /tmp/health.json -w '%{http_code}' \
+          STATUS=$(curl -k -sS --connect-timeout 5 --max-time 15 -o /tmp/health.json -w '%{http_code}' \
             -H 'Cache-Control: no-cache' 'https://sdr.dashboardtalentera.tech/api/health' || true)
           echo "HTTP=$STATUS"
           cat /tmp/health.json 2>/dev/null || true
 
-          echo "=== HOSTINGER DOCKER ENDPOINT ==="
-          CODE=$(curl -sS --connect-timeout 10 --max-time 30 -o /tmp/containers.json -w '%{http_code}' \
+          echo "=== SDR PROJECT CONTAINERS ==="
+          CODE=$(curl -sS --connect-timeout 10 --max-time 40 -o /tmp/containers.json -w '%{http_code}' \
             -H "$AUTH" -H 'Accept: application/json' "$BASE/docker/sdr-project/containers" || true)
           echo "HTTP=$CODE"
           if [ "$CODE" = "200" ]; then
