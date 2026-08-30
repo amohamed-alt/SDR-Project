@@ -1,5 +1,5 @@
-import { LeadImportPush } from "@/components/LeadImportPush";
+import { LeadImportPushV2 } from "@/components/LeadImportPushV2";
 
 export default function LeadImportPage() {
-  return <LeadImportPush/>;
+  return <LeadImportPushV2/>;
 }
