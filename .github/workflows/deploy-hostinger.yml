@@ -11,59 +11,117 @@ permissions:
   statuses: write
 
 jobs:
-  deploy:
+  preflight:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    outputs:
+      should_deploy: ${{ steps.freshness.outputs.should_deploy }}
+      deploy_sha: ${{ steps.freshness.outputs.deploy_sha }}
+    steps:
+      - name: Reject stale main deployment candidates
+        id: freshness
+        uses: actions/github-script@v7
+        env:
+          CANDIDATE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          DEPLOY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          retries: 3
+          script: |
+            const candidate = String(process.env.CANDIDATE_SHA || '').trim();
+            core.setOutput('deploy_sha', candidate);
+
+            if (context.eventName === 'workflow_dispatch') {
+              core.setOutput('should_deploy', 'true');
+              return;
+            }
+
+            const { data: branch } = await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: 'main',
+            });
+            const currentMain = branch.commit.sha;
+
+            if (candidate !== currentMain) {
+              core.setOutput('should_deploy', 'false');
+              core.notice(`Skipping stale deployment ${candidate}; current main is ${currentMain}.`);
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: candidate,
+                state: 'success',
+                context: 'hostinger/deploy',
+                description: 'Superseded by a newer main commit; production untouched',
+                target_url: process.env.DEPLOY_URL,
+              });
+              return;
+            }
+
+            core.setOutput('should_deploy', 'true');
+
+  deploy:
+    needs: preflight
+    if: needs.preflight.outputs.should_deploy == 'true'
     concurrency:
       group: hostinger-sdr-production
       cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      DEPLOY_SHA: ${{ needs.preflight.outputs.deploy_sha }}
+      DEPLOY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
-      - name: Ensure this is the current main revision
-        id: freshness
+      - name: Mark deployment pending
+        continue-on-error: true
         uses: actions/github-script@v7
-        env:
-          CANDIDATE_SHA: ${{ env.DEPLOY_SHA }}
         with:
           retries: 3
           script: |
-            const candidate = String(process.env.CANDIDATE_SHA || '').trim();
-            if (context.eventName === 'workflow_dispatch') {
-              core.setOutput('deploy', 'true');
-              return;
-            }
-            const { data: branch } = await github.rest.repos.getBranch({
+            await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              branch: 'main',
+              sha: process.env.DEPLOY_SHA,
+              state: 'pending',
+              context: 'hostinger/deploy',
+              description: 'Deploying CPU-light SDR stack to Hostinger',
+              target_url: process.env.DEPLOY_URL,
             });
-            core.setOutput('deploy', candidate === branch.commit.sha ? 'true' : 'false');
-            if (candidate !== branch.commit.sha) {
-              core.notice(`Skipping stale deployment ${candidate}; main is ${branch.commit.sha}.`);
-            }
 
-      - name: Checkout production revision
-        if: steps.freshness.outputs.deploy == 'true'
+      - name: Checkout validated revision
         uses: actions/checkout@v5
         with:
           ref: ${{ env.DEPLOY_SHA }}
 
       - name: Validate light compose
-        if: steps.freshness.outputs.deploy == 'true'
         run: docker compose -f docker-compose.light.yml config >/tmp/sdr-light-compose.txt
 
       - name: Validate Hostinger API key
-        if: steps.freshness.outputs.deploy == 'true'
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
         run: test -n "$HOSTINGER_API_KEY"
 
+      - name: Validate dashboard authentication
+        env:
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
+          ACQUISITION_OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN }}
+        run: |
+          test -n "$DASHBOARD_PASSWORD" || {
+            echo "::error::Configure DASHBOARD_PASSWORD or ACQUISITION_OWNER_TOKEN."
+            exit 1
+          }
+          echo "Dashboard authentication configured"
+
+      - name: Report optional production integrations
+        env:
+          PRIMEFORGE_API_KEY: ${{ secrets.PRIMEFORGE_API_KEY || secrets.PRIME_FORGE_API_KEY }}
+          SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
+        run: |
+          [ -n "$SMARTLEAD_API_KEY" ] && echo "Smartlead configured" || true
+          [ -n "$PRIMEFORGE_API_KEY" ] && echo "Primeforge advisory configured" || true
+
       - name: Deploy CPU-light SDR stack
-        if: steps.freshness.outputs.deploy == 'true'
         uses: hostinger/deploy-on-vps@v2
         with:
           api-key: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
@@ -73,24 +131,91 @@ jobs:
           environment: |
             SDR_BUILD_REF=${{ env.DEPLOY_SHA }}
             CAREER_GENERATION=v3
+            SMARTLEAD_AUTOPILOT_ENABLED=true
+            SMARTLEAD_LEGACY_SEND_ENABLED=false
 
-      - name: Verify dashboard recovery
-        if: steps.freshness.outputs.deploy == 'true'
+      - name: Verify exact light production build
+        env:
+          DASHBOARD_USERNAME: ${{ secrets.DASHBOARD_USERNAME || 'talentera' }}
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
         run: |
           set -euo pipefail
-          URL='https://sdr.dashboardtalentera.tech/api/health'
+          HOST='sdr.dashboardtalentera.tech'
+          READY=false
           for ATTEMPT in $(seq 1 24); do
-            CODE=$(curl --silent --show-error --connect-timeout 5 --max-time 12 \
+            BODY=$(curl --silent --show-error \
+              --connect-timeout 5 \
+              --max-time 12 \
               -H 'Cache-Control: no-cache' \
-              -o /tmp/health.json -w '%{http_code}' \
-              "$URL?light_recovery=${ATTEMPT}&deploy=${DEPLOY_SHA}" || true)
-            BUILD=$(jq -r '.buildRef // ""' /tmp/health.json 2>/dev/null || true)
-            echo "Light recovery ${ATTEMPT}/24: HTTP ${CODE}, build=${BUILD:-none}"
-            if [ "$CODE" = "200" ]; then
-              cat /tmp/health.json
-              exit 0
+              "https://${HOST}/api/health?deploy=${DEPLOY_SHA}&light_attempt=${ATTEMPT}" || true)
+            BUILD_REF=$(printf '%s' "$BODY" | jq -r '.buildRef // ""' 2>/dev/null || true)
+            echo "Light production gate ${ATTEMPT}/24: build=${BUILD_REF:-none}"
+            if [ "$BUILD_REF" = "$DEPLOY_SHA" ]; then
+              READY=true
+              break
             fi
             sleep 10
           done
-          echo "::error::Dashboard did not recover after the CPU-light deployment window."
-          exit 1
+
+          if [ "$READY" != "true" ]; then
+            echo "::error::Production never exposed the exact CPU-light build $DEPLOY_SHA."
+            exit 1
+          fi
+
+          ACCESS_CODE=$(curl --silent --show-error \
+            --user "${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}" \
+            --connect-timeout 5 \
+            --max-time 15 \
+            --output /tmp/dashboard-access.json \
+            --write-out '%{http_code}' \
+            "https://${HOST}/api/usage?deploy=${DEPLOY_SHA}" || true)
+          echo "Authenticated dashboard gate: HTTP ${ACCESS_CODE:-none}"
+          [ "$ACCESS_CODE" = "200" ]
+
+      - name: Mark deployment successful
+        if: success()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.DEPLOY_SHA,
+              state: 'success',
+              context: 'hostinger/deploy',
+              description: 'CPU-light SDR production is healthy',
+              target_url: process.env.DEPLOY_URL,
+            });
+
+      - name: Mark deployment failed
+        if: failure()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.DEPLOY_SHA,
+              state: 'failure',
+              context: 'hostinger/deploy',
+              description: 'CPU-light SDR production deployment failed',
+              target_url: process.env.DEPLOY_URL,
+            });
+
+      - name: Mark deployment cancelled
+        if: cancelled()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.DEPLOY_SHA,
+              state: 'error',
+              context: 'hostinger/deploy',
+              description: 'CPU-light SDR production deployment cancelled',
+              target_url: process.env.DEPLOY_URL,
+            });
