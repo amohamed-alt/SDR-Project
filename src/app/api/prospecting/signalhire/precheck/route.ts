@@ -9,6 +9,8 @@ export const dynamic = "force-dynamic";
 const schema = z.object({
   name: z.string().trim().max(220).default(""),
   company: z.string().trim().max(320).default(""),
+  companyWebsite: z.string().trim().max(1500).default(""),
+  companyDomain: z.string().trim().max(320).default(""),
   linkedinUrl: z.string().trim().max(1500).default(""),
   email: z.string().trim().max(320).default(""),
   emails: z.array(z.string().trim().max(320)).max(20).default([]),
@@ -69,7 +71,8 @@ async function companyCheck(input: z.infer<typeof schema>) {
     "name", "domain", "account_type", "account_status", "hs_num_open_deals", "search_status",
     "detected_ats", "ats_status", "career_page_url", "hs_lead_status", "hubspot_owner_id",
   ];
-  const domain = workDomain(unique([input.email, ...input.emails]));
+  const domain = normalizeCompanyDomain(input.companyDomain || input.companyWebsite)
+    || workDomain(unique([input.email, ...input.emails]));
   let match = null as Awaited<ReturnType<typeof searchAll>>[number] | null;
   let matchedBy = "";
 
@@ -95,9 +98,9 @@ async function companyCheck(input: z.infer<typeof schema>) {
   const accountType = String(p.account_type || "").trim();
   const accountStatus = String(p.account_status || "").trim();
   const openDeals = Math.max(0, Number(p.hs_num_open_deals || 0) || 0);
-  const activeCustomer = accountType === "Retention" && accountStatus === "Active";
-  const protectedReason = activeCustomer
-    ? "Active Retention customer"
+  const retentionAccount = accountType.toLowerCase() === "retention";
+  const protectedReason = retentionAccount
+    ? `Retention account${accountStatus ? ` · ${accountStatus}` : ""}`
     : openDeals > 0
       ? `${openDeals} open deal${openDeals === 1 ? "" : "s"}`
       : "";
@@ -117,7 +120,7 @@ async function companyCheck(input: z.infer<typeof schema>) {
     careerPageUrl: String(p.career_page_url || ""),
     leadStatus: String(p.hs_lead_status || ""),
     ownerId: String(p.hubspot_owner_id || ""),
-    protected: Boolean(activeCustomer || openDeals > 0),
+    protected: Boolean(retentionAccount || openDeals > 0),
     protectedReason,
   };
 }
