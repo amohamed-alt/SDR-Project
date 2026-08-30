@@ -1,0 +1,55 @@
+name: Hostinger 404 Diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/hostinger-404-diagnostic.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect Docker project/container state
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "Diagnostic run: container state only; no environment values are printed."
+          test -n "$HOSTINGER_API_KEY" || { echo "::error::Hostinger token missing"; exit 1; }
+
+          AUTH="$HOSTINGER_API_KEY"
+          case "$AUTH" in
+            Bearer\ *) ;;
+            *) AUTH="Bearer $AUTH" ;;
+          esac
+
+          BASE='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210/docker'
+          CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+            -H "Authorization: $AUTH" \
+            -H 'Accept: application/json' \
+            -o /tmp/projects.json -w '%{http_code}' "$BASE" || true)
+          echo "Hostinger Docker Manager: HTTP $CODE"
+          test "$CODE" = "200" || { head -c 500 /tmp/projects.json; exit 1; }
+
+          echo '=== Docker projects and container health (no env/secrets) ==='
+          jq -r '.[] | "PROJECT\t\(.name)\tstatus=\(.status // "")\tstate=\(.state // "")", ((.containers // [])[] | "  CONTAINER\t\(.name)\tstate=\(.state // "")\thealth=\(.health // "")\tstatus=\(.status // "")\timage=\(.image // "")")' /tmp/projects.json
+
+          for PROJECT in sdr-project sdr-fastapi-dashboard sdr-route-recovery; do
+            CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+              -H "Authorization: $AUTH" \
+              -H 'Accept: application/json' \
+              -o "/tmp/${PROJECT}.json" -w '%{http_code}' "$BASE/$PROJECT/containers" || true)
+            echo "=== $PROJECT containers: HTTP $CODE ==="
+            if [ "$CODE" = "200" ]; then
+              jq -r '.[] | "\(.name)\tstate=\(.state // "")\thealth=\(.health // "")\tstatus=\(.status // "")\timage=\(.image // "")"' "/tmp/${PROJECT}.json"
+            else
+              head -c 300 "/tmp/${PROJECT}.json" || true
+              echo
+            fi
+          done
