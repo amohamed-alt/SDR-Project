@@ -11,6 +11,8 @@ const CONNECTED_CALL_DISPOSITIONS = new Set([
   "2e7360c1-6b71-40e9-ab2b-30ae98a4678c", // Meeting booked
 ]);
 const MEANINGFUL_MEETING_OUTCOMES = new Set(["SCHEDULED", "COMPLETED", "RESCHEDULED"]);
+const MAX_CONTACTS_PER_COMPANY_SCAN = 100;
+const ENGAGEMENT_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const schema = z.object({
   name: z.string().trim().max(220).default(""),
@@ -23,6 +25,40 @@ const schema = z.object({
   phone: z.string().trim().max(120).default(""),
   phones: z.array(z.string().trim().max(120)).max(20).default([]),
 });
+
+type EngagementCheck = {
+  checked: boolean;
+  engaged: boolean;
+  connectedCallCount: number;
+  meetingCount: number;
+  latestConnectedCallAt: string;
+  latestMeetingAt: string;
+  latestEngagementAt: string;
+  reason: string;
+  error: string;
+};
+
+type EngagementCacheEntry = {
+  expiresAt: number;
+  value?: EngagementCheck;
+  inflight?: Promise<EngagementCheck>;
+};
+
+const engagementCache = new Map<string, EngagementCacheEntry>();
+
+function emptyEngagement(checked = true, error = ""): EngagementCheck {
+  return {
+    checked,
+    engaged: false,
+    connectedCallCount: 0,
+    meetingCount: 0,
+    latestConnectedCallAt: "",
+    latestMeetingAt: "",
+    latestEngagementAt: "",
+    reason: "",
+    error,
+  };
+}
 
 function unique(values: string[]) {
   const seen = new Set<string>();
@@ -62,49 +98,86 @@ async function safeAssociations(fromObjectType: string, toObjectType: string, fr
   }
 }
 
-async function companyEngagementCheck(companyId: string) {
-  const [companyContacts, companyCalls, companyMeetings] = await Promise.all([
-    safeAssociations("companies", "contacts", [companyId]),
-    safeAssociations("companies", "calls", [companyId]),
-    safeAssociations("companies", "meetings", [companyId]),
-  ]);
+async function scanCompanyEngagement(companyId: string): Promise<EngagementCheck> {
+  try {
+    const [companyContacts, companyCalls, companyMeetings] = await Promise.all([
+      safeAssociations("companies", "contacts", [companyId]),
+      safeAssociations("companies", "calls", [companyId]),
+      safeAssociations("companies", "meetings", [companyId]),
+    ]);
 
-  const contactIds = companyContacts.get(companyId) || [];
-  const [contactCalls, contactMeetings] = await Promise.all([
-    safeAssociations("contacts", "calls", contactIds),
-    safeAssociations("contacts", "meetings", contactIds),
-  ]);
+    const allContactIds = companyContacts.get(companyId) || [];
+    const contactIds = allContactIds.slice(0, MAX_CONTACTS_PER_COMPANY_SCAN);
+    const [contactCalls, contactMeetings] = await Promise.all([
+      safeAssociations("contacts", "calls", contactIds),
+      safeAssociations("contacts", "meetings", contactIds),
+    ]);
 
-  const callIds = new Set(companyCalls.get(companyId) || []);
-  const meetingIds = new Set(companyMeetings.get(companyId) || []);
-  for (const ids of contactCalls.values()) for (const id of ids) callIds.add(id);
-  for (const ids of contactMeetings.values()) for (const id of ids) meetingIds.add(id);
+    const callIds = new Set(companyCalls.get(companyId) || []);
+    const meetingIds = new Set(companyMeetings.get(companyId) || []);
+    for (const ids of contactCalls.values()) for (const id of ids) callIds.add(id);
+    for (const ids of contactMeetings.values()) for (const id of ids) meetingIds.add(id);
 
-  const [calls, meetings] = await Promise.all([
-    batchRead("calls", [...callIds], ["hs_call_disposition", "hs_call_status", "hs_timestamp"]),
-    batchRead("meetings", [...meetingIds], ["hs_meeting_outcome", "hs_meeting_title", "hs_meeting_start_time", "hs_timestamp"]),
-  ]);
+    const [calls, meetings] = await Promise.all([
+      batchRead("calls", [...callIds], ["hs_call_disposition", "hs_call_status", "hs_timestamp"]),
+      batchRead("meetings", [...meetingIds], ["hs_meeting_outcome", "hs_meeting_title", "hs_meeting_start_time", "hs_timestamp"]),
+    ]);
 
-  const connectedCalls = calls.filter((call) => CONNECTED_CALL_DISPOSITIONS.has(String(call.properties.hs_call_disposition || "")));
-  const meaningfulMeetings = meetings.filter((meeting) => MEANINGFUL_MEETING_OUTCOMES.has(String(meeting.properties.hs_meeting_outcome || "").toUpperCase()));
-  const latestConnectedCallAt = latestIso(connectedCalls.map((call) => String(call.properties.hs_timestamp || "")));
-  const latestMeetingAt = latestIso(meaningfulMeetings.map((meeting) => String(meeting.properties.hs_meeting_start_time || meeting.properties.hs_timestamp || "")));
-  const latestEngagementAt = latestIso([latestConnectedCallAt, latestMeetingAt]);
-  const engaged = connectedCalls.length > 0 || meaningfulMeetings.length > 0;
+    const connectedCalls = calls.filter((call) => CONNECTED_CALL_DISPOSITIONS.has(String(call.properties.hs_call_disposition || "")));
+    const meaningfulMeetings = meetings.filter((meeting) => MEANINGFUL_MEETING_OUTCOMES.has(String(meeting.properties.hs_meeting_outcome || "").toUpperCase()));
+    const latestConnectedCallAt = latestIso(connectedCalls.map((call) => String(call.properties.hs_timestamp || "")));
+    const latestMeetingAt = latestIso(meaningfulMeetings.map((meeting) => String(meeting.properties.hs_meeting_start_time || meeting.properties.hs_timestamp || "")));
+    const latestEngagementAt = latestIso([latestConnectedCallAt, latestMeetingAt]);
+    const engaged = connectedCalls.length > 0 || meaningfulMeetings.length > 0;
 
-  const reasonParts: string[] = [];
-  if (connectedCalls.length) reasonParts.push(`${connectedCalls.length} connected call${connectedCalls.length === 1 ? "" : "s"}`);
-  if (meaningfulMeetings.length) reasonParts.push(`${meaningfulMeetings.length} meeting${meaningfulMeetings.length === 1 ? "" : "s"}`);
+    const reasonParts: string[] = [];
+    if (connectedCalls.length) reasonParts.push(`${connectedCalls.length} connected call${connectedCalls.length === 1 ? "" : "s"}`);
+    if (meaningfulMeetings.length) reasonParts.push(`${meaningfulMeetings.length} meeting${meaningfulMeetings.length === 1 ? "" : "s"}`);
 
-  return {
-    engaged,
-    connectedCallCount: connectedCalls.length,
-    meetingCount: meaningfulMeetings.length,
-    latestConnectedCallAt,
-    latestMeetingAt,
-    latestEngagementAt,
-    reason: reasonParts.join(" · "),
-  };
+    if (!engaged && allContactIds.length > MAX_CONTACTS_PER_COMPANY_SCAN) {
+      return {
+        ...emptyEngagement(false, `Company has ${allContactIds.length} HubSpot contacts; automatic engagement scan is capped at ${MAX_CONTACTS_PER_COMPANY_SCAN}. Review before Push.`),
+        reason: `Engagement scan incomplete (${MAX_CONTACTS_PER_COMPANY_SCAN}/${allContactIds.length} contacts checked)`,
+      };
+    }
+
+    return {
+      checked: true,
+      engaged,
+      connectedCallCount: connectedCalls.length,
+      meetingCount: meaningfulMeetings.length,
+      latestConnectedCallAt,
+      latestMeetingAt,
+      latestEngagementAt,
+      reason: reasonParts.join(" · "),
+      error: "",
+    };
+  } catch (error) {
+    console.error("SignalHire company engagement scan failed", { companyId, error });
+    return emptyEngagement(false, error instanceof Error
+      ? `Could not verify company calls/meetings: ${error.message}`
+      : "Could not verify company calls/meetings.");
+  }
+}
+
+async function companyEngagementCheck(companyId: string): Promise<EngagementCheck> {
+  const now = Date.now();
+  const cached = engagementCache.get(companyId);
+  if (cached?.value && cached.expiresAt > now) return cached.value;
+  if (cached?.inflight) return cached.inflight;
+
+  const inflight = scanCompanyEngagement(companyId)
+    .then((value) => {
+      engagementCache.set(companyId, { value, expiresAt: Date.now() + ENGAGEMENT_CACHE_TTL_MS });
+      return value;
+    })
+    .catch((error) => {
+      engagementCache.delete(companyId);
+      return emptyEngagement(false, error instanceof Error ? error.message : "Company engagement scan failed.");
+    });
+
+  engagementCache.set(companyId, { expiresAt: 0, inflight });
+  return inflight;
 }
 
 async function contactCheck(input: z.infer<typeof schema>) {
@@ -136,7 +209,7 @@ async function contactCheck(input: z.infer<typeof schema>) {
   return { inHubSpot: false, id: "", matchedBy: "", properties: {} as Record<string, unknown> };
 }
 
-async function companyCheck(input: z.infer<typeof schema>) {
+async function companyCheck(input: z.infer<typeof schema>, shouldCheckEngagement: boolean) {
   const properties = [
     "name", "domain", "account_type", "account_status", "hs_num_open_deals", "search_status",
     "detected_ats", "ats_status", "career_page_url", "hs_lead_status", "hubspot_owner_id",
@@ -160,7 +233,7 @@ async function companyCheck(input: z.infer<typeof schema>) {
     return {
       inHubSpot: false, id: "", matchedBy: "", name: input.company, domain,
       accountType: "", accountStatus: "", openDeals: 0, searchStatus: "", detectedAts: "", atsStatus: "", careerPageUrl: "", leadStatus: "", ownerId: "",
-      engaged: false, connectedCallCount: 0, meetingCount: 0, latestConnectedCallAt: "", latestMeetingAt: "", latestEngagementAt: "", engagementReason: "",
+      engagementChecked: true, engagementError: "", engaged: false, connectedCallCount: 0, meetingCount: 0, latestConnectedCallAt: "", latestMeetingAt: "", latestEngagementAt: "", engagementReason: "",
       protected: false, protectedReason: "",
     };
   }
@@ -170,12 +243,19 @@ async function companyCheck(input: z.infer<typeof schema>) {
   const accountStatus = String(p.account_status || "").trim();
   const openDeals = Math.max(0, Number(p.hs_num_open_deals || 0) || 0);
   const retentionAccount = accountType.toLowerCase() === "retention";
-  const engagement = await companyEngagementCheck(String(match.id));
-  const protectedReason = retentionAccount
+  const crmProtected = Boolean(retentionAccount || openDeals > 0);
+  const engagement = shouldCheckEngagement && !crmProtected
+    ? await companyEngagementCheck(String(match.id))
+    : emptyEngagement(false);
+  const crmProtectedReason = retentionAccount
     ? `Retention account${accountStatus ? ` · ${accountStatus}` : ""}`
     : openDeals > 0
       ? `${openDeals} open deal${openDeals === 1 ? "" : "s"}`
       : "";
+  const engagementUnknown = shouldCheckEngagement && !crmProtected && !engagement.checked;
+  const protectedReason = crmProtectedReason || (engagementUnknown
+    ? engagement.error || engagement.reason || "Company engagement could not be verified. Review before Push."
+    : "");
 
   return {
     inHubSpot: true,
@@ -192,6 +272,8 @@ async function companyCheck(input: z.infer<typeof schema>) {
     careerPageUrl: String(p.career_page_url || ""),
     leadStatus: String(p.hs_lead_status || ""),
     ownerId: String(p.hubspot_owner_id || ""),
+    engagementChecked: engagement.checked,
+    engagementError: engagement.error,
     engaged: engagement.engaged,
     connectedCallCount: engagement.connectedCallCount,
     meetingCount: engagement.meetingCount,
@@ -199,7 +281,7 @@ async function companyCheck(input: z.infer<typeof schema>) {
     latestMeetingAt: engagement.latestMeetingAt,
     latestEngagementAt: engagement.latestEngagementAt,
     engagementReason: engagement.reason,
-    protected: Boolean(retentionAccount || openDeals > 0),
+    protected: Boolean(crmProtected || engagementUnknown),
     protectedReason,
   };
 }
@@ -208,10 +290,12 @@ export async function POST(request: NextRequest) {
   try {
     const parsed = schema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: "Invalid SignalHire precheck payload." }, { status: 400 });
-    const [contact, company] = await Promise.all([
-      contactCheck(parsed.data),
-      companyCheck(parsed.data),
-    ]);
+
+    // Existing people are decisive: do not run a company-wide activity scan for rows
+    // that will be skipped anyway. This keeps CSV dry-runs responsive and reduces HubSpot load.
+    const contact = await contactCheck(parsed.data);
+    const company = await companyCheck(parsed.data, !contact.inHubSpot);
+
     return NextResponse.json({ contact, company, checkedAt: new Date().toISOString() }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("SignalHire HubSpot precheck failed", error);
