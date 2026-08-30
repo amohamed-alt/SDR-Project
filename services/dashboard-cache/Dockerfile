@@ -13,7 +13,8 @@ COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=appuser:appuser app.py ./app.py
+COPY --chown=appuser:appuser prewarm.py ./prewarm.py
 USER appuser
 
 EXPOSE 8000
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-access-log"]
+CMD ["/bin/sh", "-c", "python /app/prewarm.py & exec uvicorn app:app --host 0.0.0.0 --port 8000 --workers 1 --no-access-log"]
