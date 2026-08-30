@@ -4,11 +4,14 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  Building2,
+  CalendarCheck2,
   CheckCircle2,
   CircleAlert,
   ExternalLink,
   FileSpreadsheet,
   LoaderCircle,
+  PhoneCall,
   Send,
   ShieldCheck,
   Upload,
@@ -28,12 +31,19 @@ type CompanyCheck = {
   accountType: string;
   accountStatus: string;
   openDeals: number;
+  engaged: boolean;
+  connectedCallCount: number;
+  meetingCount: number;
+  latestConnectedCallAt: string;
+  latestMeetingAt: string;
+  latestEngagementAt: string;
+  engagementReason: string;
   protected: boolean;
   protectedReason: string;
 };
 type Precheck = { contact: ContactCheck; company: CompanyCheck; checkedAt: string };
-type Stage = "checking" | "ready" | "existing" | "retention" | "protected" | "error" | "pushed";
-type View = "ready" | "existing" | "retention" | "protected" | "pushed" | "review" | "all";
+type Stage = "checking" | "ready" | "existing" | "engaged" | "retention" | "protected" | "error" | "pushed";
+type View = "ready" | "existing" | "engaged" | "retention" | "protected" | "pushed" | "review" | "all";
 type Owner = { id: string; name: string };
 type TriggerKey = "job_change" | "promoted" | "linkedin_active" | "frequent_posts" | "hiring_now" | "hr_growth" | "ats_change" | "senior_buyer";
 
@@ -58,6 +68,17 @@ const TRIGGERS: Array<{ key: TriggerKey; label: string }> = [
   { key: "senior_buyer", label: "Senior HR decision-maker" },
 ];
 
+const VIEW_LABELS: Record<View, string> = {
+  ready: "Ready",
+  existing: "Existing person",
+  engaged: "Engaged company",
+  retention: "Retention",
+  protected: "Protected",
+  pushed: "Pushed",
+  review: "Review",
+  all: "All",
+};
+
 function keyFor(lead: SignalHireCsvLead, index: number) {
   return lead.id || lead.linkedinUrl || lead.email || lead.phone || `${lead.name}:${lead.company}:${index}`;
 }
@@ -70,7 +91,15 @@ function stageFromCheck(check: Precheck): Stage {
   if (isRetention(check.company)) return "retention";
   if (check.contact.inHubSpot) return "existing";
   if (check.company.protected) return "protected";
+  if (check.company.engaged) return "engaged";
   return "ready";
+}
+
+function formatDate(value: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(date);
 }
 
 function scoreLead(lead: SignalHireCsvLead) {
@@ -169,7 +198,7 @@ export function LeadImportPushV2() {
         }
       });
       await Promise.all(workers);
-      setMessage(`Dry run complete for ${initial.length} contacts. Nothing new was written during the check.`);
+      setMessage(`Dry run complete for ${initial.length} contacts. Existing people and already-engaged companies are separated before Push.`);
     } catch (fileError) {
       setRows([]);
       setError(fileError instanceof Error ? fileError.message : "Could not read SignalHire CSV.");
@@ -180,7 +209,7 @@ export function LeadImportPushV2() {
 
   function toggleTrigger(rowKey: string, trigger: TriggerKey) {
     setRows((current) => current.map((row) => {
-      if (row.key !== rowKey) return row;
+      if (row.key !== rowKey || row.stage !== "ready") return row;
       const triggers = row.triggers.includes(trigger) ? row.triggers.filter((item) => item !== trigger) : [...row.triggers, trigger];
       return { ...row, triggers };
     }));
@@ -231,6 +260,7 @@ export function LeadImportPushV2() {
     total: rows.length,
     ready: rows.filter((row) => row.stage === "ready").length,
     existing: rows.filter((row) => row.stage === "existing").length,
+    engaged: rows.filter((row) => row.stage === "engaged").length,
     retention: rows.filter((row) => row.stage === "retention").length,
     protected: rows.filter((row) => row.stage === "protected").length,
     pushed: rows.filter((row) => row.stage === "pushed").length,
@@ -242,8 +272,16 @@ export function LeadImportPushV2() {
     return rows.filter((row) => {
       if (view !== "all" && row.stage !== view) return false;
       if (!term) return true;
-      return [row.lead.name, row.lead.title, row.lead.company, row.lead.email, row.lead.phone, row.precheck?.company.accountType, row.precheck?.company.accountStatus]
-        .some((value) => String(value || "").toLowerCase().includes(term));
+      return [
+        row.lead.name,
+        row.lead.title,
+        row.lead.company,
+        row.lead.email,
+        row.lead.phone,
+        row.precheck?.company.accountType,
+        row.precheck?.company.accountStatus,
+        row.precheck?.company.engagementReason,
+      ].some((value) => String(value || "").toLowerCase().includes(term));
     });
   }, [query, rows, view]);
 
@@ -269,58 +307,74 @@ export function LeadImportPushV2() {
         <div>
           <Link href="/" className={styles.back}><ArrowLeft size={15}/>SDR Command Center</Link>
           <span className={styles.eyebrow}><FileSpreadsheet size={14}/>SIGNALHIRE IMPORT</span>
-          <h1>Dry Run → Choose Trigger → Choose Task Owner → Push</h1>
-          <p>The task owner is a manual override for this import. It does not depend on SDR Owner routing. Retention accounts and companies with open deals stay blocked.</p>
+          <h1>New Person → Check Company Engagement → Choose Trigger → Push</h1>
+          <p>A company can already exist in HubSpot and still be valid. We only block it when the person already exists, the company is Retention/protected, or the company already has a connected call or meaningful meeting.</p>
         </div>
-        <div className={styles.guardrails}><span><ShieldCheck size={13}/>Dry run first</span><span><ShieldCheck size={13}/>Manual task owner</span></div>
+        <div className={styles.guardrails}><span><ShieldCheck size={13}/>New people only</span><span><PhoneCall size={13}/>Connected call guard</span><span><CalendarCheck2 size={13}/>Meeting guard</span></div>
       </header>
 
       <section className={styles.controlGrid}>
         <div className={styles.uploadCard}>
           <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={(event) => { const file = event.target.files?.[0]; if (file) void processFile(file); event.currentTarget.value = ""; }}/>
-          <Upload size={20}/><div><strong>{fileName || "SignalHire CSV"}</strong><small>Upload the export and run the HubSpot check before any push.</small></div>
+          <Upload size={20}/><div><strong>{fileName || "SignalHire CSV"}</strong><small>Upload the export. The dry run checks the person, company, connected calls and meetings before any write.</small></div>
           <button onClick={() => fileRef.current?.click()} disabled={processing}>{processing ? "Checking…" : "Choose CSV"}</button>
         </div>
         <label className={styles.ownerCard}><span>Task owner override</span><select value={ownerId} onChange={(event) => setOwnerId(event.target.value)}><option value="">Choose owner…</option>{owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}</select><small>{ownerName ? `${ownerName} will receive every task you push.` : "Required before Push. This bypasses automatic SDR task routing."}</small></label>
       </section>
 
-      {processing && <div className={styles.notice}><LoaderCircle className={styles.spin} size={15}/>Dry run {progress.done}/{progress.total}</div>}
+      {processing && <div className={styles.notice}><LoaderCircle className={styles.spin} size={15}/>Dry run {progress.done}/{progress.total} — checking people, companies, calls and meetings.</div>}
       {error && <div className={styles.error}><CircleAlert size={15}/>{error}</div>}
       {message && !processing && <div className={styles.notice}><CheckCircle2 size={15}/>{message}</div>}
 
       <section className={styles.metrics}>
         <article><UsersRound size={17}/><span>Uploaded</span><strong>{counts.total}</strong></article>
         <article><Send size={17}/><span>Ready</span><strong>{counts.ready}</strong></article>
-        <article><UserCheck size={17}/><span>Existing</span><strong>{counts.existing}</strong></article>
+        <article><UserCheck size={17}/><span>Existing person</span><strong>{counts.existing}</strong></article>
+        <article><PhoneCall size={17}/><span>Engaged company</span><strong>{counts.engaged}</strong></article>
         <article><ShieldCheck size={17}/><span>Retention</span><strong>{counts.retention}</strong></article>
-        <article><ShieldCheck size={17}/><span>Protected</span><strong>{counts.protected}</strong></article>
+        <article><Building2 size={17}/><span>Protected</span><strong>{counts.protected}</strong></article>
         <article><CheckCircle2 size={17}/><span>Pushed</span><strong>{counts.pushed}</strong></article>
       </section>
 
       <section className={styles.toolbar}>
         <div className={styles.views}>
-          {(["ready","existing","retention","protected","pushed","review","all"] as View[]).map((item) => <button key={item} data-active={view === item} onClick={() => setView(item)}>{item[0].toUpperCase()+item.slice(1)} <b>{item === "all" ? counts.total : counts[item as keyof typeof counts]}</b></button>)}
+          {(["ready","existing","engaged","retention","protected","pushed","review","all"] as View[]).map((item) => <button key={item} data-active={view === item} onClick={() => setView(item)}>{VIEW_LABELS[item]} <b>{item === "all" ? counts.total : counts[item as keyof typeof counts]}</b></button>)}
         </div>
-        <input className={styles.search} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search lead, company, status…"/>
+        <input className={styles.search} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search person, company, engagement…"/>
       </section>
 
       <section className={styles.selection}>
         <button onClick={toggleVisible} disabled={!eligibleVisible.length}>{allVisibleSelected ? "Unselect visible" : "Select ready"}</button>
         <span><b>{selectedCount}</b> selected</span>
-        <small>Pick the “why now” trigger on each row before pushing. You can select more than one.</small>
+        <small>Ready = new person + no connected call/meeting at the company. Existing companies with no meaningful engagement are still allowed.</small>
         <button className={styles.primary} onClick={() => void pushSelected()} disabled={!selectedCount || !ownerId || bulk.loading}>{bulk.loading ? <LoaderCircle className={styles.spin} size={14}/> : <Send size={14}/>}{bulk.loading ? `Pushing ${bulk.done}/${bulk.total}` : "Push selected + Tasks"}</button>
       </section>
 
-      <section className={styles.tablePanel}><div className={styles.tableWrap}><table><thead><tr><th/><th>Lead</th><th>Contact data</th><th>HubSpot</th><th>Why now / trigger</th><th>Status</th><th>Action</th></tr></thead><tbody>
-        {visible.map((row) => <tr key={row.key} data-blocked={row.stage === "retention" || row.stage === "protected"}>
-          <td><input type="checkbox" disabled={row.stage !== "ready"} checked={selected.has(row.key)} onChange={() => setSelected((current) => { const next = new Set(current); if (next.has(row.key)) next.delete(row.key); else next.add(row.key); return next; })}/></td>
-          <td><strong>{row.lead.name}</strong><span>{row.lead.title || "—"}</span><small>{row.lead.company || "—"}</small>{row.lead.linkedinUrl && <a href={row.lead.linkedinUrl} target="_blank" rel="noreferrer">LinkedIn <ExternalLink size={10}/></a>}</td>
-          <td><strong>{row.lead.phone || "No phone"}</strong><span>{row.lead.email || "No business email"}</span><small>{row.lead.phones.length} phones · {row.lead.emails.length} emails</small></td>
-          <td>{row.stage === "checking" ? <span>Checking…</span> : row.precheck?.contact.inHubSpot ? <strong className={styles.bad}>Contact exists · {row.precheck.contact.matchedBy}</strong> : <strong className={styles.good}>New contact</strong>}<small>{row.precheck?.company.inHubSpot ? `${row.precheck.company.accountType || "Existing company"}${row.precheck.company.accountStatus ? ` · ${row.precheck.company.accountStatus}` : ""}` : "New company"}</small>{row.precheck?.company.openDeals ? <small className={styles.bad}>{row.precheck.company.openDeals} open deal(s)</small> : null}</td>
-          <td><details className={styles.triggerPicker}><summary>{row.triggers.length ? `${row.triggers.length} selected` : "Choose triggers"}</summary><div>{TRIGGERS.map((trigger) => <label key={trigger.key}><input type="checkbox" checked={row.triggers.includes(trigger.key)} onChange={() => toggleTrigger(row.key, trigger.key)}/><span>{trigger.label}</span></label>)}</div></details>{row.triggers.length ? <small>{row.triggers.map((key) => TRIGGERS.find((item) => item.key === key)?.label).filter(Boolean).join(" · ")}</small> : null}</td>
-          <td><span className={`${styles.badge} ${styles[row.stage]}`}>{row.stage}</span>{row.error && <small className={styles.bad}>{row.error}</small>}{row.push?.success && <small className={styles.good}>{row.push.success}</small>}{row.push?.error && <small className={styles.bad}>{row.push.error}</small>}{row.push?.taskId && <a href={`https://app.hubspot.com/tasks/145742477/view/all/task/${row.push.taskId}`} target="_blank" rel="noreferrer">Open HubSpot task <ExternalLink size={10}/></a>}</td>
-          <td><button className={styles.pushButton} disabled={row.stage !== "ready" || !ownerId || row.push?.loading} onClick={() => void pushRow(row)}>{row.push?.loading ? <LoaderCircle className={styles.spin} size={13}/> : <Send size={13}/>}Push + Task</button></td>
-        </tr>)}
+      <section className={styles.tablePanel}><div className={styles.tableWrap}><table><thead><tr><th/><th>Lead</th><th>Contact data</th><th>HubSpot person / company</th><th>Why now / trigger</th><th>Status</th><th>Action</th></tr></thead><tbody>
+        {visible.map((row) => {
+          const company = row.precheck?.company;
+          const latestTouch = formatDate(company?.latestEngagementAt || "");
+          return <tr key={row.key} data-blocked={["retention", "protected", "engaged", "existing"].includes(row.stage)}>
+            <td><input type="checkbox" disabled={row.stage !== "ready"} checked={selected.has(row.key)} onChange={() => setSelected((current) => { const next = new Set(current); if (next.has(row.key)) next.delete(row.key); else next.add(row.key); return next; })}/></td>
+            <td><strong>{row.lead.name}</strong><span>{row.lead.title || "—"}</span><small>{row.lead.company || "—"}</small>{row.lead.linkedinUrl && <a href={row.lead.linkedinUrl} target="_blank" rel="noreferrer">LinkedIn <ExternalLink size={10}/></a>}</td>
+            <td><strong>{row.lead.phone || "No phone"}</strong><span>{row.lead.email || "No business email"}</span><small>{row.lead.phones.length} phones · {row.lead.emails.length} emails</small></td>
+            <td className={styles.hubspotCheck}>
+              {row.stage === "checking" ? <span>Checking…</span> : row.precheck?.contact.inHubSpot
+                ? <strong className={styles.bad}>Person: already exists · matched by {row.precheck.contact.matchedBy}</strong>
+                : <strong className={styles.good}>Person: new</strong>}
+              {!company ? null : company.inHubSpot ? <>
+                <small><b>Company:</b> existing · {company.accountType || "unclassified"}{company.accountStatus ? ` · ${company.accountStatus}` : ""}</small>
+                {company.engaged
+                  ? <small className={styles.bad}><b>Engagement:</b> {company.connectedCallCount} connected call(s) · {company.meetingCount} meeting(s){latestTouch ? ` · latest ${latestTouch}` : ""} → skip company</small>
+                  : <small className={styles.good}><b>Engagement:</b> no connected call / meeting → this new person is allowed</small>}
+                {company.openDeals ? <small className={styles.bad}>{company.openDeals} open deal(s)</small> : null}
+              </> : <small className={styles.good}><b>Company:</b> new in HubSpot</small>}
+            </td>
+            <td><details className={styles.triggerPicker}><summary>{row.stage !== "ready" ? "Not needed — blocked" : row.triggers.length ? `${row.triggers.length} selected` : "Choose triggers"}</summary><div>{TRIGGERS.map((trigger) => <label key={trigger.key}><input type="checkbox" disabled={row.stage !== "ready"} checked={row.triggers.includes(trigger.key)} onChange={() => toggleTrigger(row.key, trigger.key)}/><span>{trigger.label}</span></label>)}</div></details>{row.triggers.length ? <small>{row.triggers.map((key) => TRIGGERS.find((item) => item.key === key)?.label).filter(Boolean).join(" · ")}</small> : null}</td>
+            <td><span className={`${styles.badge} ${styles[row.stage]}`}>{row.stage === "existing" ? "existing person" : row.stage === "engaged" ? "engaged company" : row.stage}</span>{row.error && <small className={styles.bad}>{row.error}</small>}{row.push?.success && <small className={styles.good}>{row.push.success}</small>}{row.push?.error && <small className={styles.bad}>{row.push.error}</small>}{row.push?.taskId && <a href={`https://app.hubspot.com/tasks/145742477/view/all/task/${row.push.taskId}`} target="_blank" rel="noreferrer">Open HubSpot task <ExternalLink size={10}/></a>}</td>
+            <td><button className={styles.pushButton} disabled={row.stage !== "ready" || !ownerId || row.push?.loading} onClick={() => void pushRow(row)}>{row.push?.loading ? <LoaderCircle className={styles.spin} size={13}/> : <Send size={13}/>}Push + Task</button></td>
+          </tr>;
+        })}
         {!visible.length && <tr><td className={styles.empty} colSpan={7}>{rows.length ? "No rows in this view." : "Upload the SignalHire CSV to start."}</td></tr>}
       </tbody></table></div></section>
       <div className={styles.footerLink}><Link href="/signalhire-companion">Open Companion queue instead</Link></div>
