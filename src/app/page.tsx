@@ -1,5 +1,5 @@
-import { Dashboard } from "@/components/DashboardShell";
+import { AcquisitionDashboard } from "@/components/AcquisitionDashboard";
 
 export default function Home() {
-  return <Dashboard />;
+  return <AcquisitionDashboard />;
 }
