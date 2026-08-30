@@ -11,16 +11,16 @@ permissions:
   contents: read
 
 jobs:
-  diagnose:
+  diagnose-and-recover:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
-      - name: Inspect Docker project/container state
+      - name: Inspect and restart SDR Docker project
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
         run: |
           set -euo pipefail
-          echo "Diagnostic run: container state only; no environment values are printed."
+          echo "Recovery run: no environment values or secrets are printed."
           test -n "$HOSTINGER_API_KEY" || { echo "::error::Hostinger token missing"; exit 1; }
 
           AUTH="$HOSTINGER_API_KEY"
@@ -29,27 +29,54 @@ jobs:
             *) AUTH="Bearer $AUTH" ;;
           esac
 
-          BASE='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210/docker'
-          CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
-            -H "Authorization: $AUTH" \
-            -H 'Accept: application/json' \
-            -o /tmp/projects.json -w '%{http_code}' "$BASE" || true)
-          echo "Hostinger Docker Manager: HTTP $CODE"
-          test "$CODE" = "200" || { head -c 500 /tmp/projects.json; exit 1; }
+          VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
+          DOCKER="$VM/docker"
 
-          echo '=== Docker projects and container health (no env/secrets) ==='
-          jq -r '.[] | "PROJECT\t\(.name)\tstatus=\(.status // "")\tstate=\(.state // "")", ((.containers // [])[] | "  CONTAINER\t\(.name)\tstate=\(.state // "")\thealth=\(.health // "")\tstatus=\(.status // "")\timage=\(.image // "")")' /tmp/projects.json
+          VM_CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+            -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/vm.json -w '%{http_code}' "$VM" || true)
+          echo "Hostinger VM details: HTTP $VM_CODE"
+          if [ "$VM_CODE" = "200" ]; then
+            jq '{id,hostname,state,status}' /tmp/vm.json 2>/dev/null || true
+          fi
 
-          for PROJECT in sdr-project sdr-fastapi-dashboard sdr-route-recovery; do
-            CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
-              -H "Authorization: $AUTH" \
-              -H 'Accept: application/json' \
-              -o "/tmp/${PROJECT}.json" -w '%{http_code}' "$BASE/$PROJECT/containers" || true)
-            echo "=== $PROJECT containers: HTTP $CODE ==="
+          LIST_CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+            -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/projects.json -w '%{http_code}' "$DOCKER" || true)
+          echo "Hostinger Docker Manager before restart: HTTP $LIST_CODE"
+          if [ "$LIST_CODE" = "200" ]; then
+            jq -r '.[] | "PROJECT\t\(.name)\tstatus=\(.status // "")\tstate=\(.state // "")", ((.containers // [])[] | "  CONTAINER\t\(.name)\tstate=\(.state // "")\thealth=\(.health // "")\tstatus=\(.status // "")")' /tmp/projects.json
+          else
+            jq '{message,correlation_id}' /tmp/projects.json 2>/dev/null || head -c 300 /tmp/projects.json || true
+          fi
+
+          RESTART_CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 45 \
+            -X POST -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/restart.json -w '%{http_code}' "$DOCKER/sdr-project/restart" || true)
+          echo "Restart sdr-project: HTTP $RESTART_CODE"
+          jq '{id,name,state,created_at,updated_at,message,correlation_id}' /tmp/restart.json 2>/dev/null || true
+
+          if [ "$RESTART_CODE" != "200" ]; then
+            echo "::warning::Docker Manager could not restart sdr-project; public recovery check will still run."
+          fi
+
+          HEALTHY=false
+          for ATTEMPT in $(seq 1 18); do
+            CODE=$(curl --silent --show-error --connect-timeout 5 --max-time 10 \
+              -H 'Cache-Control: no-cache' \
+              -o /tmp/health.json -w '%{http_code}' \
+              "https://sdr.dashboardtalentera.tech/api/health?emergency_restart=${ATTEMPT}" || true)
+            BUILD=$(jq -r '.buildRef // ""' /tmp/health.json 2>/dev/null || true)
+            echo "Public health ${ATTEMPT}/18: HTTP ${CODE}, build=${BUILD:-none}"
             if [ "$CODE" = "200" ]; then
-              jq -r '.[] | "\(.name)\tstate=\(.state // "")\thealth=\(.health // "")\tstatus=\(.status // "")\timage=\(.image // "")"' "/tmp/${PROJECT}.json"
-            else
-              head -c 300 "/tmp/${PROJECT}.json" || true
-              echo
+              HEALTHY=true
+              jq '{status,buildRef,careerGeneration,ready}' /tmp/health.json 2>/dev/null || cat /tmp/health.json
+              break
             fi
+            sleep 10
           done
+
+          if [ "$HEALTHY" != "true" ]; then
+            echo "::error::Public dashboard is still unavailable after the project restart attempt."
+            exit 1
+          fi
