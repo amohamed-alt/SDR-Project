@@ -47,10 +47,13 @@ async function patchTask(taskId: string, ownerId: string, ownerName: string, tri
     cache: "no-store",
     signal: AbortSignal.timeout(30_000),
   });
-  if (!read.ok) throw new Error(`Could not read created HubSpot task (${read.status}).`);
+  if (!read.ok) throw new Error(`Could not read HubSpot task (${read.status}).`);
   const current = await read.json() as { properties?: { hs_task_body?: string } };
   let body = String(current.properties?.hs_task_body || "");
-  body = body.replace(/👥 \*\*Assigned SDR\*\*\n[^\n]+/, `👥 **Assigned Task Owner**\n${ownerName}`);
+  body = body.replace(/👥 \*\*(?:Assigned SDR|Assigned Task Owner)\*\*\n[^\n]+/, `👥 **Assigned Task Owner**\n${ownerName}`);
+
+  const triggerBlockPattern = /📌 \*\*Why Now \/ Trigger\*\*\n(?:•[^\n]*\n)*\n?/;
+  body = body.replace(triggerBlockPattern, "");
   if (triggers.length) {
     const triggerBlock = ["📌 **Why Now / Trigger**", ...triggers.map((key) => `• ${triggerLabels[key]}`), ""].join("\n");
     if (/📈 \*\*Person Signal\*\*/.test(body)) {
@@ -67,7 +70,7 @@ async function patchTask(taskId: string, ownerId: string, ownerName: string, tri
     cache: "no-store",
     signal: AbortSignal.timeout(30_000),
   });
-  if (!patch.ok) throw new Error(`Could not assign created HubSpot task (${patch.status}): ${(await patch.text()).slice(0, 300)}`);
+  if (!patch.ok) throw new Error(`Could not assign HubSpot task (${patch.status}): ${(await patch.text()).slice(0, 300)}`);
 }
 
 export async function POST(request: NextRequest) {
@@ -99,7 +102,7 @@ export async function POST(request: NextRequest) {
     const payload = await baseResponse.json() as Record<string, unknown> & { taskId?: string; duplicate?: boolean; error?: string };
     if (!baseResponse.ok) return NextResponse.json(payload, { status: baseResponse.status });
 
-    if (payload.taskId && !payload.duplicate) {
+    if (payload.taskId) {
       await patchTask(payload.taskId, owner.id, owner.name, parsed.data.triggers);
     }
 
@@ -108,7 +111,7 @@ export async function POST(request: NextRequest) {
       taskOwnerId: owner.id,
       taskOwnerName: owner.name,
       triggerLabels: labels,
-      taskOwnerOverridden: Boolean(payload.taskId && !payload.duplicate),
+      taskOwnerOverridden: Boolean(payload.taskId),
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Manual SignalHire push failed", error);
