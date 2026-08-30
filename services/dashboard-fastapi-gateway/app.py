@@ -24,10 +24,11 @@ DB_PATH = Path(os.getenv("FASTAPI_DASHBOARD_DB_PATH", "/data/dashboard-gateway.s
 DASHBOARD_USERNAME = os.getenv("DASHBOARD_USERNAME", "talentera")
 DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
 DEFAULT_FROM = os.getenv("NEXT_PUBLIC_DEFAULT_START_DATE", "2026-07-01")
-WARM_OWNER_IDS = [value.strip() for value in os.getenv(
-    "DASHBOARD_WARM_OWNER_IDS",
-    "31644369,76369997,31558980",
-).split(",") if value.strip()]
+WARM_OWNER_IDS = [
+    value.strip()
+    for value in os.getenv("DASHBOARD_WARM_OWNER_IDS", "31644369,76369997,31558980").split(",")
+    if value.strip()
+]
 WARM_INTERVAL_SECONDS = max(60, int(os.getenv("DASHBOARD_WARM_INTERVAL_SECONDS", "120")))
 SOFT_TTL_SECONDS = max(30, int(os.getenv("FASTAPI_DASHBOARD_SOFT_TTL_SECONDS", "120")))
 ORIGIN_TIMEOUT_SECONDS = max(15, int(os.getenv("FASTAPI_DASHBOARD_ORIGIN_TIMEOUT_SECONDS", "120")))
@@ -111,7 +112,7 @@ def read_snapshot(cache_key: str) -> sqlite3.Row | None:
         ).fetchone()
 
 
-def store_snapshot(cache_key: str, query_string: str, payload: bytes, content_type: str) -> int:
+def store_snapshot(cache_key: str, query_string: str, payload: bytes, content_type: str) -> None:
     fetched_at = int(time.time())
     with db() as connection:
         connection.execute(
@@ -126,7 +127,6 @@ def store_snapshot(cache_key: str, query_string: str, payload: bytes, content_ty
             """,
             (cache_key, query_string, payload, content_type, fetched_at),
         )
-    return fetched_at
 
 
 def response_from_snapshot(row: sqlite3.Row, cache_status: str) -> Response:
@@ -151,7 +151,11 @@ async def fetch_origin(query_string: str, force_refresh: bool) -> tuple[bytes, s
     url = f"{ORIGIN_URL}?{params}" if params else ORIGIN_URL
     auth = httpx.BasicAuth(DASHBOARD_USERNAME, DASHBOARD_PASSWORD)
     async with httpx.AsyncClient(timeout=ORIGIN_TIMEOUT_SECONDS, follow_redirects=False) as client:
-        response = await client.get(url, auth=auth, headers={"Accept": "application/json", "Cache-Control": "no-cache"})
+        response = await client.get(
+            url,
+            auth=auth,
+            headers={"Accept": "application/json", "Cache-Control": "no-cache"},
+        )
     if response.status_code != 200:
         detail = response.text[:500] if response.text else f"HTTP {response.status_code}"
         raise HTTPException(status_code=502, detail=f"Dashboard origin failed: {detail}")
@@ -219,9 +223,8 @@ app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
 
 @app.get("/api/dashboard")
-async def dashboard(request: Request, credentials: HTTPBasicCredentials | None = None) -> Response:
-    if credentials is None:
-        credentials = await security(request)
+async def dashboard(request: Request) -> Response:
+    credentials = await security(request)
     require_auth(credentials)
 
     cache_key, query_string = canonical_query(request)
@@ -235,7 +238,7 @@ async def dashboard(request: Request, credentials: HTTPBasicCredentials | None =
         return response_from_snapshot(row, "hit" if age < SOFT_TTL_SECONDS else "stale")
 
     payload, content_type = await fetch_origin(query_string, force_refresh=force_refresh)
-    fetched_at = store_snapshot(cache_key, query_string, payload, content_type)
+    store_snapshot(cache_key, query_string, payload, content_type)
     row = read_snapshot(cache_key)
     if row is None:
         return Response(content=payload, media_type="application/json")
