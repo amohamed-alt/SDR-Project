@@ -1,0 +1,88 @@
+name: Diagnose Hostinger CPU
+
+on:
+  push:
+    branches:
+      - diagnose/hostinger-cpu-20260830
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      HOSTINGER_TOKEN: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+      VM_ID: "1604210"
+    steps:
+      - name: Validate Hostinger token
+        run: |
+          set -euo pipefail
+          test -n "$HOSTINGER_TOKEN" || { echo "::error::Hostinger API token is missing"; exit 1; }
+          echo "Hostinger token is configured"
+
+      - name: Read VPS details, metrics, and Docker container stats
+        run: |
+          set -euo pipefail
+          BASE="https://developers.hostinger.com/api/vps/v1/virtual-machines/${VM_ID}"
+          AUTH="Authorization: Bearer ${HOSTINGER_TOKEN}"
+          FROM=$(date -u -d '2 hours ago' '+%Y-%m-%dT%H:%MZ')
+          TO=$(date -u '+%Y-%m-%dT%H:%MZ')
+
+          echo "=== VPS DETAILS ==="
+          DETAILS_CODE=$(curl -sS --connect-timeout 10 --max-time 30 -o /tmp/vm.json -w '%{http_code}' \
+            -H "$AUTH" -H 'Accept: application/json' "$BASE" || true)
+          echo "HTTP $DETAILS_CODE"
+          jq '{id, hostname, state, plan, data_center, ipv4, cpu_cores, memory, disk}' /tmp/vm.json 2>/dev/null || cat /tmp/vm.json || true
+
+          echo "=== VPS METRICS LAST 2 HOURS ==="
+          METRICS_CODE=$(curl -sS --connect-timeout 10 --max-time 30 -G -o /tmp/metrics.json -w '%{http_code}' \
+            -H "$AUTH" -H 'Accept: application/json' \
+            --data-urlencode "date_from=$FROM" --data-urlencode "date_to=$TO" \
+            "$BASE/metrics" || true)
+          echo "HTTP $METRICS_CODE from=$FROM to=$TO"
+          jq . /tmp/metrics.json 2>/dev/null || cat /tmp/metrics.json || true
+
+          echo "=== DOCKER PROJECTS ==="
+          PROJECTS_CODE=$(curl -sS --connect-timeout 10 --max-time 30 -o /tmp/projects.json -w '%{http_code}' \
+            -H "$AUTH" -H 'Accept: application/json' "$BASE/docker" || true)
+          echo "HTTP $PROJECTS_CODE"
+          jq '[.[] | {name,status,state,path,containers: ([.containers[]? | {name,state,status,health}])}]' /tmp/projects.json 2>/dev/null || cat /tmp/projects.json || true
+
+          : > /tmp/container-stats.ndjson
+          if jq -e 'type == "array"' /tmp/projects.json >/dev/null 2>&1; then
+            while IFS= read -r PROJECT; do
+              test -n "$PROJECT" || continue
+              SAFE_PROJECT=$(printf '%s' "$PROJECT" | jq -sRr @uri)
+              CODE=$(curl -sS --connect-timeout 10 --max-time 30 -o /tmp/containers.json -w '%{http_code}' \
+                -H "$AUTH" -H 'Accept: application/json' "$BASE/docker/${SAFE_PROJECT}/containers" || true)
+              echo "Project $PROJECT containers HTTP $CODE"
+              if [ "$CODE" = "200" ]; then
+                jq -c --arg project "$PROJECT" '.[] | {
+                  project: $project,
+                  id,
+                  name,
+                  image,
+                  state,
+                  status,
+                  health,
+                  cpu_percentage: (.stats.cpu_percentage // 0),
+                  memory_percentage: (.stats.memory_percentage // 0),
+                  memory_used: (.stats.memory_used // 0),
+                  memory_total: (.stats.memory_total // 0),
+                  net_in: (.stats.net_in // 0),
+                  net_out: (.stats.net_out // 0)
+                }' /tmp/containers.json >> /tmp/container-stats.ndjson || true
+              fi
+            done < <(jq -r '.[].name // empty' /tmp/projects.json)
+          fi
+
+          echo "=== CONTAINERS SORTED BY CPU ==="
+          if [ -s /tmp/container-stats.ndjson ]; then
+            jq -s 'sort_by(.cpu_percentage) | reverse' /tmp/container-stats.ndjson
+            echo "=== TOP CPU CONTAINERS ==="
+            jq -s -r 'sort_by(.cpu_percentage) | reverse | .[] | "CPU=\(.cpu_percentage)% MEM=\(.memory_percentage)% project=\(.project) container=\(.name) state=\(.state) health=\(.health // \"n/a\")"' /tmp/container-stats.ndjson
+          else
+            echo "No container stats returned."
+          fi
