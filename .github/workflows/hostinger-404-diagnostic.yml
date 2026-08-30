@@ -11,72 +11,65 @@ permissions:
   contents: read
 
 jobs:
-  diagnose-and-recover:
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
     steps:
-      - name: Inspect and restart SDR Docker project
+      - name: Inspect queued Hostinger recovery action
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
         run: |
           set -euo pipefail
-          echo "Recovery run: no environment values or secrets are printed."
           test -n "$HOSTINGER_API_KEY" || { echo "::error::Hostinger token missing"; exit 1; }
-
           AUTH="$HOSTINGER_API_KEY"
-          case "$AUTH" in
-            Bearer\ *) ;;
-            *) AUTH="Bearer $AUTH" ;;
-          esac
+          case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
 
           VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
-          DOCKER="$VM/docker"
+          ACTION_ID='112140928'
 
           VM_CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
             -H "Authorization: $AUTH" -H 'Accept: application/json' \
             -o /tmp/vm.json -w '%{http_code}' "$VM" || true)
-          echo "Hostinger VM details: HTTP $VM_CODE"
-          if [ "$VM_CODE" = "200" ]; then
-            jq '{id,hostname,state,status}' /tmp/vm.json 2>/dev/null || true
-          fi
+          echo "VM: HTTP $VM_CODE"
+          if [ "$VM_CODE" = "200" ]; then jq '{id,hostname,state}' /tmp/vm.json; fi
 
-          LIST_CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
-            -H "Authorization: $AUTH" -H 'Accept: application/json' \
-            -o /tmp/projects.json -w '%{http_code}' "$DOCKER" || true)
-          echo "Hostinger Docker Manager before restart: HTTP $LIST_CODE"
-          if [ "$LIST_CODE" = "200" ]; then
-            jq -r '.[] | "PROJECT\t\(.name)\tstatus=\(.status // "")\tstate=\(.state // "")", ((.containers // [])[] | "  CONTAINER\t\(.name)\tstate=\(.state // "")\thealth=\(.health // "")\tstatus=\(.status // "")")' /tmp/projects.json
-          else
-            jq '{message,correlation_id}' /tmp/projects.json 2>/dev/null || head -c 300 /tmp/projects.json || true
-          fi
-
-          RESTART_CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 45 \
-            -X POST -H "Authorization: $AUTH" -H 'Accept: application/json' \
-            -o /tmp/restart.json -w '%{http_code}' "$DOCKER/sdr-project/restart" || true)
-          echo "Restart sdr-project: HTTP $RESTART_CODE"
-          jq '{id,name,state,created_at,updated_at,message,correlation_id}' /tmp/restart.json 2>/dev/null || true
-
-          if [ "$RESTART_CODE" != "200" ]; then
-            echo "::warning::Docker Manager could not restart sdr-project; public recovery check will still run."
-          fi
-
-          HEALTHY=false
-          for ATTEMPT in $(seq 1 18); do
-            CODE=$(curl --silent --show-error --connect-timeout 5 --max-time 10 \
-              -H 'Cache-Control: no-cache' \
-              -o /tmp/health.json -w '%{http_code}' \
-              "https://sdr.dashboardtalentera.tech/api/health?emergency_restart=${ATTEMPT}" || true)
-            BUILD=$(jq -r '.buildRef // ""' /tmp/health.json 2>/dev/null || true)
-            echo "Public health ${ATTEMPT}/18: HTTP ${CODE}, build=${BUILD:-none}"
-            if [ "$CODE" = "200" ]; then
-              HEALTHY=true
-              jq '{status,buildRef,careerGeneration,ready}' /tmp/health.json 2>/dev/null || cat /tmp/health.json
+          for ATTEMPT in $(seq 1 8); do
+            ACTION_CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+              -H "Authorization: $AUTH" -H 'Accept: application/json' \
+              -o /tmp/action.json -w '%{http_code}' "$VM/actions/$ACTION_ID" || true)
+            STATE=$(jq -r '.state // "unknown"' /tmp/action.json 2>/dev/null || echo unknown)
+            NAME=$(jq -r '.name // "unknown"' /tmp/action.json 2>/dev/null || echo unknown)
+            echo "Restart action ${ATTEMPT}/8: HTTP ${ACTION_CODE}, name=${NAME}, state=${STATE}"
+            jq '{id,name,state,created_at,updated_at}' /tmp/action.json 2>/dev/null || true
+            if [ "$ACTION_CODE" = "200" ] && [ "$STATE" != "delayed" ] && [ "$STATE" != "running" ] && [ "$STATE" != "pending" ]; then
               break
             fi
             sleep 10
           done
 
-          if [ "$HEALTHY" != "true" ]; then
-            echo "::error::Public dashboard is still unavailable after the project restart attempt."
-            exit 1
+          ACTIONS_CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+            -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/actions.json -w '%{http_code}' "$VM/actions?page=1" || true)
+          echo "Recent VM actions: HTTP $ACTIONS_CODE"
+          if [ "$ACTIONS_CODE" = "200" ]; then
+            jq -r '(.data // [])[:12][] | "ACTION\t\(.id)\t\(.name)\tstate=\(.state)\tcreated=\(.created_at)\tupdated=\(.updated_at)"' /tmp/actions.json
+          fi
+
+          DOCKER_CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+            -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/projects.json -w '%{http_code}' "$VM/docker" || true)
+          echo "Docker Manager now: HTTP $DOCKER_CODE"
+          if [ "$DOCKER_CODE" = "200" ]; then
+            jq -r '.[] | "PROJECT\t\(.name)\tstatus=\(.status // "")\tstate=\(.state // "")", ((.containers // [])[] | "  CONTAINER\t\(.name)\tstate=\(.state // "")\thealth=\(.health // "")\tstatus=\(.status // "")")' /tmp/projects.json
+          else
+            jq '{message,correlation_id}' /tmp/projects.json 2>/dev/null || true
+          fi
+
+          HEALTH_CODE=$(curl --silent --show-error --connect-timeout 5 --max-time 12 \
+            -H 'Cache-Control: no-cache' -o /tmp/health.json -w '%{http_code}' \
+            'https://sdr.dashboardtalentera.tech/api/health?action_watch=1' || true)
+          BUILD=$(jq -r '.buildRef // ""' /tmp/health.json 2>/dev/null || true)
+          echo "Public health: HTTP ${HEALTH_CODE}, build=${BUILD:-none}"
+          if [ "$HEALTH_CODE" = "200" ]; then
+            jq '{status,buildRef,careerGeneration,ready}' /tmp/health.json 2>/dev/null || true
           fi
