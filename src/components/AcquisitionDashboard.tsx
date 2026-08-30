@@ -43,8 +43,15 @@ type MetricCard = {
   onClick: () => void;
 };
 
+type RepClientCacheEntry = {
+  data: DashboardData;
+  loadedAt: number;
+};
+
 const DEFAULT_START = process.env.NEXT_PUBLIC_DEFAULT_START_DATE ?? new Date().toISOString().slice(0, 7) + "-01";
 const TODAY = new Date().toISOString().slice(0, 10);
+const REP_CLIENT_CACHE_TTL_MS = 5 * 60 * 1000;
+const repClientCache = new Map<string, RepClientCacheEntry>();
 
 const ACQUISITION_OWNERS: Record<AcquisitionOwnerKey, AcquisitionOwner> = {
   marita: {
@@ -71,6 +78,14 @@ function acquisitionOwnerFromUrl(): AcquisitionOwnerKey {
   if (typeof window === "undefined") return "marita";
   const value = new URLSearchParams(window.location.search).get("acq");
   return value === "ursula" || value === "zein" ? value : "marita";
+}
+
+function repClientCacheKey(ownerId: string) {
+  return `${ownerId}:${DEFAULT_START}:${TODAY}`;
+}
+
+function cachedRepData(ownerId: string) {
+  return repClientCache.get(repClientCacheKey(ownerId));
 }
 
 function formatNumber(value: number) {
@@ -117,7 +132,7 @@ function SidebarAcquisitionPortal({ onSelect }: { onSelect: (owner: AcquisitionO
     let host: HTMLDivElement | null = null;
 
     const attach = () => {
-      const sidebar = document.querySelector<HTMLElement>(".sidebar");
+      const sidebar = document.querySelector<HTMLElement>("[data-marita-dashboard-host] .sidebar");
       if (!sidebar) {
         attempts += 1;
         if (attempts < 120) frame = window.requestAnimationFrame(attach);
@@ -165,39 +180,49 @@ function RepKpiDashboard({
   onSelectOwner: (owner: AcquisitionOwnerKey) => void;
 }) {
   const owner = ACQUISITION_OWNERS[ownerKey];
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const initialCache = cachedRepData(owner.ownerId);
+  const [data, setData] = useState<DashboardData | null>(() => initialCache?.data ?? null);
+  const [loading, setLoading] = useState(() => !initialCache);
   const [error, setError] = useState("");
-  const [refreshKey, setRefreshKey] = useState(0);
   const [drilldown, setDrilldown] = useState<Drilldown | null>(null);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (forceRefresh = false) => {
+    const cacheKey = repClientCacheKey(owner.ownerId);
+    const cached = repClientCache.get(cacheKey);
+    const cacheIsFresh = cached && Date.now() - cached.loadedAt < REP_CLIENT_CACHE_TTL_MS;
+
+    if (!forceRefresh && cacheIsFresh) {
+      setData(cached.data);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError("");
-    setDrilldown(null);
 
     const query = new URLSearchParams({
       from: DEFAULT_START,
       to: TODAY,
       ownerId: owner.ownerId,
     });
-    if (refreshKey) query.set("refresh", "1");
+    if (forceRefresh) query.set("refresh", "1");
 
     try {
       const response = await fetch(`/api/dashboard?${query.toString()}`, { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.details || payload.error || "Dashboard request failed");
-      setData(payload as DashboardData);
+      const nextData = payload as DashboardData;
+      repClientCache.set(cacheKey, { data: nextData, loadedAt: Date.now() });
+      setData(nextData);
     } catch (requestError) {
-      setData(null);
       setError(requestError instanceof Error ? requestError.message : "Unable to load KPI data");
     } finally {
       setLoading(false);
     }
-  }, [owner.ownerId, refreshKey]);
+  }, [owner.ownerId]);
 
   useEffect(() => {
-    void loadData();
+    void loadData(false);
   }, [loadData]);
 
   const activities = useCallback((type: ActivityRow["type"]) => {
@@ -298,8 +323,8 @@ function RepKpiDashboard({
       <div className="top-title"><strong>Acquisition KPIs</strong><span>Live HubSpot performance</span></div>
       <div className="top-actions">
         <span className={`status-pill ${data?.meta.isDemo ? "demo" : "live"}`}><i/>{data?.meta.isDemo ? "Demo data" : "LIVE · HUBSPOT"}</span>
-        <button className="refresh-button" type="button" onClick={() => setRefreshKey((key) => key + 1)} disabled={loading}>
-          <RefreshCw size={16} className={loading ? "spin" : ""}/>Refresh data
+        <button className="refresh-button" type="button" onClick={() => void loadData(true)} disabled={loading}>
+          <RefreshCw size={16} className={loading ? "spin" : ""}/>{loading && data ? "Refreshing…" : "Refresh data"}
         </button>
       </div>
     </header>
@@ -327,12 +352,12 @@ function RepKpiDashboard({
         </div>
 
         {data?.meta.warnings.length ? <div className="warning-banner"><AlertTriangle size={17}/><div><strong>{data.meta.isDemo ? "Demo mode" : "Some HubSpot data sources were unavailable"}</strong><span>{data.meta.warnings.join(" · ")}</span></div></div> : null}
-        {error ? <div className="error-banner"><AlertTriangle size={20}/><div><strong>KPI dashboard failed to load</strong><span>{error}</span></div><button type="button" onClick={() => void loadData()}>Try again</button></div> : null}
+        {error ? <div className="error-banner"><AlertTriangle size={20}/><div><strong>{data ? "Refresh failed — showing the last loaded data" : "KPI dashboard failed to load"}</strong><span>{error}</span></div><button type="button" onClick={() => void loadData(false)}>Try again</button></div> : null}
 
         {data ? <div className="kpi-grid">{cards.map((card) => <MetricButton key={card.label} {...card}/>)}</div> : null}
         {data ? <AcquisitionDailyPulse data={data} ownerName={owner.name} onOpen={setDrilldown}/> : null}
 
-        {loading ? <div className="loading-overlay"><div className="loader"/><strong>Loading {owner.name.split(" ")[0]} KPIs…</strong><span>Calls, meetings, WhatsApp, and task execution</span></div> : null}
+        {loading && !data ? <div className="loading-overlay"><div className="loader"/><strong>Loading {owner.name.split(" ")[0]} KPIs…</strong><span>Calls, meetings, WhatsApp, and task execution</span></div> : null}
       </div>
     </div>
 
@@ -342,28 +367,49 @@ function RepKpiDashboard({
 
 export function AcquisitionDashboard() {
   const [activeOwner, setActiveOwner] = useState<AcquisitionOwnerKey>("marita");
+  const [visitedOwners, setVisitedOwners] = useState<Set<AcquisitionOwnerKey>>(() => new Set(["marita"]));
+
+  const markVisited = useCallback((owner: AcquisitionOwnerKey) => {
+    setVisitedOwners((current) => {
+      if (current.has(owner)) return current;
+      const next = new Set(current);
+      next.add(owner);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
-    const syncFromUrl = () => setActiveOwner(acquisitionOwnerFromUrl());
+    const syncFromUrl = () => {
+      const owner = acquisitionOwnerFromUrl();
+      setActiveOwner(owner);
+      markVisited(owner);
+    };
     syncFromUrl();
     window.addEventListener("popstate", syncFromUrl);
     return () => window.removeEventListener("popstate", syncFromUrl);
-  }, []);
+  }, [markVisited]);
 
   function selectOwner(owner: AcquisitionOwnerKey) {
     const url = new URL(window.location.href);
     if (owner === "marita") url.searchParams.delete("acq");
     else url.searchParams.set("acq", owner);
     window.history.pushState({}, "", url);
+    markVisited(owner);
     setActiveOwner(owner);
   }
 
-  if (activeOwner === "ursula" || activeOwner === "zein") {
-    return <RepKpiDashboard ownerKey={activeOwner} onSelectOwner={selectOwner}/>;
-  }
-
   return <>
-    <ExistingDashboard/>
-    <SidebarAcquisitionPortal onSelect={selectOwner}/>
+    <div data-marita-dashboard-host hidden={activeOwner !== "marita"}>
+      <ExistingDashboard/>
+      <SidebarAcquisitionPortal onSelect={selectOwner}/>
+    </div>
+
+    {visitedOwners.has("ursula") ? <div hidden={activeOwner !== "ursula"}>
+      <RepKpiDashboard ownerKey="ursula" onSelectOwner={selectOwner}/>
+    </div> : null}
+
+    {visitedOwners.has("zein") ? <div hidden={activeOwner !== "zein"}>
+      <RepKpiDashboard ownerKey="zein" onSelectOwner={selectOwner}/>
+    </div> : null}
   </>;
 }
