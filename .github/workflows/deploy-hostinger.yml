@@ -128,7 +128,7 @@ jobs:
           virtual-machine: "1604210"
           project-name: sdr-project
           docker-compose-path: docker-compose.light.yml
-          environment: |
+          environment-variables: |
             SDR_BUILD_REF=${{ env.DEPLOY_SHA }}
             CAREER_GENERATION=v3
             SMARTLEAD_AUTOPILOT_ENABLED=true
@@ -143,16 +143,23 @@ jobs:
           HOST='sdr.dashboardtalentera.tech'
           READY=false
           for ATTEMPT in $(seq 1 24); do
-            BODY=$(curl --silent --show-error \
+            HTTP_CODE=$(curl --silent --show-error \
               --connect-timeout 5 \
               --max-time 12 \
               -H 'Cache-Control: no-cache' \
+              --output /tmp/light-health.json \
+              --write-out '%{http_code}' \
               "https://${HOST}/api/health?deploy=${DEPLOY_SHA}&light_attempt=${ATTEMPT}" || true)
-            BUILD_REF=$(printf '%s' "$BODY" | jq -r '.buildRef // ""' 2>/dev/null || true)
-            echo "Light production gate ${ATTEMPT}/24: build=${BUILD_REF:-none}"
-            if [ "$BUILD_REF" = "$DEPLOY_SHA" ]; then
+            BUILD_REF=$(jq -r '.buildRef // ""' /tmp/light-health.json 2>/dev/null || true)
+            echo "Light production gate ${ATTEMPT}/24: http=${HTTP_CODE:-000} build=${BUILD_REF:-none}"
+            if [ "$HTTP_CODE" = "200" ] && [ "$BUILD_REF" = "$DEPLOY_SHA" ]; then
               READY=true
               break
+            fi
+            if [ "$ATTEMPT" = "1" ] || [ "$ATTEMPT" = "8" ] || [ "$ATTEMPT" = "16" ] || [ "$ATTEMPT" = "24" ]; then
+              printf 'Response preview: '
+              head -c 180 /tmp/light-health.json 2>/dev/null | tr '\n' ' ' || true
+              echo
             fi
             sleep 10
           done
