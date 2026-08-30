@@ -1,0 +1,120 @@
+name: FastAPI Dashboard Gateway
+
+on:
+  pull_request:
+    paths:
+      - "services/dashboard-fastapi-gateway/**"
+      - "docker-compose.fastapi-dashboard.yml"
+      - ".github/workflows/fastapi-dashboard.yml"
+  push:
+    branches: [main]
+    paths:
+      - "services/dashboard-fastapi-gateway/**"
+      - "docker-compose.fastapi-dashboard.yml"
+      - ".github/workflows/fastapi-dashboard.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile FastAPI gateway
+        run: python -m py_compile services/dashboard-fastapi-gateway/app.py
+
+      - name: Build FastAPI gateway image
+        run: docker build -t sdr-fastapi-dashboard:test services/dashboard-fastapi-gateway
+
+      - name: Validate FastAPI Docker Compose
+        env:
+          DASHBOARD_PASSWORD: ci-only-password
+        run: docker compose -f docker-compose.fastapi-dashboard.yml config >/tmp/fastapi-dashboard-compose.yml
+
+  deploy:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate deployment authentication
+        env:
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+        run: |
+          test -n "$DASHBOARD_PASSWORD" || {
+            echo "::error::DASHBOARD_PASSWORD is required for the FastAPI dashboard gateway."
+            exit 1
+          }
+
+      - name: Deploy FastAPI dashboard gateway
+        uses: hostinger/deploy-on-vps@v2
+        with:
+          api-key: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+          virtual-machine: "1604210"
+          project-name: sdr-fastapi-dashboard
+          docker-compose-path: docker-compose.fastapi-dashboard.yml
+          environment-variables: |
+            DASHBOARD_USERNAME=talentera
+            DASHBOARD_PASSWORD=${{ secrets.DASHBOARD_PASSWORD }}
+            NEXT_PUBLIC_DEFAULT_START_DATE=2026-07-01
+            DASHBOARD_WARM_OWNER_IDS=31644369,76369997,31558980
+            DASHBOARD_WARM_INTERVAL_SECONDS=120
+            FASTAPI_DASHBOARD_SOFT_TTL_SECONDS=120
+            FASTAPI_DASHBOARD_ORIGIN_TIMEOUT_SECONDS=120
+            HUBSPOT_TIMEZONE=Asia/Riyadh
+
+      - name: Verify FastAPI route is live
+        env:
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+        run: |
+          set -euo pipefail
+          HEALTH='https://sdr.dashboardtalentera.tech/api/dashboard-fastapi/health'
+          for ATTEMPT in $(seq 1 24); do
+            HTTP_CODE=$(curl --silent --show-error \
+              --connect-timeout 4 \
+              --max-time 10 \
+              --output /tmp/fastapi-health.json \
+              --write-out '%{http_code}' \
+              "$HEALTH?attempt=$ATTEMPT" || true)
+            GATEWAY=$(jq -r '.gateway // ""' /tmp/fastapi-health.json 2>/dev/null || true)
+            echo "FastAPI health ${ATTEMPT}/24: HTTP ${HTTP_CODE}, gateway=${GATEWAY:-none}"
+            if [ "$HTTP_CODE" = "200" ] && [ "$GATEWAY" = "fastapi" ]; then
+              break
+            fi
+            if [ "$ATTEMPT" = "24" ]; then
+              echo "::error::FastAPI dashboard gateway did not become healthy."
+              cat /tmp/fastapi-health.json 2>/dev/null || true
+              exit 1
+            fi
+            sleep 10
+          done
+
+          TODAY=$(TZ=Asia/Riyadh date +%F)
+          API="https://sdr.dashboardtalentera.tech/api/dashboard?from=2026-07-01&to=${TODAY}&ownerId=31644369"
+          API_CODE=$(curl --silent --show-error \
+            --user "talentera:${DASHBOARD_PASSWORD}" \
+            --connect-timeout 5 \
+            --max-time 150 \
+            --output /tmp/fastapi-dashboard.json \
+            --dump-header /tmp/fastapi-dashboard.headers \
+            --write-out '%{http_code}' \
+            "$API" || true)
+          grep -qi '^x-dashboard-gateway: fastapi' /tmp/fastapi-dashboard.headers || {
+            echo "::error::Public /api/dashboard is not routed through FastAPI."
+            cat /tmp/fastapi-dashboard.headers
+            exit 1
+          }
+          test "$API_CODE" = "200" || {
+            echo "::error::FastAPI dashboard request returned HTTP ${API_CODE}."
+            head -c 1000 /tmp/fastapi-dashboard.json || true
+            exit 1
+          }
+          jq -e '.kpis and .meta and .dailyActivities and .recentActivities' /tmp/fastapi-dashboard.json >/dev/null || {
+            echo "::error::FastAPI gateway changed the dashboard response shape."
+            exit 1
+          }
+          echo "FastAPI dashboard read path is live and response-compatible."

@@ -1,0 +1,45 @@
+name: sdr-fastapi-dashboard
+
+services:
+  dashboard-fastapi-gateway:
+    build:
+      context: ./services/dashboard-fastapi-gateway
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    mem_limit: "512m"
+    cpus: 0.75
+    pids_limit: 128
+    environment:
+      DASHBOARD_ORIGIN_URL: http://sdr-dashboard:3000/api/dashboard
+      FASTAPI_DASHBOARD_DB_PATH: /data/dashboard-gateway.sqlite3
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-talentera}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+      NEXT_PUBLIC_DEFAULT_START_DATE: ${NEXT_PUBLIC_DEFAULT_START_DATE:-2026-07-01}
+      DASHBOARD_WARM_OWNER_IDS: ${DASHBOARD_WARM_OWNER_IDS:-31644369,76369997,31558980}
+      DASHBOARD_WARM_INTERVAL_SECONDS: ${DASHBOARD_WARM_INTERVAL_SECONDS:-120}
+      FASTAPI_DASHBOARD_SOFT_TTL_SECONDS: ${FASTAPI_DASHBOARD_SOFT_TTL_SECONDS:-120}
+      FASTAPI_DASHBOARD_ORIGIN_TIMEOUT_SECONDS: ${FASTAPI_DASHBOARD_ORIGIN_TIMEOUT_SECONDS:-120}
+      HUBSPOT_TIMEZONE: ${HUBSPOT_TIMEZONE:-Asia/Riyadh}
+    volumes:
+      - sdr_fastapi_dashboard_cache:/data
+    networks:
+      - traefik_proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=n8n_default"
+      - "traefik.http.routers.sdr-fastapi-dashboard.rule=Host(`sdr.dashboardtalentera.tech`) && (Path(`/api/dashboard`) || Path(`/api/dashboard-fastapi/health`))"
+      - "traefik.http.routers.sdr-fastapi-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.sdr-fastapi-dashboard.tls=true"
+      - "traefik.http.routers.sdr-fastapi-dashboard.tls.certresolver=mytlschallenge"
+      - "traefik.http.routers.sdr-fastapi-dashboard.priority=20000"
+      - "traefik.http.routers.sdr-fastapi-dashboard.service=sdr-fastapi-dashboard"
+      - "traefik.http.services.sdr-fastapi-dashboard.loadbalancer.server.port=8000"
+
+volumes:
+  sdr_fastapi_dashboard_cache:
+    name: sdr_fastapi_dashboard_cache
+
+networks:
+  traefik_proxy:
+    external: true
+    name: n8n_default
