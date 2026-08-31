@@ -1,0 +1,97 @@
+name: Patch Hostinger Deploy Safety
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/patch-hostinger-deploy-safety.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    concurrency:
+      group: hostinger-sdr-production
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Remove automatic VPS reboot from production deploy
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/deploy-hostinger.yml')
+          text = path.read_text()
+          start_marker = '      - name: Recover Hostinger Docker control plane if unhealthy\n'
+          end_marker = '      - name: Deploy CPU-light SDR stack\n'
+          start = text.index(start_marker)
+          end = text.index(end_marker, start)
+          replacement = '''      - name: Probe Hostinger control plane without rebooting production
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          AUTH="$HOSTINGER_API_KEY"
+          case "$AUTH" in
+            Bearer\\ *) ;;
+            *) AUTH="Bearer $AUTH" ;;
+          esac
+
+          VM_BASE='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
+          DOCKER_URL="$VM_BASE/docker"
+
+          VM_CODE=$(curl --silent --show-error \\
+            --connect-timeout 8 \\
+            --max-time 30 \\
+            -H "Authorization: $AUTH" \\
+            -H 'Accept: application/json' \\
+            -o /tmp/hostinger-vm.json \\
+            -w '%{http_code}' \\
+            "$VM_BASE" || true)
+          VM_STATE=$(jq -r '.state // "unknown"' /tmp/hostinger-vm.json 2>/dev/null || echo unknown)
+          echo "Hostinger VM preflight: HTTP ${VM_CODE:-000}, state=${VM_STATE}"
+          [ "$VM_CODE" = "200" ] && [ "$VM_STATE" = "running" ] || {
+            echo "::error::Hostinger VPS is not confirmed running; refusing to mutate or reboot it automatically."
+            exit 1
+          }
+
+          DOCKER_CODE=$(curl --silent --show-error \\
+            --connect-timeout 8 \\
+            --max-time 30 \\
+            -H "Authorization: $AUTH" \\
+            -H 'Accept: application/json' \\
+            -o /tmp/hostinger-docker.json \\
+            -w '%{http_code}' \\
+            "$DOCKER_URL" || true)
+          echo "Hostinger Docker Manager probe: HTTP ${DOCKER_CODE:-000}"
+
+          if [ "$DOCKER_CODE" != "200" ]; then
+            echo "::warning::Hostinger Docker inventory API is degraded. Production will NOT be rebooted; the deploy action will be attempted and the public exact-build health gate will decide success."
+            jq '{message,correlation_id}' /tmp/hostinger-docker.json 2>/dev/null || true
+          else
+            echo "Hostinger Docker control plane inventory is healthy."
+          fi
+
+'''
+          path.write_text(text[:start] + replacement + text[end:])
+          PY
+
+          git diff --check
+          git diff -- .github/workflows/deploy-hostinger.yml
+
+      - name: Commit deployment safety fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/deploy-hostinger.yml
+          git diff --cached --quiet && exit 0
+          git commit -m "Stop auto-rebooting Hostinger on Docker API errors"
+          git push origin HEAD:main
