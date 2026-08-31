@@ -1,4 +1,4 @@
-# Dashboard password redeploy trigger: 2026-08-31 secret refresh
+# Dashboard password redeploy trigger: 2026-08-31 secret refresh v2
 name: Direct Hostinger Hotfix Deploy
 
 on:
@@ -27,10 +27,10 @@ jobs:
 
       - name: Validate SDR admin password
         env:
-          SDR_ADMIN_PASSWORD: ${{ secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
+          SDR_ADMIN_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.SDR_ADMIN_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
         run: |
           test -n "$SDR_ADMIN_PASSWORD" || {
-            echo "::error::Configure SDR_ADMIN_PASSWORD, DASHBOARD_PASSWORD, or ACQUISITION_OWNER_TOKEN."
+            echo "::error::Configure DASHBOARD_PASSWORD, SDR_ADMIN_PASSWORD, or ACQUISITION_OWNER_TOKEN."
             exit 1
           }
           echo "SDR admin password is configured"
@@ -46,7 +46,7 @@ jobs:
             SDR_BUILD_REF=${{ github.sha }}
             CAREER_GENERATION=v3
             DISABLE_AUTH=true
-            SDR_ADMIN_PASSWORD=${{ secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
+            SDR_ADMIN_PASSWORD=${{ secrets.DASHBOARD_PASSWORD || secrets.SDR_ADMIN_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
             DASHBOARD_PASSWORD=${{ secrets.DASHBOARD_PASSWORD || secrets.SDR_ADMIN_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
             SMARTLEAD_AUTOPILOT_ENABLED=true
             SMARTLEAD_LEGACY_SEND_ENABLED=false
