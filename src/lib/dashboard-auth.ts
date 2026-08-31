@@ -92,6 +92,12 @@ function trustedMachineRoute(request: NextRequest) {
 }
 
 export function dashboardAuthResponse(request: NextRequest) {
+  // Production is intentionally public at the dashboard layer. Sensitive write
+  // routes keep their own bearer/owner/ingest protections. Browser Basic Auth
+  // can be re-enabled explicitly for a private deployment with
+  // DASHBOARD_ACCESS_MODE=basic.
+  if (clean(process.env.DASHBOARD_ACCESS_MODE, 20).toLowerCase() !== "basic") return null;
+
   if (request.nextUrl.pathname === "/api/health" || internalRequest(request) || trustedMachineRoute(request)) return null;
 
   const config = dashboardAuthConfig();
