@@ -1,4 +1,4 @@
-name: SDR Overlay Handoff
+name: Retire SDR Temporary Overlay
 
 on:
   push:
@@ -11,188 +11,109 @@ permissions:
   contents: read
 
 jobs:
-  handoff:
-    concurrency:
-      group: sdr-auth-overlay-handoff
-      cancel-in-progress: true
+  retire-overlay:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: sdr-auth-overlay-retirement
+      cancel-in-progress: true
     steps:
-      - name: Point the temporary overlay at the validated SDR image
+      - name: Stop temporary high-priority SDR overlay
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
-          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.SDR_ADMIN_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
-          PREVIOUS_MAIN_SHA: ${{ github.event.before }}
-          CURRENT_MAIN_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          test -n "$HOSTINGER_API_KEY"
-          test -n "$DASHBOARD_PASSWORD" || {
-            echo "::error::Configure DASHBOARD_PASSWORD, SDR_ADMIN_PASSWORD, or ACQUISITION_OWNER_TOKEN."
+          test -n "$HOSTINGER_API_KEY" || {
+            echo "::error::HOSTINGER_API_KEY/HOSTINGER_API_TOKEN is not configured."
             exit 1
           }
-
-          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ -n "${PREVIOUS_MAIN_SHA:-}" ] && \
-             [ "$PREVIOUS_MAIN_SHA" != "0000000000000000000000000000000000000000" ]; then
-            EXPECTED_SHA="$PREVIOUS_MAIN_SHA"
-          else
-            EXPECTED_SHA="$CURRENT_MAIN_SHA"
-          fi
-          echo "Overlay handoff target: $EXPECTED_SHA"
 
           AUTH="$HOSTINGER_API_KEY"
           case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
           VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
-
-          COMPOSE=$(cat <<'YAML'
-          services:
-            sdr-dashboard-public:
-              image: sdr-project-sdr-dashboard:latest
-              pull_policy: never
-              restart: unless-stopped
-              environment:
-                NODE_ENV: production
-                HOSTNAME: 0.0.0.0
-                SDR_BUILD_REF: __EXPECTED_SHA__
-                CAREER_GENERATION: v3
-                DISABLE_AUTH: "true"
-                DASHBOARD_ACCESS_MODE: public
-                DASHBOARD_USERNAME: talentera
-                SDR_ADMIN_PASSWORD: __DASHBOARD_PASSWORD__
-                DASHBOARD_PASSWORD: __DASHBOARD_PASSWORD__
-                SDR_RUNTIME_ENV_FILE: /run/sdr-env/.env
-                DASHBOARD_CACHE_API_URL: http://dashboard-cache-api:8000
-                DASHBOARD_CACHE_READ_TIMEOUT_MS: "700"
-                DASHBOARD_CACHE_WRITE_TIMEOUT_MS: "2000"
-                ACQUISITION_SNAPSHOT_PATH: /app/data/acquisition-dashboard.json
-                GOOGLE_TOKEN_STORE_PATH: /app/data/google-calendar.json
-                HIRING_SNAPSHOT_PATH: /app/data/hiring-signals.json
-                CAREER_INTELLIGENCE_STORE_PATH: /app/data/career-intelligence-v3.json
-                CAREER_VALIDATION_MARKER_PATH: /app/data/career-validation-v3.done
-                CAREER_VALIDATION_STATE_PATH: /app/data/career-validation-v3.state
-                CAREER_ENGINE_URL: http://gtm-career-browser:3000/intelligence-detect
-                SMARTLEAD_V2_INTELLIGENCE_PATH: /app/data/smartlead-v2-intelligence-v3.json
-                SMARTLEAD_INTERNAL_BASE_URL: http://127.0.0.1:3000
-              volumes:
-                - sdr_runtime_env:/run/sdr-env:ro
-                - sdr_app_data:/app/data
-              networks:
-                - traefik_proxy
-                - sdr_project
-              labels:
-                - "traefik.enable=true"
-                - "traefik.docker.network=n8n_default"
-                - "traefik.http.routers.sdr-auth-free.rule=Host(`sdr.dashboardtalentera.tech`)"
-                - "traefik.http.routers.sdr-auth-free.entrypoints=websecure"
-                - "traefik.http.routers.sdr-auth-free.tls=true"
-                - "traefik.http.routers.sdr-auth-free.tls.certresolver=mytlschallenge"
-                - "traefik.http.routers.sdr-auth-free.priority=40000"
-                - "traefik.http.routers.sdr-auth-free.service=sdr-auth-free"
-                - "traefik.http.services.sdr-auth-free.loadbalancer.server.port=3000"
-              healthcheck:
-                test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-                interval: 20s
-                timeout: 8s
-                start_period: 30s
-                retries: 5
-
-          volumes:
-            sdr_runtime_env:
-              external: true
-              name: sdr_runtime_env
-            sdr_app_data:
-              external: true
-              name: sdr_app_data
-
-          networks:
-            traefik_proxy:
-              external: true
-              name: n8n_default
-            sdr_project:
-              external: true
-              name: sdr-project_default
-          YAML
-          )
-
-          export COMPOSE DASHBOARD_PASSWORD EXPECTED_SHA
-          COMPOSE=$(python - <<'PY'
-          import json
-          import os
-
-          compose = os.environ["COMPOSE"]
-          compose = compose.replace("__EXPECTED_SHA__", os.environ["EXPECTED_SHA"])
-          compose = compose.replace("__DASHBOARD_PASSWORD__", json.dumps(os.environ["DASHBOARD_PASSWORD"]))
-          print(compose)
-          PY
-          )
-
-          BODY=$(jq -n --arg project_name 'sdr-auth-hotfix' --arg content "$COMPOSE" \
-            '{project_name:$project_name,content:$content}')
+          PROJECT='sdr-auth-hotfix'
 
           CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
-            -X POST -H "Authorization: $AUTH" -H 'Content-Type: application/json' \
-            -d "$BODY" -o /tmp/deploy.json -w '%{http_code}' "$VM/docker" || true)
-          echo "Overlay handoff deploy: HTTP ${CODE:-000}"
-          [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ] || {
-            cat /tmp/deploy.json 2>/dev/null || true
-            exit 1
-          }
+            -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/overlay.json -w '%{http_code}' "$VM/docker/$PROJECT" || true)
+          echo "Temporary overlay lookup: HTTP ${CODE:-000}"
 
-          ACTION_ID=$(jq -r '.id // empty' /tmp/deploy.json 2>/dev/null || true)
-          if [ -n "$ACTION_ID" ]; then
-            ACTION_OK=false
-            for I in $(seq 1 40); do
-              ACODE=$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
-                -H "Authorization: $AUTH" -H 'Accept: application/json' \
-                -o /tmp/action.json -w '%{http_code}' "$VM/actions/$ACTION_ID" || true)
-              STATE=$(jq -r '.state // "unknown"' /tmp/action.json 2>/dev/null || echo unknown)
-              echo "Hostinger action $I/40: HTTP=${ACODE:-000} state=$STATE"
-              if [ "$ACODE" = "200" ] && [ "$STATE" = "success" ]; then ACTION_OK=true; break; fi
-              if [ "$ACODE" = "200" ] && [ "$STATE" = "failed" ]; then cat /tmp/action.json; exit 1; fi
-              sleep 5
-            done
-            [ "$ACTION_OK" = "true" ] || echo "::warning::Hostinger action status did not settle; public verification will decide."
+          if [ "$CODE" = "404" ]; then
+            echo "Temporary overlay is already absent."
+            exit 0
           fi
 
-          echo "$EXPECTED_SHA" > /tmp/expected-sha
+          if [ "$CODE" != "200" ]; then
+            cat /tmp/overlay.json 2>/dev/null || true
+            echo "::error::Unable to inspect the temporary overlay project."
+            exit 1
+          fi
 
-      - name: Verify overlay now exposes the validated build and admin gate
+          STOP_CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+            -X POST -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/overlay-stop.json -w '%{http_code}' "$VM/docker/$PROJECT/stop" || true)
+          echo "Temporary overlay stop: HTTP ${STOP_CODE:-000}"
+
+          if [ "$STOP_CODE" -lt 200 ] || [ "$STOP_CODE" -ge 300 ]; then
+            cat /tmp/overlay-stop.json 2>/dev/null || true
+            echo "::error::Unable to stop the temporary overlay."
+            exit 1
+          fi
+
+          ACTION_ID=$(jq -r '.id // empty' /tmp/overlay-stop.json 2>/dev/null || true)
+          if [ -n "$ACTION_ID" ]; then
+            SETTLED=false
+            for ATTEMPT in $(seq 1 40); do
+              ACTION_CODE=$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
+                -H "Authorization: $AUTH" -H 'Accept: application/json' \
+                -o /tmp/overlay-action.json -w '%{http_code}' "$VM/actions/$ACTION_ID" || true)
+              STATE=$(jq -r '.state // "unknown"' /tmp/overlay-action.json 2>/dev/null || echo unknown)
+              echo "Stop action ${ATTEMPT}/40: HTTP=${ACTION_CODE:-000} state=$STATE"
+              if [ "$ACTION_CODE" = "200" ] && [ "$STATE" = "success" ]; then
+                SETTLED=true
+                break
+              fi
+              if [ "$ACTION_CODE" = "200" ] && [ "$STATE" = "failed" ]; then
+                cat /tmp/overlay-action.json
+                exit 1
+              fi
+              sleep 5
+            done
+            [ "$SETTLED" = "true" ] || echo "::warning::Stop action did not settle; container verification will decide."
+          fi
+
+      - name: Verify overlay containers are no longer running
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
         run: |
           set -euo pipefail
-          HOST='sdr.dashboardtalentera.tech'
-          EXPECTED_SHA=$(cat /tmp/expected-sha)
+          AUTH="$HOSTINGER_API_KEY"
+          case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
+          URL='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210/docker/sdr-auth-hotfix/containers'
 
-          for I in $(seq 1 48); do
-            HCODE=$(curl --silent --show-error --connect-timeout 5 --max-time 12 \
-              -H 'Cache-Control: no-cache' -o /tmp/health.json -w '%{http_code}' \
-              "https://${HOST}/api/health?overlay_handoff=${EXPECTED_SHA}&attempt=$I" || true)
-            BUILD=$(jq -r '.buildRef // ""' /tmp/health.json 2>/dev/null || true)
+          for ATTEMPT in $(seq 1 24); do
+            CODE=$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
+              -H "Authorization: $AUTH" -H 'Accept: application/json' \
+              -o /tmp/overlay-containers.json -w '%{http_code}' "$URL" || true)
 
-            RCODE=$(curl --silent --show-error --connect-timeout 5 --max-time 12 \
-              -H 'Cache-Control: no-cache' -D /tmp/root.headers -o /tmp/root.html -w '%{http_code}' \
-              "https://${HOST}/" || true)
-            AUTH_HEADER=$(grep -i '^WWW-Authenticate:' /tmp/root.headers 2>/dev/null || true)
-
-            ACODE=$(curl --silent --show-error --connect-timeout 5 --max-time 12 \
-              -H 'Cache-Control: no-cache' -o /tmp/admin.json -w '%{http_code}' \
-              "https://${HOST}/api/sdr-admin?overlay_handoff=$I" || true)
-            ADMIN_CONFIGURED=$(jq -r '.configured // false' /tmp/admin.json 2>/dev/null || echo false)
-
-            echo "Handoff $I/48: health=$HCODE build=${BUILD:-none} root=$RCODE auth_header=${AUTH_HEADER:-none} admin=$ACODE configured=$ADMIN_CONFIGURED"
-
-            if [ "$HCODE" = "200" ] && [ "$BUILD" = "$EXPECTED_SHA" ] && \
-               [ "$RCODE" != "401" ] && [ "$RCODE" != "000" ] && [ -z "$AUTH_HEADER" ] && \
-               [ "$ACODE" = "200" ] && [ "$ADMIN_CONFIGURED" = "true" ]; then
-              echo "Temporary overlay is now serving the validated build with the in-app admin gate configured."
+            if [ "$CODE" = "404" ]; then
+              echo "Temporary overlay project is absent."
               exit 0
+            fi
+
+            if [ "$CODE" = "200" ]; then
+              RUNNING=$(jq '[.[] | select((.state // "") == "running")] | length' /tmp/overlay-containers.json 2>/dev/null || echo 999)
+              echo "Overlay verification ${ATTEMPT}/24: running=$RUNNING"
+              if [ "$RUNNING" = "0" ]; then
+                echo "Temporary overlay is stopped; it can no longer shadow the primary SDR route."
+                exit 0
+              fi
+            else
+              echo "Overlay verification ${ATTEMPT}/24: HTTP=${CODE:-000}"
             fi
             sleep 5
           done
 
-          echo "::error::Overlay handoff did not expose the validated build with the admin gate configured."
-          echo "Last health response:"
-          cat /tmp/health.json 2>/dev/null || true
-          echo
-          echo "Last admin response:"
-          cat /tmp/admin.json 2>/dev/null || true
+          echo "::error::Temporary overlay still has running containers."
+          cat /tmp/overlay-containers.json 2>/dev/null || true
           exit 1
