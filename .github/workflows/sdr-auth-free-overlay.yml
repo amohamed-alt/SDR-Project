@@ -1,4 +1,4 @@
-name: SDR Auth-Free Overlay
+name: SDR Overlay Handoff
 
 on:
   push:
@@ -11,25 +11,37 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
+  handoff:
+    concurrency:
+      group: sdr-auth-overlay-handoff
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Deploy auth-free overlay with app admin gate
+      - name: Point the temporary overlay at the validated SDR image
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
-          SDR_ADMIN_PASSWORD: ${{ secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.SDR_ADMIN_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
+          PREVIOUS_MAIN_SHA: ${{ github.event.before }}
+          CURRENT_MAIN_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           test -n "$HOSTINGER_API_KEY"
-          test -n "$SDR_ADMIN_PASSWORD" || {
-            echo "::error::Configure SDR_ADMIN_PASSWORD, DASHBOARD_PASSWORD, or ACQUISITION_OWNER_TOKEN."
+          test -n "$DASHBOARD_PASSWORD" || {
+            echo "::error::Configure DASHBOARD_PASSWORD, SDR_ADMIN_PASSWORD, or ACQUISITION_OWNER_TOKEN."
             exit 1
           }
 
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ -n "${PREVIOUS_MAIN_SHA:-}" ] && \
+             [ "$PREVIOUS_MAIN_SHA" != "0000000000000000000000000000000000000000" ]; then
+            EXPECTED_SHA="$PREVIOUS_MAIN_SHA"
+          else
+            EXPECTED_SHA="$CURRENT_MAIN_SHA"
+          fi
+          echo "Overlay handoff target: $EXPECTED_SHA"
+
           AUTH="$HOSTINGER_API_KEY"
           case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
-
           VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
 
           COMPOSE=$(cat <<'YAML'
@@ -41,12 +53,13 @@ jobs:
               environment:
                 NODE_ENV: production
                 HOSTNAME: 0.0.0.0
-                SDR_BUILD_REF: auth-free-overlay
+                SDR_BUILD_REF: __EXPECTED_SHA__
                 CAREER_GENERATION: v3
                 DISABLE_AUTH: "true"
-                DASHBOARD_USERNAME: ""
-                SDR_ADMIN_PASSWORD: __SDR_ADMIN_PASSWORD__
-                DASHBOARD_PASSWORD: __SDR_ADMIN_PASSWORD__
+                DASHBOARD_ACCESS_MODE: public
+                DASHBOARD_USERNAME: talentera
+                SDR_ADMIN_PASSWORD: __DASHBOARD_PASSWORD__
+                DASHBOARD_PASSWORD: __DASHBOARD_PASSWORD__
                 SDR_RUNTIME_ENV_FILE: /run/sdr-env/.env
                 DASHBOARD_CACHE_API_URL: http://dashboard-cache-api:8000
                 DASHBOARD_CACHE_READ_TIMEOUT_MS: "700"
@@ -101,14 +114,15 @@ jobs:
           YAML
           )
 
-          export COMPOSE SDR_ADMIN_PASSWORD
+          export COMPOSE DASHBOARD_PASSWORD EXPECTED_SHA
           COMPOSE=$(python - <<'PY'
           import json
           import os
 
           compose = os.environ["COMPOSE"]
-          secret = os.environ["SDR_ADMIN_PASSWORD"]
-          print(compose.replace("__SDR_ADMIN_PASSWORD__", json.dumps(secret)))
+          compose = compose.replace("__EXPECTED_SHA__", os.environ["EXPECTED_SHA"])
+          compose = compose.replace("__DASHBOARD_PASSWORD__", json.dumps(os.environ["DASHBOARD_PASSWORD"]))
+          print(compose)
           PY
           )
 
@@ -118,32 +132,40 @@ jobs:
           CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
             -X POST -H "Authorization: $AUTH" -H 'Content-Type: application/json' \
             -d "$BODY" -o /tmp/deploy.json -w '%{http_code}' "$VM/docker" || true)
-          echo "Overlay deploy: HTTP ${CODE:-000}"
-          cat /tmp/deploy.json
-          [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]
+          echo "Overlay handoff deploy: HTTP ${CODE:-000}"
+          [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ] || {
+            cat /tmp/deploy.json 2>/dev/null || true
+            exit 1
+          }
 
-          ACTION_ID=$(jq -r '.id // empty' /tmp/deploy.json)
+          ACTION_ID=$(jq -r '.id // empty' /tmp/deploy.json 2>/dev/null || true)
           if [ -n "$ACTION_ID" ]; then
-            for I in $(seq 1 30); do
+            ACTION_OK=false
+            for I in $(seq 1 40); do
               ACODE=$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
                 -H "Authorization: $AUTH" -H 'Accept: application/json' \
                 -o /tmp/action.json -w '%{http_code}' "$VM/actions/$ACTION_ID" || true)
               STATE=$(jq -r '.state // "unknown"' /tmp/action.json 2>/dev/null || echo unknown)
-              echo "Action $I/30: HTTP=${ACODE:-000} state=$STATE"
-              if [ "$ACODE" = "200" ] && [ "$STATE" = "success" ]; then break; fi
+              echo "Hostinger action $I/40: HTTP=${ACODE:-000} state=$STATE"
+              if [ "$ACODE" = "200" ] && [ "$STATE" = "success" ]; then ACTION_OK=true; break; fi
               if [ "$ACODE" = "200" ] && [ "$STATE" = "failed" ]; then cat /tmp/action.json; exit 1; fi
               sleep 5
             done
+            [ "$ACTION_OK" = "true" ] || echo "::warning::Hostinger action status did not settle; public verification will decide."
           fi
 
-      - name: Verify public dashboard is auth-free but admin is configured
+          echo "$EXPECTED_SHA" > /tmp/expected-sha
+
+      - name: Verify overlay now exposes the validated build and admin gate
         run: |
           set -euo pipefail
           HOST='sdr.dashboardtalentera.tech'
-          for I in $(seq 1 40); do
+          EXPECTED_SHA=$(cat /tmp/expected-sha)
+
+          for I in $(seq 1 48); do
             HCODE=$(curl --silent --show-error --connect-timeout 5 --max-time 12 \
               -H 'Cache-Control: no-cache' -o /tmp/health.json -w '%{http_code}' \
-              "https://${HOST}/api/health?auth_free_overlay=$I" || true)
+              "https://${HOST}/api/health?overlay_handoff=${EXPECTED_SHA}&attempt=$I" || true)
             BUILD=$(jq -r '.buildRef // ""' /tmp/health.json 2>/dev/null || true)
 
             RCODE=$(curl --silent --show-error --connect-timeout 5 --max-time 12 \
@@ -153,20 +175,24 @@ jobs:
 
             ACODE=$(curl --silent --show-error --connect-timeout 5 --max-time 12 \
               -H 'Cache-Control: no-cache' -o /tmp/admin.json -w '%{http_code}' \
-              "https://${HOST}/api/sdr-admin" || true)
+              "https://${HOST}/api/sdr-admin?overlay_handoff=$I" || true)
             ADMIN_CONFIGURED=$(jq -r '.configured // false' /tmp/admin.json 2>/dev/null || echo false)
 
-            echo "Check $I/40: health=$HCODE build=${BUILD:-none} root=$RCODE auth_header=${AUTH_HEADER:-none} admin=$ACODE configured=$ADMIN_CONFIGURED"
+            echo "Handoff $I/48: health=$HCODE build=${BUILD:-none} root=$RCODE auth_header=${AUTH_HEADER:-none} admin=$ACODE configured=$ADMIN_CONFIGURED"
 
-            if [ "$HCODE" = "200" ] && [ "$BUILD" = "auth-free-overlay" ] && \
+            if [ "$HCODE" = "200" ] && [ "$BUILD" = "$EXPECTED_SHA" ] && \
                [ "$RCODE" != "401" ] && [ "$RCODE" != "000" ] && [ -z "$AUTH_HEADER" ] && \
                [ "$ACODE" = "200" ] && [ "$ADMIN_CONFIGURED" = "true" ]; then
-              echo "Auth-free SDR overlay is live and the app admin gate is configured."
+              echo "Temporary overlay is now serving the validated build with the in-app admin gate configured."
               exit 0
             fi
             sleep 5
           done
-          echo "::error::Auth-free overlay did not become healthy with the SDR admin gate configured."
+
+          echo "::error::Overlay handoff did not expose the validated build with the admin gate configured."
+          echo "Last health response:"
+          cat /tmp/health.json 2>/dev/null || true
+          echo
           echo "Last admin response:"
           cat /tmp/admin.json 2>/dev/null || true
           exit 1
