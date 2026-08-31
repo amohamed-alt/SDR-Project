@@ -9,14 +9,12 @@ import {
   Building2,
   ChevronDown,
   ChevronUp,
-  Flame,
   ListTodo,
   LoaderCircle,
   MailCheck,
   Menu,
   PhoneCall,
   Radar,
-  Search,
   Target,
   UserPlus,
   Wrench,
@@ -25,24 +23,12 @@ import {
 import { Dashboard as ExistingDashboard } from "@/components/DashboardMotion";
 import styles from "@/components/DashboardShell.module.css";
 
-type ShellView = "core" | "maqsam" | "hiring" | "career" | "ats-intent" | "marita-priority" | "smartlead" | "team-activity" | "net-new" | "gtm-brain";
+type ShellView = "core" | "maqsam" | "marita-priority" | "smartlead" | "team-activity" | "net-new" | "gtm-brain";
 
 function ViewLoading() {
   return <main className={styles.viewLoading}><LoaderCircle size={24}/><strong>Loading workspace…</strong></main>;
 }
 
-const AtsIntentSearch = dynamic(
-  () => import("@/components/AtsIntentSearch").then((module) => module.AtsIntentSearch),
-  { ssr: false, loading: ViewLoading },
-);
-const CareerIntelligence = dynamic(
-  () => import("@/components/CareerIntelligence").then((module) => module.CareerIntelligence),
-  { ssr: false, loading: ViewLoading },
-);
-const HiringIntelligence = dynamic(
-  () => import("@/components/HiringIntelligence").then((module) => module.HiringIntelligence),
-  { ssr: false, loading: ViewLoading },
-);
 const MaqsamCallsDashboard = dynamic(
   () => import("@/components/MaqsamCallsDashboard").then((module) => module.MaqsamCallsDashboard),
   { ssr: false, loading: ViewLoading },
@@ -71,9 +57,6 @@ const TalenteraIntelligenceWorkspace = dynamic(
 function viewFromUrl(): ShellView {
   const view = new URLSearchParams(window.location.search).get("view");
   if (view === "maqsam") return "maqsam";
-  if (view === "hiring") return "hiring";
-  if (view === "career") return "career";
-  if (view === "ats-intent") return "ats-intent";
   if (view === "marita-priority") return "marita-priority";
   if (view === "smartlead") return "smartlead";
   if (view === "team-activity") return "team-activity";
@@ -122,7 +105,7 @@ export function Dashboard() {
 
   useEffect(() => {
     if (!adminChecked || adminUnlocked) return;
-    const adminViews: ShellView[] = ["hiring", "career", "ats-intent", "marita-priority", "team-activity"];
+    const adminViews: ShellView[] = ["marita-priority", "team-activity"];
     if (!adminViews.includes(view)) return;
     const url = new URL(window.location.href);
     url.searchParams.delete("view");
@@ -181,7 +164,7 @@ export function Dashboard() {
   }
 
   function changeView(next: ShellView) {
-    const adminViews: ShellView[] = ["hiring", "career", "ats-intent", "marita-priority", "team-activity"];
+    const adminViews: ShellView[] = ["marita-priority", "team-activity"];
     if (adminViews.includes(next) && !adminUnlocked) {
       setView("core");
       setToolsOpen(true);
@@ -198,9 +181,6 @@ export function Dashboard() {
   }
 
   if (view === "maqsam") return <MaqsamCallsDashboard onBack={() => changeView("core")}/>;
-  if (view === "hiring") return <HiringIntelligence onBack={() => changeView("core")}/>;
-  if (view === "career") return <CareerIntelligence onBack={() => changeView("core")}/>;
-  if (view === "ats-intent") return <AtsIntentSearch onBack={() => changeView("core")}/>;
   if (view === "marita-priority") return <MaritaPriorityQueue onBack={() => changeView("core")}/>;
   if (view === "smartlead") return <SmartleadCommandCenter onBack={() => changeView("core")}/>;
   if (view === "team-activity") return <TeamActivity onBack={() => changeView("core")}/>;
@@ -241,7 +221,7 @@ export function Dashboard() {
             </button>
 
             <button className={styles.advancedToggle} type="button" onClick={toggleAdvanced} aria-expanded={advancedOpen}>
-              <span><Wrench size={14}/><strong>Advanced & Data Ops</strong><small>{adminUnlocked ? "Admin unlocked · sources, verification and ops" : "Password protected admin tools"}</small></span>
+              <span><Wrench size={14}/><strong>Advanced & Data Ops</strong><small>{adminUnlocked ? "Admin unlocked · sources and controlled ops" : "Password protected admin tools"}</small></span>
               {advancedOpen ? <ChevronUp size={16}/> : <ChevronDown size={16}/>} 
             </button>
 
@@ -265,18 +245,6 @@ export function Dashboard() {
               <button className={styles.toolItem} type="button" onClick={() => changeView("marita-priority")}>
                 <span className={`${styles.toolIcon} ${styles.priorityIcon}`}><ListTodo size={17}/></span>
                 <span className={styles.toolCopy}><strong>Call Queue Ops</strong><small>Marita Extensive-Lighter scheduling</small></span>
-              </button>
-              <button className={styles.toolItem} type="button" onClick={() => changeView("hiring")}>
-                <span className={`${styles.toolIcon} ${styles.hiringIcon}`}><Flame size={17}/></span>
-                <span className={styles.toolCopy}><strong>Hiring Verification</strong><small>Verified current jobs · stale cleanup</small></span>
-              </button>
-              <button className={styles.toolItem} type="button" onClick={() => changeView("ats-intent")}>
-                <span className={`${styles.toolIcon} ${styles.intentIcon}`}><Search size={17}/></span>
-                <span className={styles.toolCopy}><strong>ATS Intent Signals</strong><small>Public buying / replacement signals</small></span>
-              </button>
-              <button className={styles.toolItem} type="button" onClick={() => changeView("career")}>
-                <span className={`${styles.toolIcon} ${styles.careerIcon}`}><Search size={17}/></span>
-                <span className={styles.toolCopy}><strong>Career & ATS Data</strong><small>Career discovery · ATS review · HubSpot sync</small></span>
               </button>
               <Link className={styles.toolItem} href="/company-enrichment" onClick={() => trackFeature("company-repair")}>
                 <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Building2 size={17}/></span>
