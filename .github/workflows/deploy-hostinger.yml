@@ -191,6 +191,58 @@ jobs:
             echo "::warning::No Hostinger action id returned; exact public build gate will decide."
           fi
 
+      - name: Inspect stored project and force managed update
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          AUTH="$HOSTINGER_API_KEY"
+          case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
+          VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
+          PROJECT="$VM/docker/sdr-project"
+
+          PCODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+            -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/project.json -w '%{http_code}' "$PROJECT" || true)
+          echo "Stored Docker project: HTTP ${PCODE:-000}"
+          if [ "$PCODE" = "200" ]; then
+            HAS_IMAGE=$(jq -r '(.content // "") | contains("image: sdr-dashboard:")' /tmp/project.json 2>/dev/null || echo false)
+            HAS_SHA=$(jq -r --arg sha "$DEPLOY_SHA" '((.content // "") | contains($sha)) or ((.environment // "") | contains($sha))' /tmp/project.json 2>/dev/null || echo false)
+            echo "Stored project has versioned dashboard image=${HAS_IMAGE}; has deploy SHA=${HAS_SHA}"
+          else
+            jq '{message,correlation_id}' /tmp/project.json 2>/dev/null || true
+          fi
+
+          UCODE=$(curl --silent --show-error --connect-timeout 10 --max-time 60 \
+            -X POST -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/update-action.json -w '%{http_code}' "$PROJECT/update" || true)
+          echo "Hostinger managed update request: HTTP ${UCODE:-000}"
+          if [ -z "$UCODE" ] || [ "$UCODE" -lt 200 ] || [ "$UCODE" -ge 300 ]; then
+            jq '{message,correlation_id,errors}' /tmp/update-action.json 2>/dev/null || cat /tmp/update-action.json 2>/dev/null || true
+            echo "::warning::Managed update endpoint was unavailable; exact public build gate will decide."
+            exit 0
+          fi
+
+          UPDATE_ID=$(jq -r '.id // .action.id // empty' /tmp/update-action.json 2>/dev/null || true)
+          UPDATE_STATE=$(jq -r '.state // .action.state // "unknown"' /tmp/update-action.json 2>/dev/null || echo unknown)
+          echo "Managed update action id=${UPDATE_ID:-none}, state=${UPDATE_STATE}"
+          case "$UPDATE_STATE" in failed|error) echo "::warning::Managed update failed immediately."; exit 0 ;; esac
+
+          if [ -n "$UPDATE_ID" ]; then
+            for I in $(seq 1 45); do
+              ACODE=$(curl --silent --show-error --connect-timeout 8 --max-time 25 \
+                -H "Authorization: $AUTH" -H 'Accept: application/json' \
+                -o /tmp/update-status.json -w '%{http_code}' "$VM/actions/$UPDATE_ID" || true)
+              UPDATE_STATE=$(jq -r '.state // "unknown"' /tmp/update-status.json 2>/dev/null || echo unknown)
+              echo "Managed update ${I}/45: HTTP=${ACODE:-000}, state=${UPDATE_STATE}"
+              case "$UPDATE_STATE" in
+                success|completed) break ;;
+                failed|error) echo "::warning::Managed update action failed."; break ;;
+              esac
+              sleep 8
+            done
+          fi
+
       - name: Verify exact public build, admin gate, and no browser Basic Auth
         run: |
           set -euo pipefail
@@ -260,6 +312,17 @@ jobs:
             -o /tmp/actions.json -w '%{http_code}' "$VM/actions?page=1" || true)
           echo "Recent actions: HTTP ${ACODE:-000}"
           [ "$ACODE" = "200" ] && jq -r '.data[]? | [.id,.name,.state,.created_at,.updated_at] | @tsv' /tmp/actions.json | head -20 || cat /tmp/actions.json 2>/dev/null || true
+
+          PCODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+            -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/project-failure.json -w '%{http_code}' "$VM/docker/sdr-project" || true)
+          echo "Stored project after failure: HTTP ${PCODE:-000}"
+          if [ "$PCODE" = "200" ]; then
+            HAS_IMAGE=$(jq -r '(.content // "") | contains("image: sdr-dashboard:")' /tmp/project-failure.json 2>/dev/null || echo false)
+            HAS_SHA=$(jq -r --arg sha "$DEPLOY_SHA" '((.content // "") | contains($sha)) or ((.environment // "") | contains($sha))' /tmp/project-failure.json 2>/dev/null || echo false)
+            echo "Stored project has versioned dashboard image=${HAS_IMAGE}; has deploy SHA=${HAS_SHA}"
+          fi
+
           DCODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
             -H "Authorization: $AUTH" -H 'Accept: application/json' \
             -o /tmp/docker-failure.json -w '%{http_code}' "$VM/docker" || true)
