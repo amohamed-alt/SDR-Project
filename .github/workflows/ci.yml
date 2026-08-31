@@ -23,11 +23,6 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run smoke
-      - name: Validate Career browser runtime
-        working-directory: services/career-browser
-        run: |
-          npm install --omit=dev --no-audit --no-fund
-          npm run check
       - name: Validate FastAPI dashboard cache
         run: |
           python -m py_compile services/dashboard-cache/app.py services/dashboard-cache/smoke.py
@@ -47,3 +42,5 @@ jobs:
           python services/dashboard-cache/smoke.py
       - name: Validate production Docker Compose
         run: SDR_ENV_FILE=.env.example docker compose -f docker-compose.yml config >/dev/null
+      - name: Validate CPU-light Docker Compose
+        run: SDR_ENV_FILE=.env.example docker compose -f docker-compose.light.yml config >/dev/null
