@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/sdr-auth-free-overlay.yml"
+      - "ops/sdr-overlay-retired.compose.yml"
   workflow_dispatch:
 
 permissions:
@@ -18,102 +19,47 @@ jobs:
       group: sdr-auth-overlay-retirement
       cancel-in-progress: true
     steps:
-      - name: Stop temporary high-priority SDR overlay
-        env:
-          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+      - name: Checkout retirement compose
+        uses: actions/checkout@v5
+
+      - name: Validate retirement compose
+        run: docker compose -f ops/sdr-overlay-retired.compose.yml config >/tmp/sdr-overlay-retired.txt
+
+      - name: Replace temporary high-priority overlay with inert project
+        uses: hostinger/deploy-on-vps@v2
+        with:
+          api-key: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+          virtual-machine: "1604210"
+          project-name: sdr-auth-hotfix
+          docker-compose-path: ops/sdr-overlay-retired.compose.yml
+
+      - name: Verify primary SDR route is no longer shadowed
         run: |
           set -euo pipefail
-          test -n "$HOSTINGER_API_KEY" || {
-            echo "::error::HOSTINGER_API_KEY/HOSTINGER_API_TOKEN is not configured."
-            exit 1
-          }
+          HOST='sdr.dashboardtalentera.tech'
 
-          AUTH="$HOSTINGER_API_KEY"
-          case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
-          VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
-          PROJECT='sdr-auth-hotfix'
+          for ATTEMPT in $(seq 1 48); do
+            HEALTH_CODE=$(curl --silent --show-error --connect-timeout 5 --max-time 12 \
+              -H 'Cache-Control: no-cache' \
+              -o /tmp/health.json -w '%{http_code}' \
+              "https://${HOST}/api/health?overlay_retired=$ATTEMPT" || true)
+            BUILD_REF=$(jq -r '.buildRef // ""' /tmp/health.json 2>/dev/null || true)
+            ROOT_CODE=$(curl --silent --show-error --connect-timeout 5 --max-time 12 \
+              -H 'Cache-Control: no-cache' -D /tmp/root.headers \
+              -o /tmp/root.html -w '%{http_code}' \
+              "https://${HOST}/" || true)
+            AUTH_HEADER=$(grep -i '^WWW-Authenticate:' /tmp/root.headers 2>/dev/null || true)
 
-          CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
-            -H "Authorization: $AUTH" -H 'Accept: application/json' \
-            -o /tmp/overlay.json -w '%{http_code}' "$VM/docker/$PROJECT" || true)
-          echo "Temporary overlay lookup: HTTP ${CODE:-000}"
+            echo "Primary route ${ATTEMPT}/48: health=${HEALTH_CODE:-000} build=${BUILD_REF:-none} root=${ROOT_CODE:-000} auth_header=${AUTH_HEADER:-none}"
 
-          if [ "$CODE" = "404" ]; then
-            echo "Temporary overlay is already absent."
-            exit 0
-          fi
-
-          if [ "$CODE" != "200" ]; then
-            cat /tmp/overlay.json 2>/dev/null || true
-            echo "::error::Unable to inspect the temporary overlay project."
-            exit 1
-          fi
-
-          STOP_CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
-            -X POST -H "Authorization: $AUTH" -H 'Accept: application/json' \
-            -o /tmp/overlay-stop.json -w '%{http_code}' "$VM/docker/$PROJECT/stop" || true)
-          echo "Temporary overlay stop: HTTP ${STOP_CODE:-000}"
-
-          if [ "$STOP_CODE" -lt 200 ] || [ "$STOP_CODE" -ge 300 ]; then
-            cat /tmp/overlay-stop.json 2>/dev/null || true
-            echo "::error::Unable to stop the temporary overlay."
-            exit 1
-          fi
-
-          ACTION_ID=$(jq -r '.id // empty' /tmp/overlay-stop.json 2>/dev/null || true)
-          if [ -n "$ACTION_ID" ]; then
-            SETTLED=false
-            for ATTEMPT in $(seq 1 40); do
-              ACTION_CODE=$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
-                -H "Authorization: $AUTH" -H 'Accept: application/json' \
-                -o /tmp/overlay-action.json -w '%{http_code}' "$VM/actions/$ACTION_ID" || true)
-              STATE=$(jq -r '.state // "unknown"' /tmp/overlay-action.json 2>/dev/null || echo unknown)
-              echo "Stop action ${ATTEMPT}/40: HTTP=${ACTION_CODE:-000} state=$STATE"
-              if [ "$ACTION_CODE" = "200" ] && [ "$STATE" = "success" ]; then
-                SETTLED=true
-                break
-              fi
-              if [ "$ACTION_CODE" = "200" ] && [ "$STATE" = "failed" ]; then
-                cat /tmp/overlay-action.json
-                exit 1
-              fi
-              sleep 5
-            done
-            [ "$SETTLED" = "true" ] || echo "::warning::Stop action did not settle; container verification will decide."
-          fi
-
-      - name: Verify overlay containers are no longer running
-        env:
-          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
-        run: |
-          set -euo pipefail
-          AUTH="$HOSTINGER_API_KEY"
-          case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
-          URL='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210/docker/sdr-auth-hotfix/containers'
-
-          for ATTEMPT in $(seq 1 24); do
-            CODE=$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
-              -H "Authorization: $AUTH" -H 'Accept: application/json' \
-              -o /tmp/overlay-containers.json -w '%{http_code}' "$URL" || true)
-
-            if [ "$CODE" = "404" ]; then
-              echo "Temporary overlay project is absent."
+            if [ "$HEALTH_CODE" = "200" ] && [ -n "$BUILD_REF" ] && \
+               [ "$ROOT_CODE" != "401" ] && [ "$ROOT_CODE" != "000" ] && [ -z "$AUTH_HEADER" ]; then
+              echo "Temporary overlay is retired; the primary SDR route is serving traffic."
               exit 0
-            fi
-
-            if [ "$CODE" = "200" ]; then
-              RUNNING=$(jq '[.[] | select((.state // "") == "running")] | length' /tmp/overlay-containers.json 2>/dev/null || echo 999)
-              echo "Overlay verification ${ATTEMPT}/24: running=$RUNNING"
-              if [ "$RUNNING" = "0" ]; then
-                echo "Temporary overlay is stopped; it can no longer shadow the primary SDR route."
-                exit 0
-              fi
-            else
-              echo "Overlay verification ${ATTEMPT}/24: HTTP=${CODE:-000}"
             fi
             sleep 5
           done
 
-          echo "::error::Temporary overlay still has running containers."
-          cat /tmp/overlay-containers.json 2>/dev/null || true
+          echo "::error::Primary SDR route did not become reachable after retiring the overlay."
+          cat /tmp/health.json 2>/dev/null || true
           exit 1
