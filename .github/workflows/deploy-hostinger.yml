@@ -137,7 +137,7 @@ jobs:
           AUTH="$HOSTINGER_API_KEY"
           case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
           VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
-          CONTENT_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${DEPLOY_SHA}/docker-compose.light.yml"
+          CONTENT_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${DEPLOY_SHA}/docker-compose.light.yml"
 
           ENVIRONMENT=$(cat <<EOF
           SDR_BUILD_REF=${DEPLOY_SHA}
