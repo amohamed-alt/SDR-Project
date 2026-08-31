@@ -68,7 +68,7 @@ jobs:
       group: hostinger-sdr-production
       cancel-in-progress: true
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       DEPLOY_SHA: ${{ needs.preflight.outputs.deploy_sha }}
       DEPLOY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -97,92 +97,135 @@ jobs:
       - name: Validate CPU-light compose
         run: docker compose -f docker-compose.light.yml config >/tmp/sdr-light-compose.txt
 
-      - name: Validate Hostinger API key
+      - name: Validate production secrets
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
-        run: test -n "$HOSTINGER_API_KEY"
-
-      - name: Validate SDR admin password
-        env:
           SDR_ADMIN_PASSWORD: ${{ secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.SDR_ADMIN_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
         run: |
-          test -n "$SDR_ADMIN_PASSWORD" || {
-            echo "::error::Configure SDR_ADMIN_PASSWORD, DASHBOARD_PASSWORD, or ACQUISITION_OWNER_TOKEN."
-            exit 1
-          }
-          echo "SDR admin password is configured"
+          test -n "$HOSTINGER_API_KEY" || { echo "::error::Hostinger API token is missing."; exit 1; }
+          test -n "$SDR_ADMIN_PASSWORD" || { echo "::error::SDR admin password is missing."; exit 1; }
+          test -n "$DASHBOARD_PASSWORD" || { echo "::error::Dashboard password is missing."; exit 1; }
+          echo "Required deployment secrets are configured."
 
-      - name: Report optional integrations
-        env:
-          PRIMEFORGE_API_KEY: ${{ secrets.PRIMEFORGE_API_KEY || secrets.PRIME_FORGE_API_KEY }}
-          SMARTLEAD_API_KEY: ${{ secrets.SMARTLEAD_API_KEY }}
-        run: |
-          [ -n "$SMARTLEAD_API_KEY" ] && echo "Smartlead configured" || echo "Smartlead not configured"
-          [ -n "$PRIMEFORGE_API_KEY" ] && echo "Primeforge advisory configured" || echo "Primeforge not configured"
-
-      - name: Probe Hostinger control plane without rebooting production
+      - name: Probe Hostinger VM and control plane
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
         run: |
           set -euo pipefail
-
           AUTH="$HOSTINGER_API_KEY"
-          case "$AUTH" in
-            Bearer\ *) ;;
-            *) AUTH="Bearer $AUTH" ;;
-          esac
+          case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
+          VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
 
-          VM_BASE='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
-          DOCKER_URL="$VM_BASE/docker"
-
-          VM_CODE=$(curl --silent --show-error \
-            --connect-timeout 8 \
-            --max-time 30 \
-            -H "Authorization: $AUTH" \
-            -H 'Accept: application/json' \
-            -o /tmp/hostinger-vm.json \
-            -w '%{http_code}' \
-            "$VM_BASE" || true)
-          VM_STATE=$(jq -r '.state // "unknown"' /tmp/hostinger-vm.json 2>/dev/null || echo unknown)
-          echo "Hostinger VM preflight: HTTP ${VM_CODE:-000}, state=${VM_STATE}"
-
-          [ "$VM_CODE" = "200" ] && [ "$VM_STATE" = "running" ] || {
-            echo "::error::Hostinger VPS is not confirmed running. Refusing automatic mutation or reboot."
+          VCODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+            -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/hostinger-vm.json -w '%{http_code}' "$VM" || true)
+          VSTATE=$(jq -r '.state // "unknown"' /tmp/hostinger-vm.json 2>/dev/null || echo unknown)
+          echo "Hostinger VM: HTTP ${VCODE:-000}, state=${VSTATE}"
+          [ "$VCODE" = "200" ] && [ "$VSTATE" = "running" ] || {
+            echo "::error::Hostinger VPS is not confirmed running; refusing deployment mutation."
             exit 1
           }
 
-          DOCKER_CODE=$(curl --silent --show-error \
-            --connect-timeout 8 \
-            --max-time 30 \
-            -H "Authorization: $AUTH" \
-            -H 'Accept: application/json' \
-            -o /tmp/hostinger-docker.json \
-            -w '%{http_code}' \
-            "$DOCKER_URL" || true)
-          echo "Hostinger Docker Manager probe: HTTP ${DOCKER_CODE:-000}"
-
-          if [ "$DOCKER_CODE" != "200" ]; then
-            echo "::warning::Hostinger Docker inventory API is degraded. The VPS will NOT be rebooted. Deployment will still be attempted and public health will decide success."
+          DCODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+            -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/hostinger-docker.json -w '%{http_code}' "$VM/docker" || true)
+          echo "Docker Manager inventory: HTTP ${DCODE:-000}"
+          if [ "$DCODE" != "200" ]; then
             jq '{message,correlation_id}' /tmp/hostinger-docker.json 2>/dev/null || true
-          else
-            echo "Hostinger Docker inventory API is healthy."
+            echo "::warning::Docker inventory is degraded. No reboot or delete will be attempted; the deploy action and exact public build gate remain authoritative."
           fi
 
-      - name: Deploy CPU-light SDR stack
-        uses: hostinger/deploy-on-vps@v2
-        with:
-          api-key: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
-          virtual-machine: "1604210"
-          project-name: sdr-project
-          docker-compose-path: docker-compose.light.yml
-          environment-variables: |
-            SDR_BUILD_REF=${{ env.DEPLOY_SHA }}
-            CAREER_GENERATION=v3
-            DISABLE_AUTH=true
-            SDR_ADMIN_PASSWORD=${{ secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
-            DASHBOARD_PASSWORD=${{ secrets.DASHBOARD_PASSWORD || secrets.SDR_ADMIN_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
-            SMARTLEAD_AUTOPILOT_ENABLED=true
-            SMARTLEAD_LEGACY_SEND_ENABLED=false
+      - name: Start Hostinger deployment and wait for action
+        id: hostinger_deploy
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+          SDR_ADMIN_PASSWORD: ${{ secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.SDR_ADMIN_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
+        run: |
+          set -euo pipefail
+          AUTH="$HOSTINGER_API_KEY"
+          case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
+          VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
+          CONTENT_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${DEPLOY_SHA}/docker-compose.light.yml"
+
+          ENVIRONMENT=$(cat <<EOF
+          SDR_BUILD_REF=${DEPLOY_SHA}
+          DISABLE_AUTH=true
+          DASHBOARD_ACCESS_MODE=public
+          SDR_ADMIN_PASSWORD=${SDR_ADMIN_PASSWORD}
+          DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD}
+          SMARTLEAD_AUTOPILOT_ENABLED=true
+          SMARTLEAD_LEGACY_SEND_ENABLED=false
+          EOF
+          )
+
+          BODY=$(jq -n \
+            --arg project_name 'sdr-project' \
+            --arg content "$CONTENT_URL" \
+            --arg environment "$ENVIRONMENT" \
+            '{project_name:$project_name,content:$content,environment:$environment}')
+
+          CODE=$(curl --silent --show-error --connect-timeout 10 --max-time 60 \
+            -X POST \
+            -H "Authorization: $AUTH" \
+            -H 'Accept: application/json' \
+            -H 'Content-Type: application/json' \
+            -d "$BODY" \
+            -o /tmp/deploy-action.json \
+            -w '%{http_code}' \
+            "$VM/docker" || true)
+          echo "Hostinger deploy request: HTTP ${CODE:-000}"
+
+          if [ -z "$CODE" ] || [ "$CODE" -lt 200 ] || [ "$CODE" -ge 300 ]; then
+            jq '{message,correlation_id,errors}' /tmp/deploy-action.json 2>/dev/null || cat /tmp/deploy-action.json || true
+            echo "::error::Hostinger rejected the Docker deployment request."
+            exit 1
+          fi
+
+          ACTION_ID=$(jq -r '.id // .action.id // empty' /tmp/deploy-action.json 2>/dev/null || true)
+          INITIAL_STATE=$(jq -r '.state // .action.state // "unknown"' /tmp/deploy-action.json 2>/dev/null || echo unknown)
+          echo "Deploy action id=${ACTION_ID:-none}, initial_state=${INITIAL_STATE}"
+          echo "action_id=$ACTION_ID" >> "$GITHUB_OUTPUT"
+
+          case "$INITIAL_STATE" in
+            failed|error)
+              jq . /tmp/deploy-action.json 2>/dev/null || cat /tmp/deploy-action.json
+              echo "::error::Hostinger deployment action failed immediately."
+              exit 1
+              ;;
+          esac
+
+          if [ -z "$ACTION_ID" ]; then
+            echo "::warning::Hostinger accepted the deploy but returned no action id. Public exact-build verification will decide success."
+            exit 0
+          fi
+
+          ACTION_DONE=false
+          for I in $(seq 1 60); do
+            ACODE=$(curl --silent --show-error --connect-timeout 8 --max-time 25 \
+              -H "Authorization: $AUTH" -H 'Accept: application/json' \
+              -o /tmp/action.json -w '%{http_code}' "$VM/actions/$ACTION_ID" || true)
+            STATE=$(jq -r '.state // "unknown"' /tmp/action.json 2>/dev/null || echo unknown)
+            echo "Deploy action ${I}/60: HTTP=${ACODE:-000}, state=${STATE}"
+
+            case "$STATE" in
+              success|completed)
+                ACTION_DONE=true
+                break
+                ;;
+              failed|error)
+                jq . /tmp/action.json 2>/dev/null || cat /tmp/action.json || true
+                echo "::error::Hostinger deployment action entered ${STATE}."
+                exit 1
+                ;;
+            esac
+            sleep 10
+          done
+
+          if [ "$ACTION_DONE" != "true" ]; then
+            echo "::warning::Hostinger action did not reach a terminal success state in 10 minutes. Continuing only to the exact public build gate; no destructive recovery will run."
+          fi
 
       - name: Verify exact public build, admin gate, and no browser Basic Auth
         run: |
@@ -190,32 +233,25 @@ jobs:
           HOST='sdr.dashboardtalentera.tech'
           READY=false
 
-          for ATTEMPT in $(seq 1 60); do
+          for ATTEMPT in $(seq 1 42); do
             HEALTH_CODE=$(curl --silent --show-error \
-              --connect-timeout 5 \
-              --max-time 12 \
+              --connect-timeout 5 --max-time 12 \
               -H 'Cache-Control: no-cache' \
-              --output /tmp/light-health.json \
-              --write-out '%{http_code}' \
+              -o /tmp/light-health.json -w '%{http_code}' \
               "https://${HOST}/api/health?deploy=${DEPLOY_SHA}&attempt=${ATTEMPT}" || true)
             BUILD_REF=$(jq -r '.buildRef // ""' /tmp/light-health.json 2>/dev/null || true)
-            echo "Production gate ${ATTEMPT}/60: HTTP=${HEALTH_CODE:-000} build=${BUILD_REF:-none}"
+            echo "Production gate ${ATTEMPT}/42: HTTP=${HEALTH_CODE:-000} build=${BUILD_REF:-none}"
 
             if [ "$HEALTH_CODE" = "200" ] && [ "$BUILD_REF" = "$DEPLOY_SHA" ]; then
               ROOT_CODE=$(curl --silent --show-error \
-                --connect-timeout 5 \
-                --max-time 15 \
+                --connect-timeout 5 --max-time 15 \
                 -H 'Cache-Control: no-cache' \
-                -D /tmp/root-headers.txt \
-                -o /tmp/root-body.html \
-                --write-out '%{http_code}' \
+                -D /tmp/root-headers.txt -o /tmp/root-body.html -w '%{http_code}' \
                 "https://${HOST}/" || true)
               ADMIN_CODE=$(curl --silent --show-error \
-                --connect-timeout 5 \
-                --max-time 15 \
+                --connect-timeout 5 --max-time 15 \
                 -H 'Cache-Control: no-cache' \
-                -o /tmp/admin-status.json \
-                --write-out '%{http_code}' \
+                -o /tmp/admin-status.json -w '%{http_code}' \
                 "https://${HOST}/api/sdr-admin" || true)
               ADMIN_CONFIGURED=$(jq -r '.configured // false' /tmp/admin-status.json 2>/dev/null || echo false)
               echo "Dashboard root: HTTP=${ROOT_CODE:-000}; admin API: HTTP=${ADMIN_CODE:-000} configured=${ADMIN_CONFIGURED}"
@@ -228,12 +264,9 @@ jobs:
               fi
             fi
 
-            if [ "$ATTEMPT" = "1" ] || [ "$ATTEMPT" = "15" ] || [ "$ATTEMPT" = "30" ] || [ "$ATTEMPT" = "45" ] || [ "$ATTEMPT" = "60" ]; then
+            if [ "$ATTEMPT" = "1" ] || [ "$ATTEMPT" = "14" ] || [ "$ATTEMPT" = "28" ] || [ "$ATTEMPT" = "42" ]; then
               printf 'Health preview: '
-              head -c 220 /tmp/light-health.json 2>/dev/null | tr '\n' ' ' || true
-              echo
-              printf 'Admin preview: '
-              head -c 220 /tmp/admin-status.json 2>/dev/null | tr '\n' ' ' || true
+              head -c 300 /tmp/light-health.json 2>/dev/null | tr '\n' ' ' || true
               echo
             fi
             sleep 10
@@ -246,7 +279,7 @@ jobs:
 
           echo "Exact production build is healthy, admin gate is configured, and browser Basic Auth is disabled."
 
-      - name: Verify heavy Docker Ollama is not active when inventory is available
+      - name: Verify no heavy Ollama container when inventory is available
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
         run: |
@@ -254,22 +287,17 @@ jobs:
           AUTH="$HOSTINGER_API_KEY"
           case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
           URL='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210/docker/sdr-project/containers'
-          CODE=$(curl --silent --show-error \
-            --connect-timeout 8 \
-            --max-time 30 \
-            -H "Authorization: $AUTH" \
-            -H 'Accept: application/json' \
-            -o /tmp/sdr-containers.json \
-            -w '%{http_code}' \
-            "$URL" || true)
+          CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+            -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/sdr-containers.json -w '%{http_code}' "$URL" || true)
           echo "SDR container inventory: HTTP ${CODE:-000}"
 
           if [ "$CODE" != "200" ]; then
-            echo "::warning::Container inventory unavailable; public exact-build verification already passed."
+            echo "::warning::Container inventory unavailable; exact public build verification already passed."
             exit 0
           fi
 
-          jq -r '.[] | "CONTAINER\t\(.name // "")\timage=\(.image // "")\tstate=\(.state // "")\thealth=\(.health // "")"' /tmp/sdr-containers.json
+          jq -r '.[] | "CONTAINER\t\(.name // "")\timage=\(.image // "")\tstate=\(.state // "")\thealth=\(.health // "")\tcpu=\(.stats.cpu_percentage // 0)%"' /tmp/sdr-containers.json
           if jq -e '.[] | select(((.image // "") | ascii_downcase | contains("ollama/ollama")))' /tmp/sdr-containers.json >/dev/null; then
             echo "::error::A heavy ollama/ollama container is active in sdr-project."
             exit 1
@@ -285,28 +313,33 @@ jobs:
           set -u
           AUTH="$HOSTINGER_API_KEY"
           case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
-          BASE='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210/docker'
+          VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
 
+          echo '=== RECENT HOSTINGER ACTIONS ==='
+          ACODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+            -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/failure-actions.json -w '%{http_code}' "$VM/actions?page=1" || true)
+          echo "Actions after failure: HTTP ${ACODE:-000}"
+          [ "$ACODE" = "200" ] && jq -r '.data[]? | [.id,.name,.state,.created_at,.updated_at] | @tsv' /tmp/failure-actions.json | head -20 || cat /tmp/failure-actions.json 2>/dev/null || true
+
+          echo '=== DOCKER MANAGER ==='
           CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
             -H "Authorization: $AUTH" -H 'Accept: application/json' \
-            -o /tmp/failure-projects.json -w '%{http_code}' "$BASE" || true)
+            -o /tmp/failure-projects.json -w '%{http_code}' "$VM/docker" || true)
           echo "Docker Manager after failure: HTTP ${CODE:-000}"
-          if [ "$CODE" != "200" ]; then
-            jq '{message,correlation_id}' /tmp/failure-projects.json 2>/dev/null || true
-          fi
+          [ "$CODE" = "200" ] || jq '{message,correlation_id}' /tmp/failure-projects.json 2>/dev/null || true
+
+          PCODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+            -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/failure-project.json -w '%{http_code}' "$VM/docker/sdr-project" || true)
+          echo "sdr-project details after failure: HTTP ${PCODE:-000}"
+          [ "$PCODE" = "200" ] && jq '{name,state,status,file_path}' /tmp/failure-project.json 2>/dev/null || true
 
           HEALTH_CODE=$(curl --silent --show-error --connect-timeout 5 --max-time 12 \
             -H 'Cache-Control: no-cache' -o /tmp/failure-health.json -w '%{http_code}' \
             'https://sdr.dashboardtalentera.tech/api/health?failure_diagnostic=1' || true)
           echo "Public health after failure: HTTP ${HEALTH_CODE:-000}"
           head -c 500 /tmp/failure-health.json 2>/dev/null || true
-          echo
-
-          ADMIN_CODE=$(curl --silent --show-error --connect-timeout 5 --max-time 12 \
-            -H 'Cache-Control: no-cache' -o /tmp/failure-admin.json -w '%{http_code}' \
-            'https://sdr.dashboardtalentera.tech/api/sdr-admin?failure_diagnostic=1' || true)
-          echo "Admin status after failure: HTTP ${ADMIN_CODE:-000}"
-          head -c 300 /tmp/failure-admin.json 2>/dev/null || true
           echo
 
       - name: Mark deployment successful
