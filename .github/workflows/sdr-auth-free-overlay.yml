@@ -15,12 +15,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Deploy auth-free overlay from raw compose
+      - name: Deploy auth-free overlay with app admin gate
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+          SDR_ADMIN_PASSWORD: ${{ secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$HOSTINGER_API_KEY"
+          test -n "$SDR_ADMIN_PASSWORD" || {
+            echo "::error::Configure SDR_ADMIN_PASSWORD, DASHBOARD_PASSWORD, or ACQUISITION_OWNER_TOKEN."
+            exit 1
+          }
+
           AUTH="$HOSTINGER_API_KEY"
           case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
 
@@ -39,7 +45,8 @@ jobs:
                 CAREER_GENERATION: v3
                 DISABLE_AUTH: "true"
                 DASHBOARD_USERNAME: ""
-                DASHBOARD_PASSWORD: ""
+                SDR_ADMIN_PASSWORD: __SDR_ADMIN_PASSWORD__
+                DASHBOARD_PASSWORD: __SDR_ADMIN_PASSWORD__
                 SDR_RUNTIME_ENV_FILE: /run/sdr-env/.env
                 DASHBOARD_CACHE_API_URL: http://dashboard-cache-api:8000
                 DASHBOARD_CACHE_READ_TIMEOUT_MS: "700"
@@ -94,6 +101,17 @@ jobs:
           YAML
           )
 
+          export COMPOSE SDR_ADMIN_PASSWORD
+          COMPOSE=$(python - <<'PY'
+          import json
+          import os
+
+          compose = os.environ["COMPOSE"]
+          secret = os.environ["SDR_ADMIN_PASSWORD"]
+          print(compose.replace("__SDR_ADMIN_PASSWORD__", json.dumps(secret)))
+          PY
+          )
+
           BODY=$(jq -n --arg project_name 'sdr-auth-hotfix' --arg content "$COMPOSE" \
             '{project_name:$project_name,content:$content}')
 
@@ -118,7 +136,7 @@ jobs:
             done
           fi
 
-      - name: Verify public dashboard has no Basic Auth
+      - name: Verify public dashboard is auth-free but admin is configured
         run: |
           set -euo pipefail
           HOST='sdr.dashboardtalentera.tech'
@@ -132,14 +150,23 @@ jobs:
               -H 'Cache-Control: no-cache' -D /tmp/root.headers -o /tmp/root.html -w '%{http_code}' \
               "https://${HOST}/" || true)
             AUTH_HEADER=$(grep -i '^WWW-Authenticate:' /tmp/root.headers 2>/dev/null || true)
-            echo "Check $I/40: health=$HCODE build=${BUILD:-none} root=$RCODE auth_header=${AUTH_HEADER:-none}"
+
+            ACODE=$(curl --silent --show-error --connect-timeout 5 --max-time 12 \
+              -H 'Cache-Control: no-cache' -o /tmp/admin.json -w '%{http_code}' \
+              "https://${HOST}/api/sdr-admin" || true)
+            ADMIN_CONFIGURED=$(jq -r '.configured // false' /tmp/admin.json 2>/dev/null || echo false)
+
+            echo "Check $I/40: health=$HCODE build=${BUILD:-none} root=$RCODE auth_header=${AUTH_HEADER:-none} admin=$ACODE configured=$ADMIN_CONFIGURED"
 
             if [ "$HCODE" = "200" ] && [ "$BUILD" = "auth-free-overlay" ] && \
-               [ "$RCODE" != "401" ] && [ "$RCODE" != "000" ] && [ -z "$AUTH_HEADER" ]; then
-              echo "Auth-free SDR overlay is live."
+               [ "$RCODE" != "401" ] && [ "$RCODE" != "000" ] && [ -z "$AUTH_HEADER" ] && \
+               [ "$ACODE" = "200" ] && [ "$ADMIN_CONFIGURED" = "true" ]; then
+              echo "Auth-free SDR overlay is live and the app admin gate is configured."
               exit 0
             fi
             sleep 5
           done
-          echo "::error::Auth-free overlay did not become the public route."
+          echo "::error::Auth-free overlay did not become healthy with the SDR admin gate configured."
+          echo "Last admin response:"
+          cat /tmp/admin.json 2>/dev/null || true
           exit 1
