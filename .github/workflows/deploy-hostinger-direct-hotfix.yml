@@ -1,0 +1,85 @@
+name: Direct Hostinger Hotfix Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/deploy-hostinger-direct-hotfix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    concurrency:
+      group: hostinger-sdr-production
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v5
+
+      - name: Validate CPU-light compose
+        run: docker compose -f docker-compose.light.yml config >/tmp/sdr-light-compose.txt
+
+      - name: Deploy without rebooting production VPS
+        uses: hostinger/deploy-on-vps@v2
+        with:
+          api-key: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+          virtual-machine: "1604210"
+          project-name: sdr-project
+          docker-compose-path: docker-compose.light.yml
+          environment-variables: |
+            SDR_BUILD_REF=${{ github.sha }}
+            CAREER_GENERATION=v3
+            DISABLE_AUTH=true
+            SMARTLEAD_AUTOPILOT_ENABLED=true
+            SMARTLEAD_LEGACY_SEND_ENABLED=false
+
+      - name: Verify exact public build without Basic Auth
+        run: |
+          set -euo pipefail
+          HOST='sdr.dashboardtalentera.tech'
+          EXPECTED='${{ github.sha }}'
+          READY=false
+
+          for ATTEMPT in $(seq 1 60); do
+            HEALTH_CODE=$(curl --silent --show-error \
+              --connect-timeout 5 \
+              --max-time 12 \
+              -H 'Cache-Control: no-cache' \
+              --output /tmp/health.json \
+              --write-out '%{http_code}' \
+              "https://${HOST}/api/health?direct_hotfix=${EXPECTED}&attempt=${ATTEMPT}" || true)
+            BUILD_REF=$(jq -r '.buildRef // ""' /tmp/health.json 2>/dev/null || true)
+            echo "Health ${ATTEMPT}/60: HTTP=${HEALTH_CODE:-000} build=${BUILD_REF:-none}"
+
+            if [ "$HEALTH_CODE" = "200" ] && [ "$BUILD_REF" = "$EXPECTED" ]; then
+              ROOT_CODE=$(curl --silent --show-error \
+                --connect-timeout 5 \
+                --max-time 15 \
+                -H 'Cache-Control: no-cache' \
+                --output /tmp/root.html \
+                --write-out '%{http_code}' \
+                "https://${HOST}/" || true)
+              echo "Public dashboard root: HTTP=${ROOT_CODE:-000}"
+              if [ "$ROOT_CODE" != "401" ] && [ "$ROOT_CODE" != "000" ]; then
+                READY=true
+                break
+              fi
+            fi
+
+            sleep 10
+          done
+
+          if [ "$READY" != "true" ]; then
+            echo "::error::Exact public hotfix build did not become reachable without Basic Auth."
+            echo "Last health response:"
+            head -c 500 /tmp/health.json 2>/dev/null || true
+            echo
+            exit 1
+          fi
+
+          echo "Direct hotfix verified: exact build is public and browser Basic Auth is gone."
