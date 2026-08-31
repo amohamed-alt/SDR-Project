@@ -1,0 +1,74 @@
+name: Hostinger Emergency Reboot
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/hostinger-emergency-reboot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reboot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Reboot Hostinger VPS and wait for recovery
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$HOSTINGER_API_KEY" || { echo "::error::Hostinger token missing"; exit 1; }
+          AUTH="$HOSTINGER_API_KEY"
+          case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
+
+          VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
+
+          echo "Requesting emergency VPS reboot..."
+          CODE=$(curl --silent --show-error --connect-timeout 10 --max-time 45 \
+            -X POST -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/restart.json -w '%{http_code}' "$VM/restart" || true)
+          echo "Restart request: HTTP ${CODE:-000}"
+          cat /tmp/restart.json 2>/dev/null || true
+          echo
+
+          if [ "$CODE" != "200" ] && [ "$CODE" != "201" ] && [ "$CODE" != "202" ]; then
+            echo "::error::Hostinger rejected the reboot request."
+            exit 1
+          fi
+
+          ACTION_ID=$(jq -r '.id // .action.id // empty' /tmp/restart.json 2>/dev/null || true)
+          if [ -n "$ACTION_ID" ]; then
+            echo "Restart action id: $ACTION_ID"
+            for I in $(seq 1 24); do
+              ACODE=$(curl --silent --show-error --connect-timeout 8 --max-time 25 \
+                -H "Authorization: $AUTH" -H 'Accept: application/json' \
+                -o /tmp/action.json -w '%{http_code}' "$VM/actions/$ACTION_ID" || true)
+              STATE=$(jq -r '.state // "unknown"' /tmp/action.json 2>/dev/null || echo unknown)
+              echo "Action $I/24: HTTP ${ACODE:-000}, state=$STATE"
+              case "$STATE" in
+                success|completed) break ;;
+                failed|error) cat /tmp/action.json; exit 1 ;;
+              esac
+              sleep 10
+            done
+          fi
+
+          echo "Waiting for VM to return running..."
+          for I in $(seq 1 30); do
+            VCODE=$(curl --silent --show-error --connect-timeout 8 --max-time 25 \
+              -H "Authorization: $AUTH" -H 'Accept: application/json' \
+              -o /tmp/vm.json -w '%{http_code}' "$VM" || true)
+            STATE=$(jq -r '.state // "unknown"' /tmp/vm.json 2>/dev/null || echo unknown)
+            echo "VM check $I/30: HTTP ${VCODE:-000}, state=$STATE"
+            if [ "$VCODE" = "200" ] && [ "$STATE" = "running" ]; then
+              echo "VM is running again."
+              exit 0
+            fi
+            sleep 10
+          done
+
+          echo "::error::VM did not return to running state in time."
+          exit 1
