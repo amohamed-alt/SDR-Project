@@ -1,0 +1,73 @@
+name: Hostinger CPU Diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/hostinger-cpu-diagnostic.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect Hostinger Docker CPU usage
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$HOSTINGER_API_KEY"
+          AUTH="$HOSTINGER_API_KEY"
+          case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
+          VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
+
+          CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+            -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/projects.json -w '%{http_code}' "$VM/docker" || true)
+          echo "Docker Manager project list: HTTP ${CODE:-000}"
+          cat /tmp/projects.json || true
+          echo
+
+          if [ "$CODE" != "200" ]; then
+            echo "::error::Hostinger Docker Manager inventory is unavailable."
+            exit 1
+          fi
+
+          echo "=== PROJECTS ==="
+          jq -r '.[] | [.name, .state, .status] | @tsv' /tmp/projects.json
+
+          echo "=== CONTAINER CPU SNAPSHOT ==="
+          printf '%-28s %-36s %-34s %10s %10s\n' PROJECT CONTAINER IMAGE CPU_PCT MEM_PCT
+          while IFS= read -r PROJECT; do
+            [ -n "$PROJECT" ] || continue
+            PCODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+              -H "Authorization: $AUTH" -H 'Accept: application/json' \
+              -o /tmp/containers.json -w '%{http_code}' "$VM/docker/$PROJECT/containers" || true)
+            echo "Project $PROJECT containers: HTTP ${PCODE:-000}" >&2
+            if [ "$PCODE" = "200" ]; then
+              jq -r --arg p "$PROJECT" '.[] | [$p, .name, .image, (.stats.cpu_percentage // 0), (.stats.memory_percentage // 0)] | @tsv' /tmp/containers.json \
+                | sort -t $'\t' -k4,4nr
+            fi
+          done < <(jq -r '.[].name' /tmp/projects.json)
+
+          echo "=== HIGH CPU / OLLAMA / CALIBRATION MATCHES ==="
+          FOUND=0
+          while IFS= read -r PROJECT; do
+            [ -n "$PROJECT" ] || continue
+            PCODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+              -H "Authorization: $AUTH" -H 'Accept: application/json' \
+              -o /tmp/containers.json -w '%{http_code}' "$VM/docker/$PROJECT/containers" || true)
+            [ "$PCODE" = "200" ] || continue
+            MATCHES=$(jq -r --arg p "$PROJECT" '.[] | select((.stats.cpu_percentage // 0) >= 20 or (.image|ascii_downcase|contains("ollama")) or (.name|ascii_downcase|contains("ollama")) or (.command|ascii_downcase|contains("horseshoe")) or (.command|ascii_downcase|contains("calibration"))) | [$p,.id,.name,.image,.command,(.stats.cpu_percentage // 0),(.stats.memory_percentage // 0)] | @tsv' /tmp/containers.json || true)
+            if [ -n "$MATCHES" ]; then
+              FOUND=1
+              echo "$MATCHES"
+            fi
+          done < <(jq -r '.[].name' /tmp/projects.json)
+          if [ "$FOUND" = "0" ]; then
+            echo "No Docker container matched >=20% CPU, Ollama, horseshoe, or calibration. Host-level processes may be responsible."
+          fi
