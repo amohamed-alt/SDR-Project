@@ -15,7 +15,7 @@ function safeEqual(left: string, right: string) {
 }
 
 export function sdrAdminSecret() {
-  return clean(process.env.SDR_ADMIN_PASSWORD || process.env.DASHBOARD_PASSWORD, 500);
+  return clean(process.env.DASHBOARD_PASSWORD || process.env.SDR_ADMIN_PASSWORD, 500);
 }
 
 export function sdrAdminConfigured() {
