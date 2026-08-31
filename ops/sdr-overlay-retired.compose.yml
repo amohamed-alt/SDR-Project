@@ -1,0 +1,7 @@
+name: sdr-auth-hotfix
+
+services:
+  retired:
+    image: alpine:3.21
+    restart: "no"
+    command: ["/bin/sh", "-c", "echo 'Temporary SDR overlay retired'; exit 0"]
