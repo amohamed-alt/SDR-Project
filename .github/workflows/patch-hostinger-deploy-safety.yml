@@ -23,8 +23,12 @@ jobs:
           fetch-depth: 0
 
       - name: Remove automatic VPS reboot from production deploy
+        env:
+          SAFE_STEP_B64: "ICAgICAgLSBuYW1lOiBQcm9iZSBIb3N0aW5nZXIgY29udHJvbCBwbGFuZSB3aXRob3V0IHJlYm9vdGluZyBwcm9kdWN0aW9uCiAgICAgICAgZW52OgogICAgICAgICAgSE9TVElOR0VSX0FQSV9LRVk6ICR7eyBzZWNyZXRzLkhPU1RJTkdFUl9BUElfS0VZIHx8IHNlY3JldHMuSE9TVElOR0VSX0FQSV9UT0tFTiB9fQogICAgICAgIHJ1bjogfAogICAgICAgICAgc2V0IC1ldW8gcGlwZWZhaWwKCiAgICAgICAgICBBVVRIPSIkSE9TVElOR0VSX0FQSV9LRVkiCiAgICAgICAgICBjYXNlICIkQVVUSCIgaW4KICAgICAgICAgICAgQmVhcmVyXCAqKSA7OwogICAgICAgICAgICAqKSBBVVRIPSJCZWFyZXIgJEFVVEgiIDs7CiAgICAgICAgICBlc2FjCgogICAgICAgICAgVk1fQkFTRT0naHR0cHM6Ly9kZXZlbG9wZXJzLmhvc3Rpbmdlci5jb20vYXBpL3Zwcy92MS92aXJ0dWFsLW1hY2hpbmVzLzE2MDQyMTAnCiAgICAgICAgICBET0NLRVJfVVJMPSIkVk1fQkFTRS9kb2NrZXIiCgogICAgICAgICAgVk1fQ09ERT0kKGN1cmwgLS1zaWxlbnQgLS1zaG93LWVycm9yIFwKICAgICAgICAgICAgLS1jb25uZWN0LXRpbWVvdXQgOCBcCiAgICAgICAgICAgIC0tbWF4LXRpbWUgMzAgXAogICAgICAgICAgICAtSCAiQXV0aG9yaXphdGlvbjogJEFVVEgiIFwKICAgICAgICAgICAgLUggJ0FjY2VwdDogYXBwbGljYXRpb24vanNvbicgXAogICAgICAgICAgICAtbyAvdG1wL2hvc3Rpbmdlci12bS5qc29uIFwKICAgICAgICAgICAgLXcgJyV7aHR0cF9jb2RlfScgXAogICAgICAgICAgICAiJFZNX0JBU0UiIHx8IHRydWUpCiAgICAgICAgICBWTV9TVEFURT0kKGpxIC1yICcuc3RhdGUgLy8gInVua25vd24iJyAvdG1wL2hvc3Rpbmdlci12bS5qc29uIDI+L2Rldi9udWxsIHx8IGVjaG8gdW5rbm93bikKICAgICAgICAgIGVjaG8gIkhvc3RpbmdlciBWTSBwcmVmbGlnaHQ6IEhUVFAgJHtWTV9DT0RFOi0wMDB9LCBzdGF0ZT0ke1ZNX1NUQVRFfSIKICAgICAgICAgIFsgIiRWTV9DT0RFIiA9ICIyMDAiIF0gJiYgWyAiJFZNX1NUQVRFIiA9ICJydW5uaW5nIiBdIHx8IHsKICAgICAgICAgICAgZWNobyAiOjplcnJvcjo6SG9zdGluZ2VyIFZQUyBpcyBub3QgY29uZmlybWVkIHJ1bm5pbmc7IHJlZnVzaW5nIHRvIG11dGF0ZSBvciByZWJvb3QgaXQgYXV0b21hdGljYWxseS4iCiAgICAgICAgICAgIGV4aXQgMQogICAgICAgICAgfQoKICAgICAgICAgIERPQ0tFUl9DT0RFPSQoY3VybCAtLXNpbGVudCAtLXNob3ctZXJyb3IgXAogICAgICAgICAgICAtLWNvbm5lY3QtdGltZW91dCA4IFwKICAgICAgICAgICAgLS1tYXgtdGltZSAzMCBcCiAgICAgICAgICAgIC1IICJBdXRob3JpemF0aW9uOiAkQVVUSCIgXAogICAgICAgICAgICAtSCAnQWNjZXB0OiBhcHBsaWNhdGlvbi9qc29uJyBcCiAgICAgICAgICAgIC1vIC90bXAvaG9zdGluZ2VyLWRvY2tlci5qc29uIFwKICAgICAgICAgICAgLXcgJyV7aHR0cF9jb2RlfScgXAogICAgICAgICAgICAiJERPQ0tFUl9VUkwiIHx8IHRydWUpCiAgICAgICAgICBlY2hvICJIb3N0aW5nZXIgRG9ja2VyIE1hbmFnZXIgcHJvYmU6IEhUVFAgJHtET0NLRVJfQ09ERTotMDAwfSIKCiAgICAgICAgICBpZiBbICIkRE9DS0VSX0NPREUiICE9ICIyMDAiIF07IHRoZW4KICAgICAgICAgICAgZWNobyAiOjp3YXJuaW5nOjpIb3N0aW5nZXIgRG9ja2VyIGludmVudG9yeSBBUEkgaXMgZGVncmFkZWQuIFByb2R1Y3Rpb24gd2lsbCBOT1QgYmUgcmVib290ZWQ7IHRoZSBkZXBsb3kgYWN0aW9uIHdpbGwgYmUgYXR0ZW1wdGVkIGFuZCB0aGUgcHVibGljIGV4YWN0LWJ1aWxkIGhlYWx0aCBnYXRlIHdpbGwgZGVjaWRlIHN1Y2Nlc3MuIgogICAgICAgICAgICBqcSAne21lc3NhZ2UsY29ycmVsYXRpb25faWR9JyAvdG1wL2hvc3Rpbmdlci1kb2NrZXIuanNvbiAyPi9kZXYvbnVsbCB8fCB0cnVlCiAgICAgICAgICBlbHNlCiAgICAgICAgICAgIGVjaG8gIkhvc3RpbmdlciBEb2NrZXIgY29udHJvbCBwbGFuZSBpbnZlbnRvcnkgaXMgaGVhbHRoeS4iCiAgICAgICAgICBmaQoK"
         run: |
           python - <<'PY'
+          import base64
+          import os
           from pathlib import Path
 
           path = Path('.github/workflows/deploy-hostinger.yml')
@@ -33,54 +37,7 @@ jobs:
           end_marker = '      - name: Deploy CPU-light SDR stack\n'
           start = text.index(start_marker)
           end = text.index(end_marker, start)
-          replacement = '''      - name: Probe Hostinger control plane without rebooting production
-        env:
-          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
-        run: |
-          set -euo pipefail
-
-          AUTH="$HOSTINGER_API_KEY"
-          case "$AUTH" in
-            Bearer\\ *) ;;
-            *) AUTH="Bearer $AUTH" ;;
-          esac
-
-          VM_BASE='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
-          DOCKER_URL="$VM_BASE/docker"
-
-          VM_CODE=$(curl --silent --show-error \\
-            --connect-timeout 8 \\
-            --max-time 30 \\
-            -H "Authorization: $AUTH" \\
-            -H 'Accept: application/json' \\
-            -o /tmp/hostinger-vm.json \\
-            -w '%{http_code}' \\
-            "$VM_BASE" || true)
-          VM_STATE=$(jq -r '.state // "unknown"' /tmp/hostinger-vm.json 2>/dev/null || echo unknown)
-          echo "Hostinger VM preflight: HTTP ${VM_CODE:-000}, state=${VM_STATE}"
-          [ "$VM_CODE" = "200" ] && [ "$VM_STATE" = "running" ] || {
-            echo "::error::Hostinger VPS is not confirmed running; refusing to mutate or reboot it automatically."
-            exit 1
-          }
-
-          DOCKER_CODE=$(curl --silent --show-error \\
-            --connect-timeout 8 \\
-            --max-time 30 \\
-            -H "Authorization: $AUTH" \\
-            -H 'Accept: application/json' \\
-            -o /tmp/hostinger-docker.json \\
-            -w '%{http_code}' \\
-            "$DOCKER_URL" || true)
-          echo "Hostinger Docker Manager probe: HTTP ${DOCKER_CODE:-000}"
-
-          if [ "$DOCKER_CODE" != "200" ]; then
-            echo "::warning::Hostinger Docker inventory API is degraded. Production will NOT be rebooted; the deploy action will be attempted and the public exact-build health gate will decide success."
-            jq '{message,correlation_id}' /tmp/hostinger-docker.json 2>/dev/null || true
-          else
-            echo "Hostinger Docker control plane inventory is healthy."
-          fi
-
-'''
+          replacement = base64.b64decode(os.environ['SAFE_STEP_B64']).decode()
           path.write_text(text[:start] + replacement + text[end:])
           PY
 
