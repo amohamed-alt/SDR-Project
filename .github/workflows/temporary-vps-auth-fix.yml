@@ -23,16 +23,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          COMMENT="chatgpt-temp-${GITHUB_RUN_ID}"
-          ssh-keygen -q -t ed25519 -N '' -C "$COMMENT" -f /tmp/chatgpt-vps-key
+          ssh-keygen -q -t ed25519 -N '' -C "chatgpt-temp-${GITHUB_RUN_ID}" -f /tmp/chatgpt-vps-key
           chmod 600 /tmp/chatgpt-vps-key
-          PUB=$(cat /tmp/chatgpt-vps-key.pub)
-          KEY_B64=$(awk '{print $2}' /tmp/chatgpt-vps-key.pub)
-          echo "comment=$COMMENT" >> "$GITHUB_OUTPUT"
-          echo "key_b64=$KEY_B64" >> "$GITHUB_OUTPUT"
-          printf '%s' "$PUB" > /tmp/chatgpt-vps-key.pub.txt
+          echo "key_b64=$(awk '{print $2}' /tmp/chatgpt-vps-key.pub)" >> "$GITHUB_OUTPUT"
 
-      - name: Register and attach temporary Hostinger public key
+      - name: Register and request temporary key attachment
         id: attach
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
@@ -43,7 +38,7 @@ jobs:
           AUTH="$HOSTINGER_API_KEY"
           case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
           BASE='https://developers.hostinger.com/api/vps/v1'
-          PUB=$(cat /tmp/chatgpt-vps-key.pub.txt)
+          PUB=$(cat /tmp/chatgpt-vps-key.pub)
           NAME="chatgpt-temp-${GITHUB_RUN_ID}"
 
           CREATE_CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
@@ -52,7 +47,6 @@ jobs:
             -o /tmp/key-create.json -w '%{http_code}' "$BASE/public-keys" || true)
           echo "Create temporary key: HTTP ${CREATE_CODE:-000}"
           [ "$CREATE_CODE" -ge 200 ] && [ "$CREATE_CODE" -lt 300 ]
-
           KEY_ID=$(jq -r '.id // empty' /tmp/key-create.json)
           test -n "$KEY_ID"
           echo "key_id=$KEY_ID" >> "$GITHUB_OUTPUT"
@@ -61,33 +55,19 @@ jobs:
             -X POST -H "Authorization: $AUTH" -H 'Content-Type: application/json' \
             -d "$(jq -n --argjson id "$KEY_ID" '{ids:[$id]}')" \
             -o /tmp/key-attach.json -w '%{http_code}' "$BASE/public-keys/attach/$VM_ID" || true)
-          echo "Attach temporary key: HTTP ${ATTACH_CODE:-000}"
+          echo "Attach request: HTTP ${ATTACH_CODE:-000}"
           cat /tmp/key-attach.json
           [ "$ATTACH_CODE" -ge 200 ] && [ "$ATTACH_CODE" -lt 300 ]
 
-          ACTION_ID=$(jq -r '.id // empty' /tmp/key-attach.json)
-          if [ -n "$ACTION_ID" ]; then
-            READY=false
-            for I in $(seq 1 60); do
-              CODE=$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
-                -H "Authorization: $AUTH" -H 'Accept: application/json' \
-                -o /tmp/key-action.json -w '%{http_code}' \
-                "$BASE/virtual-machines/$VM_ID/actions/$ACTION_ID" || true)
-              STATE=$(jq -r '.state // "unknown"' /tmp/key-action.json 2>/dev/null || echo unknown)
-              echo "Attach action $I/60: HTTP=${CODE:-000} state=$STATE"
-              if [ "$CODE" = "200" ] && [ "$STATE" = "success" ]; then READY=true; break; fi
-              if [ "$CODE" = "200" ] && [ "$STATE" = "failed" ]; then cat /tmp/key-action.json; exit 1; fi
-              sleep 5
-            done
-            [ "$READY" = "true" ] || { echo "::error::Temporary SSH key attach did not complete."; exit 1; }
-          fi
+          # Hostinger currently returns a stale delayed Docker action ID here.
+          # The definitive gate is whether this exact ephemeral key can SSH.
 
-      - name: Wait for SSH
+      - name: Wait for temporary SSH access
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
-          for I in $(seq 1 30); do
+          for I in $(seq 1 90); do
             if ssh -i /tmp/chatgpt-vps-key \
               -o BatchMode=yes \
               -o StrictHostKeyChecking=accept-new \
@@ -96,7 +76,7 @@ jobs:
               cat /tmp/ssh-test.txt
               exit 0
             fi
-            echo "SSH wait $I/30"
+            echo "SSH wait $I/90"
             sleep 5
           done
           cat /tmp/ssh-test.err || true
@@ -127,17 +107,14 @@ jobs:
           trap cleanup_temp_key EXIT
 
           TARGET='sdr-project-sdr-dashboard-1'
-          echo '=== PRECHECK ==='
-          docker inspect "$TARGET" --format 'status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} image={{.Config.Image}}'
+          docker inspect "$TARGET" --format 'before status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} image={{.Config.Image}}'
 
-          echo '=== PATCH PERSISTENT RUNTIME ENV ==='
           STAMP=$(date -u +%Y%m%dT%H%M%SZ)
           docker run --rm -e STAMP="$STAMP" -v sdr_runtime_env:/env alpine:3.21 /bin/sh -c '
             set -eu
             test -s /env/.env
             cp /env/.env "/env/.env.before-auth-fix-$STAMP"
             chmod 600 "/env/.env.before-auth-fix-$STAMP" /env/.env
-
             set_key() {
               key="$1"; value="$2"
               if grep -q "^${key}=" /env/.env; then
@@ -146,16 +123,13 @@ jobs:
                 printf "\n%s=%s\n" "$key" "$value" >> /env/.env
               fi
             }
-
             set_key DISABLE_AUTH true
             set_key DASHBOARD_ACCESS_MODE public
             echo "Runtime auth flags updated; backup=.env.before-auth-fix-$STAMP"
           '
 
-          echo '=== RESTART ONLY SDR DASHBOARD ==='
           docker restart "$TARGET" >/dev/null
 
-          echo '=== WAIT FOR LOCAL HEALTH ==='
           READY=false
           for I in $(seq 1 30); do
             CODE=$(curl -sS --max-time 8 -o /tmp/sdr-health.json -w '%{http_code}' http://127.0.0.1:3010/api/health || true)
@@ -164,29 +138,23 @@ jobs:
             sleep 3
           done
           [ "$READY" = "true" ] || { docker logs --tail 100 "$TARGET"; exit 1; }
-          cat /tmp/sdr-health.json
-          echo
+          cat /tmp/sdr-health.json; echo
 
-          echo '=== VERIFY PROCESS AUTH FLAGS ==='
-          docker exec "$TARGET" /bin/sh -c "tr '\000' '\n' </proc/1/environ | grep -E '^(DISABLE_AUTH|DASHBOARD_ACCESS_MODE)=' || true"
-
-          echo '=== VERIFY LOCAL ROOT HAS NO BASIC AUTH ==='
           LOCAL_CODE=$(curl -sS --max-time 12 -D /tmp/local.headers -o /tmp/local.body -w '%{http_code}' http://127.0.0.1:3010/ || true)
           LOCAL_AUTH=$(grep -i '^WWW-Authenticate:' /tmp/local.headers 2>/dev/null || true)
           echo "local root: HTTP=${LOCAL_CODE:-000} auth_header=${LOCAL_AUTH:-none}"
           [ "$LOCAL_CODE" != "401" ] && [ "$LOCAL_CODE" != "000" ] && [ -z "$LOCAL_AUTH" ]
 
-          echo '=== VERIFY PUBLIC ROOT HAS NO BASIC AUTH ==='
           PUBLIC_CODE=$(curl -ksS --max-time 15 -H 'Cache-Control: no-cache' -D /tmp/public.headers -o /tmp/public.body -w '%{http_code}' https://sdr.dashboardtalentera.tech/ || true)
           PUBLIC_AUTH=$(grep -i '^WWW-Authenticate:' /tmp/public.headers 2>/dev/null || true)
           echo "public root: HTTP=${PUBLIC_CODE:-000} auth_header=${PUBLIC_AUTH:-none}"
           [ "$PUBLIC_CODE" != "401" ] && [ "$PUBLIC_CODE" != "000" ] && [ -z "$PUBLIC_AUTH" ]
 
-          echo '=== DONE ==='
-          echo 'SDR dashboard is public at the dashboard layer; protected write routes remain application-protected.'
+          docker inspect "$TARGET" --format 'after status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} image={{.Config.Image}}'
+          echo 'Auth-free SDR dashboard verified.'
           REMOTE
 
-      - name: Delete temporary public key from Hostinger account
+      - name: Delete temporary key object from Hostinger account
         if: always() && steps.attach.outputs.key_id != ''
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
@@ -200,5 +168,5 @@ jobs:
             -X DELETE -H "Authorization: $AUTH" -H 'Accept: application/json' \
             -o /tmp/key-delete.json -w '%{http_code}' \
             "https://developers.hostinger.com/api/vps/v1/public-keys/$KEY_ID" || true)
-          echo "Delete temporary key from Hostinger account: HTTP ${CODE:-000}"
+          echo "Delete temporary key object: HTTP ${CODE:-000}"
           cat /tmp/key-delete.json 2>/dev/null || true
