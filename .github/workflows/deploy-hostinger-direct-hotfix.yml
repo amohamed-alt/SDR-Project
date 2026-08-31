@@ -1,4 +1,4 @@
-# Manual auth-removal redeploy trigger: 2026-08-31
+# Dashboard password redeploy trigger: 2026-08-31 secret refresh
 name: Direct Hostinger Hotfix Deploy
 
 on:
