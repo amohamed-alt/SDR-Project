@@ -1,7 +1,17 @@
 name: sdr-auth-hotfix
 
 services:
-  retired:
+  sdr-dashboard-public:
     image: alpine:3.21
     restart: "no"
-    command: ["/bin/sh", "-c", "echo 'Temporary SDR overlay retired'; exit 0"]
+    mem_limit: "16m"
+    cpus: 0.05
+    pids_limit: 16
+    labels:
+      - "traefik.enable=false"
+    command:
+      - /bin/sh
+      - -c
+      - |
+        echo "Temporary SDR auth overlay retired"
+        exit 0
