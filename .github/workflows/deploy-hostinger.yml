@@ -102,6 +102,16 @@ jobs:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
         run: test -n "$HOSTINGER_API_KEY"
 
+      - name: Validate SDR admin password
+        env:
+          SDR_ADMIN_PASSWORD: ${{ secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
+        run: |
+          test -n "$SDR_ADMIN_PASSWORD" || {
+            echo "::error::Configure SDR_ADMIN_PASSWORD, DASHBOARD_PASSWORD, or ACQUISITION_OWNER_TOKEN."
+            exit 1
+          }
+          echo "SDR admin password is configured"
+
       - name: Report optional integrations
         env:
           PRIMEFORGE_API_KEY: ${{ secrets.PRIMEFORGE_API_KEY || secrets.PRIME_FORGE_API_KEY }}
@@ -169,10 +179,12 @@ jobs:
             SDR_BUILD_REF=${{ env.DEPLOY_SHA }}
             CAREER_GENERATION=v3
             DISABLE_AUTH=true
+            SDR_ADMIN_PASSWORD=${{ secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
+            DASHBOARD_PASSWORD=${{ secrets.DASHBOARD_PASSWORD || secrets.SDR_ADMIN_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
             SMARTLEAD_AUTOPILOT_ENABLED=true
             SMARTLEAD_LEGACY_SEND_ENABLED=false
 
-      - name: Verify exact public build and no browser Basic Auth
+      - name: Verify exact public build, admin gate, and no browser Basic Auth
         run: |
           set -euo pipefail
           HOST='sdr.dashboardtalentera.tech'
@@ -198,9 +210,19 @@ jobs:
                 -o /tmp/root-body.html \
                 --write-out '%{http_code}' \
                 "https://${HOST}/" || true)
-              echo "Dashboard root: HTTP=${ROOT_CODE:-000}"
+              ADMIN_CODE=$(curl --silent --show-error \
+                --connect-timeout 5 \
+                --max-time 15 \
+                -H 'Cache-Control: no-cache' \
+                -o /tmp/admin-status.json \
+                --write-out '%{http_code}' \
+                "https://${HOST}/api/sdr-admin" || true)
+              ADMIN_CONFIGURED=$(jq -r '.configured // false' /tmp/admin-status.json 2>/dev/null || echo false)
+              echo "Dashboard root: HTTP=${ROOT_CODE:-000}; admin API: HTTP=${ADMIN_CODE:-000} configured=${ADMIN_CONFIGURED}"
 
-              if [ "$ROOT_CODE" != "000" ] && [ "$ROOT_CODE" != "401" ] && ! grep -qi '^WWW-Authenticate:' /tmp/root-headers.txt; then
+              if [ "$ROOT_CODE" != "000" ] && [ "$ROOT_CODE" != "401" ] && \
+                 ! grep -qi '^WWW-Authenticate:' /tmp/root-headers.txt && \
+                 [ "$ADMIN_CODE" = "200" ] && [ "$ADMIN_CONFIGURED" = "true" ]; then
                 READY=true
                 break
               fi
@@ -210,16 +232,19 @@ jobs:
               printf 'Health preview: '
               head -c 220 /tmp/light-health.json 2>/dev/null | tr '\n' ' ' || true
               echo
+              printf 'Admin preview: '
+              head -c 220 /tmp/admin-status.json 2>/dev/null | tr '\n' ' ' || true
+              echo
             fi
             sleep 10
           done
 
           if [ "$READY" != "true" ]; then
-            echo "::error::Exact CPU-light build did not become publicly reachable without browser Basic Auth."
+            echo "::error::Exact CPU-light build did not become publicly reachable with the SDR admin gate configured and browser Basic Auth disabled."
             exit 1
           fi
 
-          echo "Exact production build is healthy and browser Basic Auth is disabled."
+          echo "Exact production build is healthy, admin gate is configured, and browser Basic Auth is disabled."
 
       - name: Verify heavy Docker Ollama is not active when inventory is available
         env:
@@ -275,6 +300,13 @@ jobs:
             'https://sdr.dashboardtalentera.tech/api/health?failure_diagnostic=1' || true)
           echo "Public health after failure: HTTP ${HEALTH_CODE:-000}"
           head -c 500 /tmp/failure-health.json 2>/dev/null || true
+          echo
+
+          ADMIN_CODE=$(curl --silent --show-error --connect-timeout 5 --max-time 12 \
+            -H 'Cache-Control: no-cache' -o /tmp/failure-admin.json -w '%{http_code}' \
+            'https://sdr.dashboardtalentera.tech/api/sdr-admin?failure_diagnostic=1' || true)
+          echo "Admin status after failure: HTTP ${ADMIN_CODE:-000}"
+          head -c 300 /tmp/failure-admin.json 2>/dev/null || true
           echo
 
       - name: Mark deployment successful
