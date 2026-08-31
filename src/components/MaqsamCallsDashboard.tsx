@@ -79,6 +79,12 @@ function normalizeSentiment(value?: string) {
   return "Unknown";
 }
 
+function isCompletedCall(record: MaqsamCallRecord) {
+  const state = String(record.state ?? "").trim().toLowerCase();
+  if (!state) return true;
+  return /complete|completed|answered|connected|finished|ended|done/.test(state);
+}
+
 function statusLabel(status?: MaqsamMatchStatus) {
   if (status === "matched") return "Matched";
   if (status === "ambiguous") return "Ambiguous";
@@ -116,6 +122,7 @@ export function MaqsamCallsDashboard({ onBack }: { onBack: () => void }) {
   const [appliedRange, setAppliedRange] = useState({ from: defaultFrom, to: today });
   const [search, setSearch] = useState("");
   const [matchStatus, setMatchStatus] = useState<"all" | MaqsamMatchStatus>("all");
+  const [callStatus, setCallStatus] = useState<"all" | "completed" | "other">("all");
   const [expandedCallKey, setExpandedCallKey] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -148,6 +155,8 @@ export function MaqsamCallsDashboard({ onBack }: { onBack: () => void }) {
     const calls = data?.calls ?? [];
     const filtered = calls.filter((record) => {
       if (matchStatus !== "all" && record.matchStatus !== matchStatus) return false;
+      if (callStatus === "completed" && !isCompletedCall(record)) return false;
+      if (callStatus === "other" && isCompletedCall(record)) return false;
       if (!search.trim()) return true;
       const term = search.trim().toLowerCase();
       return [
@@ -163,6 +172,8 @@ export function MaqsamCallsDashboard({ onBack }: { onBack: () => void }) {
       ].some((value) => String(value ?? "").toLowerCase().includes(term));
     });
 
+    const completed = calls.filter(isCompletedCall).length;
+    const otherStates = calls.length - completed;
     const matched = calls.filter((record) => record.matchStatus === "matched").length;
     const unmatched = calls.filter((record) => record.matchStatus === "unmatched").length;
     const ambiguous = calls.filter((record) => record.matchStatus === "ambiguous").length;
@@ -172,11 +183,13 @@ export function MaqsamCallsDashboard({ onBack }: { onBack: () => void }) {
       ? calls.reduce((total, record) => total + Number(record.durationSeconds ?? 0), 0) / calls.length
       : 0;
 
-    const dailyMap = new Map<string, { date: string; calls: number; matched: number; unmatched: number }>();
+    const dailyMap = new Map<string, { date: string; calls: number; completed: number; otherStates: number; matched: number; unmatched: number }>();
     for (const record of calls) {
       const date = dayKey(record);
-      const row = dailyMap.get(date) ?? { date, calls: 0, matched: 0, unmatched: 0 };
+      const row = dailyMap.get(date) ?? { date, calls: 0, completed: 0, otherStates: 0, matched: 0, unmatched: 0 };
       row.calls += 1;
+      if (isCompletedCall(record)) row.completed += 1;
+      else row.otherStates += 1;
       if (record.matchStatus === "matched") row.matched += 1;
       else row.unmatched += 1;
       dailyMap.set(date, row);
@@ -191,6 +204,8 @@ export function MaqsamCallsDashboard({ onBack }: { onBack: () => void }) {
     return {
       calls,
       filtered,
+      completed,
+      otherStates,
       matched,
       unmatched,
       ambiguous,
@@ -200,7 +215,7 @@ export function MaqsamCallsDashboard({ onBack }: { onBack: () => void }) {
       daily: [...dailyMap.values()].sort((left, right) => left.date.localeCompare(right.date)),
       sentiments: [...sentimentMap.entries()].map(([name, value]) => ({ name, value })),
     };
-  }, [data, matchStatus, search]);
+  }, [callStatus, data, matchStatus, search]);
 
   const portalId = data?.meta.portalId ?? "145742477";
 
@@ -242,7 +257,8 @@ export function MaqsamCallsDashboard({ onBack }: { onBack: () => void }) {
 
       {data && <>
         <section className={styles.metrics}>
-          <MetricCard label="Calls" value={model.calls.length} helper="Completed calls in range" icon={PhoneCall}/>
+          <MetricCard label="Calls" value={model.calls.length} helper="All Maqsam calls in range" icon={PhoneCall}/>
+          <MetricCard label="Completed calls" value={model.completed} helper={`${model.otherStates} non-completed or open`} icon={CheckCircle2}/>
           <MetricCard label="Matched" value={model.matched} helper="Unique HubSpot contact found" icon={UserRoundCheck}/>
           <MetricCard label="Unmatched" value={model.unmatched} helper="Kept in dashboard only" icon={UserRoundX}/>
           <MetricCard label="Ambiguous" value={model.ambiguous} helper="Multiple equally safe matches" icon={UsersRound}/>
@@ -261,8 +277,8 @@ export function MaqsamCallsDashboard({ onBack }: { onBack: () => void }) {
                 <YAxis allowDecimals={false} tick={{ fontSize: 10 }}/>
                 <Tooltip/>
                 <Legend/>
-                <Bar dataKey="matched" stackId="calls" fill="#087a50" name="Matched"/>
-                <Bar dataKey="unmatched" stackId="calls" fill="#d98d25" name="Unmatched / ambiguous"/>
+                <Bar dataKey="completed" stackId="calls" fill="#087a50" name="Completed calls"/>
+                <Bar dataKey="otherStates" stackId="calls" fill="#d98d25" name="Other states"/>
               </BarChart>
             </ResponsiveContainer> : <div className={styles.empty}>No calls in this date range.</div>}
           </article>
@@ -292,12 +308,17 @@ export function MaqsamCallsDashboard({ onBack }: { onBack: () => void }) {
                 <option value="unmatched">Unmatched</option>
                 <option value="ambiguous">Ambiguous</option>
               </select>
+              <select value={callStatus} onChange={(event) => setCallStatus(event.target.value as "all" | "completed" | "other")}>
+                <option value="all">All call states</option>
+                <option value="completed">Completed calls</option>
+                <option value="other">Other states</option>
+              </select>
             </div>
           </div>
 
           <div className={styles.tableWrap}>
             <table>
-              <thead><tr><th>Call</th><th>Contact</th><th>Direction</th><th>Duration</th><th>Sentiment</th><th>HubSpot match</th><th>Note</th><th/></tr></thead>
+              <thead><tr><th>Call</th><th>Contact</th><th>Direction</th><th>Status</th><th>Duration</th><th>Sentiment</th><th>HubSpot match</th><th>Note</th><th/></tr></thead>
               <tbody>
                 {model.filtered.map((record) => {
                   const expanded = expandedCallKey === record.callKey;
@@ -309,13 +330,14 @@ export function MaqsamCallsDashboard({ onBack }: { onBack: () => void }) {
                       <td><strong>#{record.callId ?? record.referenceId ?? record.callKey}</strong><span>{formatDate(record.noteTimestamp, record.timestamp)}</span><small>{record.agentName || record.agentEmail || "Marita"}</small></td>
                       <td><strong>{record.contactName || "No matched contact"}</strong><span>{record.phone || "—"}</span><small>{record.contactEmail || ""}</small></td>
                       <td><span className={styles.direction}>{record.direction || "Unknown"}</span></td>
+                      <td><span className={styles.noteBadge} data-status={isCompletedCall(record) ? "synced" : "pending"}>{isCompletedCall(record) ? "Completed" : record.state || "Other"}</span></td>
                       <td>{formatDuration(record.durationSeconds)}</td>
                       <td><span className={styles.sentiment} data-sentiment={normalizeSentiment(record.sentiment).toLowerCase()}>{normalizeSentiment(record.sentiment)}</span></td>
                       <td><span className={styles.matchBadge} data-status={record.matchStatus ?? "unmatched"}>{statusLabel(record.matchStatus)}</span></td>
                       <td><span className={styles.noteBadge} data-status={record.hubspotNoteStatus ?? "not_applicable"}>{noteLabel(record.hubspotNoteStatus)}</span></td>
                       <td><button type="button" className={styles.expandButton} aria-label={expanded ? "Collapse call" : "Expand call"}>{expanded ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}</button></td>
                     </tr>
-                    {expanded && <tr className={styles.detailRow}><td colSpan={8}>
+                    {expanded && <tr className={styles.detailRow}><td colSpan={9}>
                       <div className={styles.detailGrid}>
                         <article>
                           <div className={styles.detailHeading}><h3>AI Summary</h3><span>{record.summaryLanguage?.toUpperCase() || "AUTO"}</span></div>
@@ -332,7 +354,7 @@ export function MaqsamCallsDashboard({ onBack }: { onBack: () => void }) {
                     </td></tr>}
                   </Fragment>;
                 })}
-                {!model.filtered.length && <tr><td colSpan={8}><div className={styles.empty}>No calls match the current filters.</div></td></tr>}
+                {!model.filtered.length && <tr><td colSpan={9}><div className={styles.empty}>No calls match the current filters.</div></td></tr>}
               </tbody>
             </table>
           </div>

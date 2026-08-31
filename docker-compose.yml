@@ -176,6 +176,36 @@ services:
       start_period: 45s
       retries: 3
 
+  maqsam-sync:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      sdr-dashboard:
+        condition: service_healthy
+    mem_limit: "256m"
+    cpus: 0.20
+    pids_limit: 96
+    environment:
+      NODE_ENV: production
+      SDR_WORKER: maqsam-sync
+      SDR_RUNTIME_ENV_FILE: /run/sdr-env/.env
+      SDR_DASHBOARD_INTERNAL_URL: http://sdr-dashboard:3000
+      MAQSAM_INGEST_SECRET: ${MAQSAM_INGEST_SECRET:-}
+      MAQSAM_BASIC_AUTH: ${MAQSAM_BASIC_AUTH:-}
+      MAQSAM_ACCESS_KEY: ${MAQSAM_ACCESS_KEY:-}
+      MAQSAM_ACCESS_SECRET: ${MAQSAM_ACCESS_SECRET:-}
+      MAQSAM_TARGET_AGENT_EMAIL: ${MAQSAM_TARGET_AGENT_EMAIL:-m.chedid@bayt.net}
+      MAQSAM_SYNC_INTERVAL_SECONDS: ${MAQSAM_SYNC_INTERVAL_SECONDS:-600}
+      MAQSAM_SYNC_LOOKBACK_SECONDS: ${MAQSAM_SYNC_LOOKBACK_SECONDS:-10800}
+      MAQSAM_SYNC_PAGE_COUNT: ${MAQSAM_SYNC_PAGE_COUNT:-12}
+      HUBSPOT_PRIVATE_APP_TOKEN: ${HUBSPOT_PRIVATE_APP_TOKEN:-}
+    volumes:
+      - sdr_runtime_env:/run/sdr-env:ro
+    networks:
+      - default
+
   dashboard-warmer:
     image: alpine:3.21
     restart: "no"
