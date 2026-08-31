@@ -25,6 +25,16 @@ jobs:
       - name: Validate CPU-light compose
         run: docker compose -f docker-compose.light.yml config >/tmp/sdr-light-compose.txt
 
+      - name: Validate SDR admin password
+        env:
+          SDR_ADMIN_PASSWORD: ${{ secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
+        run: |
+          test -n "$SDR_ADMIN_PASSWORD" || {
+            echo "::error::Configure SDR_ADMIN_PASSWORD, DASHBOARD_PASSWORD, or ACQUISITION_OWNER_TOKEN."
+            exit 1
+          }
+          echo "SDR admin password is configured"
+
       - name: Deploy without rebooting production VPS
         uses: hostinger/deploy-on-vps@v2
         with:
@@ -36,10 +46,12 @@ jobs:
             SDR_BUILD_REF=${{ github.sha }}
             CAREER_GENERATION=v3
             DISABLE_AUTH=true
+            SDR_ADMIN_PASSWORD=${{ secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
+            DASHBOARD_PASSWORD=${{ secrets.DASHBOARD_PASSWORD || secrets.SDR_ADMIN_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
             SMARTLEAD_AUTOPILOT_ENABLED=true
             SMARTLEAD_LEGACY_SEND_ENABLED=false
 
-      - name: Verify exact public build without Basic Auth
+      - name: Verify exact public build, admin gate, and no Basic Auth
         run: |
           set -euo pipefail
           HOST='sdr.dashboardtalentera.tech'
@@ -62,11 +74,22 @@ jobs:
                 --connect-timeout 5 \
                 --max-time 15 \
                 -H 'Cache-Control: no-cache' \
+                -D /tmp/root.headers \
                 --output /tmp/root.html \
                 --write-out '%{http_code}' \
                 "https://${HOST}/" || true)
-              echo "Public dashboard root: HTTP=${ROOT_CODE:-000}"
-              if [ "$ROOT_CODE" != "401" ] && [ "$ROOT_CODE" != "000" ]; then
+              ADMIN_CODE=$(curl --silent --show-error \
+                --connect-timeout 5 \
+                --max-time 15 \
+                -H 'Cache-Control: no-cache' \
+                --output /tmp/admin.json \
+                --write-out '%{http_code}' \
+                "https://${HOST}/api/sdr-admin" || true)
+              ADMIN_CONFIGURED=$(jq -r '.configured // false' /tmp/admin.json 2>/dev/null || echo false)
+              echo "Public dashboard root: HTTP=${ROOT_CODE:-000}; admin API: HTTP=${ADMIN_CODE:-000} configured=${ADMIN_CONFIGURED}"
+              if [ "$ROOT_CODE" != "401" ] && [ "$ROOT_CODE" != "000" ] && \
+                 ! grep -qi '^WWW-Authenticate:' /tmp/root.headers && \
+                 [ "$ADMIN_CODE" = "200" ] && [ "$ADMIN_CONFIGURED" = "true" ]; then
                 READY=true
                 break
               fi
@@ -76,11 +99,14 @@ jobs:
           done
 
           if [ "$READY" != "true" ]; then
-            echo "::error::Exact public hotfix build did not become reachable without Basic Auth."
+            echo "::error::Exact public hotfix build did not become reachable with admin auth configured and browser Basic Auth disabled."
             echo "Last health response:"
             head -c 500 /tmp/health.json 2>/dev/null || true
+            echo
+            echo "Last admin response:"
+            head -c 300 /tmp/admin.json 2>/dev/null || true
             echo
             exit 1
           fi
 
-          echo "Direct hotfix verified: exact build is public and browser Basic Auth is gone."
+          echo "Direct hotfix verified: exact build is public, admin gate is configured, and browser Basic Auth is gone."
