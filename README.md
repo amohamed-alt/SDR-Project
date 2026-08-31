@@ -13,8 +13,7 @@ The project is configured for Talentera's EU1 HubSpot portal and defaults to Mar
 - Deduplicated meetings, outcomes, booking source, creator, and assigned owner
 - Sales email sends, opens, clicks, replies, and reply rate
 - Contact data quality across email, phone, LinkedIn, company association, country, source, ICP, Apollo, SignalHire, and MillionVerifier fields
-- Company country, industry, employee count, ICP context, detected ATS, and ATS confidence
-- ATS Intent Search for public LinkedIn post discovery, commercial-intent scoring, regional filtering, and ATS/vendor mentions without using a LinkedIn login on the VPS
+- Company country, industry, employee count, ICP context, detected ATS, and ATS confidence already stored in HubSpot
 - Deals associated with SDR-owned contacts, stage conversion, open pipeline, and meeting-to-deal conversion
 - In-dashboard searchable drill-down drawers for KPI cards, alerts, funnel stages, chart slices, bars, and daily activity points
 - Safe HubSpot links inside every drill-down result: CRM records open directly, while activities open their associated contact timeline instead of unsupported standalone activity URLs
@@ -93,7 +92,7 @@ Google OAuth requests the least-privilege Calendar scopes needed to create event
 | `MARITA_GOOGLE_EMAIL` | Google account accepted for the default Marita organizer |
 | `ABDULLAH_GOOGLE_EMAIL` | Google account accepted for the Abdullah organizer link |
 | `GOOGLE_TOKEN_STORE_PATH` | Encrypted credential path; defaults to `/app/data/google-calendar.json` |
-| `TAVILY_API_KEY` | Server-only public-web search key used by Career fallback and ATS Intent Search |
+| `TAVILY_API_KEY` | Server-only public-web search key used by bounded prospecting research |
 | `DEMO_MODE` | Use safe synthetic data without calling HubSpot |
 
 ## Quality checks
@@ -105,24 +104,23 @@ npm test
 npm run build
 ```
 
-GitHub Actions runs all three checks on every push and pull request.
+GitHub Actions runs all checks on every push and pull request.
 
 ## Docker deployment on Hostinger
 
 ```bash
-cp docker-compose.example.yml docker-compose.yml
 cp .env.example .env
 # Fill the production values in .env
-docker compose up -d --build
+docker compose -f docker-compose.light.yml up -d --build
+docker compose -f docker-compose.light.yml ps
 curl http://127.0.0.1:3010/api/health
 ```
 
-Put the service behind the existing reverse proxy and TLS. Do not expose port `3010` publicly.
-Keep the `sdr-google-data:/app/data` named volume from `docker-compose.example.yml`; it preserves both encrypted Calendar connections across image rebuilds.
+Put the service behind the existing reverse proxy and TLS. Do not expose port `3010` publicly. The named `sdr_runtime_env`, `sdr_app_data`, `sdr_dashboard_cache`, and `sdr_postgres_data` volumes preserve runtime state across image rebuilds.
 
 ## Scaling path
 
-The current live adapter queries HubSpot and caches results for 15 minutes. This is appropriate for one SDR and hundreds to a few thousand active records. For the full acquisition team or higher refresh frequency:
+The current live adapter queries HubSpot and uses the persistent dashboard cache for repeated reads. For the full acquisition team or higher refresh frequency:
 
 1. Use the existing n8n server to extract changed HubSpot records every 15 minutes.
 2. Materialize contacts, companies, activities, associations, and deals in Postgres.
