@@ -102,10 +102,12 @@ jobs:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
           SDR_ADMIN_PASSWORD: ${{ secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
           DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD || secrets.SDR_ADMIN_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
+          PRIMEFORGE_API_KEY: ${{ secrets.PRIMEFORGE_API_KEY || secrets.PRIME_FORGE_API_KEY }}
         run: |
           test -n "$HOSTINGER_API_KEY" || { echo "::error::Hostinger API token is missing."; exit 1; }
           test -n "$SDR_ADMIN_PASSWORD" || { echo "::error::SDR admin password is missing."; exit 1; }
           test -n "$DASHBOARD_PASSWORD" || { echo "::error::Dashboard password is missing."; exit 1; }
+          [ -n "$PRIMEFORGE_API_KEY" ] && echo "Primeforge advisory configured" || echo "Primeforge advisory not configured"
           echo "Required deployment secrets are configured."
 
       - name: Probe Hostinger VM and control plane
