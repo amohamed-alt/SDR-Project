@@ -6,11 +6,19 @@ export const dynamic = "force-dynamic";
 
 let activeBatch: Promise<Awaited<ReturnType<typeof runMissingCareerBackfillBatch>>> | null = null;
 
+function writesEnabled() {
+  return String(process.env.CAREER_MANUAL_WRITE_ENABLED || "false").toLowerCase() === "true";
+}
+
 export async function GET() {
   try {
     const status = await getMissingCareerBackfillStatus();
     return NextResponse.json(
-      { ...status, activeInProcess: Boolean(activeBatch) },
+      {
+        ...status,
+        activeInProcess: Boolean(activeBatch),
+        writeMode: writesEnabled() ? "enabled" : "manual-verification-required",
+      },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
@@ -22,6 +30,16 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  if (!writesEnabled()) {
+    return NextResponse.json(
+      {
+        error: "Automatic missing Career Page HubSpot writes are disabled. Each company must be manually verified before CRM update.",
+        mode: "manual-verification-required",
+      },
+      { status: 423, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
   if (activeBatch) {
     return NextResponse.json(
       { error: "A missing Career Page backfill batch is already running." },
