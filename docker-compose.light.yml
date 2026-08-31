@@ -124,26 +124,12 @@ services:
       PRIMEFORGE_API_KEY: ${PRIMEFORGE_API_KEY:-}
       MILLIONVERIFIER_API_KEY: ${MILLIONVERIFIER_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_CAREER_MODEL: ${GEMINI_CAREER_MODEL:-gemini-2.5-flash-lite}
-      CAREER_GENERATION: v3
       SDR_RUNTIME_ENV_FILE: /run/sdr-env/.env
       DASHBOARD_CACHE_API_URL: http://dashboard-cache-api:8000
       DASHBOARD_CACHE_READ_TIMEOUT_MS: 700
       DASHBOARD_CACHE_WRITE_TIMEOUT_MS: 2000
       ACQUISITION_SNAPSHOT_PATH: /app/data/acquisition-dashboard.json
       GOOGLE_TOKEN_STORE_PATH: /app/data/google-calendar.json
-      HIRING_SNAPSHOT_PATH: /app/data/hiring-signals.json
-      HIRING_SCAN_LIMIT: 80
-      HIRING_SCAN_CONCURRENCY: 4
-      CAREER_INTELLIGENCE_STORE_PATH: /app/data/career-intelligence-v3.json
-      CAREER_VALIDATION_MARKER_PATH: /app/data/career-validation-v3.done
-      CAREER_VALIDATION_STATE_PATH: /app/data/career-validation-v3.state
-      CAREER_ENGINE_URL: http://gtm-career-browser:3000/intelligence-detect
-      CAREER_ENGINE_TIMEOUT_MS: 120000
-      CAREER_SCAN_LIMIT: 10
-      CAREER_SCAN_CONCURRENCY: 2
-      CAREER_PORTFOLIO_CACHE_MS: 60000
-      CAREER_AUTO_PUSH: ${CAREER_AUTO_PUSH:-true}
       SMARTLEAD_V2_INTELLIGENCE_PATH: /app/data/smartlead-v2-intelligence-v3.json
       SMARTLEAD_INTERNAL_BASE_URL: http://127.0.0.1:3000
       SMARTLEAD_CAMPAIGN_ID: ${SMARTLEAD_CAMPAIGN_ID:-}
@@ -183,94 +169,6 @@ services:
       start_period: 30s
       retries: 5
 
-  gtm-career-browser:
-    build:
-      context: ./services/career-browser
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    init: true
-    shm_size: "1gb"
-    mem_limit: "1280m"
-    cpus: 1.0
-    pids_limit: 384
-    security_opt:
-      - no-new-privileges:true
-      - seccomp:unconfined
-    environment:
-      PORT: 3000
-      CACHE_FILE: /data/cache-v3.json
-      CACHE_TTL_DAYS: 30
-      MAX_STATIC_PAGES: 18
-      MAX_BROWSER_STEPS: 8
-      MAX_BROWSER_CONTEXTS: 1
-      REQUEST_TIMEOUT_MS: 10000
-      BROWSER_TIMEOUT_MS: 45000
-      AI_JUDGE_ENABLED: "false"
-      AI_JUDGE_AUDIT_PERCENT: 0
-      AI_JUDGE_MIN_RULE_SCORE: 92
-    volumes:
-      - career_browser_cache:/data
-    networks:
-      - traefik_proxy
-    healthcheck:
-      test:
-        - CMD
-        - node
-        - -e
-        - "fetch('http://127.0.0.1:3000/health').then(async r=>{const j=await r.json();if(!r.ok||!j.capabilities?.includes('career-v3')||!j.capabilities?.includes('ats-detect'))process.exit(1)}).catch(()=>process.exit(1))"
-      interval: 30s
-      timeout: 8s
-      start_period: 45s
-      retries: 5
-
-  # Same service names as the previous heavy stack so a redeploy replaces the
-  # old containers instead of leaving the Ollama / scanner containers running.
-  career-judge-ollama:
-    image: alpine:3.21
-    restart: unless-stopped
-    mem_limit: "32m"
-    cpus: 0.05
-    pids_limit: 32
-    command: ["/bin/sh", "-c", "echo 'Local Ollama disabled in light production'; while true; do sleep 3600; done"]
-
-  career-judge-model-init:
-    image: alpine:3.21
-    restart: "no"
-    command: ["/bin/sh", "-c", "echo 'Local model pull disabled'; exit 0"]
-
-  dashboard-warmer:
-    image: alpine:3.21
-    restart: unless-stopped
-    mem_limit: "24m"
-    cpus: 0.03
-    command: ["/bin/sh", "-c", "echo 'Dashboard warmer paused during light production'; while true; do sleep 3600; done"]
-
-  hiring-refresh:
-    image: alpine:3.21
-    restart: unless-stopped
-    mem_limit: "24m"
-    cpus: 0.03
-    command: ["/bin/sh", "-c", "echo 'Hiring refresh paused during light production'; while true; do sleep 3600; done"]
-
-  career-validation:
-    image: alpine:3.21
-    restart: "no"
-    command: ["/bin/sh", "-c", "echo 'Career validation batch paused during light production'; exit 0"]
-
-  career-refresh:
-    image: alpine:3.21
-    restart: unless-stopped
-    mem_limit: "24m"
-    cpus: 0.03
-    command: ["/bin/sh", "-c", "echo 'Career background backfill paused during light production'; while true; do sleep 3600; done"]
-
-  heavy-model-cleanup:
-    image: alpine:3.21
-    restart: "no"
-    command: ["/bin/sh", "-c", "rm -rf /models/* /models/.[!.]* /models/..?* 2>/dev/null || true; echo 'Removed cached local Ollama/Qwen model files'"]
-    volumes:
-      - career_judge_models:/models
-
 volumes:
   sdr_runtime_env:
     name: sdr_runtime_env
@@ -280,10 +178,6 @@ volumes:
     name: sdr_dashboard_cache
   sdr_postgres_data:
     name: sdr_postgres_data
-  career_browser_cache:
-    name: sdr_career_browser_cache
-  career_judge_models:
-    name: sdr_career_judge_models
 
 networks:
   data_private:
