@@ -1,0 +1,145 @@
+name: SDR Auth-Free Overlay
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/sdr-auth-free-overlay.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Deploy auth-free overlay from raw compose
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$HOSTINGER_API_KEY"
+          AUTH="$HOSTINGER_API_KEY"
+          case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
+
+          VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
+
+          COMPOSE=$(cat <<'YAML'
+          services:
+            sdr-dashboard-public:
+              image: sdr-project-sdr-dashboard:latest
+              pull_policy: never
+              restart: unless-stopped
+              environment:
+                NODE_ENV: production
+                HOSTNAME: 0.0.0.0
+                SDR_BUILD_REF: auth-free-overlay
+                CAREER_GENERATION: v3
+                DISABLE_AUTH: "true"
+                DASHBOARD_USERNAME: ""
+                DASHBOARD_PASSWORD: ""
+                SDR_RUNTIME_ENV_FILE: /run/sdr-env/.env
+                DASHBOARD_CACHE_API_URL: http://dashboard-cache-api:8000
+                DASHBOARD_CACHE_READ_TIMEOUT_MS: "700"
+                DASHBOARD_CACHE_WRITE_TIMEOUT_MS: "2000"
+                ACQUISITION_SNAPSHOT_PATH: /app/data/acquisition-dashboard.json
+                GOOGLE_TOKEN_STORE_PATH: /app/data/google-calendar.json
+                HIRING_SNAPSHOT_PATH: /app/data/hiring-signals.json
+                CAREER_INTELLIGENCE_STORE_PATH: /app/data/career-intelligence-v3.json
+                CAREER_VALIDATION_MARKER_PATH: /app/data/career-validation-v3.done
+                CAREER_VALIDATION_STATE_PATH: /app/data/career-validation-v3.state
+                CAREER_ENGINE_URL: http://gtm-career-browser:3000/intelligence-detect
+                SMARTLEAD_V2_INTELLIGENCE_PATH: /app/data/smartlead-v2-intelligence-v3.json
+                SMARTLEAD_INTERNAL_BASE_URL: http://127.0.0.1:3000
+              volumes:
+                - sdr_runtime_env:/run/sdr-env:ro
+                - sdr_app_data:/app/data
+              networks:
+                - traefik_proxy
+                - sdr_project
+              labels:
+                - "traefik.enable=true"
+                - "traefik.docker.network=n8n_default"
+                - "traefik.http.routers.sdr-auth-free.rule=Host(`sdr.dashboardtalentera.tech`)"
+                - "traefik.http.routers.sdr-auth-free.entrypoints=websecure"
+                - "traefik.http.routers.sdr-auth-free.tls=true"
+                - "traefik.http.routers.sdr-auth-free.tls.certresolver=mytlschallenge"
+                - "traefik.http.routers.sdr-auth-free.priority=40000"
+                - "traefik.http.routers.sdr-auth-free.service=sdr-auth-free"
+                - "traefik.http.services.sdr-auth-free.loadbalancer.server.port=3000"
+              healthcheck:
+                test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+                interval: 20s
+                timeout: 8s
+                start_period: 30s
+                retries: 5
+
+          volumes:
+            sdr_runtime_env:
+              external: true
+              name: sdr_runtime_env
+            sdr_app_data:
+              external: true
+              name: sdr_app_data
+
+          networks:
+            traefik_proxy:
+              external: true
+              name: n8n_default
+            sdr_project:
+              external: true
+              name: sdr-project_default
+          YAML
+          )
+
+          BODY=$(jq -n --arg project_name 'sdr-auth-hotfix' --arg content "$COMPOSE" \
+            '{project_name:$project_name,content:$content}')
+
+          CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+            -X POST -H "Authorization: $AUTH" -H 'Content-Type: application/json' \
+            -d "$BODY" -o /tmp/deploy.json -w '%{http_code}' "$VM/docker" || true)
+          echo "Overlay deploy: HTTP ${CODE:-000}"
+          cat /tmp/deploy.json
+          [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]
+
+          ACTION_ID=$(jq -r '.id // empty' /tmp/deploy.json)
+          if [ -n "$ACTION_ID" ]; then
+            for I in $(seq 1 30); do
+              ACODE=$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
+                -H "Authorization: $AUTH" -H 'Accept: application/json' \
+                -o /tmp/action.json -w '%{http_code}' "$VM/actions/$ACTION_ID" || true)
+              STATE=$(jq -r '.state // "unknown"' /tmp/action.json 2>/dev/null || echo unknown)
+              echo "Action $I/30: HTTP=${ACODE:-000} state=$STATE"
+              if [ "$ACODE" = "200" ] && [ "$STATE" = "success" ]; then break; fi
+              if [ "$ACODE" = "200" ] && [ "$STATE" = "failed" ]; then cat /tmp/action.json; exit 1; fi
+              sleep 5
+            done
+          fi
+
+      - name: Verify public dashboard has no Basic Auth
+        run: |
+          set -euo pipefail
+          HOST='sdr.dashboardtalentera.tech'
+          for I in $(seq 1 40); do
+            HCODE=$(curl --silent --show-error --connect-timeout 5 --max-time 12 \
+              -H 'Cache-Control: no-cache' -o /tmp/health.json -w '%{http_code}' \
+              "https://${HOST}/api/health?auth_free_overlay=$I" || true)
+            BUILD=$(jq -r '.buildRef // ""' /tmp/health.json 2>/dev/null || true)
+
+            RCODE=$(curl --silent --show-error --connect-timeout 5 --max-time 12 \
+              -H 'Cache-Control: no-cache' -D /tmp/root.headers -o /tmp/root.html -w '%{http_code}' \
+              "https://${HOST}/" || true)
+            AUTH_HEADER=$(grep -i '^WWW-Authenticate:' /tmp/root.headers 2>/dev/null || true)
+            echo "Check $I/40: health=$HCODE build=${BUILD:-none} root=$RCODE auth_header=${AUTH_HEADER:-none}"
+
+            if [ "$HCODE" = "200" ] && [ "$BUILD" = "auth-free-overlay" ] && \
+               [ "$RCODE" != "401" ] && [ "$RCODE" != "000" ] && [ -z "$AUTH_HEADER" ]; then
+              echo "Auth-free SDR overlay is live."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Auth-free overlay did not become the public route."
+          exit 1
