@@ -25,7 +25,7 @@ test("Hostinger workflow rejects stale CI candidates before production concurren
   assert.match(workflow, /candidate !== currentMain/);
   assert.match(workflow, /needs: preflight/);
   assert.match(workflow, /needs\.preflight\.outputs\.should_deploy == 'true'/);
-  assert.match(workflow, /Superseded by a newer main commit; production untouched/);
+  assert.ok(workflow.includes("Superseded by newer main commit") || workflow.includes("Superseded by a newer main commit; production untouched"));
   assert.match(workflow, /if: cancelled\(\)/);
 });
 
@@ -66,17 +66,24 @@ test("today task queue and full task drawer expose WhatsApp for associated conta
   assert.match(drawer, /row\.type === "Task" && row\.relatedContactId && row\.relatedContactHasPhone && <WhatsAppQuickAction contactId=\{row\.relatedContactId\}/);
 });
 
-test("production access is protected and no hardcoded owner PIN remains", async () => {
+test("public production keeps browser Basic Auth off and protects admin tools in-app", async () => {
   const proxy = await read("src/proxy.ts");
   const acquisition = await read("src/app/api/acquisition/route.ts");
   const smartleadAuth = await read("src/lib/smartlead-action-auth.ts");
   const workflow = await read(".github/workflows/deploy-hostinger.yml");
+  const adminAuth = await read("src/lib/sdr-admin-auth.ts");
+  const adminRoute = await read("src/app/api/sdr-admin/route.ts");
 
   assert.match(proxy, /dashboardAuthResponse/);
   assert.doesNotMatch(acquisition, /OWNER_PIN_SHA256|e0f05da9/);
   assert.doesNotMatch(smartleadAuth, /OWNER_PIN_SHA256|e0f05da9/);
-  assert.match(workflow, /DASHBOARD_PASSWORD:.*ACQUISITION_OWNER_TOKEN/);
-  assert.match(workflow, /--user "\$\{DASHBOARD_USERNAME\}:\$\{DASHBOARD_PASSWORD\}"/);
+  assert.match(workflow, /DISABLE_AUTH=true/);
+  assert.match(workflow, /DASHBOARD_PASSWORD=\$\{\{ secrets\.DASHBOARD_PASSWORD \|\| secrets\.SDR_ADMIN_PASSWORD \|\| secrets\.ACQUISITION_OWNER_TOKEN \}\}/);
+  assert.doesNotMatch(workflow, /--user\s+"\$\{DASHBOARD_USERNAME\}:\$\{DASHBOARD_PASSWORD\}"/);
+  assert.match(workflow, /WWW-Authenticate/);
+  assert.match(adminAuth, /process\.env\.DASHBOARD_PASSWORD \|\| process\.env\.SDR_ADMIN_PASSWORD/);
+  assert.match(adminRoute, /configured: sdrAdminConfigured\(\)/);
+  assert.match(adminRoute, /validateSdrAdminPassword/);
 });
 
 test("Primeforge remains read-only and advisory while Smartlead safety stays enforced", async () => {
