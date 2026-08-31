@@ -92,6 +92,8 @@ services:
       retries: 5
 
   sdr-dashboard:
+    image: sdr-dashboard:${SDR_BUILD_REF:-unknown}
+    pull_policy: build
     build:
       context: .
       dockerfile: Dockerfile
