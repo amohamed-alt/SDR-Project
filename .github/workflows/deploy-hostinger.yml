@@ -68,7 +68,7 @@ jobs:
       group: hostinger-sdr-production
       cancel-in-progress: true
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       DEPLOY_SHA: ${{ needs.preflight.outputs.deploy_sha }}
       DEPLOY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -85,7 +85,7 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'pending',
               context: 'hostinger/deploy',
-              description: 'Deploying CPU-light SDR stack to Hostinger',
+              description: 'Recovering Hostinger and deploying CPU-light SDR stack',
               target_url: process.env.DEPLOY_URL,
             });
 
@@ -121,6 +121,141 @@ jobs:
           [ -n "$SMARTLEAD_API_KEY" ] && echo "Smartlead configured" || true
           [ -n "$PRIMEFORGE_API_KEY" ] && echo "Primeforge advisory configured" || true
 
+      - name: Recover Hostinger Docker control plane if unhealthy
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          AUTH="$HOSTINGER_API_KEY"
+          case "$AUTH" in
+            Bearer\ *) ;;
+            *) AUTH="Bearer $AUTH" ;;
+          esac
+
+          VM_BASE='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
+          DOCKER_URL="$VM_BASE/docker"
+
+          docker_manager_code() {
+            curl --silent --show-error \
+              --connect-timeout 8 \
+              --max-time 30 \
+              -H "Authorization: $AUTH" \
+              -H 'Accept: application/json' \
+              -o /tmp/hostinger-docker.json \
+              -w '%{http_code}' \
+              "$DOCKER_URL" || true
+          }
+
+          VM_CODE=$(curl --silent --show-error \
+            --connect-timeout 8 \
+            --max-time 30 \
+            -H "Authorization: $AUTH" \
+            -H 'Accept: application/json' \
+            -o /tmp/hostinger-vm.json \
+            -w '%{http_code}' \
+            "$VM_BASE" || true)
+          VM_STATE=$(jq -r '.state // "unknown"' /tmp/hostinger-vm.json 2>/dev/null || echo unknown)
+          echo "Hostinger VM preflight: HTTP ${VM_CODE:-000}, state=${VM_STATE}"
+          [ "$VM_CODE" = "200" ] || {
+            echo "::error::Unable to read Hostinger VPS state."
+            exit 1
+          }
+
+          DOCKER_CODE=$(docker_manager_code)
+          echo "Hostinger Docker Manager preflight: HTTP ${DOCKER_CODE:-000}"
+
+          if [ "$DOCKER_CODE" = "200" ]; then
+            echo "Hostinger Docker control plane is healthy; no VPS reboot needed."
+            exit 0
+          fi
+
+          echo "::warning::Hostinger Docker Manager is unhealthy (HTTP ${DOCKER_CODE:-000}). Restarting the VPS once to clear the stuck Docker action queue."
+          jq '{message,correlation_id}' /tmp/hostinger-docker.json 2>/dev/null || true
+
+          RESTART_CODE=$(curl --silent --show-error \
+            --connect-timeout 8 \
+            --max-time 45 \
+            -X POST \
+            -H "Authorization: $AUTH" \
+            -H 'Accept: application/json' \
+            -o /tmp/hostinger-vm-restart.json \
+            -w '%{http_code}' \
+            "$VM_BASE/restart" || true)
+          echo "Hostinger VPS restart request: HTTP ${RESTART_CODE:-000}"
+          [ "$RESTART_CODE" = "200" ] || {
+            jq '{message,correlation_id}' /tmp/hostinger-vm-restart.json 2>/dev/null || true
+            echo "::error::Hostinger VPS restart request failed."
+            exit 1
+          }
+
+          ACTION_ID=$(jq -r '.id // empty' /tmp/hostinger-vm-restart.json 2>/dev/null || true)
+          [ -n "$ACTION_ID" ] || {
+            echo "::error::Hostinger VPS restart did not return an action id."
+            exit 1
+          }
+          echo "Hostinger restart action id: $ACTION_ID"
+
+          RESTART_DONE=false
+          for ATTEMPT in $(seq 1 36); do
+            ACTION_CODE=$(curl --silent --show-error \
+              --connect-timeout 8 \
+              --max-time 30 \
+              -H "Authorization: $AUTH" \
+              -H 'Accept: application/json' \
+              -o /tmp/hostinger-action.json \
+              -w '%{http_code}' \
+              "$VM_BASE/actions/$ACTION_ID" || true)
+            ACTION_STATE=$(jq -r '.state // "unknown"' /tmp/hostinger-action.json 2>/dev/null || echo unknown)
+            echo "VPS restart action ${ATTEMPT}/36: HTTP ${ACTION_CODE:-000}, state=${ACTION_STATE}"
+
+            if [ "$ACTION_CODE" = "200" ] && [ "$ACTION_STATE" = "success" ]; then
+              RESTART_DONE=true
+              break
+            fi
+
+            case "$ACTION_STATE" in
+              failed|failure|error|cancelled|canceled)
+                echo "::error::Hostinger VPS restart reached terminal state: $ACTION_STATE"
+                exit 1
+                ;;
+            esac
+            sleep 10
+          done
+
+          [ "$RESTART_DONE" = "true" ] || {
+            echo "::error::Hostinger VPS restart did not complete within 6 minutes."
+            exit 1
+          }
+
+          CONTROL_PLANE_READY=false
+          for ATTEMPT in $(seq 1 36); do
+            VM_CODE=$(curl --silent --show-error \
+              --connect-timeout 8 \
+              --max-time 30 \
+              -H "Authorization: $AUTH" \
+              -H 'Accept: application/json' \
+              -o /tmp/hostinger-vm.json \
+              -w '%{http_code}' \
+              "$VM_BASE" || true)
+            VM_STATE=$(jq -r '.state // "unknown"' /tmp/hostinger-vm.json 2>/dev/null || echo unknown)
+            DOCKER_CODE=$(docker_manager_code)
+            echo "Control-plane recovery ${ATTEMPT}/36: vm_http=${VM_CODE:-000}, vm_state=${VM_STATE}, docker_http=${DOCKER_CODE:-000}"
+
+            if [ "$VM_CODE" = "200" ] && [ "$VM_STATE" = "running" ] && [ "$DOCKER_CODE" = "200" ]; then
+              CONTROL_PLANE_READY=true
+              break
+            fi
+            sleep 10
+          done
+
+          [ "$CONTROL_PLANE_READY" = "true" ] || {
+            echo "::error::Hostinger Docker Manager did not recover after the VPS restart."
+            exit 1
+          }
+
+          echo "Hostinger Docker control plane recovered."
+
       - name: Deploy CPU-light SDR stack
         uses: hostinger/deploy-on-vps@v2
         with:
@@ -142,7 +277,7 @@ jobs:
           set -euo pipefail
           HOST='sdr.dashboardtalentera.tech'
           READY=false
-          for ATTEMPT in $(seq 1 24); do
+          for ATTEMPT in $(seq 1 48); do
             HTTP_CODE=$(curl --silent --show-error \
               --connect-timeout 5 \
               --max-time 12 \
@@ -151,12 +286,12 @@ jobs:
               --write-out '%{http_code}' \
               "https://${HOST}/api/health?deploy=${DEPLOY_SHA}&light_attempt=${ATTEMPT}" || true)
             BUILD_REF=$(jq -r '.buildRef // ""' /tmp/light-health.json 2>/dev/null || true)
-            echo "Light production gate ${ATTEMPT}/24: http=${HTTP_CODE:-000} build=${BUILD_REF:-none}"
+            echo "Light production gate ${ATTEMPT}/48: http=${HTTP_CODE:-000} build=${BUILD_REF:-none}"
             if [ "$HTTP_CODE" = "200" ] && [ "$BUILD_REF" = "$DEPLOY_SHA" ]; then
               READY=true
               break
             fi
-            if [ "$ATTEMPT" = "1" ] || [ "$ATTEMPT" = "8" ] || [ "$ATTEMPT" = "16" ] || [ "$ATTEMPT" = "24" ]; then
+            if [ "$ATTEMPT" = "1" ] || [ "$ATTEMPT" = "12" ] || [ "$ATTEMPT" = "24" ] || [ "$ATTEMPT" = "36" ] || [ "$ATTEMPT" = "48" ]; then
               printf 'Response preview: '
               head -c 180 /tmp/light-health.json 2>/dev/null | tr '\n' ' ' || true
               echo
@@ -178,6 +313,72 @@ jobs:
             "https://${HOST}/api/usage?deploy=${DEPLOY_SHA}" || true)
           echo "Authenticated dashboard gate: HTTP ${ACCESS_CODE:-none}"
           [ "$ACCESS_CODE" = "200" ]
+
+      - name: Verify heavy Ollama image is not active
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          AUTH="$HOSTINGER_API_KEY"
+          case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
+          URL='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210/docker/sdr-project/containers'
+          CODE=$(curl --silent --show-error \
+            --connect-timeout 8 \
+            --max-time 30 \
+            -H "Authorization: $AUTH" \
+            -H 'Accept: application/json' \
+            -o /tmp/sdr-containers.json \
+            -w '%{http_code}' \
+            "$URL" || true)
+          echo "SDR container verification: HTTP ${CODE:-000}"
+          if [ "$CODE" != "200" ]; then
+            echo "::warning::Hostinger container inventory is temporarily unavailable; public health gate already passed."
+            exit 0
+          fi
+
+          jq -r '.[] | "CONTAINER\t\(.name // "")\timage=\(.image // "")\tstate=\(.state // "")\thealth=\(.health // "")"' /tmp/sdr-containers.json
+          if jq -e '.[] | select(((.image // "") | ascii_downcase | contains("ollama/ollama")))' /tmp/sdr-containers.json >/dev/null; then
+            echo "::error::A heavy ollama/ollama container is still active after the light deployment."
+            exit 1
+          fi
+          echo "Heavy local Ollama image is not active in sdr-project."
+
+      - name: Hostinger failure diagnostics
+        if: failure()
+        continue-on-error: true
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          set -u
+          AUTH="$HOSTINGER_API_KEY"
+          case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
+          BASE='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210/docker'
+
+          CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+            -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/failure-projects.json -w '%{http_code}' "$BASE" || true)
+          echo "Docker Manager after failure: HTTP ${CODE:-000}"
+          if [ "$CODE" = "200" ]; then
+            jq -r '.[] | "PROJECT\t\(.name // "")\tstatus=\(.status // "")\tstate=\(.state // "")"' /tmp/failure-projects.json 2>/dev/null || true
+          else
+            jq '{message,correlation_id}' /tmp/failure-projects.json 2>/dev/null || true
+          fi
+
+          PROJECT_CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+            -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/failure-containers.json -w '%{http_code}' "$BASE/sdr-project/containers" || true)
+          echo "sdr-project containers after failure: HTTP ${PROJECT_CODE:-000}"
+          if [ "$PROJECT_CODE" = "200" ]; then
+            jq -r '.[] | "CONTAINER\t\(.name // "")\timage=\(.image // "")\tstate=\(.state // "")\thealth=\(.health // "")"' /tmp/failure-containers.json 2>/dev/null || true
+          fi
+
+          LOG_CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+            -H "Authorization: $AUTH" -H 'Accept: application/json' \
+            -o /tmp/failure-logs.json -w '%{http_code}' "$BASE/sdr-project/logs" || true)
+          echo "sdr-project logs endpoint after failure: HTTP ${LOG_CODE:-000}"
+          if [ "$LOG_CODE" = "200" ]; then
+            jq -r '.[] | .service as $service | (.entries // [])[-20:][]? | "LOG\t\($service)\t\(.timestamp // "")\t\(.line // "")"' /tmp/failure-logs.json 2>/dev/null | tail -n 120 || true
+          fi
 
       - name: Mark deployment successful
         if: success()
