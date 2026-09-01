@@ -57,67 +57,7 @@ jobs:
               exit 1
             fi
             NOW=$(date +%s)
-            while IFS=
-          CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
-            -H "Authorization: $AUTH" -H 'Accept: application/json' \
-            -o /tmp/projects.json -w '%{http_code}' "$VM/docker" || true)
-          echo "Docker Manager project list: HTTP ${CODE:-000}"
-
-          if [ "$CODE" != "200" ]; then
-            jq '{message,correlation_id}' /tmp/projects.json 2>/dev/null || cat /tmp/projects.json || true
-            echo "::warning::Docker Manager inventory is degraded; action history above is the authoritative control-plane diagnostic."
-            exit 0
-          fi
-
-          echo "=== PROJECTS ==="
-          jq -r '.[] | [.name, .state, .status] | @tsv' /tmp/projects.json
-
-          echo "=== SDR PROJECT DETAILS ==="
-          PCODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
-            -H "Authorization: $AUTH" -H 'Accept: application/json' \
-            -o /tmp/sdr-project.json -w '%{http_code}' "$VM/docker/sdr-project" || true)
-          echo "sdr-project details: HTTP ${PCODE:-000}"
-          if [ "$PCODE" = "200" ]; then
-            jq '{name,state,status,file_path,environment}' /tmp/sdr-project.json 2>/dev/null || cat /tmp/sdr-project.json
-          else
-            cat /tmp/sdr-project.json 2>/dev/null || true
-          fi
-          echo
-
-          echo "=== CONTAINER CPU SNAPSHOT ==="
-          printf '%-28s %-36s %-34s %10s %10s\n' PROJECT CONTAINER IMAGE CPU_PCT MEM_PCT
-          while IFS= read -r PROJECT; do
-            [ -n "$PROJECT" ] || continue
-            CCODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
-              -H "Authorization: $AUTH" -H 'Accept: application/json' \
-              -o /tmp/containers.json -w '%{http_code}' "$VM/docker/$PROJECT/containers" || true)
-            echo "Project $PROJECT containers: HTTP ${CCODE:-000}" >&2
-            if [ "$CCODE" = "200" ]; then
-              jq -r --arg p "$PROJECT" '.[] | [$p, .name, .image, (.stats.cpu_percentage // 0), (.stats.memory_percentage // 0)] | @tsv' /tmp/containers.json \
-                | sort -t $'\t' -k4,4nr
-            fi
-          done < <(jq -r '.[].name' /tmp/projects.json)
-
-          echo "=== HIGH CPU / OLLAMA / CALIBRATION MATCHES ==="
-          FOUND=0
-          while IFS= read -r PROJECT; do
-            [ -n "$PROJECT" ] || continue
-            CCODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
-              -H "Authorization: $AUTH" -H 'Accept: application/json' \
-              -o /tmp/containers.json -w '%{http_code}' "$VM/docker/$PROJECT/containers" || true)
-            [ "$CCODE" = "200" ] || continue
-            MATCHES=$(jq -r --arg p "$PROJECT" '.[] | select((.stats.cpu_percentage // 0) >= 20 or ((.image // "")|ascii_downcase|contains("ollama")) or ((.name // "")|ascii_downcase|contains("ollama")) or ((.command // "")|ascii_downcase|contains("horseshoe")) or ((.command // "")|ascii_downcase|contains("calibration"))) | [$p,.id,.name,.image,.command,(.stats.cpu_percentage // 0),(.stats.memory_percentage // 0)] | @tsv' /tmp/containers.json || true)
-            if [ -n "$MATCHES" ]; then
-              FOUND=1
-              echo "$MATCHES"
-            fi
-          done < <(jq -r '.[].name' /tmp/projects.json)
-          if [ "$FOUND" = "0" ]; then
-            echo "No Docker container matched >=20% CPU, Ollama, horseshoe, or calibration."
-          fi
-
-# diagnostic trigger: 2026-09-02T01:45+03:00
-\t' read -r ID NAME STATE CREATED; do
+            while IFS=$'\t' read -r ID NAME STATE CREATED; do
               [ -n "$ID" ] || continue
               CREATED_EPOCH=$(date -d "$CREATED" +%s 2>/dev/null || echo "$NOW")
               AGE=$((NOW - CREATED_EPOCH))
