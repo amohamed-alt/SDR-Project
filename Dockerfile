@@ -24,7 +24,6 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --chown=nextjs:nodejs scripts/maqsam-sync.mjs ./scripts/maqsam-sync.mjs
-COPY --chown=nextjs:nodejs ops/docker-guardian.mjs ./ops/docker-guardian.mjs
 COPY --chown=nextjs:nodejs --chmod=755 docker/sdr-entrypoint.sh /usr/local/bin/sdr-entrypoint
 USER nextjs
 EXPOSE 3000
