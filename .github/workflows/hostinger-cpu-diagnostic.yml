@@ -49,7 +49,7 @@ jobs:
           if [ "$ACODE" = "200" ]; then
             ACTIVE=$(jq -r '[.data[]? | select(
               ((.name // "") | startswith("docker_compose_")) and
-              ((.state // "") | IN("pending","queued","running","processing","in_progress"))
+              ((.state // "") | IN("pending","queued","started","running","processing","in_progress"))
             )] | length' /tmp/actions.json)
             echo "Active Docker Compose actions: $ACTIVE"
             if [ "$ACTIVE" -gt 1 ]; then
@@ -68,7 +68,7 @@ jobs:
               fi
             done < <(jq -r '.data[]? | select(
               ((.name // "") | startswith("docker_compose_")) and
-              ((.state // "") | IN("pending","queued","running","processing","in_progress"))
+              ((.state // "") | IN("pending","queued","started","running","processing","in_progress"))
             ) | [.id,.name,.state,.created_at] | @tsv' /tmp/actions.json)
           fi
 
