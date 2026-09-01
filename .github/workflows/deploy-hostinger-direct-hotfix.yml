@@ -1,4 +1,4 @@
-# Dashboard password redeploy trigger: 2026-08-31 secret refresh v2
+# Dashboard CPU-light recovery trigger: 2026-09-01T09:36+03:00
 name: Direct Hostinger Hotfix Deploy
 
 on:
