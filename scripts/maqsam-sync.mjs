@@ -1,6 +1,8 @@
 const MAQSAM_API_URL = "https://api.mq.maqsam.com/v3/calls";
 const DEFAULT_TARGET_AGENT_EMAIL = "m.chedid@bayt.net";
 const DEFAULT_DASHBOARD_URL = "http://sdr-dashboard:3000";
+const MIN_LOOKBACK_SECONDS = 72 * 60 * 60;
+const NOTE_TO_CONTACT_ASSOCIATION_TYPE_ID = 202;
 
 function env(name, fallback = "") {
   return String(process.env[name] ?? fallback).trim();
@@ -20,7 +22,9 @@ const config = {
   hubspotToken: env("HUBSPOT_PRIVATE_APP_TOKEN"),
   targetAgentEmail: env("MAQSAM_TARGET_AGENT_EMAIL", DEFAULT_TARGET_AGENT_EMAIL).toLowerCase(),
   intervalMs: numberEnv("MAQSAM_SYNC_INTERVAL_SECONDS", 600) * 1000,
-  lookbackSeconds: numberEnv("MAQSAM_SYNC_LOOKBACK_SECONDS", 3 * 60 * 60),
+  // Maqsam summaries/transcripts can arrive after the call itself. Never let a
+  // stale 3-hour compose default permanently hide a completed call.
+  lookbackSeconds: Math.max(MIN_LOOKBACK_SECONDS, numberEnv("MAQSAM_SYNC_LOOKBACK_SECONDS", MIN_LOOKBACK_SECONDS)),
   pageCount: Math.min(50, Math.max(1, numberEnv("MAQSAM_SYNC_PAGE_COUNT", 12))),
 };
 
@@ -41,6 +45,14 @@ function authHeader() {
   }
 
   throw new Error("Set MAQSAM_BASIC_AUTH or MAQSAM_ACCESS_KEY + MAQSAM_ACCESS_SECRET.");
+}
+
+function hubspotHeaders(extra = {}) {
+  return {
+    Authorization: `Bearer ${required(config.hubspotToken, "HUBSPOT_PRIVATE_APP_TOKEN is missing.")}`,
+    Accept: "application/json",
+    ...extra,
+  };
 }
 
 function digits(value) {
@@ -119,7 +131,16 @@ function isReadyCall(call) {
   return type !== "internal" && ["completed", "serviced"].includes(state) && duration > 0;
 }
 
-async function fetchJson(url, options) {
+function htmlEscape(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
   const text = await response.text();
   let body = {};
@@ -186,10 +207,7 @@ async function resolveHubspotContact(callPhone) {
 
   const payload = await fetchJson("https://api.hubapi.com/crm/v3/objects/contacts/search", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.hubspotToken}`,
-      "Content-Type": "application/json",
-    },
+    headers: hubspotHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
       query: callPhone.national,
       properties: ["firstname", "lastname", "email", "phone", "mobilephone", "hs_searchable_calculated_phone_number", "hs_searchable_calculated_mobile_number"],
@@ -224,6 +242,84 @@ async function resolveHubspotContact(callPhone) {
   };
 }
 
+async function findExistingHubspotNote(contactId, callKey) {
+  const contact = await fetchJson(`https://api.hubapi.com/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?associations=notes`, {
+    headers: hubspotHeaders(),
+  });
+  const noteIds = (contact?.associations?.notes?.results ?? [])
+    .map((entry) => String(entry?.id ?? "").trim())
+    .filter(Boolean)
+    .slice(0, 100);
+  if (!noteIds.length) return "";
+
+  const batch = await fetchJson("https://api.hubapi.com/crm/v3/objects/notes/batch/read", {
+    method: "POST",
+    headers: hubspotHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      properties: ["hs_note_body", "hs_timestamp"],
+      inputs: noteIds.map((id) => ({ id })),
+    }),
+  });
+  const marker = `Maqsam Call ID: ${callKey}`;
+  const existing = (Array.isArray(batch.results) ? batch.results : [])
+    .find((note) => String(note?.properties?.hs_note_body ?? "").includes(marker));
+  return existing ? String(existing.id) : "";
+}
+
+function buildHubspotNoteBody({ callKey, referenceId, phone, direction, state, durationSeconds, agentName, summary, transcription }) {
+  const transcript = String(transcription ?? "").trim();
+  const summaryText = String(summary ?? "").trim();
+  const lines = [
+    "<strong>Maqsam Call</strong>",
+    `Maqsam Call ID: ${htmlEscape(callKey)}`,
+    referenceId ? `Reference ID: ${htmlEscape(referenceId)}` : "",
+    phone ? `Phone: ${htmlEscape(phone)}` : "",
+    direction ? `Direction: ${htmlEscape(direction)}` : "",
+    state ? `State: ${htmlEscape(state)}` : "",
+    `Duration: ${Math.max(0, Math.round(Number(durationSeconds ?? 0)))} seconds`,
+    agentName ? `Agent: ${htmlEscape(agentName)}` : "",
+    "",
+    "<strong>AI Summary</strong>",
+    htmlEscape(summaryText).replace(/\n/g, "<br>"),
+  ];
+  if (transcript) {
+    lines.push("", "<strong>Transcript</strong>", htmlEscape(transcript.slice(0, 20_000)).replace(/\n/g, "<br>"));
+  }
+  return lines.filter((value) => value !== "").join("<br>");
+}
+
+async function syncHubspotNote(match, details) {
+  if (match.matchStatus !== "matched" || !match.hubspotContactId || !details.summary || !config.hubspotToken) return match;
+  try {
+    const existingNoteId = await findExistingHubspotNote(match.hubspotContactId, details.callKey);
+    if (existingNoteId) {
+      return { ...match, hubspotNoteStatus: "already_synced", hubspotNoteId: existingNoteId };
+    }
+
+    const created = await fetchJson("https://api.hubapi.com/crm/v3/objects/notes", {
+      method: "POST",
+      headers: hubspotHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        properties: {
+          hs_timestamp: details.noteTimestamp,
+          hs_note_body: buildHubspotNoteBody(details),
+        },
+        associations: [{
+          to: { id: match.hubspotContactId },
+          types: [{
+            associationCategory: "HUBSPOT_DEFINED",
+            associationTypeId: NOTE_TO_CONTACT_ASSOCIATION_TYPE_ID,
+          }],
+        }],
+      }),
+    });
+    return { ...match, hubspotNoteStatus: "synced", hubspotNoteId: String(created.id) };
+  } catch (error) {
+    console.warn(`HubSpot note sync failed for call ${details.callKey}: ${error.message}`);
+    return { ...match, hubspotNoteStatus: "failed" };
+  }
+}
+
 async function upsertDashboardCall(record) {
   return fetchJson(`${config.dashboardBaseUrl}/api/maqsam/calls`, {
     method: "POST",
@@ -240,6 +336,8 @@ async function syncOnce() {
   let ready = 0;
   let upserted = 0;
   let skipped = 0;
+  let waitingForAi = 0;
+  let notesSynced = 0;
 
   for (const call of calls) {
     if (!isTargetAgentCall(call) || !isReadyCall(call)) {
@@ -247,15 +345,15 @@ async function syncOnce() {
       continue;
     }
 
+    // Store the completed call immediately. A later pass enriches the same
+    // callKey when Maqsam adds the AI summary/transcript.
     const { text: summary, language: summaryLanguage } = extractSummary(call.summary);
-    if (!summary) {
-      skipped += 1;
-      continue;
-    }
+    if (!summary) waitingForAi += 1;
 
     const callKey = String(call.id ?? call.referenceId ?? "").trim();
     const timestampSeconds = Number(call.timestamp);
     const timestampMs = Number.isFinite(timestampSeconds) && timestampSeconds > 0 ? timestampSeconds * 1000 : Date.now();
+    const noteTimestamp = new Date(timestampMs).toISOString();
     const agents = Array.isArray(call.agents) ? call.agents : [];
     const targetAgent = agents.find((agent) => String(agent?.email ?? "").trim().toLowerCase() === config.targetAgentEmail) ?? agents[0] ?? {};
     const phoneRaw = getPhone(call);
@@ -267,10 +365,24 @@ async function syncOnce() {
     }
 
     ready += 1;
-    const match = await resolveHubspotContact(phone).catch((error) => {
+    let match = await resolveHubspotContact(phone).catch((error) => {
       console.warn(`HubSpot match failed for call ${callKey}: ${error.message}`);
       return { matchStatus: "unmatched", hubspotNoteStatus: "not_applicable" };
     });
+
+    match = await syncHubspotNote(match, {
+      callKey,
+      referenceId: call.referenceId ?? null,
+      phone: String(phoneRaw),
+      direction: String(call.type ?? ""),
+      state: String(call.state ?? ""),
+      durationSeconds: Number(call.duration ?? 0),
+      agentName: String(targetAgent?.name ?? ""),
+      noteTimestamp,
+      summary,
+      transcription: String(call.transcription ?? ""),
+    });
+    if (["synced", "already_synced"].includes(match.hubspotNoteStatus)) notesSynced += 1;
 
     await upsertDashboardCall({
       callKey,
@@ -282,7 +394,7 @@ async function syncOnce() {
       direction: String(call.type ?? ""),
       state: String(call.state ?? ""),
       timestamp: Number.isFinite(timestampSeconds) ? timestampSeconds : null,
-      noteTimestamp: new Date(timestampMs).toISOString(),
+      noteTimestamp,
       durationSeconds: Number(call.duration ?? 0),
       ringingTimeSeconds: Number(call.ringingTime ?? 0),
       holdTimeSeconds: Number(call.holdTime ?? 0),
@@ -299,7 +411,7 @@ async function syncOnce() {
     upserted += 1;
   }
 
-  console.log(`Maqsam sync: fetched=${calls.length}; ready=${ready}; upserted=${upserted}; skipped=${skipped}`);
+  console.log(`Maqsam sync: fetched=${calls.length}; ready=${ready}; upserted=${upserted}; notesSynced=${notesSynced}; waitingForAi=${waitingForAi}; skipped=${skipped}`);
 }
 
 async function main() {

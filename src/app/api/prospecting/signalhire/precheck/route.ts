@@ -70,6 +70,10 @@ function unique(values: string[]) {
   });
 }
 
+function validEmails(values: string[]) {
+  return unique(values).filter((value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value));
+}
+
 function workDomain(emails: string[]) {
   const blocked = /^(gmail|googlemail|yahoo|hotmail|outlook|live|icloud|me|aol|protonmail|proton)\./i;
   for (const email of emails) {
@@ -294,6 +298,9 @@ export async function POST(request: NextRequest) {
     // Existing people are decisive: do not run a company-wide activity scan for rows
     // that will be skipped anyway. This keeps CSV dry-runs responsive and reduces HubSpot load.
     const contact = await contactCheck(parsed.data);
+    if (!contact.inHubSpot && !validEmails([parsed.data.email, ...parsed.data.emails]).length) {
+      return NextResponse.json({ error: "Email is required. This contact is excluded from Ready until an email is available." }, { status: 422 });
+    }
     const company = await companyCheck(parsed.data, !contact.inHubSpot);
 
     return NextResponse.json({ contact, company, checkedAt: new Date().toISOString() }, { headers: { "Cache-Control": "no-store" } });
