@@ -1,0 +1,106 @@
+name: Hostinger Maintenance Audit
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - ".github/workflows/hostinger-maintenance-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Audit Hostinger VPS and Docker projects
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$HOSTINGER_API_KEY" || { echo "Hostinger API token is missing"; exit 1; }
+          AUTH="$HOSTINGER_API_KEY"
+          case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
+          VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
+          REPORT="$GITHUB_WORKSPACE/hostinger-audit.txt"
+          : > "$REPORT"
+
+          req() {
+            local url="$1" out="$2"
+            curl --silent --show-error --connect-timeout 8 --max-time 40 \
+              -H "Authorization: $AUTH" -H 'Accept: application/json' \
+              -o "$out" -w '%{http_code}' "$url" || true
+          }
+
+          {
+            echo "HOSTINGER MAINTENANCE AUDIT"
+            echo "UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo
+            echo "=== VM STATE ==="
+          } >> "$REPORT"
+          VCODE=$(req "$VM" /tmp/vm.json)
+          echo "HTTP $VCODE" >> "$REPORT"
+          jq '{id,state,hostname,plan,created_at}' /tmp/vm.json >> "$REPORT" 2>/dev/null || cat /tmp/vm.json >> "$REPORT"
+
+          echo -e "\n=== RECENT HOSTINGER ACTIONS ===" >> "$REPORT"
+          ACODE=$(req "$VM/actions?page=1" /tmp/actions.json)
+          echo "HTTP $ACODE" >> "$REPORT"
+          if [ "$ACODE" = "200" ]; then
+            jq -r '.data[]? | [.id,.name,.state,.created_at,.updated_at] | @tsv' /tmp/actions.json | head -40 >> "$REPORT"
+          else
+            cat /tmp/actions.json >> "$REPORT" 2>/dev/null || true
+          fi
+
+          echo -e "\n=== PUBLIC SDR HEALTH ===" >> "$REPORT"
+          HCODE=$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
+            -H 'Cache-Control: no-cache' -o /tmp/health.json -w '%{http_code}' \
+            "https://sdr.dashboardtalentera.tech/api/health?audit=$GITHUB_RUN_ID" || true)
+          echo "HTTP $HCODE" >> "$REPORT"
+          jq . /tmp/health.json >> "$REPORT" 2>/dev/null || cat /tmp/health.json >> "$REPORT" 2>/dev/null || true
+
+          echo -e "\n=== DOCKER PROJECTS ===" >> "$REPORT"
+          PCODE=$(req "$VM/docker" /tmp/projects.json)
+          echo "HTTP $PCODE" >> "$REPORT"
+          if [ "$PCODE" != "200" ]; then
+            cat /tmp/projects.json >> "$REPORT" 2>/dev/null || true
+            cat "$REPORT"
+            exit 0
+          fi
+          jq -r '.[] | [.name,.state,.status,.path] | @tsv' /tmp/projects.json >> "$REPORT"
+
+          echo -e "\n=== PROJECT / CONTAINER DETAILS ===" >> "$REPORT"
+          while IFS= read -r PROJECT; do
+            [ -n "$PROJECT" ] || continue
+            echo -e "\n--- PROJECT: $PROJECT ---" >> "$REPORT"
+            DCODE=$(req "$VM/docker/$PROJECT" "/tmp/project-$PROJECT.json")
+            echo "details HTTP $DCODE" >> "$REPORT"
+            if [ "$DCODE" = "200" ]; then
+              jq '{content,environment}' "/tmp/project-$PROJECT.json" >> "$REPORT" 2>/dev/null || true
+            fi
+            CCODE=$(req "$VM/docker/$PROJECT/containers" "/tmp/containers-$PROJECT.json")
+            echo "containers HTTP $CCODE" >> "$REPORT"
+            if [ "$CCODE" = "200" ]; then
+              jq -r '.[] | [.id,.name,.image,.state,.status,(.health // ""),(.stats.cpu_percentage // 0),(.stats.memory_percentage // 0),(.command // "")] | @tsv' "/tmp/containers-$PROJECT.json" >> "$REPORT"
+            else
+              cat "/tmp/containers-$PROJECT.json" >> "$REPORT" 2>/dev/null || true
+            fi
+            LCODE=$(req "$VM/docker/$PROJECT/logs" "/tmp/logs-$PROJECT.json")
+            echo "logs HTTP $LCODE" >> "$REPORT"
+            if [ "$LCODE" = "200" ]; then
+              jq -r '.[]? | .service as $s | (.entries // [])[-20:][]? | [$s,.timestamp,.line] | @tsv' "/tmp/logs-$PROJECT.json" >> "$REPORT" 2>/dev/null || true
+            fi
+          done < <(jq -r '.[].name' /tmp/projects.json)
+
+          echo -e "\n=== CANDIDATES ===" >> "$REPORT"
+          jq -r '.[] | .name as $p | (.containers // [])[]? | select((.state // "") != "running" or ((.health // "") != "" and (.health // "") != "healthy")) | [$p,.name,.image,.state,.status,(.health // "")] | @tsv' /tmp/projects.json >> "$REPORT" 2>/dev/null || true
+
+          cat "$REPORT"
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: hostinger-maintenance-audit
+          path: hostinger-audit.txt
+          retention-days: 3
