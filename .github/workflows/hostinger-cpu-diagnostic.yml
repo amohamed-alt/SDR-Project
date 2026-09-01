@@ -78,10 +78,9 @@ jobs:
             "https://sdr.dashboardtalentera.tech/api/health?guardian=$GITHUB_RUN_ID" || true)
           echo "Dashboard health: HTTP $HCODE"
           jq '{status,service,buildRef,timestamp}' /tmp/health.json 2>/dev/null || cat /tmp/health.json 2>/dev/null || true
-          [ "$HCODE" = "200" ] || {
+          if [ "$HCODE" != "200" ]; then
             echo "::error::The public SDR dashboard health endpoint is unavailable."
-            exit 1
-          }
+          fi
           echo
 
           echo "=== DOCKER MANAGER ==="
@@ -102,7 +101,7 @@ jobs:
             else
               jq '{message,correlation_id}' /tmp/sdr-containers-direct.json 2>/dev/null || cat /tmp/sdr-containers-direct.json 2>/dev/null || true
             fi
-            exit 0
+            [ "$HCODE" = "200" ] && exit 0 || exit 1
           fi
 
           echo "=== PROJECTS ==="
@@ -151,5 +150,6 @@ jobs:
           if [ "$FOUND" = "0" ]; then
             echo "No Docker container matched >=20% CPU, Ollama, horseshoe, or calibration."
           fi
+          [ "$HCODE" = "200" ] || exit 1
 
 # diagnostic trigger: 2026-09-02T01:45+03:00
