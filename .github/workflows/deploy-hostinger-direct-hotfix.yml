@@ -2,10 +2,6 @@
 name: Direct Hostinger Hotfix Deploy
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/deploy-hostinger-direct-hotfix.yml"
   workflow_dispatch:
 
 permissions:
@@ -15,7 +11,7 @@ jobs:
   deploy:
     concurrency:
       group: hostinger-sdr-production
-      cancel-in-progress: true
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
