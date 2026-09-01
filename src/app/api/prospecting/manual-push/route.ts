@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { POST as pushProspect } from "@/app/api/prospecting/push/route";
 import { acquisitionOwners } from "@/lib/acquisition-routing";
+import { isThirdPartyCompanyDomain } from "@/lib/company-domain-safety";
 import { sdrAdminAuthorized } from "@/lib/sdr-admin-auth";
 
 export const runtime = "nodejs";
@@ -35,6 +36,44 @@ const schema = z.object({
   prospect: z.record(z.string(), z.unknown()),
 });
 
+function strictCompanyDomain(raw: unknown, companyName: string) {
+  const value = String(raw || "").trim();
+  if (!value || isThirdPartyCompanyDomain(value, companyName)) return "";
+  try {
+    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+    const host = url.hostname.toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
+    const labels = host.split(".");
+    if (!host || host.length > 253 || labels.length < 2) return "";
+    if (labels.some((label) => !label || label.length > 63 || !/^[a-z0-9-]+$/i.test(label) || label.startsWith("-") || label.endsWith("-"))) return "";
+    return host;
+  } catch {
+    return "";
+  }
+}
+
+function strictCompanyWebsite(raw: unknown, companyName: string) {
+  const value = String(raw || "").trim();
+  if (!value || isThirdPartyCompanyDomain(value, companyName)) return "";
+  try {
+    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+    if (!/^https?:$/.test(url.protocol) || !strictCompanyDomain(url.hostname, companyName)) return "";
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return "";
+  }
+}
+
+function sanitizedCompanyIdentity(prospect: Record<string, unknown>) {
+  const companyName = String(prospect.company || "").trim();
+  const rawWebsite = String(prospect.companyWebsite || "").trim();
+  const website = strictCompanyWebsite(rawWebsite, companyName);
+  const explicitDomain = strictCompanyDomain(prospect.companyDomain, companyName);
+  const domain = explicitDomain || strictCompanyDomain(website || rawWebsite, companyName);
+  return { website, domain };
+}
+
 function hubspotToken() {
   const token = String(process.env.HUBSPOT_PRIVATE_APP_TOKEN || "").trim();
   if (!token) throw new Error("HUBSPOT_PRIVATE_APP_TOKEN is not configured.");
@@ -51,6 +90,8 @@ async function patchTask(taskId: string, ownerId: string, ownerName: string, tri
   const current = await read.json() as { properties?: { hs_task_body?: string } };
   let body = String(current.properties?.hs_task_body || "");
   body = body.replace(/👥 \*\*(?:Assigned SDR|Assigned Task Owner)\*\*\n[^\n]+/, `👥 **Assigned Task Owner**\n${ownerName}`);
+  body = body.replace(/🔥 \*\*(?:HIGH|MEDIUM|NORMAL) PRIORITY — SALES SIGNAL\*\*/, "🔥 **HIGH PRIORITY — SALES SIGNAL**");
+  body = body.replace(/(⭐ \*\*Priority Score\*\*\n\d+\/100 — )(?:HIGH|MEDIUM|NORMAL)/, "$1HIGH");
 
   const triggerBlockPattern = /📌 \*\*Why Now \/ Trigger\*\*\n(?:•[^\n]*\n)*\n?/;
   body = body.replace(triggerBlockPattern, "");
@@ -66,7 +107,7 @@ async function patchTask(taskId: string, ownerId: string, ownerName: string, tri
   const patch = await fetch(`https://api.hubapi.com/crm/v3/objects/tasks/${encodeURIComponent(taskId)}`, {
     method: "PATCH",
     headers: { Authorization: `Bearer ${hubspotToken()}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ properties: { hubspot_owner_id: ownerId, hs_task_body: body } }),
+    body: JSON.stringify({ properties: { hubspot_owner_id: ownerId, hs_task_body: body, hs_task_priority: "HIGH" } }),
     cache: "no-store",
     signal: AbortSignal.timeout(30_000),
   });
@@ -86,8 +127,12 @@ export async function POST(request: NextRequest) {
     if (!owner) return NextResponse.json({ error: "Select an enabled Acquisition task owner." }, { status: 400 });
 
     const labels = parsed.data.triggers.map((key) => triggerLabels[key]);
+    const companyIdentity = sanitizedCompanyIdentity(parsed.data.prospect);
     const prospect = {
       ...parsed.data.prospect,
+      companyWebsite: companyIdentity.website,
+      companyDomain: companyIdentity.domain,
+      priority: "high",
       recentSignal: labels.length
         ? { type: "manual_trigger", label: labels.join(" · ") }
         : { type: "signalhire_csv", label: "Imported from SignalHire CSV" },
