@@ -1,4 +1,4 @@
-name: Hostinger One-Shot Maintenance Audit
+name: Hostinger One-Shot Project State Audit
 
 on:
   push:
@@ -13,74 +13,36 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4
-
-      - name: Audit Hostinger directly
+      - name: Capture raw project state
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
         run: |
           set -euo pipefail
-          test -n "$HOSTINGER_API_KEY"
           AUTH="$HOSTINGER_API_KEY"; case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
           VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
-          REPORT="$GITHUB_WORKSPACE/docs/hostinger-audit-latest.md"
-          mkdir -p docs; : > "$REPORT"
-          req(){ curl --silent --show-error --connect-timeout 8 --max-time 40 -H "Authorization: $AUTH" -H 'Accept: application/json' -o "$2" -w '%{http_code}' "$1" || true; }
-
-          echo '# Hostinger maintenance audit' >> "$REPORT"
-          echo >> "$REPORT"; echo "Generated UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$REPORT"
-
-          echo -e '\n## VM and recent actions\n```text' >> "$REPORT"
-          V=$(req "$VM" /tmp/vm.json); echo "VM HTTP $V" >> "$REPORT"; jq '{id,state,hostname,plan}' /tmp/vm.json >> "$REPORT" 2>/dev/null || true
-          A=$(req "$VM/actions?page=1" /tmp/actions.json); echo "Actions HTTP $A" >> "$REPORT"
-          [ "$A" = 200 ] && jq -r '.data[]? | [.id,.name,.state,.created_at,.updated_at] | @tsv' /tmp/actions.json | head -30 >> "$REPORT" || true
-          echo '```' >> "$REPORT"
-
-          echo -e '\n## Public SDR health\n```text' >> "$REPORT"
-          H=$(curl -sS --connect-timeout 5 --max-time 15 -o /tmp/h.json -w '%{http_code}' "https://sdr.dashboardtalentera.tech/api/health?audit=$GITHUB_RUN_ID" || true)
-          echo "HTTP $H" >> "$REPORT"; jq . /tmp/h.json >> "$REPORT" 2>/dev/null || true; echo '```' >> "$REPORT"
-
-          echo -e '\n## Docker Manager list\n```text' >> "$REPORT"
-          D=$(req "$VM/docker" /tmp/projects.json); echo "HTTP $D" >> "$REPORT"
-          if [ "$D" = 200 ]; then jq -r '.[] | [.name,.state,.status,.path] | @tsv' /tmp/projects.json >> "$REPORT"; else jq . /tmp/projects.json >> "$REPORT" 2>/dev/null || true; fi
-          echo '```' >> "$REPORT"
-
-          # Hostinger's project-list endpoint can fail while direct project endpoints still work.
-          PROJECTS='sdr-project n8n gtm-career gtm-career-browser career-judge-ollama dashboard-cache-api open-webui ollama coolify'
-          if [ "$D" = 200 ]; then PROJECTS="$PROJECTS $(jq -r '.[].name' /tmp/projects.json | tr '\n' ' ')"; fi
-
-          for P in $(printf '%s\n' $PROJECTS | awk '!seen[$0]++'); do
-            S=$(printf '%s' "$P" | tr -c 'A-Za-z0-9_.-' '_')
-            C=$(req "$VM/docker/$P/containers" "/tmp/c-$S.json")
-            X=$(req "$VM/docker/$P" "/tmp/p-$S.json")
-            if [ "$C" != 200 ] && [ "$X" != 200 ]; then continue; fi
-            echo -e "\n## Project: $P\n\`\`\`text" >> "$REPORT"
-            echo "details HTTP $X | containers HTTP $C" >> "$REPORT"
-            if [ "$C" = 200 ]; then
-              jq -r '.[] | [.name,.image,.state,.status,(.health // ""),(.stats.cpu_percentage // 0),(.stats.memory_percentage // 0),(.command // "")] | @tsv' "/tmp/c-$S.json" >> "$REPORT"
-            fi
-            L=$(req "$VM/docker/$P/logs" "/tmp/l-$S.json"); echo "logs HTTP $L" >> "$REPORT"
-            if [ "$L" = 200 ]; then
-              jq -r '.[]? | .service as $svc | (.entries // [])[-30:][]? | [$svc,.timestamp,.line] | @tsv' "/tmp/l-$S.json" >> "$REPORT" 2>/dev/null || true
-            fi
-            echo '\`\`\`' >> "$REPORT"
+          OUT=docs/hostinger-project-states-latest.md
+          mkdir -p docs
+          echo '# Hostinger project states' > "$OUT"
+          echo >> "$OUT"; echo "Generated UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$OUT"
+          for P in sdr-project gtm-career gtm-career-browser career-judge-ollama dashboard-cache-api open-webui ollama coolify sdr-fastapi-dashboard sdr-marita-task-cleanup; do
+            echo >> "$OUT"; echo "## $P" >> "$OUT"; echo '```json' >> "$OUT"
+            DC=$(curl -sS --connect-timeout 6 --max-time 20 -H "Authorization: $AUTH" -H 'Accept: application/json' -o /tmp/d.json -w '%{http_code}' "$VM/docker/$P" || true)
+            echo "DETAILS_HTTP=$DC" >> "$OUT"
+            if [ "$DC" = 200 ]; then jq '{content,environment}' /tmp/d.json >> "$OUT" 2>/dev/null || cat /tmp/d.json >> "$OUT"; else cat /tmp/d.json >> "$OUT" 2>/dev/null || true; fi
+            CC=$(curl -sS --connect-timeout 6 --max-time 20 -H "Authorization: $AUTH" -H 'Accept: application/json' -o /tmp/c.json -w '%{http_code}' "$VM/docker/$P/containers" || true)
+            echo "CONTAINERS_HTTP=$CC" >> "$OUT"
+            cat /tmp/c.json >> "$OUT" 2>/dev/null || true
+            echo >> "$OUT"; echo '```' >> "$OUT"
           done
-
-          echo -e '\n## Candidate summary\n```text' >> "$REPORT"
-          for F in /tmp/c-*.json; do
-            [ -e "$F" ] || continue
-            jq -r '.[]? | select((.state // "") != "running" or ((.health // "") != "" and (.health // "") != "healthy") or (.stats.cpu_percentage // 0) >= 20) | [.name,.image,.state,.status,(.health // ""),(.stats.cpu_percentage // 0),(.stats.memory_percentage // 0)] | @tsv' "$F" >> "$REPORT" 2>/dev/null || true
-          done
-          echo '```' >> "$REPORT"
-          cat "$REPORT"
-
-      - name: Save audit report
+          cat "$OUT"
+      - name: Save report
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/hostinger-audit-latest.md
-          git diff --cached --quiet || git commit -m "docs: refresh Hostinger maintenance audit"
+          git add docs/hostinger-project-states-latest.md
+          git diff --cached --quiet || git commit -m "docs: save raw Hostinger project states"
           git pull --rebase origin main
           git push origin HEAD:main
