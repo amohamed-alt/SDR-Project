@@ -1,4 +1,4 @@
-name: Clean Retired Hostinger Projects
+name: Verify SDR After Hostinger Cleanup
 
 on:
   push:
@@ -11,11 +11,11 @@ permissions:
   contents: read
 
 jobs:
-  cleanup:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 8
     steps:
-      - name: Delete retired projects and stop dormant AI stack
+      - name: Verify primary SDR and recover Ollama only if required
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
         run: |
@@ -24,42 +24,31 @@ jobs:
           AUTH="$HOSTINGER_API_KEY"; case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
           VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
           req(){ local m="$1" u="$2" o="$3"; curl -sS --connect-timeout 8 --max-time 30 -X "$m" -H "Authorization: $AUTH" -H 'Accept: application/json' -o "$o" -w '%{http_code}' "$u" || true; }
-          poll(){ local id="$1" label="$2"; [ -z "$id" ] && return 0; for i in $(seq 1 36); do c=$(req GET "$VM/actions/$id" /tmp/action.json); s=$(jq -r '.state // "unknown"' /tmp/action.json 2>/dev/null || echo unknown); echo "$label $i: HTTP=$c state=$s"; case "$s" in success|completed) return 0;; failed|error) cat /tmp/action.json; return 1;; esac; sleep 5; done; return 1; }
+          poll(){ local id="$1"; [ -z "$id" ] && return 0; for i in $(seq 1 30); do c=$(req GET "$VM/actions/$id" /tmp/action.json); s=$(jq -r '.state // "unknown"' /tmp/action.json 2>/dev/null || echo unknown); echo "action $i: HTTP=$c state=$s"; case "$s" in success|completed) return 0;; failed|error) cat /tmp/action.json; return 1;; esac; sleep 5; done; return 1; }
+          check_health(){
+            local label="$1"
+            for i in $(seq 1 6); do
+              H=$(curl -sS --connect-timeout 8 --max-time 20 -o /tmp/health.json -w '%{http_code}' "https://sdr.dashboardtalentera.tech/api/health?${label}=$i" || true)
+              echo "$label health $i/6: HTTP=${H:-000}"
+              if [ "$H" = 200 ]; then jq '{status,service,buildRef,timestamp}' /tmp/health.json 2>/dev/null || true; return 0; fi
+              sleep 5
+            done
+            return 1
+          }
 
-          echo '=== DELETE EXPLICITLY RETIRED PROJECTS ==='
-          for P in career-judge-ollama gtm-career-browser; do
-            D=$(req GET "$VM/docker/$P" /tmp/details.json)
-            echo "$P details: HTTP $D"
-            if [ "$D" = 404 ] || [ "$D" = 422 ]; then echo "$P already absent"; continue; fi
-            if [ "$D" != 200 ]; then cat /tmp/details.json 2>/dev/null || true; echo "Skip $P: cannot prove project state"; continue; fi
-            echo "Found exact retired project $P; deleting it."
-            X=$(req DELETE "$VM/docker/$P/down" /tmp/delete.json)
-            echo "$P delete: HTTP $X"
-            if [ "$X" -ge 200 ] 2>/dev/null && [ "$X" -lt 300 ] 2>/dev/null; then
-              ID=$(jq -r '.id // .action.id // empty' /tmp/delete.json 2>/dev/null || true)
-              poll "$ID" "delete $P"
-            else
-              cat /tmp/delete.json 2>/dev/null || true
-            fi
-          done
+          if check_health post_cleanup_verify; then
+            echo 'SDR is healthy. Ollama remains stopped.'
+            exit 0
+          fi
 
-          echo '=== STOP OPTIONAL LOCAL AI STACK, PRESERVE DATA ==='
-          for P in ollama open-webui; do
-            D=$(req GET "$VM/docker/$P" /tmp/details.json)
-            echo "$P details: HTTP $D"
-            [ "$D" = 200 ] || continue
-            X=$(req POST "$VM/docker/$P/stop" /tmp/stop.json)
-            echo "$P stop: HTTP $X"
-            if [ "$X" -ge 200 ] 2>/dev/null && [ "$X" -lt 300 ] 2>/dev/null; then
-              ID=$(jq -r '.id // .action.id // empty' /tmp/stop.json 2>/dev/null || true)
-              poll "$ID" "stop $P"
-            else
-              cat /tmp/stop.json 2>/dev/null || true
-            fi
-          done
+          echo 'SDR is still unavailable; starting Ollama as conservative rollback.'
+          X=$(req POST "$VM/docker/ollama/start" /tmp/start.json)
+          echo "ollama start: HTTP ${X:-000}"
+          if [ "$X" -ge 200 ] 2>/dev/null && [ "$X" -lt 300 ] 2>/dev/null; then
+            ID=$(jq -r '.id // .action.id // empty' /tmp/start.json 2>/dev/null || true)
+            poll "$ID"
+          else
+            cat /tmp/start.json 2>/dev/null || true
+          fi
 
-          echo '=== VERIFY PRIMARY SDR ==='
-          H=$(curl -sS --connect-timeout 5 --max-time 15 -o /tmp/health.json -w '%{http_code}' 'https://sdr.dashboardtalentera.tech/api/health?retired_cleanup=1' || true)
-          echo "SDR health HTTP $H"
-          jq '{status,service,buildRef}' /tmp/health.json 2>/dev/null || true
-          test "$H" = 200
+          check_health after_ollama_rollback
