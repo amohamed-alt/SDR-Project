@@ -1,22 +1,17 @@
 # Hostinger maintenance audit
 
-Generated UTC: 2026-09-01T23:31:26Z
+Generated UTC: 2026-09-01T23:32:20Z
 
-## VM state
+## VM and recent actions
 ```text
-HTTP 200
+VM HTTP 200
 {
   "id": 1604210,
   "state": "running",
   "hostname": "srv1604210.hstgr.cloud",
-  "plan": "KVM 8",
-  "created_at": "2026-04-20T12:18:21Z"
+  "plan": "KVM 8"
 }
-```
-
-## Recent Hostinger actions
-```text
-HTTP 200
+Actions HTTP 200
 112465563	docker_compose_up	success	2026-09-01T23:01:07Z	2026-09-01T23:13:23Z
 112462416	docker_compose_up	success	2026-09-01T22:38:58Z	2026-09-01T22:46:02Z
 112460328	docker_compose_up	success	2026-09-01T22:23:35Z	2026-09-01T22:38:29Z
@@ -41,14 +36,61 @@ HTTP 200
   "status": "ok",
   "service": "sdr-project",
   "buildRef": "eebe3c265d861e8112bbf348935ce02fab632f25",
-  "timestamp": "2026-09-01T23:31:26.951Z"
+  "timestamp": "2026-09-01T23:32:21.590Z"
 }
 ```
 
-## Docker projects
+## Docker Manager list
 ```text
 HTTP 500
 {
-    "message": "[VPS:9999] Request failed",
-    "correlation_id": "a2a53b56-2f91-4581-9164-1839b6d6ce5a"
-}```
+  "message": "[VPS:9999] Request failed",
+  "correlation_id": "a2a53ba8-1ad7-4aa2-b174-6e0540af4fd6"
+}
+```
+
+## Project: gtm-career
+```text
+details HTTP 200 | containers HTTP 500
+logs HTTP 500
+\`\`\`
+
+## Project: gtm-career-browser
+```text
+details HTTP 200 | containers HTTP 200
+logs HTTP 500
+\`\`\`
+
+## Project: career-judge-ollama
+```text
+details HTTP 200 | containers HTTP 200
+logs HTTP 500
+\`\`\`
+
+## Project: dashboard-cache-api
+```text
+details HTTP 500 | containers HTTP 200
+logs HTTP 500
+\`\`\`
+
+## Project: open-webui
+```text
+details HTTP 200 | containers HTTP 500
+logs HTTP 500
+\`\`\`
+
+## Project: ollama
+```text
+details HTTP 200 | containers HTTP 200
+logs HTTP 500
+\`\`\`
+
+## Project: coolify
+```text
+details HTTP 200 | containers HTTP 200
+logs HTTP 500
+\`\`\`
+
+## Candidate summary
+```text
+```
