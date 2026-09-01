@@ -104,4 +104,4 @@ jobs:
             echo "No Docker container matched >=20% CPU, Ollama, horseshoe, or calibration."
           fi
 
-# diagnostic trigger: 2026-09-01
+# diagnostic trigger: 2026-09-01T09:38+03:00
