@@ -10,6 +10,12 @@ permissions:
   contents: read
   statuses: write
 
+# Serialize the entire workflow. Cancelling a runner does not cancel an already
+# accepted Hostinger control-plane action, so overlapping deploys must queue.
+concurrency:
+  group: hostinger-sdr-production
+  cancel-in-progress: false
+
 jobs:
   preflight:
     if: >-
@@ -55,14 +61,40 @@ jobs:
               });
               return;
             }
+            const { data: commit } = await github.rest.repos.getCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: candidate,
+              per_page: 100,
+            });
+            const files = Array.isArray(commit.files) ? commit.files : [];
+            const productionFiles = files.filter((file) => {
+              const path = String(file.filename || '');
+              return !path.startsWith('.github/') &&
+                !path.startsWith('docs/') &&
+                path !== 'README.md' &&
+                !path.endsWith('.md');
+            });
+            if (productionFiles.length === 0) {
+              core.setOutput('should_deploy', 'false');
+              core.notice('Skipping Hostinger deployment because this commit only changes workflows or documentation.');
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: candidate,
+                state: 'success',
+                context: 'hostinger/deploy',
+                description: 'No production files changed; production untouched',
+                target_url: process.env.DEPLOY_URL,
+              });
+              return;
+            }
+            core.notice(`Production changes detected: ${productionFiles.map((file) => file.filename).join(', ')}`);
             core.setOutput('should_deploy', 'true');
 
   deploy:
     needs: preflight
     if: needs.preflight.outputs.should_deploy == 'true'
-    concurrency:
-      group: hostinger-sdr-production
-      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
