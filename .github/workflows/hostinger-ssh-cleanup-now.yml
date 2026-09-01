@@ -18,6 +18,7 @@ jobs:
       VPS_USER: ${{ secrets.HOSTINGER_VPS_USER || secrets.VPS_USER }}
       VPS_PORT: ${{ secrets.HOSTINGER_VPS_PORT || secrets.VPS_PORT }}
       VPS_KEY: ${{ secrets.HOSTINGER_VPS_SSH_KEY || secrets.VPS_SSH_KEY || secrets.SSH_PRIVATE_KEY }}
+      VPS_KEY_B64: ${{ secrets.VPS_SSH_KEY_B64 }}
     steps:
       - name: Connect, audit, and perform safe cleanup
         run: |
@@ -25,10 +26,16 @@ jobs:
           HOST="${VPS_HOST:-187.77.2.175}"
           USER="${VPS_USER:-root}"
           PORT="${VPS_PORT:-22}"
-          test -n "${VPS_KEY:-}" || { echo "::error::No VPS SSH private-key secret is configured."; exit 2; }
 
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$VPS_KEY" > ~/.ssh/id_vps
+          if [ -n "${VPS_KEY_B64:-}" ]; then
+            printf '%s' "$VPS_KEY_B64" | base64 --decode > ~/.ssh/id_vps
+          elif [ -n "${VPS_KEY:-}" ]; then
+            printf '%s\n' "$VPS_KEY" > ~/.ssh/id_vps
+          else
+            echo "::error::No VPS SSH private-key secret is configured."
+            exit 2
+          fi
           chmod 600 ~/.ssh/id_vps
           ssh-keyscan -p "$PORT" -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
