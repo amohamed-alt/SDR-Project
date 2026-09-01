@@ -1,4 +1,4 @@
-name: Run Marita Extensive Lighter Cleanup on VPS
+name: Retire Stale Marita Cleanup Project
 
 on:
   push:
@@ -11,33 +11,85 @@ permissions:
   contents: read
 
 jobs:
-  deploy-cleanup-runner:
+  cleanup:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 8
     steps:
-      - name: Checkout cleanup runner
-        uses: actions/checkout@v5
-
-      - name: Validate cleanup deployment credentials
+      - name: Remove completed one-shot Hostinger project safely
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
-          SIGNALHIRE_API_KEY: ${{ secrets.SIGNALHIRE_API_KEY }}
         run: |
-          test -n "$HOSTINGER_API_KEY" || {
-            echo "::error::HOSTINGER_API_KEY is required."
-            exit 1
-          }
-          test -n "$SIGNALHIRE_API_KEY" || {
-            echo "::error::SIGNALHIRE_API_KEY is required."
-            exit 1
+          set -euo pipefail
+          test -n "$HOSTINGER_API_KEY"
+          AUTH="$HOSTINGER_API_KEY"; case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
+          VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
+          PROJECT='sdr-marita-task-cleanup'
+
+          req() {
+            local method="$1" url="$2" out="$3"
+            curl --silent --show-error --connect-timeout 8 --max-time 30 \
+              -X "$method" -H "Authorization: $AUTH" -H 'Accept: application/json' \
+              -o "$out" -w '%{http_code}' "$url" || true
           }
 
-      - name: Deploy one-shot cleanup runner inside VPS network
-        uses: hostinger/deploy-on-vps@v2
-        with:
-          api-key: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
-          virtual-machine: "1604210"
-          project-name: sdr-marita-task-cleanup
-          docker-compose-path: docker-compose.cleanup-marita.yml
-          environment-variables: |
-            SIGNALHIRE_API_KEY=${{ secrets.SIGNALHIRE_API_KEY }}
+          C=$(req GET "$VM/docker/$PROJECT/containers" /tmp/containers.json)
+          echo "Container inventory: HTTP ${C:-000}"
+          if [ "$C" = "200" ]; then
+            jq -r '.[] | [.name,.image,.state,.status,(.health // "")] | @tsv' /tmp/containers.json || true
+            RUNNING=$(jq '[.[] | select((.state // "") == "running")] | length' /tmp/containers.json)
+            if [ "$RUNNING" -gt 0 ]; then
+              S=$(req POST "$VM/docker/$PROJECT/stop" /tmp/stop.json)
+              echo "Stop project: HTTP ${S:-000}"
+              if ! { [ "$S" -ge 200 ] 2>/dev/null && [ "$S" -lt 300 ] 2>/dev/null; }; then
+                cat /tmp/stop.json 2>/dev/null || true
+                exit 1
+              fi
+              ACTION=$(jq -r '.id // .action.id // empty' /tmp/stop.json 2>/dev/null || true)
+              if [ -n "$ACTION" ]; then
+                for I in $(seq 1 24); do
+                  G=$(req GET "$VM/actions/$ACTION" /tmp/action.json)
+                  STATE=$(jq -r '.state // "unknown"' /tmp/action.json 2>/dev/null || echo unknown)
+                  echo "Stop action $I: $STATE"
+                  case "$STATE" in success|completed) break ;; failed|error) exit 1 ;; esac
+                  sleep 5
+                done
+              fi
+            fi
+          elif [ "$C" = "404" ] || [ "$C" = "422" ]; then
+            echo "Project already absent; nothing to clean."
+            exit 0
+          else
+            cat /tmp/containers.json 2>/dev/null || true
+            echo "Could not prove project state; refusing destructive cleanup."
+            exit 1
+          fi
+
+          D=$(req DELETE "$VM/docker/$PROJECT/down" /tmp/delete.json)
+          echo "Delete project: HTTP ${D:-000}"
+          if ! { [ "$D" -ge 200 ] 2>/dev/null && [ "$D" -lt 300 ] 2>/dev/null; }; then
+            cat /tmp/delete.json 2>/dev/null || true
+            exit 1
+          fi
+
+          ACTION=$(jq -r '.id // .action.id // empty' /tmp/delete.json 2>/dev/null || true)
+          if [ -n "$ACTION" ]; then
+            for I in $(seq 1 30); do
+              G=$(req GET "$VM/actions/$ACTION" /tmp/delete-action.json)
+              STATE=$(jq -r '.state // "unknown"' /tmp/delete-action.json 2>/dev/null || echo unknown)
+              echo "Delete action $I: $STATE"
+              case "$STATE" in success|completed) break ;; failed|error) cat /tmp/delete-action.json; exit 1 ;; esac
+              sleep 5
+            done
+          fi
+
+          CHECK=$(req GET "$VM/docker/$PROJECT/containers" /tmp/after.json)
+          echo "Post-delete inventory: HTTP ${CHECK:-000}"
+          if [ "$CHECK" = "200" ]; then
+            echo "Project still exists after delete action."; cat /tmp/after.json; exit 1
+          fi
+
+          HEALTH=$(curl -sS --connect-timeout 5 --max-time 15 -o /tmp/health.json -w '%{http_code}' \
+            'https://sdr.dashboardtalentera.tech/api/health?post_cleanup=1' || true)
+          echo "SDR health after cleanup: HTTP ${HEALTH:-000}"
+          jq '{status,service,buildRef}' /tmp/health.json 2>/dev/null || true
+          test "$HEALTH" = "200"
