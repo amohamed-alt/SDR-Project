@@ -5,8 +5,19 @@ export type SignalHireCsvLead = {
   company: string;
   companyWebsite: string;
   companyDomain: string;
+  companyHeadquarter: string;
+  companySize: string;
   location: string;
+  headline: string;
+  summary: string;
+  yearsExperience: string;
+  spokenLanguage: string;
+  recruitmentStage: string;
+  recruitmentStatus: string;
   linkedinUrl: string;
+  twitterUrl: string;
+  facebookUrl: string;
+  skype: string;
   signalHireProfileUrl: string;
   email: string;
   emails: string[];
@@ -14,6 +25,16 @@ export type SignalHireCsvLead = {
   personalEmails: string[];
   phone: string;
   phones: string[];
+  mobilePhones: string[];
+  workPhones: string[];
+  otherPhones: string[];
+  skills: string[];
+  currentRoleSummary: string;
+  previousTitle: string;
+  previousCompany: string;
+  previousStarted: string;
+  previousEnded: string;
+  education: string[];
 };
 
 export type SignalHireCsvParseResult = {
@@ -79,6 +100,10 @@ function parseCsvRows(text: string) {
   return rows;
 }
 
+function compact(value: string, max = 4_000) {
+  return value.replace(/\u200b/g, "").replace(/\r/g, "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim().slice(0, max);
+}
+
 function normalizeWebsite(value: string) {
   const raw = value.trim();
   if (!raw) return "";
@@ -117,6 +142,17 @@ function cleanLinkedIn(value: string) {
   }
 }
 
+function cleanSocial(value: string) {
+  const raw = value.trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    return /^https?:$/.test(url.protocol) ? url.toString().replace(/\/$/, "") : "";
+  } catch {
+    return "";
+  }
+}
+
 function emailValues(values: string[]) {
   return unique(values).filter((value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value));
 }
@@ -127,6 +163,32 @@ function phoneValues(values: string[]) {
 
 function cell(record: Record<string, string>, name: string) {
   return String(record[name] || "").trim();
+}
+
+function firstCell(record: Record<string, string>, names: string[]) {
+  for (const name of names) {
+    const value = cell(record, name);
+    if (value) return value;
+  }
+  return "";
+}
+
+function educationValues(record: Record<string, string>) {
+  const rows: string[] = [];
+  for (let index = 1; index <= 8; index += 1) {
+    const degree = cell(record, `Education Degree${index}`);
+    const faculty = cell(record, `Education Faculty${index}`);
+    const university = cell(record, `Education University${index}`);
+    const started = cell(record, `Education Started${index}`);
+    const ended = cell(record, `Education Ended${index}`);
+    if (!degree && !faculty && !university) continue;
+    const program = [degree, faculty].filter(Boolean).join(" — ");
+    const place = university;
+    const dates = [started, ended].filter(Boolean).join(" → ");
+    rows.push([program, place, dates].filter(Boolean).join(" · "));
+    if (rows.length >= 3) break;
+  }
+  return unique(rows);
 }
 
 export function parseSignalHireCsv(text: string): SignalHireCsvParseResult {
@@ -151,19 +213,15 @@ export function parseSignalHireCsv(text: string): SignalHireCsvParseResult {
     const businessEmails = emailValues([cell(record, "Business Email1"), cell(record, "Business Email2")]);
     const personalEmails = emailValues([cell(record, "Personal Email1"), cell(record, "Personal Email2")]);
     const emails = unique([...businessEmails, ...personalEmails]);
-    const phones = phoneValues([
-      cell(record, "Mobile Phone1"),
-      cell(record, "Mobile Phone2"),
-      cell(record, "Work Phone"),
-      cell(record, "Unknown Phone1"),
-      cell(record, "Unknown Phone2"),
-    ]);
-    const linkedinUrl = cleanLinkedIn(cell(record, "LinkedIn Link1"))
-      || cleanLinkedIn(cell(record, "LinkedIn Link2"))
-      || cleanLinkedIn(cell(record, "LinkedIn Link3"));
-    const companyWebsite = normalizeWebsite(cell(record, "Company Website1"))
-      || normalizeWebsite(cell(record, "Company Website2"))
-      || normalizeWebsite(cell(record, "Company Website3"));
+
+    const mobilePhones = phoneValues([cell(record, "Mobile Phone1"), cell(record, "Mobile Phone2")]);
+    const workPhones = phoneValues([cell(record, "Work Phone1"), cell(record, "Work Phone2"), cell(record, "Work Phone")]);
+    const otherPhones = phoneValues([cell(record, "Unknown Phone1"), cell(record, "Unknown Phone2"), cell(record, "Home Phone")]);
+    const phones = unique([...mobilePhones, ...workPhones, ...otherPhones]);
+
+    const linkedinUrl = cleanLinkedIn(firstCell(record, ["LinkedIn Link", "LinkedIn Link1", "LinkedIn Link2", "LinkedIn Link3"]));
+    const companyWebsite = Array.from({ length: 15 }, (_, index) => normalizeWebsite(cell(record, `Company Website${index + 1}`))).find(Boolean) || "";
+    const skills = unique(cell(record, "Skill").split(/[,;|]/).map((value) => value.trim())).slice(0, 25);
 
     if (!name || (!company && !linkedinUrl && !emails.length && !phones.length)) {
       skipped += 1;
@@ -177,15 +235,36 @@ export function parseSignalHireCsv(text: string): SignalHireCsvParseResult {
       company,
       companyWebsite,
       companyDomain: domainFromWebsite(companyWebsite),
+      companyHeadquarter: cell(record, "Company Headquarter"),
+      companySize: cell(record, "Company Size"),
       location: cell(record, "Location") || cell(record, "Company Headquarter"),
+      headline: compact(cell(record, "Headline"), 700),
+      summary: compact(cell(record, "Summary")),
+      yearsExperience: cell(record, "Years of Experience"),
+      spokenLanguage: cell(record, "Spoken Language"),
+      recruitmentStage: cell(record, "Recruitment Stage"),
+      recruitmentStatus: cell(record, "Recruitment Status"),
       linkedinUrl,
+      twitterUrl: cleanSocial(firstCell(record, ["Twitter Link", "Twitter Link1"])),
+      facebookUrl: cleanSocial(firstCell(record, ["Facebook Link", "Facebook Link1"])),
+      skype: cell(record, "Skype"),
       signalHireProfileUrl: cell(record, "Uploaded Link"),
-      email: businessEmails[0] || "",
+      email: businessEmails[0] || personalEmails[0] || "",
       emails,
       businessEmails,
       personalEmails,
-      phone: phones[0] || "",
+      phone: mobilePhones[0] || workPhones[0] || otherPhones[0] || "",
       phones,
+      mobilePhones,
+      workPhones,
+      otherPhones,
+      skills,
+      currentRoleSummary: compact(cell(record, "Experience Summary1"), 2_000),
+      previousTitle: cell(record, "Experience Title2"),
+      previousCompany: cell(record, "Experience Company2"),
+      previousStarted: cell(record, "Experience Started2"),
+      previousEnded: cell(record, "Experience Ended2"),
+      education: educationValues(record),
     });
   }
 
