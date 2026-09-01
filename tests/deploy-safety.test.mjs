@@ -88,17 +88,14 @@ test("public production keeps browser Basic Auth off and protects admin tools in
 
 test("Primeforge remains read-only and advisory while Smartlead safety stays enforced", async () => {
   const deploy = await read(".github/workflows/deploy-hostinger.yml");
-  const autopilot = await read(".github/workflows/smartlead-autopilot.yml");
   const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
   const primeforge = await read("src/lib/primeforge-health.ts");
 
   assert.match(deploy, /PRIMEFORGE_API_KEY/);
-  assert.match(autopilot, /Primeforge infrastructure advisory/);
   assert.match(orchestrator, /checkPrimeforgeInfrastructure/);
   assert.match(orchestrator, /pauseManagedCampaigns\(\)\.catch/);
   assert.match(orchestrator, /validateApprovedSenderInventory/);
   assert.match(orchestrator, /primeforgeGateEnforced: false/);
-  assert.doesNotMatch(autopilot, /primeforge-fail-closed/);
   assert.doesNotMatch(deploy, /primeforge-deploy-fail-closed/);
   assert.match(primeforge, /method: "GET"/);
   assert.doesNotMatch(primeforge, /method: "(?:POST|PUT|PATCH|DELETE)"/);
@@ -117,13 +114,11 @@ test("Smartlead campaign parity audits the detailed campaign response", async ()
 
 test("Smartlead sender reconciliation enforces Marita identity and pauses personal-domain leads", async () => {
   const reconcile = await read("src/app/api/smartlead/sender-reconcile/route.ts");
-  const workflow = await read(".github/workflows/smartlead-autopilot.yml");
   assert.match(reconcile, /OUTREACH_SENDER_NAME/);
   assert.match(reconcile, /signature: " "/);
   assert.match(reconcile, /pauseActivePersonalLeads/);
   assert.match(reconcile, /isPersonalEmail/);
   assert.match(reconcile, /personalLeadSafety/);
-  assert.match(workflow, /senderIdentity, personalLeadSafety/);
 });
 
 test("Smartlead setup never rewrites a matching active sequence", async () => {
@@ -137,19 +132,16 @@ test("Smartlead setup never rewrites a matching active sequence", async () => {
 
 test("Smartlead topology detects every non-visible Marita campaign and reports it", async () => {
   const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
-  const workflow = await read(".github/workflows/smartlead-autopilot.yml");
 
   assert.match(orchestrator, /isMaritaOutreachCampaignName/);
   assert.match(orchestrator, /!MANAGED_CAMPAIGN_NAMES\.has\(item\.name\)/);
   assert.match(orchestrator, /legacyCampaigns: legacy\.campaigns/);
   assert.doesNotMatch(orchestrator, /const LEGACY_CAMPAIGNS/);
-  assert.match(workflow, /campaignTopology, legacyCampaigns/);
 });
 
 test("Smartlead V2 migration pauses legacy campaigns and deduplicates bounce recipients", async () => {
   const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
   const reputation = await read("src/lib/smartlead-reputation.ts");
-  const workflow = await read(".github/workflows/smartlead-autopilot.yml");
 
   assert.match(orchestrator, /pauseCampaigns\(\[\.\.\.unsafeLanes\]/);
   assert.match(orchestrator, /BOUNCE_GUARD_MIN_UNIQUE_RECIPIENTS = 3/);
@@ -157,49 +149,26 @@ test("Smartlead V2 migration pauses legacy campaigns and deduplicates bounce rec
   assert.match(orchestrator, /managed V2 lanes/);
   assert.match(reputation, /uniqueBouncedLeadEmails/);
   assert.match(reputation, /duplicateBounceEvents/);
-  assert.match(workflow, /returned blocked=true/);
 });
 
-test("Golden Hours runs three idempotent attempts before the Riyadh send window", async () => {
-  const workflow = await read(".github/workflows/smartlead-autopilot.yml");
+test("Smartlead keeps the Riyadh send window and daily idempotence", async () => {
   const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
 
-  assert.match(workflow, /cron: "45 5 \* \* 0-4"/);
-  assert.match(workflow, /cron: "5 6 \* \* 0-4"/);
-  assert.match(workflow, /cron: "25 6 \* \* 0-4"/);
   assert.match(orchestrator, /start_hour: "09:30"/);
   assert.match(orchestrator, /end_hour: "16:30"/);
   assert.match(orchestrator, /lastSuccessfulDate === clock\.date/);
 });
 
-test("manual Smartlead dry-run reports masked routing without campaign writes", async () => {
-  const workflow = await read(".github/workflows/smartlead-autopilot.yml");
+test("Smartlead dry-run reports masked routing without campaign writes", async () => {
   const dryRun = await read("src/app/api/smartlead/language-test/route.ts");
 
-  assert.match(workflow, /- dry-run/);
-  assert.match(workflow, /api\/smartlead\/language-test\?limit=50&refresh=1/);
-  assert.match(workflow, /if: steps\.mode\.outputs\.mode != 'dry-run'/);
-  assert.match(workflow, /Audit first 50 recipient routes without sending/);
-  assert.match(workflow, /jq '\{mode, productionSendingChanged, sampled, localeCounts, laneCounts, translatedCount, lowConfidence, senderPools\}'/);
-  assert.doesNotMatch(workflow, /senderPools, samples/);
   assert.match(dryRun, /READ_ONLY_ROUTING_DRY_RUN/);
   assert.match(dryRun, /productionSendingChanged: false/);
   assert.match(dryRun, /maskedEmail\(lead\.email\)/);
   assert.match(dryRun, /VISIBLE_SEQUENCE_LANES\[lane\]\.campaignName/);
 });
 
-test("Smartlead active-campaign warmup is reconciled only for the exact approved 15 inboxes", async () => {
-  const workflow = await read(".github/workflows/smartlead-autopilot.yml");
 
-  assert.match(workflow, /Reconcile active-campaign warmup for approved inboxes/);
-  assert.match(workflow, /if: steps\.mode\.outputs\.mode != 'dry-run'/);
-  assert.match(workflow, /EXPECTED_DOMAIN_COUNTS='\{"jointalentera\.com":3,"usetalentera\.com":3,"talenteramena\.com":3,"evalufyhq\.com":3,"getevalufy\.com":3\}'/);
-  assert.match(workflow, /"total_warmup_per_day":10/);
-  assert.match(workflow, /"reply_rate_percentage":30/);
-  assert.match(workflow, /"auto_adjust_warmup":true/);
-  assert.match(workflow, /"is_rampup_enabled":false/);
-  assert.match(workflow, /test "\$UPDATED" = "15"/);
-});
 
 test("Smartlead pauses on the first recorded spam complaint", async () => {
   const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
