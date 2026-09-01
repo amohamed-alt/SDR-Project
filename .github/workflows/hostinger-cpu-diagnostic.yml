@@ -1,4 +1,4 @@
-name: Hostinger CPU Diagnostic
+name: Hostinger One-Shot Maintenance Audit
 
 on:
   push:
@@ -6,150 +6,133 @@ on:
     paths:
       - ".github/workflows/hostinger-cpu-diagnostic.yml"
   workflow_dispatch:
-  schedule:
-    - cron: "17 * * * *"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  inspect:
+  audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 10
     steps:
-      - name: Inspect Hostinger Docker CPU usage and recent actions
+      - uses: actions/checkout@v4
+
+      - name: Audit Hostinger VPS and Docker projects
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
         run: |
           set -euo pipefail
-          test -n "$HOSTINGER_API_KEY"
+          test -n "$HOSTINGER_API_KEY" || { echo "Hostinger API token is missing"; exit 1; }
           AUTH="$HOSTINGER_API_KEY"
           case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
           VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
+          REPORT="$GITHUB_WORKSPACE/docs/hostinger-audit-latest.md"
+          mkdir -p "$GITHUB_WORKSPACE/docs"
+          : > "$REPORT"
 
-          echo "=== VM STATE ==="
-          VCODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
-            -H "Authorization: $AUTH" -H 'Accept: application/json' \
-            -o /tmp/vm.json -w '%{http_code}' "$VM" || true)
-          echo "VM: HTTP ${VCODE:-000}"
-          jq '{id,state,hostname,plan}' /tmp/vm.json 2>/dev/null || cat /tmp/vm.json || true
-          echo
-
-          echo "=== RECENT HOSTINGER ACTIONS ==="
-          ACODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
-            -H "Authorization: $AUTH" -H 'Accept: application/json' \
-            -o /tmp/actions.json -w '%{http_code}' "$VM/actions?page=1" || true)
-          echo "Actions: HTTP ${ACODE:-000}"
-          if [ "$ACODE" = "200" ]; then
-            jq -r '.data[]? | [.id,.name,.state,.created_at,.updated_at] | @tsv' /tmp/actions.json | head -25
-          else
-            cat /tmp/actions.json 2>/dev/null || true
-          fi
-
-          if [ "$ACODE" = "200" ]; then
-            ACTIVE=$(jq -r '[.data[]? | select(
-              ((.name // "") | startswith("docker_compose_")) and
-              ((.state // "") | IN("pending","queued","started","running","processing","in_progress"))
-            )] | length' /tmp/actions.json)
-            echo "Active Docker Compose actions: $ACTIVE"
-            if [ "$ACTIVE" -gt 1 ]; then
-              echo "::error::Multiple Hostinger Docker Compose actions are overlapping."
-              exit 1
-            fi
-            NOW=$(date +%s)
-            while IFS=$'\t' read -r ID NAME STATE CREATED; do
-              [ -n "$ID" ] || continue
-              CREATED_EPOCH=$(date -d "$CREATED" +%s 2>/dev/null || echo "$NOW")
-              AGE=$((NOW - CREATED_EPOCH))
-              echo "Active action $ID ($NAME/$STATE) age=$AGE seconds"
-              if [ "$AGE" -gt 2700 ]; then
-                echo "::error::Hostinger Docker Compose action $ID has been active for more than 45 minutes."
-                exit 1
-              fi
-            done < <(jq -r '.data[]? | select(
-              ((.name // "") | startswith("docker_compose_")) and
-              ((.state // "") | IN("pending","queued","started","running","processing","in_progress"))
-            ) | [.id,.name,.state,.created_at] | @tsv' /tmp/actions.json)
-          fi
-
-          echo "=== PUBLIC DASHBOARD HEALTH ==="
-          HCODE=$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
-            -H 'Cache-Control: no-cache' -o /tmp/health.json -w '%{http_code}' \
-            "https://sdr.dashboardtalentera.tech/api/health?guardian=$GITHUB_RUN_ID" || true)
-          echo "Dashboard health: HTTP $HCODE"
-          jq '{status,service,buildRef,timestamp}' /tmp/health.json 2>/dev/null || cat /tmp/health.json 2>/dev/null || true
-          if [ "$HCODE" != "200" ]; then
-            echo "::error::The public SDR dashboard health endpoint is unavailable."
-          fi
-          echo
-
-          echo "=== DOCKER MANAGER ==="
-          CODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
-            -H "Authorization: $AUTH" -H 'Accept: application/json' \
-            -o /tmp/projects.json -w '%{http_code}' "$VM/docker" || true)
-          echo "Docker Manager project list: HTTP ${CODE:-000}"
-
-          if [ "$CODE" != "200" ]; then
-            jq '{message,correlation_id}' /tmp/projects.json 2>/dev/null || cat /tmp/projects.json || true
-            echo "::warning::Docker Manager inventory is degraded; trying the SDR project container endpoint directly."
-            CCODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+          req() {
+            local url="$1" out="$2"
+            curl --silent --show-error --connect-timeout 8 --max-time 40 \
               -H "Authorization: $AUTH" -H 'Accept: application/json' \
-              -o /tmp/sdr-containers-direct.json -w '%{http_code}' "$VM/docker/sdr-project/containers" || true)
-            echo "Direct SDR container inventory: HTTP ${CCODE:-000}"
-            if [ "$CCODE" = "200" ]; then
-              jq -r '.[] | [.name,.image,.state,.status,(.stats.cpu_percentage // 0),(.stats.memory_percentage // 0)] | @tsv' /tmp/sdr-containers-direct.json
-            else
-              jq '{message,correlation_id}' /tmp/sdr-containers-direct.json 2>/dev/null || cat /tmp/sdr-containers-direct.json 2>/dev/null || true
-            fi
-            [ "$HCODE" = "200" ] && exit 0 || exit 1
+              -o "$out" -w '%{http_code}' "$url" || true
+          }
+
+          {
+            echo "# Hostinger maintenance audit"
+            echo
+            echo "Generated UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo
+            echo '## VM state'
+            echo '```text'
+          } >> "$REPORT"
+          VCODE=$(req "$VM" /tmp/vm.json); echo "HTTP $VCODE" >> "$REPORT"
+          jq '{id,state,hostname,plan,created_at}' /tmp/vm.json >> "$REPORT" 2>/dev/null || cat /tmp/vm.json >> "$REPORT"
+          echo '```' >> "$REPORT"
+
+          {
+            echo
+            echo '## Recent Hostinger actions'
+            echo '```text'
+          } >> "$REPORT"
+          ACODE=$(req "$VM/actions?page=1" /tmp/actions.json); echo "HTTP $ACODE" >> "$REPORT"
+          if [ "$ACODE" = "200" ]; then
+            jq -r '.data[]? | [.id,.name,.state,.created_at,.updated_at] | @tsv' /tmp/actions.json | head -40 >> "$REPORT"
+          else
+            cat /tmp/actions.json >> "$REPORT" 2>/dev/null || true
           fi
+          echo '```' >> "$REPORT"
 
-          echo "=== PROJECTS ==="
-          jq -r '.[] | [.name, .state, .status] | @tsv' /tmp/projects.json
+          {
+            echo
+            echo '## Public SDR health'
+            echo '```text'
+          } >> "$REPORT"
+          HCODE=$(curl --silent --show-error --connect-timeout 5 --max-time 15 -H 'Cache-Control: no-cache' \
+            -o /tmp/health.json -w '%{http_code}' "https://sdr.dashboardtalentera.tech/api/health?audit=$GITHUB_RUN_ID" || true)
+          echo "HTTP $HCODE" >> "$REPORT"
+          jq . /tmp/health.json >> "$REPORT" 2>/dev/null || cat /tmp/health.json >> "$REPORT" 2>/dev/null || true
+          echo '```' >> "$REPORT"
 
-          echo "=== SDR PROJECT DETAILS ==="
-          PCODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
-            -H "Authorization: $AUTH" -H 'Accept: application/json' \
-            -o /tmp/sdr-project.json -w '%{http_code}' "$VM/docker/sdr-project" || true)
-          echo "sdr-project details: HTTP ${PCODE:-000}"
+          {
+            echo
+            echo '## Docker projects'
+            echo '```text'
+          } >> "$REPORT"
+          PCODE=$(req "$VM/docker" /tmp/projects.json); echo "HTTP $PCODE" >> "$REPORT"
           if [ "$PCODE" = "200" ]; then
-            jq '{name,state,status,file_path,environment}' /tmp/sdr-project.json 2>/dev/null || cat /tmp/sdr-project.json
+            jq -r '.[] | [.name,.state,.status,.path] | @tsv' /tmp/projects.json >> "$REPORT"
           else
-            cat /tmp/sdr-project.json 2>/dev/null || true
+            cat /tmp/projects.json >> "$REPORT" 2>/dev/null || true
           fi
-          echo
+          echo '```' >> "$REPORT"
 
-          echo "=== CONTAINER CPU SNAPSHOT ==="
-          printf '%-28s %-36s %-34s %10s %10s\n' PROJECT CONTAINER IMAGE CPU_PCT MEM_PCT
-          while IFS= read -r PROJECT; do
-            [ -n "$PROJECT" ] || continue
-            CCODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
-              -H "Authorization: $AUTH" -H 'Accept: application/json' \
-              -o /tmp/containers.json -w '%{http_code}' "$VM/docker/$PROJECT/containers" || true)
-            echo "Project $PROJECT containers: HTTP ${CCODE:-000}" >&2
-            if [ "$CCODE" = "200" ]; then
-              jq -r --arg p "$PROJECT" '.[] | [$p, .name, .image, (.stats.cpu_percentage // 0), (.stats.memory_percentage // 0)] | @tsv' /tmp/containers.json \
-                | sort -t $'\t' -k4,4nr
-            fi
-          done < <(jq -r '.[].name' /tmp/projects.json)
+          if [ "$PCODE" = "200" ]; then
+            while IFS= read -r PROJECT; do
+              [ -n "$PROJECT" ] || continue
+              SAFE=$(echo "$PROJECT" | tr -c 'A-Za-z0-9_.-' '_')
+              {
+                echo
+                echo "### $PROJECT"
+                echo '```text'
+              } >> "$REPORT"
 
-          echo "=== HIGH CPU / OLLAMA / CALIBRATION MATCHES ==="
-          FOUND=0
-          while IFS= read -r PROJECT; do
-            [ -n "$PROJECT" ] || continue
-            CCODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
-              -H "Authorization: $AUTH" -H 'Accept: application/json' \
-              -o /tmp/containers.json -w '%{http_code}' "$VM/docker/$PROJECT/containers" || true)
-            [ "$CCODE" = "200" ] || continue
-            MATCHES=$(jq -r --arg p "$PROJECT" '.[] | select((.stats.cpu_percentage // 0) >= 20 or ((.image // "")|ascii_downcase|contains("ollama")) or ((.name // "")|ascii_downcase|contains("ollama")) or ((.command // "")|ascii_downcase|contains("horseshoe")) or ((.command // "")|ascii_downcase|contains("calibration"))) | [$p,.id,.name,.image,.command,(.stats.cpu_percentage // 0),(.stats.memory_percentage // 0)] | @tsv' /tmp/containers.json || true)
-            if [ -n "$MATCHES" ]; then
-              FOUND=1
-              echo "$MATCHES"
-            fi
-          done < <(jq -r '.[].name' /tmp/projects.json)
-          if [ "$FOUND" = "0" ]; then
-            echo "No Docker container matched >=20% CPU, Ollama, horseshoe, or calibration."
+              DCODE=$(req "$VM/docker/$PROJECT" "/tmp/project-$SAFE.json")
+              echo "details HTTP $DCODE" >> "$REPORT"
+              if [ "$DCODE" = "200" ]; then
+                echo '-- compose --' >> "$REPORT"
+                jq -r '.content // ""' "/tmp/project-$SAFE.json" >> "$REPORT" 2>/dev/null || true
+              fi
+
+              CCODE=$(req "$VM/docker/$PROJECT/containers" "/tmp/containers-$SAFE.json")
+              echo "containers HTTP $CCODE" >> "$REPORT"
+              if [ "$CCODE" = "200" ]; then
+                jq -r '.[] | [.name,.image,.state,.status,(.health // ""),(.stats.cpu_percentage // 0),(.stats.memory_percentage // 0),(.command // "")] | @tsv' "/tmp/containers-$SAFE.json" >> "$REPORT"
+              fi
+
+              LCODE=$(req "$VM/docker/$PROJECT/logs" "/tmp/logs-$SAFE.json")
+              echo "logs HTTP $LCODE" >> "$REPORT"
+              if [ "$LCODE" = "200" ]; then
+                echo '-- recent logs --' >> "$REPORT"
+                jq -r '.[]? | .service as $s | (.entries // [])[-20:][]? | [$s,.timestamp,.line] | @tsv' "/tmp/logs-$SAFE.json" >> "$REPORT" 2>/dev/null || true
+              fi
+              echo '```' >> "$REPORT"
+            done < <(jq -r '.[].name' /tmp/projects.json)
+
+            {
+              echo
+              echo '## Non-running / unhealthy candidates'
+              echo '```text'
+            } >> "$REPORT"
+            jq -r '.[] | .name as $p | (.containers // [])[]? | select((.state // "") != "running" or ((.health // "") != "" and (.health // "") != "healthy")) | [$p,.name,.image,.state,.status,(.health // "")] | @tsv' /tmp/projects.json >> "$REPORT" 2>/dev/null || true
+            echo '```' >> "$REPORT"
           fi
-          [ "$HCODE" = "200" ] || exit 1
 
-# diagnostic trigger: 2026-09-02T01:45+03:00
+          cat "$REPORT"
+
+      - name: Save audit report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/hostinger-audit-latest.md
+          git diff --cached --quiet || git commit -m "docs: save Hostinger maintenance audit"
+          git push
