@@ -105,6 +105,7 @@ function formatDate(value: string) {
 function scoreLead(lead: SignalHireCsvLead) {
   const reasons: Array<{ label: string; points: number }> = [];
   if (lead.businessEmails.length) reasons.push({ label: "Business email available", points: 20 });
+  else if (lead.personalEmails.length) reasons.push({ label: "Personal email available", points: 10 });
   if (lead.phones.length) reasons.push({ label: "Phone number available", points: 20 });
   if (lead.linkedinUrl) reasons.push({ label: "LinkedIn profile available", points: 10 });
   if (lead.companyDomain) reasons.push({ label: "Company domain available", points: 10 });
@@ -116,6 +117,7 @@ function scoreLead(lead: SignalHireCsvLead) {
 function prospectPayload(row: Row, fileName: string) {
   const scored = scoreLead(row.lead);
   return {
+    ...row.lead,
     linkedinUrl: row.lead.linkedinUrl,
     source: `SignalHire CSV · ${fileName}`.slice(0, 120),
     signalHireUid: row.lead.id.slice(0, 160),
@@ -131,6 +133,8 @@ function prospectPayload(row: Row, fileName: string) {
     phones: row.lead.phones,
     score: scored.score,
     priority: scored.priority,
+    previousTitle: row.lead.previousTitle,
+    previousCompany: row.lead.previousCompany,
     scoreReasons: scored.reasons,
   };
 }
@@ -198,7 +202,7 @@ export function LeadImportPushV2() {
         }
       });
       await Promise.all(workers);
-      setMessage(`Dry run complete for ${initial.length} contacts. Existing people and already-engaged companies are separated before Push.`);
+      setMessage(`Dry run complete for ${initial.length} contacts. Existing people, no-email rows and already-engaged companies are separated before Push.`);
     } catch (fileError) {
       setRows([]);
       setError(fileError instanceof Error ? fileError.message : "Could not read SignalHire CSV.");
@@ -227,7 +231,7 @@ export function LeadImportPushV2() {
       const payload = await response.json() as { duplicate?: boolean; taskId?: string; taskOwnerName?: string; error?: string };
       if (!response.ok) throw new Error(payload.error || "Push failed.");
       const success = payload.duplicate
-        ? `Existing open task found · ${payload.taskId || "kept"}`
+        ? `Existing open task refreshed · ${payload.taskId || "kept"}`
         : `Created task for ${payload.taskOwnerName || "selected owner"} · ${payload.taskId || "done"}`;
       setRows((current) => current.map((item) => item.key === row.key ? { ...item, stage: "pushed", push: { success, taskId: payload.taskId } } : item));
       setSelected((current) => { const next = new Set(current); next.delete(row.key); return next; });
@@ -308,9 +312,9 @@ export function LeadImportPushV2() {
           <Link href="/" className={styles.back}><ArrowLeft size={15}/>SDR Command Center</Link>
           <span className={styles.eyebrow}><FileSpreadsheet size={14}/>SIGNALHIRE IMPORT</span>
           <h1>New Person → Check Company Engagement → Choose Trigger → Push</h1>
-          <p>A company can already exist in HubSpot and still be valid. We only block it when the person already exists, the company is Retention/protected, or the company already has a connected call or meaningful meeting.</p>
+          <p>A company can already exist in HubSpot and still be valid. We block rows when the person exists, email is missing, the company is Retention/protected, or the company already has a connected call or meaningful meeting.</p>
         </div>
-        <div className={styles.guardrails}><span><ShieldCheck size={13}/>New people only</span><span><PhoneCall size={13}/>Connected call guard</span><span><CalendarCheck2 size={13}/>Meeting guard</span></div>
+        <div className={styles.guardrails}><span><ShieldCheck size={13}/>New people + email only</span><span><PhoneCall size={13}/>Connected call guard</span><span><CalendarCheck2 size={13}/>Meeting guard</span></div>
       </header>
 
       <section className={styles.controlGrid}>
@@ -346,7 +350,7 @@ export function LeadImportPushV2() {
       <section className={styles.selection}>
         <button onClick={toggleVisible} disabled={!eligibleVisible.length}>{allVisibleSelected ? "Unselect visible" : "Select ready"}</button>
         <span><b>{selectedCount}</b> selected</span>
-        <small>Ready = new person + no connected call/meeting at the company. Existing companies with no meaningful engagement are still allowed.</small>
+        <small>Ready = new person + valid email + no connected call/meeting at the company. Existing companies with no meaningful engagement are still allowed.</small>
         <button className={styles.primary} onClick={() => void pushSelected()} disabled={!selectedCount || !ownerId || bulk.loading}>{bulk.loading ? <LoaderCircle className={styles.spin} size={14}/> : <Send size={14}/>}{bulk.loading ? `Pushing ${bulk.done}/${bulk.total}` : "Push selected + Tasks"}</button>
       </section>
 
@@ -357,7 +361,7 @@ export function LeadImportPushV2() {
           return <tr key={row.key} data-blocked={["retention", "protected", "engaged", "existing"].includes(row.stage)}>
             <td><input type="checkbox" disabled={row.stage !== "ready"} checked={selected.has(row.key)} onChange={() => setSelected((current) => { const next = new Set(current); if (next.has(row.key)) next.delete(row.key); else next.add(row.key); return next; })}/></td>
             <td><strong>{row.lead.name}</strong><span>{row.lead.title || "—"}</span><small>{row.lead.company || "—"}</small>{row.lead.linkedinUrl && <a href={row.lead.linkedinUrl} target="_blank" rel="noreferrer">LinkedIn <ExternalLink size={10}/></a>}</td>
-            <td><strong>{row.lead.phone || "No phone"}</strong><span>{row.lead.email || "No business email"}</span><small>{row.lead.phones.length} phones · {row.lead.emails.length} emails</small></td>
+            <td><strong>{row.lead.phone || "No phone"}</strong><span>{row.lead.email || "No email"}</span><small>{row.lead.phones.length} phones · {row.lead.emails.length} emails</small></td>
             <td className={styles.hubspotCheck}>
               {row.stage === "checking" ? <span>Checking…</span> : row.precheck?.contact.inHubSpot
                 ? <strong className={styles.bad}>Person: already exists · matched by {row.precheck.contact.matchedBy}</strong>
