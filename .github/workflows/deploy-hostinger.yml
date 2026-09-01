@@ -182,12 +182,12 @@ jobs:
           }
           ACTIVE_ACTIONS=$(jq -r '[.data[]? | select(
             ((.name // "") | startswith("docker_compose_")) and
-            ((.state // "") | IN("pending","queued","running","processing","in_progress"))
+            ((.state // "") | IN("pending","queued","started","running","processing","in_progress"))
           )] | length' /tmp/predeploy-actions.json)
           if [ "$ACTIVE_ACTIONS" -gt 0 ]; then
             jq -r '.data[]? | select(
               ((.name // "") | startswith("docker_compose_")) and
-              ((.state // "") | IN("pending","queued","running","processing","in_progress"))
+              ((.state // "") | IN("pending","queued","started","running","processing","in_progress"))
             ) | [.id,.name,.state,.created_at] | @tsv' /tmp/predeploy-actions.json
             echo "::error::A Hostinger Docker Compose action is already active; refusing an overlapping deploy."
             exit 1
