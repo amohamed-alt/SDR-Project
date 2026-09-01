@@ -103,3 +103,5 @@ jobs:
           if [ "$FOUND" = "0" ]; then
             echo "No Docker container matched >=20% CPU, Ollama, horseshoe, or calibration."
           fi
+
+# diagnostic trigger: 2026-09-01
