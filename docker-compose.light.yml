@@ -46,6 +46,7 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *default-logging
     mem_limit: "512m"
     cpus: 0.50
     pids_limit: 128
@@ -69,6 +70,7 @@ services:
       context: ./services/dashboard-cache
       dockerfile: Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -104,6 +106,7 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       runtime-bootstrap:
         condition: service_completed_successfully
@@ -185,6 +188,7 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       sdr-dashboard:
         condition: service_healthy
