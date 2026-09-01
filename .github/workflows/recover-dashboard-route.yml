@@ -51,3 +51,5 @@ jobs:
           echo "::error::Dashboard route did not recover within the verification window."
           cat /tmp/sdr-health.json 2>/dev/null || true
           exit 1
+
+# recovery trigger: 2026-09-01T09:30+03:00
