@@ -92,7 +92,16 @@ jobs:
 
           if [ "$CODE" != "200" ]; then
             jq '{message,correlation_id}' /tmp/projects.json 2>/dev/null || cat /tmp/projects.json || true
-            echo "::warning::Docker Manager inventory is degraded; action history above is the authoritative control-plane diagnostic."
+            echo "::warning::Docker Manager inventory is degraded; trying the SDR project container endpoint directly."
+            CCODE=$(curl --silent --show-error --connect-timeout 8 --max-time 30 \
+              -H "Authorization: $AUTH" -H 'Accept: application/json' \
+              -o /tmp/sdr-containers-direct.json -w '%{http_code}' "$VM/docker/sdr-project/containers" || true)
+            echo "Direct SDR container inventory: HTTP ${CCODE:-000}"
+            if [ "$CCODE" = "200" ]; then
+              jq -r '.[] | [.name,.image,.state,.status,(.stats.cpu_percentage // 0),(.stats.memory_percentage // 0)] | @tsv' /tmp/sdr-containers-direct.json
+            else
+              jq '{message,correlation_id}' /tmp/sdr-containers-direct.json 2>/dev/null || cat /tmp/sdr-containers-direct.json 2>/dev/null || true
+            fi
             exit 0
           fi
 
