@@ -1,3 +1,4 @@
+# Cleanup audit pass: 2026-09-02
 name: Hostinger One-Shot Project State Audit
 
 on:
@@ -56,26 +57,14 @@ jobs:
             SAFE=$(printf '%s' "$P" | tr -c 'A-Za-z0-9_.-' '_')
             echo >> "$OUT"
             echo "## $P" >> "$OUT"
-
-            # Project details may contain environment variables. Never print or persist them.
             DCODE=$(req "$VM/docker/$P" "/tmp/details-$SAFE.json")
             echo "DETAILS_HTTP=${DCODE:-000}" >> "$OUT"
-
             CCODE=$(req "$VM/docker/$P/containers" "/tmp/containers-$SAFE.json")
             echo "CONTAINERS_HTTP=${CCODE:-000}" >> "$OUT"
             if [ "$CCODE" = "200" ]; then
-              jq '[.[]? | {
-                name,
-                image,
-                state,
-                status,
-                health,
-                cpu_percentage: (.stats.cpu_percentage // null),
-                memory_percentage: (.stats.memory_percentage // null)
-              }]' "/tmp/containers-$SAFE.json" >> "$OUT" 2>/dev/null || echo '[]' >> "$OUT"
+              jq '[.[]? | {name,image,state,status,health,cpu_percentage:(.stats.cpu_percentage // null),memory_percentage:(.stats.memory_percentage // null)}]' "/tmp/containers-$SAFE.json" >> "$OUT" 2>/dev/null || echo '[]' >> "$OUT"
             fi
           done
-
           cat "$OUT"
 
       - name: Upload sanitized audit artifact
