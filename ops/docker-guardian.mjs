@@ -1,5 +1,6 @@
 import http from "node:http";
 
+const guardianVersion = "1.0.0";
 const socketPath = process.env.DOCKER_SOCKET_PATH || "/var/run/docker.sock";
 const targetLabel = process.env.GUARDIAN_LABEL || "com.talentera.guardian";
 const intervalMs = Math.max(15, Number(process.env.GUARDIAN_INTERVAL_SECONDS || 60)) * 1000;
@@ -177,6 +178,7 @@ process.on("SIGTERM", () => stop("SIGTERM"));
 process.on("SIGINT", () => stop("SIGINT"));
 
 log("info", "guardian_started", {
+  guardianVersion,
   targetLabel,
   intervalSeconds: intervalMs / 1000,
   startPeriodSeconds: startPeriodMs / 1000,
