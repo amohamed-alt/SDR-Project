@@ -1,3 +1,4 @@
+# Emergency recovery trigger: 2026-09-01T09:40+03:00
 name: Hostinger Emergency Reboot
 
 on:
