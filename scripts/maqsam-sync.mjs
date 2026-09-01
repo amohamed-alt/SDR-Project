@@ -1,6 +1,7 @@
 const MAQSAM_API_URL = "https://api.mq.maqsam.com/v3/calls";
 const DEFAULT_TARGET_AGENT_EMAIL = "m.chedid@bayt.net";
 const DEFAULT_DASHBOARD_URL = "http://sdr-dashboard:3000";
+const MIN_LOOKBACK_SECONDS = 72 * 60 * 60;
 
 function env(name, fallback = "") {
   return String(process.env[name] ?? fallback).trim();
@@ -20,7 +21,9 @@ const config = {
   hubspotToken: env("HUBSPOT_PRIVATE_APP_TOKEN"),
   targetAgentEmail: env("MAQSAM_TARGET_AGENT_EMAIL", DEFAULT_TARGET_AGENT_EMAIL).toLowerCase(),
   intervalMs: numberEnv("MAQSAM_SYNC_INTERVAL_SECONDS", 600) * 1000,
-  lookbackSeconds: numberEnv("MAQSAM_SYNC_LOOKBACK_SECONDS", 3 * 60 * 60),
+  // Maqsam summaries/transcripts can arrive after the call itself. Never let a
+  // stale 3-hour compose default permanently hide a completed call.
+  lookbackSeconds: Math.max(MIN_LOOKBACK_SECONDS, numberEnv("MAQSAM_SYNC_LOOKBACK_SECONDS", MIN_LOOKBACK_SECONDS)),
   pageCount: Math.min(50, Math.max(1, numberEnv("MAQSAM_SYNC_PAGE_COUNT", 12))),
 };
 
@@ -240,6 +243,7 @@ async function syncOnce() {
   let ready = 0;
   let upserted = 0;
   let skipped = 0;
+  let waitingForAi = 0;
 
   for (const call of calls) {
     if (!isTargetAgentCall(call) || !isReadyCall(call)) {
@@ -247,11 +251,10 @@ async function syncOnce() {
       continue;
     }
 
+    // Store the completed call immediately. A later pass enriches the same
+    // callKey when Maqsam adds the AI summary/transcript.
     const { text: summary, language: summaryLanguage } = extractSummary(call.summary);
-    if (!summary) {
-      skipped += 1;
-      continue;
-    }
+    if (!summary) waitingForAi += 1;
 
     const callKey = String(call.id ?? call.referenceId ?? "").trim();
     const timestampSeconds = Number(call.timestamp);
@@ -299,7 +302,7 @@ async function syncOnce() {
     upserted += 1;
   }
 
-  console.log(`Maqsam sync: fetched=${calls.length}; ready=${ready}; upserted=${upserted}; skipped=${skipped}`);
+  console.log(`Maqsam sync: fetched=${calls.length}; ready=${ready}; upserted=${upserted}; waitingForAi=${waitingForAi}; skipped=${skipped}`);
 }
 
 async function main() {

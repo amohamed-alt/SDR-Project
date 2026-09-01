@@ -8,7 +8,10 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+# NEXT_PUBLIC_DEFAULT_START_DATE is compiled into the client bundle. Default to
+# the first day of the previous month so a deployment on the first of a month
+# never opens the Maqsam dashboard on an empty one-day range.
+RUN NEXT_PUBLIC_DEFAULT_START_DATE="$(node -e 'const d=new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth()-1); process.stdout.write(d.toISOString().slice(0,10))')" npm run build
 
 FROM node:24-alpine AS runner
 WORKDIR /app
