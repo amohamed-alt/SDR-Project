@@ -13,120 +13,67 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
 
-      - name: Audit Hostinger VPS and Docker projects
+      - name: Audit Hostinger directly
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
         run: |
           set -euo pipefail
-          test -n "$HOSTINGER_API_KEY" || { echo "Hostinger API token is missing"; exit 1; }
-          AUTH="$HOSTINGER_API_KEY"
-          case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
+          test -n "$HOSTINGER_API_KEY"
+          AUTH="$HOSTINGER_API_KEY"; case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
           VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
           REPORT="$GITHUB_WORKSPACE/docs/hostinger-audit-latest.md"
-          mkdir -p "$GITHUB_WORKSPACE/docs"
-          : > "$REPORT"
+          mkdir -p docs; : > "$REPORT"
+          req(){ curl --silent --show-error --connect-timeout 8 --max-time 40 -H "Authorization: $AUTH" -H 'Accept: application/json' -o "$2" -w '%{http_code}' "$1" || true; }
 
-          req() {
-            local url="$1" out="$2"
-            curl --silent --show-error --connect-timeout 8 --max-time 40 \
-              -H "Authorization: $AUTH" -H 'Accept: application/json' \
-              -o "$out" -w '%{http_code}' "$url" || true
-          }
+          echo '# Hostinger maintenance audit' >> "$REPORT"
+          echo >> "$REPORT"; echo "Generated UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$REPORT"
 
-          {
-            echo "# Hostinger maintenance audit"
-            echo
-            echo "Generated UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            echo
-            echo '## VM state'
-            echo '```text'
-          } >> "$REPORT"
-          VCODE=$(req "$VM" /tmp/vm.json); echo "HTTP $VCODE" >> "$REPORT"
-          jq '{id,state,hostname,plan,created_at}' /tmp/vm.json >> "$REPORT" 2>/dev/null || cat /tmp/vm.json >> "$REPORT"
+          echo -e '\n## VM and recent actions\n```text' >> "$REPORT"
+          V=$(req "$VM" /tmp/vm.json); echo "VM HTTP $V" >> "$REPORT"; jq '{id,state,hostname,plan}' /tmp/vm.json >> "$REPORT" 2>/dev/null || true
+          A=$(req "$VM/actions?page=1" /tmp/actions.json); echo "Actions HTTP $A" >> "$REPORT"
+          [ "$A" = 200 ] && jq -r '.data[]? | [.id,.name,.state,.created_at,.updated_at] | @tsv' /tmp/actions.json | head -30 >> "$REPORT" || true
           echo '```' >> "$REPORT"
 
-          {
-            echo
-            echo '## Recent Hostinger actions'
-            echo '```text'
-          } >> "$REPORT"
-          ACODE=$(req "$VM/actions?page=1" /tmp/actions.json); echo "HTTP $ACODE" >> "$REPORT"
-          if [ "$ACODE" = "200" ]; then
-            jq -r '.data[]? | [.id,.name,.state,.created_at,.updated_at] | @tsv' /tmp/actions.json | head -40 >> "$REPORT"
-          else
-            cat /tmp/actions.json >> "$REPORT" 2>/dev/null || true
-          fi
+          echo -e '\n## Public SDR health\n```text' >> "$REPORT"
+          H=$(curl -sS --connect-timeout 5 --max-time 15 -o /tmp/h.json -w '%{http_code}' "https://sdr.dashboardtalentera.tech/api/health?audit=$GITHUB_RUN_ID" || true)
+          echo "HTTP $H" >> "$REPORT"; jq . /tmp/h.json >> "$REPORT" 2>/dev/null || true; echo '```' >> "$REPORT"
+
+          echo -e '\n## Docker Manager list\n```text' >> "$REPORT"
+          D=$(req "$VM/docker" /tmp/projects.json); echo "HTTP $D" >> "$REPORT"
+          if [ "$D" = 200 ]; then jq -r '.[] | [.name,.state,.status,.path] | @tsv' /tmp/projects.json >> "$REPORT"; else jq . /tmp/projects.json >> "$REPORT" 2>/dev/null || true; fi
           echo '```' >> "$REPORT"
 
-          {
-            echo
-            echo '## Public SDR health'
-            echo '```text'
-          } >> "$REPORT"
-          HCODE=$(curl --silent --show-error --connect-timeout 5 --max-time 15 -H 'Cache-Control: no-cache' \
-            -o /tmp/health.json -w '%{http_code}' "https://sdr.dashboardtalentera.tech/api/health?audit=$GITHUB_RUN_ID" || true)
-          echo "HTTP $HCODE" >> "$REPORT"
-          jq . /tmp/health.json >> "$REPORT" 2>/dev/null || cat /tmp/health.json >> "$REPORT" 2>/dev/null || true
+          # Hostinger's project-list endpoint can fail while direct project endpoints still work.
+          PROJECTS='sdr-project n8n gtm-career gtm-career-browser career-judge-ollama dashboard-cache-api open-webui ollama coolify'
+          if [ "$D" = 200 ]; then PROJECTS="$PROJECTS $(jq -r '.[].name' /tmp/projects.json | tr '\n' ' ')"; fi
+
+          for P in $(printf '%s\n' $PROJECTS | awk '!seen[$0]++'); do
+            S=$(printf '%s' "$P" | tr -c 'A-Za-z0-9_.-' '_')
+            C=$(req "$VM/docker/$P/containers" "/tmp/c-$S.json")
+            X=$(req "$VM/docker/$P" "/tmp/p-$S.json")
+            if [ "$C" != 200 ] && [ "$X" != 200 ]; then continue; fi
+            echo -e "\n## Project: $P\n\`\`\`text" >> "$REPORT"
+            echo "details HTTP $X | containers HTTP $C" >> "$REPORT"
+            if [ "$C" = 200 ]; then
+              jq -r '.[] | [.name,.image,.state,.status,(.health // ""),(.stats.cpu_percentage // 0),(.stats.memory_percentage // 0),(.command // "")] | @tsv' "/tmp/c-$S.json" >> "$REPORT"
+            fi
+            L=$(req "$VM/docker/$P/logs" "/tmp/l-$S.json"); echo "logs HTTP $L" >> "$REPORT"
+            if [ "$L" = 200 ]; then
+              jq -r '.[]? | .service as $svc | (.entries // [])[-30:][]? | [$svc,.timestamp,.line] | @tsv' "/tmp/l-$S.json" >> "$REPORT" 2>/dev/null || true
+            fi
+            echo '\`\`\`' >> "$REPORT"
+          done
+
+          echo -e '\n## Candidate summary\n```text' >> "$REPORT"
+          for F in /tmp/c-*.json; do
+            [ -e "$F" ] || continue
+            jq -r '.[]? | select((.state // "") != "running" or ((.health // "") != "" and (.health // "") != "healthy") or (.stats.cpu_percentage // 0) >= 20) | [.name,.image,.state,.status,(.health // ""),(.stats.cpu_percentage // 0),(.stats.memory_percentage // 0)] | @tsv' "$F" >> "$REPORT" 2>/dev/null || true
+          done
           echo '```' >> "$REPORT"
-
-          {
-            echo
-            echo '## Docker projects'
-            echo '```text'
-          } >> "$REPORT"
-          PCODE=$(req "$VM/docker" /tmp/projects.json); echo "HTTP $PCODE" >> "$REPORT"
-          if [ "$PCODE" = "200" ]; then
-            jq -r '.[] | [.name,.state,.status,.path] | @tsv' /tmp/projects.json >> "$REPORT"
-          else
-            cat /tmp/projects.json >> "$REPORT" 2>/dev/null || true
-          fi
-          echo '```' >> "$REPORT"
-
-          if [ "$PCODE" = "200" ]; then
-            while IFS= read -r PROJECT; do
-              [ -n "$PROJECT" ] || continue
-              SAFE=$(echo "$PROJECT" | tr -c 'A-Za-z0-9_.-' '_')
-              {
-                echo
-                echo "### $PROJECT"
-                echo '```text'
-              } >> "$REPORT"
-
-              DCODE=$(req "$VM/docker/$PROJECT" "/tmp/project-$SAFE.json")
-              echo "details HTTP $DCODE" >> "$REPORT"
-              if [ "$DCODE" = "200" ]; then
-                echo '-- compose --' >> "$REPORT"
-                jq -r '.content // ""' "/tmp/project-$SAFE.json" >> "$REPORT" 2>/dev/null || true
-              fi
-
-              CCODE=$(req "$VM/docker/$PROJECT/containers" "/tmp/containers-$SAFE.json")
-              echo "containers HTTP $CCODE" >> "$REPORT"
-              if [ "$CCODE" = "200" ]; then
-                jq -r '.[] | [.name,.image,.state,.status,(.health // ""),(.stats.cpu_percentage // 0),(.stats.memory_percentage // 0),(.command // "")] | @tsv' "/tmp/containers-$SAFE.json" >> "$REPORT"
-              fi
-
-              LCODE=$(req "$VM/docker/$PROJECT/logs" "/tmp/logs-$SAFE.json")
-              echo "logs HTTP $LCODE" >> "$REPORT"
-              if [ "$LCODE" = "200" ]; then
-                echo '-- recent logs --' >> "$REPORT"
-                jq -r '.[]? | .service as $s | (.entries // [])[-20:][]? | [$s,.timestamp,.line] | @tsv' "/tmp/logs-$SAFE.json" >> "$REPORT" 2>/dev/null || true
-              fi
-              echo '```' >> "$REPORT"
-            done < <(jq -r '.[].name' /tmp/projects.json)
-
-            {
-              echo
-              echo '## Non-running / unhealthy candidates'
-              echo '```text'
-            } >> "$REPORT"
-            jq -r '.[] | .name as $p | (.containers // [])[]? | select((.state // "") != "running" or ((.health // "") != "" and (.health // "") != "healthy")) | [$p,.name,.image,.state,.status,(.health // "")] | @tsv' /tmp/projects.json >> "$REPORT" 2>/dev/null || true
-            echo '```' >> "$REPORT"
-          fi
-
           cat "$REPORT"
 
       - name: Save audit report
@@ -134,5 +81,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docs/hostinger-audit-latest.md
-          git diff --cached --quiet || git commit -m "docs: save Hostinger maintenance audit"
-          git push
+          git diff --cached --quiet || git commit -m "docs: refresh Hostinger maintenance audit"
+          git pull --rebase origin main
+          git push origin HEAD:main
