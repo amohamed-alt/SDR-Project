@@ -1,11 +1,5 @@
 name: sdr-project
 
-x-default-logging: &default-logging
-  driver: json-file
-  options:
-    max-size: "10m"
-    max-file: "3"
-
 services:
   runtime-bootstrap:
     image: alpine:3.21
@@ -46,7 +40,6 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
-    logging: *default-logging
     mem_limit: "512m"
     cpus: 0.50
     pids_limit: 128
@@ -70,7 +63,6 @@ services:
       context: ./services/dashboard-cache
       dockerfile: Dockerfile
     restart: unless-stopped
-    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -106,7 +98,6 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
-    logging: *default-logging
     depends_on:
       runtime-bootstrap:
         condition: service_completed_successfully
@@ -162,7 +153,6 @@ services:
       - default
       - traefik_proxy
     labels:
-      - "com.talentera.guardian=true"
       - "traefik.enable=true"
       - "traefik.docker.network=n8n_default"
       - "traefik.http.routers.sdr-dashboard.rule=Host(`sdr.dashboardtalentera.tech`)"
@@ -188,7 +178,6 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
-    logging: *default-logging
     depends_on:
       sdr-dashboard:
         condition: service_healthy
@@ -213,37 +202,6 @@ services:
       - sdr_runtime_env:/run/sdr-env:ro
     networks:
       - default
-
-  docker-guardian:
-    image: sdr-dashboard:${SDR_BUILD_REF:-unknown}
-    restart: unless-stopped
-    logging: *default-logging
-    depends_on:
-      sdr-dashboard:
-        condition: service_healthy
-    user: "0:0"
-    command: ["node", "/app/ops/docker-guardian.mjs"]
-    network_mode: none
-    mem_limit: "64m"
-    cpus: 0.05
-    pids_limit: 64
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=8m
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    environment:
-      DOCKER_SOCKET_PATH: /var/run/docker.sock
-      GUARDIAN_LABEL: com.talentera.guardian
-      GUARDIAN_INTERVAL_SECONDS: "60"
-      GUARDIAN_START_PERIOD_SECONDS: "300"
-      GUARDIAN_RESTART_TIMEOUT_SECONDS: "15"
-      GUARDIAN_MAX_RESTARTS_PER_HOUR: "2"
-      GUARDIAN_REQUEST_TIMEOUT_MS: "10000"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
 
   # Retired service guards. Keeping the legacy service keys in this compose
   # forces Hostinger/Docker Compose to replace stale containers from older
