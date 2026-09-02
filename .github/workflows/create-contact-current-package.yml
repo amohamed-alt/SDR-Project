@@ -1,4 +1,4 @@
-name: Create Contact Current Package Property
+name: Manage Contact Dropdown Properties
 
 on:
   push:
@@ -11,10 +11,10 @@ permissions:
   contents: read
 
 jobs:
-  create-property:
+  manage-properties:
     runs-on: ubuntu-latest
     steps:
-      - name: Create or update Contact Current Package dropdown
+      - name: Create or update Contact dropdown properties
         env:
           HUBSPOT_PRIVATE_APP_TOKEN: ${{ secrets.HUBSPOT_PRIVATE_APP_TOKEN }}
         run: |
@@ -28,7 +28,88 @@ jobs:
           API='https://api.hubapi.com/crm/v3/properties/contacts'
           AUTH="Authorization: Bearer ${HUBSPOT_PRIVATE_APP_TOKEN}"
 
-          cat > /tmp/property.json <<'JSON'
+          upsert_property() {
+            local name="$1"
+            local payload="$2"
+            local status
+
+            status=$(curl -sS -o /tmp/existing.json -w '%{http_code}' \
+              -H "$AUTH" \
+              -H 'Accept: application/json' \
+              "$API/$name")
+
+            if [ "$status" = '200' ]; then
+              jq '{label,type,fieldType,description,options}' "$payload" > /tmp/update.json
+              local update_status
+              update_status=$(curl -sS -o /tmp/result.json -w '%{http_code}' \
+                -X PATCH \
+                -H "$AUTH" \
+                -H 'Content-Type: application/json' \
+                --data @/tmp/update.json \
+                "$API/$name")
+              echo "$name update HTTP=$update_status"
+              cat /tmp/result.json
+              [ "$update_status" -ge 200 ] && [ "$update_status" -lt 300 ]
+            elif [ "$status" = '404' ]; then
+              local create_status
+              create_status=$(curl -sS -o /tmp/result.json -w '%{http_code}' \
+                -X POST \
+                -H "$AUTH" \
+                -H 'Content-Type: application/json' \
+                --data @"$payload" \
+                "$API")
+              echo "$name create HTTP=$create_status"
+              cat /tmp/result.json
+              [ "$create_status" -ge 200 ] && [ "$create_status" -lt 300 ]
+            else
+              echo "::error::Unexpected lookup HTTP=$status for $name"
+              cat /tmp/existing.json
+              exit 1
+            fi
+          }
+
+          verify_property() {
+            local name="$1"
+            local verify_status
+            verify_status=$(curl -sS -o /tmp/verify.json -w '%{http_code}' \
+              -H "$AUTH" \
+              -H 'Accept: application/json' \
+              "$API/$name")
+            echo "$name verify HTTP=$verify_status"
+            jq '{name,label,type,fieldType,description,options}' /tmp/verify.json
+            [ "$verify_status" = '200' ]
+          }
+
+          # Preserve the old single-line field and its historical data, but make
+          # the new dropdown the clearly named field users should select.
+          LEGACY_STATUS=$(curl -sS -o /tmp/legacy.json -w '%{http_code}' \
+            -H "$AUTH" \
+            -H 'Accept: application/json' \
+            "$API/package_credit_requested")
+
+          if [ "$LEGACY_STATUS" = '200' ]; then
+            cat > /tmp/legacy-update.json <<'JSON'
+          {
+            "label": "Package/Credit Requested (Legacy Text)",
+            "description": "Legacy single-line text field retained to preserve historical values. Use Package/Credit Requested instead."
+          }
+          JSON
+            LEGACY_UPDATE_STATUS=$(curl -sS -o /tmp/legacy-result.json -w '%{http_code}' \
+              -X PATCH \
+              -H "$AUTH" \
+              -H 'Content-Type: application/json' \
+              --data @/tmp/legacy-update.json \
+              "$API/package_credit_requested")
+            echo "Legacy property rename HTTP=$LEGACY_UPDATE_STATUS"
+            cat /tmp/legacy-result.json
+            [ "$LEGACY_UPDATE_STATUS" -ge 200 ] && [ "$LEGACY_UPDATE_STATUS" -lt 300 ]
+          elif [ "$LEGACY_STATUS" != '404' ]; then
+            echo "::error::Unexpected legacy property lookup HTTP=$LEGACY_STATUS"
+            cat /tmp/legacy.json
+            exit 1
+          fi
+
+          cat > /tmp/current-package.json <<'JSON'
           {
             "groupName": "contactinformation",
             "name": "current_package_v2",
@@ -54,42 +135,24 @@ jobs:
           }
           JSON
 
-          STATUS=$(curl -sS -o /tmp/existing.json -w '%{http_code}' \
-            -H "$AUTH" \
-            -H 'Accept: application/json' \
-            "$API/current_package_v2")
+          cat > /tmp/package-credit-requested.json <<'JSON'
+          {
+            "groupName": "contactinformation",
+            "name": "package_credit_requested_v2",
+            "label": "Package/Credit Requested",
+            "type": "enumeration",
+            "fieldType": "select",
+            "description": "Requested Evalufy package or credit action.",
+            "options": [
+              {"label":"Ask for AI Interview Credits","value":"Ask for AI Interview Credits","displayOrder":0,"hidden":false},
+              {"label":"Ask for Tests Credits","value":"Ask for Tests Credits","displayOrder":1,"hidden":false},
+              {"label":"Upgrade to Higher Package","value":"Upgrade to Higher Package","displayOrder":2,"hidden":false}
+            ]
+          }
+          JSON
 
-          if [ "$STATUS" = '200' ]; then
-            jq '{label,type,fieldType,description,options}' /tmp/property.json > /tmp/update.json
-            UPDATE_STATUS=$(curl -sS -o /tmp/result.json -w '%{http_code}' \
-              -X PATCH \
-              -H "$AUTH" \
-              -H 'Content-Type: application/json' \
-              --data @/tmp/update.json \
-              "$API/current_package_v2")
-            echo "Update HTTP=$UPDATE_STATUS"
-            cat /tmp/result.json
-            [ "$UPDATE_STATUS" -ge 200 ] && [ "$UPDATE_STATUS" -lt 300 ]
-          elif [ "$STATUS" = '404' ]; then
-            CREATE_STATUS=$(curl -sS -o /tmp/result.json -w '%{http_code}' \
-              -X POST \
-              -H "$AUTH" \
-              -H 'Content-Type: application/json' \
-              --data @/tmp/property.json \
-              "$API")
-            echo "Create HTTP=$CREATE_STATUS"
-            cat /tmp/result.json
-            [ "$CREATE_STATUS" -ge 200 ] && [ "$CREATE_STATUS" -lt 300 ]
-          else
-            echo "::error::Unexpected lookup HTTP=$STATUS"
-            cat /tmp/existing.json
-            exit 1
-          fi
+          upsert_property current_package_v2 /tmp/current-package.json
+          upsert_property package_credit_requested_v2 /tmp/package-credit-requested.json
 
-          VERIFY_STATUS=$(curl -sS -o /tmp/verify.json -w '%{http_code}' \
-            -H "$AUTH" \
-            -H 'Accept: application/json' \
-            "$API/current_package_v2")
-          echo "Verify HTTP=$VERIFY_STATUS"
-          jq '{name,label,type,fieldType,description,options}' /tmp/verify.json
-          [ "$VERIFY_STATUS" = '200' ]
+          verify_property current_package_v2
+          verify_property package_credit_requested_v2
