@@ -21,6 +21,7 @@ const triggerLabels = {
 const LINKEDIN_SALES_NAV_SOURCE = "LinkedIn Sales Navigator";
 const SIGNALHIRE_ENRICHMENT = "SignalHire";
 const RESEARCH_PROVENANCE = `${LINKEDIN_SALES_NAV_SOURCE}; ${SIGNALHIRE_ENRICHMENT}`;
+const ADDITIONAL_PHONE_PROPERTY = "gtm_additional_phone_numbers";
 
 type TriggerKey = keyof typeof triggerLabels;
 
@@ -45,6 +46,10 @@ function hubspotToken() {
   const token = String(process.env.HUBSPOT_PRIVATE_APP_TOKEN || "").trim();
   if (!token) throw new Error("HUBSPOT_PRIVATE_APP_TOKEN is not configured.");
   return token;
+}
+
+function hubspotHeaders() {
+  return { Authorization: `Bearer ${hubspotToken()}`, "Content-Type": "application/json" };
 }
 
 function placeholder(value: string) {
@@ -74,6 +79,109 @@ function safeWebsite(value: unknown) {
   } catch {
     return "";
   }
+}
+
+function uniquePhones(values: unknown[]) {
+  const seen = new Set<string>();
+  return values
+    .map((value) => String(value || "").trim())
+    .filter((value) => value && !placeholder(value))
+    .filter((value) => {
+      const key = value.replace(/[\s().-]/g, "").toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function prospectPhones(prospect: Record<string, unknown>) {
+  const phoneList = Array.isArray(prospect.phones) ? prospect.phones : [];
+  return uniquePhones([prospect.phone, ...phoneList]);
+}
+
+function storedAdditionalPhones(value: unknown) {
+  return uniquePhones(String(value || "").split(/\r?\n|;/g));
+}
+
+async function ensureAdditionalPhoneProperty() {
+  const propertyUrl = `https://api.hubapi.com/crm/v3/properties/contacts/${ADDITIONAL_PHONE_PROPERTY}`;
+  const read = await fetch(propertyUrl, {
+    headers: hubspotHeaders(),
+    cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (read.ok) return;
+  if (read.status !== 404) {
+    throw new Error(`Could not verify Additional Phone Numbers property (${read.status}): ${(await read.text()).slice(0, 300)}`);
+  }
+
+  const create = await fetch("https://api.hubapi.com/crm/v3/properties/contacts", {
+    method: "POST",
+    headers: hubspotHeaders(),
+    body: JSON.stringify({
+      groupName: "contactinformation",
+      name: ADDITIONAL_PHONE_PROPERTY,
+      label: "Additional Phone Numbers",
+      description: "Additional phone numbers captured by the SDR enrichment flow beyond the primary and mobile phone fields.",
+      type: "string",
+      fieldType: "textarea",
+    }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!create.ok && create.status !== 409) {
+    throw new Error(`Could not create Additional Phone Numbers property (${create.status}): ${(await create.text()).slice(0, 300)}`);
+  }
+}
+
+async function patchNewContactDetails(contactId: string, incomingPhones: string[]) {
+  const needsAdditionalProperty = incomingPhones.length > 2;
+  if (needsAdditionalProperty) await ensureAdditionalPhoneProperty();
+
+  const propertyNames = ["phone", "mobilephone", "lead_source", "gtm_contact_research_sources", "gtm_phone_enrichment_source"];
+  if (needsAdditionalProperty) propertyNames.push(ADDITIONAL_PHONE_PROPERTY);
+
+  const read = await fetch(
+    `https://api.hubapi.com/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?properties=${encodeURIComponent(propertyNames.join(","))}`,
+    {
+      headers: hubspotHeaders(),
+      cache: "no-store",
+      signal: AbortSignal.timeout(30_000),
+    },
+  );
+  if (!read.ok) throw new Error(`Could not read contact phone fields (${read.status}): ${(await read.text()).slice(0, 300)}`);
+
+  const current = await read.json() as { properties?: Record<string, string | null | undefined> };
+  const existingPhone = String(current.properties?.phone || "").trim();
+  const existingMobile = String(current.properties?.mobilephone || "").trim();
+  const existingAdditional = needsAdditionalProperty
+    ? storedAdditionalPhones(current.properties?.[ADDITIONAL_PHONE_PROPERTY])
+    : [];
+
+  const merged = uniquePhones([existingPhone, existingMobile, ...existingAdditional, ...incomingPhones]);
+  const primary = existingPhone || merged[0] || "";
+  const mobile = existingMobile && existingMobile !== primary
+    ? existingMobile
+    : merged.find((value) => value !== primary) || "";
+  const additional = merged.filter((value) => value !== primary && value !== mobile);
+
+  const properties: Record<string, string> = {
+    lead_source: LINKEDIN_SALES_NAV_SOURCE,
+    gtm_contact_research_sources: RESEARCH_PROVENANCE,
+    gtm_phone_enrichment_source: "signalhire",
+  };
+  if (primary) properties.phone = primary;
+  if (mobile) properties.mobilephone = mobile;
+  if (needsAdditionalProperty && additional.length) properties[ADDITIONAL_PHONE_PROPERTY] = additional.join("\n");
+
+  const patch = await fetch(`https://api.hubapi.com/crm/v3/objects/contacts/${encodeURIComponent(contactId)}`, {
+    method: "PATCH",
+    headers: hubspotHeaders(),
+    body: JSON.stringify({ properties }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!patch.ok) throw new Error(`Could not store contact phone fields (${patch.status}): ${(await patch.text()).slice(0, 300)}`);
 }
 
 function simplifyTaskBody(body: string, ownerName: string, triggers: TriggerKey[]) {
@@ -134,28 +242,12 @@ async function patchTask(taskId: string, ownerId: string, ownerName: string, tri
 
   const patch = await fetch(`https://api.hubapi.com/crm/v3/objects/tasks/${encodeURIComponent(taskId)}`, {
     method: "PATCH",
-    headers: { Authorization: `Bearer ${hubspotToken()}`, "Content-Type": "application/json" },
+    headers: hubspotHeaders(),
     body: JSON.stringify({ properties: { hubspot_owner_id: ownerId, hs_task_body: body } }),
     cache: "no-store",
     signal: AbortSignal.timeout(30_000),
   });
   if (!patch.ok) throw new Error(`Could not assign HubSpot task (${patch.status}): ${(await patch.text()).slice(0, 300)}`);
-}
-
-async function patchNewContactSource(contactId: string) {
-  const patch = await fetch(`https://api.hubapi.com/crm/v3/objects/contacts/${encodeURIComponent(contactId)}`, {
-    method: "PATCH",
-    headers: { Authorization: `Bearer ${hubspotToken()}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      properties: {
-        lead_source: LINKEDIN_SALES_NAV_SOURCE,
-        gtm_contact_research_sources: RESEARCH_PROVENANCE,
-      },
-    }),
-    cache: "no-store",
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!patch.ok) throw new Error(`Could not set contact source (${patch.status}): ${(await patch.text()).slice(0, 300)}`);
 }
 
 export async function POST(request: NextRequest) {
@@ -174,11 +266,17 @@ export async function POST(request: NextRequest) {
     const labels = activeTriggers.map((key) => triggerLabels[key]);
     const cleanedWebsite = safeWebsite(parsed.data.prospect.companyWebsite);
     const cleanedDomain = safeDomain(parsed.data.prospect.companyDomain) || (cleanedWebsite ? safeDomain(new URL(cleanedWebsite).hostname) : "");
+    const phones = prospectPhones(parsed.data.prospect);
+
+    if (phones.length > 2) await ensureAdditionalPhoneProperty();
+
     const prospect = {
       ...parsed.data.prospect,
       source: LINKEDIN_SALES_NAV_SOURCE,
       companyWebsite: cleanedWebsite,
       companyDomain: cleanedDomain,
+      phone: phones[0] || "",
+      phones,
       recentSignal: labels.length
         ? { type: "manual_trigger", label: labels.join(" · ") }
         : { type: "", label: "" },
@@ -200,12 +298,10 @@ export async function POST(request: NextRequest) {
     if (!baseResponse.ok) return NextResponse.json(payload, { status: baseResponse.status });
 
     if (payload.contactId && payload.contactCreated) {
-      await patchNewContactSource(payload.contactId);
+      await patchNewContactDetails(payload.contactId, phones);
     }
 
     if (payload.taskId) {
-      // Keep the existing generated body as the base, then normalize only this
-      // SignalHire/Sales Navigator flow into the concise operational task format.
       await patchTask(payload.taskId, owner.id, owner.name, activeTriggers);
     }
 
@@ -216,6 +312,11 @@ export async function POST(request: NextRequest) {
       triggerLabels: labels,
       taskOwnerOverridden: Boolean(payload.taskId),
       source: LINKEDIN_SALES_NAV_SOURCE,
+      phonePropertiesStored: {
+        primary: phones[0] || "",
+        mobile: phones[1] || "",
+        additionalCount: Math.max(0, phones.length - 2),
+      },
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Manual SignalHire push failed", error);
