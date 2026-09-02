@@ -1,5 +1,11 @@
 name: sdr-project
 
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   runtime-bootstrap:
     image: alpine:3.21
@@ -9,13 +15,12 @@ services:
       - -c
       - |
         set -eu
-
         ENV_TARGET=/runtime-env/.env
         DATA_MARKER=/runtime-data/.sdr-runtime-data-v1
 
         if [ ! -s "$$ENV_TARGET" ]; then
           if [ ! -s /legacy/.env ]; then
-            echo "FATAL: /root/SDR-Project/.env is missing; cannot bootstrap persistent runtime env." >&2
+            echo "FATAL: runtime env is missing and no legacy bootstrap file exists." >&2
             exit 78
           fi
           umask 077
@@ -23,9 +28,14 @@ services:
           chown 1001:1001 "$$ENV_TARGET.tmp"
           chmod 0400 "$$ENV_TARGET.tmp"
           mv "$$ENV_TARGET.tmp" "$$ENV_TARGET"
-          echo "Persistent SDR runtime env initialized."
-        else
-          echo "Persistent SDR runtime env already initialized; preserving existing secrets."
+        fi
+
+        # Permanently strip cancelled outreach vendors from the persisted runtime env.
+        # Never print the file: it contains production secrets.
+        if [ -s "$$ENV_TARGET" ]; then
+          sed -i -E '/^(SMARTLEAD_|PRIMEFORGE_|PRIME_FORGE_|CLEARBIT_|NEVERBOUNCE_)/d' "$$ENV_TARGET"
+          chown 1001:1001 "$$ENV_TARGET"
+          chmod 0400 "$$ENV_TARGET"
         fi
 
         if [ ! -e "$$DATA_MARKER" ]; then
@@ -35,14 +45,12 @@ services:
           chown -R 1001:1001 /runtime-data
           touch "$$DATA_MARKER"
           chown 1001:1001 "$$DATA_MARKER"
-          echo "Persistent SDR data volume initialized."
-        else
-          echo "Persistent SDR data volume already initialized; preserving existing secrets."
         fi
     volumes:
       - /root/SDR-Project:/legacy:ro
       - sdr_runtime_env:/runtime-env
       - sdr_app_data:/runtime-data
+    logging: *default-logging
 
   postgres:
     image: postgres:16-alpine
@@ -64,6 +72,7 @@ services:
       timeout: 5s
       start_period: 15s
       retries: 5
+    logging: *default-logging
 
   dashboard-cache-api:
     build:
@@ -88,21 +97,21 @@ services:
       - default
       - data_private
     healthcheck:
-      test:
-        - CMD
-        - python3
-        - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"]
       interval: 60s
       timeout: 5s
       start_period: 20s
       retries: 3
+    logging: *default-logging
 
   sdr-dashboard:
+    image: sdr-dashboard:${SDR_BUILD_REF:-unknown}
+    pull_policy: build
     build:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
+    init: true
     depends_on:
       runtime-bootstrap:
         condition: service_completed_successfully
@@ -118,39 +127,33 @@ services:
       SIGNALHIRE_API_KEY: ${SIGNALHIRE_API_KEY:-}
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       APOLLO_API_KEY: ${APOLLO_API_KEY:-}
+      MILLIONVERIFIER_API_KEY: ${MILLIONVERIFIER_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       ACQUISITION_OWNER_TOKEN: ${ACQUISITION_OWNER_TOKEN:-}
-      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-talentera}
-      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
-      DISABLE_AUTH: ${DISABLE_AUTH:-false}
       ACQUISITION_OWNER_IDS: ${ACQUISITION_OWNER_IDS:-31644369,76369997,31558980,76370000,76369995,76369998}
       ACQUISITION_OWNER_WEIGHTS: ${ACQUISITION_OWNER_WEIGHTS:-}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-talentera}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+      SDR_ADMIN_PASSWORD: ${SDR_ADMIN_PASSWORD:-}
+      DISABLE_AUTH: "true"
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_FAST_MODEL: ${OPENROUTER_FAST_MODEL:-openai/gpt-4.1-nano}
       OPENROUTER_DEEP_MODEL: ${OPENROUTER_DEEP_MODEL:-openai/gpt-4.1-mini}
-      SMARTLEAD_API_KEY: ${SMARTLEAD_API_KEY:-}
-      PRIMEFORGE_API_KEY: ${PRIMEFORGE_API_KEY:-}
-      MILLIONVERIFIER_API_KEY: ${MILLIONVERIFIER_API_KEY:-}
-      SMARTLEAD_V2_INTELLIGENCE_PATH: /app/data/smartlead-v2-intelligence-v3.json
-      SMARTLEAD_INTERNAL_BASE_URL: http://127.0.0.1:3000
-      SMARTLEAD_CAMPAIGN_ID: ${SMARTLEAD_CAMPAIGN_ID:-}
-      SMARTLEAD_CAMPAIGN_NAME: "${SMARTLEAD_CAMPAIGN_NAME:-Talentera | Marita SDR | Localized 3-Touch}"
-      SMARTLEAD_DAILY_NEW_LEADS: ${SMARTLEAD_DAILY_NEW_LEADS:-50}
-      SMARTLEAD_AUTOPILOT_ENABLED: ${SMARTLEAD_AUTOPILOT_ENABLED:-false}
-      SMARTLEAD_LEGACY_SEND_ENABLED: ${SMARTLEAD_LEGACY_SEND_ENABLED:-false}
-      SMARTLEAD_SALES_ACTIVITY_LOOKBACK_DAYS: ${SMARTLEAD_SALES_ACTIVITY_LOOKBACK_DAYS:-45}
-      SMARTLEAD_START_HOUR: ${SMARTLEAD_START_HOUR:-09:30}
-      SMARTLEAD_END_HOUR: ${SMARTLEAD_END_HOUR:-16:30}
-      SMARTLEAD_MIN_TIME_BETWEEN_EMAILS: ${SMARTLEAD_MIN_TIME_BETWEEN_EMAILS:-15}
-      SMARTLEAD_PREPARED_PATH: /app/data/smartlead-prepared.json
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-https://sdr.dashboardtalentera.tech/api/google/callback}
+      GOOGLE_TOKEN_ENCRYPTION_KEY: ${GOOGLE_TOKEN_ENCRYPTION_KEY:-}
+      MARITA_GOOGLE_EMAIL: ${MARITA_GOOGLE_EMAIL:-m.chedid@talentera.com}
+      ABDULLAH_GOOGLE_EMAIL: ${ABDULLAH_GOOGLE_EMAIL:-a.mohamed@talentera.com}
+      HUBSPOT_PRIVATE_APP_TOKEN: ${HUBSPOT_PRIVATE_APP_TOKEN:-}
       SDR_RUNTIME_ENV_FILE: /run/sdr-env/.env
       DASHBOARD_CACHE_API_URL: http://dashboard-cache-api:8000
       DASHBOARD_CACHE_READ_TIMEOUT_MS: 700
       DASHBOARD_CACHE_WRITE_TIMEOUT_MS: 2000
       ACQUISITION_SNAPSHOT_PATH: /app/data/acquisition-dashboard.json
       GOOGLE_TOKEN_STORE_PATH: /app/data/google-calendar.json
-    ports:
-      - "127.0.0.1:3010:3000"
+    expose:
+      - "3000"
     volumes:
       - sdr_runtime_env:/run/sdr-env:ro
       - sdr_app_data:/app/data
@@ -162,25 +165,29 @@ services:
       - "traefik.docker.network=n8n_default"
       - "traefik.http.routers.sdr-dashboard.rule=Host(`sdr.dashboardtalentera.tech`)"
       - "traefik.http.routers.sdr-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.sdr-dashboard.priority=100"
       - "traefik.http.routers.sdr-dashboard.tls=true"
       - "traefik.http.routers.sdr-dashboard.tls.certresolver=mytlschallenge"
+      - "traefik.http.routers.sdr-dashboard.service=sdr-dashboard"
+      - "traefik.http.routers.sdr-dashboard.middlewares=sdr-compress"
+      - "traefik.http.middlewares.sdr-compress.compress=true"
       - "traefik.http.services.sdr-dashboard.loadbalancer.server.port=3000"
+      - "traefik.http.services.sdr-dashboard.loadbalancer.healthcheck.path=/api/health"
+      - "traefik.http.services.sdr-dashboard.loadbalancer.healthcheck.interval=30s"
+      - "traefik.http.services.sdr-dashboard.loadbalancer.healthcheck.timeout=5s"
     healthcheck:
-      test:
-        - CMD
-        - node
-        - -e
-        - "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
-      interval: 120s
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 60s
       timeout: 5s
       start_period: 45s
       retries: 3
+    logging: *default-logging
 
   maqsam-sync:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: sdr-dashboard:${SDR_BUILD_REF:-unknown}
+    pull_policy: never
     restart: unless-stopped
+    init: true
     depends_on:
       sdr-dashboard:
         condition: service_healthy
@@ -205,46 +212,7 @@ services:
       - sdr_runtime_env:/run/sdr-env:ro
     networks:
       - default
-
-  dashboard-warmer:
-    image: alpine:3.21
-    restart: "no"
-    mem_limit: "16m"
-    cpus: 0.05
-    pids_limit: 16
-    command: ["/bin/sh", "-c", "echo 'dashboard-warmer retired'; exit 0"]
-
-  hiring-refresh:
-    image: alpine:3.21
-    restart: "no"
-    mem_limit: "16m"
-    cpus: 0.05
-    pids_limit: 16
-    command: ["/bin/sh", "-c", "echo 'hiring-refresh retired'; exit 0"]
-
-  career-refresh:
-    image: alpine:3.21
-    restart: "no"
-    mem_limit: "16m"
-    cpus: 0.05
-    pids_limit: 16
-    command: ["/bin/sh", "-c", "echo 'career-refresh retired'; exit 0"]
-
-  career-judge-ollama:
-    image: alpine:3.21
-    restart: "no"
-    mem_limit: "16m"
-    cpus: 0.05
-    pids_limit: 16
-    command: ["/bin/sh", "-c", "echo 'career-judge-ollama retired'; exit 0"]
-
-  gtm-career-browser:
-    image: alpine:3.21
-    restart: "no"
-    mem_limit: "16m"
-    cpus: 0.05
-    pids_limit: 16
-    command: ["/bin/sh", "-c", "echo 'gtm-career-browser retired'; exit 0"]
+    logging: *default-logging
 
 volumes:
   sdr_runtime_env:
