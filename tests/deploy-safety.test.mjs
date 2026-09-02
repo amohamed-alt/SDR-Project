@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+const exists = async (path) => access(new URL(`../${path}`, import.meta.url)).then(() => true).catch(() => false);
 
 test("deployment build ref survives persistent runtime env loading", async () => {
   const entrypoint = await read("docker/sdr-entrypoint.sh");
   const snapshot = entrypoint.indexOf('DEPLOY_SDR_BUILD_REF="${SDR_BUILD_REF:-}"');
   const source = entrypoint.indexOf('. "$RUNTIME_ENV_FILE"');
-  const restore = entrypoint.indexOf('SDR_BUILD_REF="$DEPLOY_SDR_BUILD_REF"');
+  const restore = entrypoint.indexOf('restore_if_set SDR_BUILD_REF "$DEPLOY_SDR_BUILD_REF"');
   const exported = entrypoint.indexOf('export SDR_BUILD_REF="${SDR_BUILD_REF:-unknown}"');
 
   assert.ok(snapshot >= 0, "deployment build ref must be snapshotted");
@@ -17,35 +18,76 @@ test("deployment build ref survives persistent runtime env loading", async () =>
   assert.ok(exported > restore, "restored build ref must be exported to Next.js");
 });
 
-test("Hostinger workflow rejects stale CI candidates before production concurrency", async () => {
+test("retired outreach vendor env cannot survive runtime migration", async () => {
+  const compose = await read("docker-compose.yml");
+  const deploy = await read(".github/workflows/deploy-hostinger.yml");
+  const envExample = await read(".env.example");
+  const entrypoint = await read("docker/sdr-entrypoint.sh");
+
+  for (const productionSurface of [compose, deploy, envExample]) {
+    assert.doesNotMatch(productionSurface, /SMARTLEAD_API_KEY|SMARTLEAD_AUTOPILOT_ENABLED|PRIMEFORGE_API_KEY|PRIME_FORGE_API_KEY/);
+  }
+  assert.match(entrypoint, /SMARTLEAD_/);
+  assert.match(entrypoint, /PRIMEFORGE_/);
+  assert.match(entrypoint, /unset "\$RETIRED_KEY"/);
+  assert.match(compose, /sed -i -E/);
+});
+
+test("production compose is canonical, Traefik-only, and volume-safe", async () => {
+  const compose = await read("docker-compose.yml");
+
+  assert.equal(await exists("docker-compose.light.yml"), false);
+  assert.doesNotMatch(compose, /127\.0\.0\.1:3010|3010:3000/);
+  assert.match(compose, /expose:\s*\n\s*- "3000"/);
+  assert.match(compose, /traefik_proxy:\s*\n\s*external: true\s*\n\s*name: n8n_default/);
+  assert.match(compose, /traefik\.http\.routers\.sdr-dashboard\.service=sdr-dashboard/);
+  assert.match(compose, /traefik\.http\.services\.sdr-dashboard\.loadbalancer\.healthcheck\.path=\/api\/health/);
+  assert.match(compose, /max-size: "10m"/);
+  assert.match(compose, /max-file: "3"/);
+  assert.match(compose, /sdr_postgres_data:/);
+  assert.match(compose, /sdr_runtime_env:/);
+  assert.doesNotMatch(compose, /volume prune|--volumes/);
+});
+
+test("Maqsam worker reuses the application image instead of rebuilding it", async () => {
+  const compose = await read("docker-compose.yml");
+  const section = compose.slice(compose.indexOf("  maqsam-sync:"));
+  assert.match(section, /image: sdr-dashboard:\$\{SDR_BUILD_REF:-unknown\}/);
+  assert.match(section, /pull_policy: never/);
+  assert.doesNotMatch(section, /\n\s+build:/);
+});
+
+test("Hostinger workflow rejects stale CI candidates before production mutation", async () => {
   const workflow = await read(".github/workflows/deploy-hostinger.yml");
 
   assert.match(workflow, /preflight:/);
   assert.match(workflow, /github\.rest\.repos\.getBranch/);
-  assert.match(workflow, /candidate !== currentMain/);
+  assert.match(workflow, /candidate !== branch\.commit\.sha/);
   assert.match(workflow, /needs: preflight/);
   assert.match(workflow, /needs\.preflight\.outputs\.should_deploy == 'true'/);
-  assert.ok(workflow.includes("Superseded by newer main commit") || workflow.includes("Superseded by a newer main commit; production untouched"));
-  assert.match(workflow, /if: cancelled\(\)/);
+  assert.match(workflow, /A Hostinger Compose action is already active/);
 });
 
-test("deployment health verification is cache-busted and exact-build gated", async () => {
+test("deployment uses one exact-build gate instead of sequential long waits", async () => {
   const workflow = await read(".github/workflows/deploy-hostinger.yml");
   const health = await read("src/app/api/health/route.ts");
 
+  assert.match(workflow, /Gate \$\{ATTEMPT\}\/108/);
   assert.match(workflow, /Cache-Control: no-cache/);
   assert.match(workflow, /deploy=\$\{DEPLOY_SHA\}/);
   assert.match(workflow, /\[ "\$BUILD_REF" = "\$DEPLOY_SHA" \]/);
+  assert.doesNotMatch(workflow, /docker-compose\.light\.yml/);
+  assert.match(workflow, /docker-compose\.yml/);
   assert.match(health, /no-store, max-age=0/);
 });
 
-test("acquisition queue status ignores skipped bootstrap and retries transient production reads", async () => {
-  const workflow = await read(".github/workflows/acquisition-queue-status.yml");
-
-  assert.match(workflow, /if: github\.event\.workflow_run\.conclusion == 'success'/);
-  assert.match(workflow, /for ATTEMPT in 1 2 3 4 5/);
-  assert.match(workflow, /Cache-Control: no-cache/);
-  assert.match(workflow, /unavailable after retries/);
+test("CI cancels stale branch work and keeps heavyweight integration checks on PRs", async () => {
+  const workflow = await read(".github/workflows/ci.yml");
+  assert.match(workflow, /cancel-in-progress: true/);
+  assert.match(workflow, /npm ci --prefer-offline --no-audit/);
+  assert.match(workflow, /if: github\.event_name == 'pull_request'/);
+  assert.match(workflow, /Production build/);
+  assert.match(workflow, /Validate production compose/);
 });
 
 test("acquisition bootstrap retries transient people-scan gateway failures", async () => {
@@ -69,158 +111,18 @@ test("today task queue and full task drawer expose WhatsApp for associated conta
 test("public production keeps browser Basic Auth off and protects admin tools in-app", async () => {
   const proxy = await read("src/proxy.ts");
   const acquisition = await read("src/app/api/acquisition/route.ts");
-  const smartleadAuth = await read("src/lib/smartlead-action-auth.ts");
   const workflow = await read(".github/workflows/deploy-hostinger.yml");
   const adminAuth = await read("src/lib/sdr-admin-auth.ts");
   const adminRoute = await read("src/app/api/sdr-admin/route.ts");
 
   assert.match(proxy, /dashboardAuthResponse/);
   assert.doesNotMatch(acquisition, /OWNER_PIN_SHA256|e0f05da9/);
-  assert.doesNotMatch(smartleadAuth, /OWNER_PIN_SHA256|e0f05da9/);
   assert.match(workflow, /DISABLE_AUTH=true/);
-  assert.match(workflow, /DASHBOARD_PASSWORD=\$\{\{ secrets\.DASHBOARD_PASSWORD \|\| secrets\.SDR_ADMIN_PASSWORD \|\| secrets\.ACQUISITION_OWNER_TOKEN \}\}/);
   assert.doesNotMatch(workflow, /--user\s+"\$\{DASHBOARD_USERNAME\}:\$\{DASHBOARD_PASSWORD\}"/);
   assert.match(workflow, /WWW-Authenticate/);
   assert.match(adminAuth, /process\.env\.DASHBOARD_PASSWORD \|\| process\.env\.SDR_ADMIN_PASSWORD/);
   assert.match(adminRoute, /configured: sdrAdminConfigured\(\)/);
   assert.match(adminRoute, /validateSdrAdminPassword/);
-});
-
-test("Primeforge remains read-only and advisory while Smartlead safety stays enforced", async () => {
-  const deploy = await read(".github/workflows/deploy-hostinger.yml");
-  const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
-  const primeforge = await read("src/lib/primeforge-health.ts");
-
-  assert.match(deploy, /PRIMEFORGE_API_KEY/);
-  assert.match(orchestrator, /checkPrimeforgeInfrastructure/);
-  assert.match(orchestrator, /pauseManagedCampaigns\(\)\.catch/);
-  assert.match(orchestrator, /validateApprovedSenderInventory/);
-  assert.match(orchestrator, /primeforgeGateEnforced: false/);
-  assert.doesNotMatch(deploy, /primeforge-deploy-fail-closed/);
-  assert.match(primeforge, /method: "GET"/);
-  assert.doesNotMatch(primeforge, /method: "(?:POST|PUT|PATCH|DELETE)"/);
-});
-
-test("Smartlead campaign parity audits the detailed campaign response", async () => {
-  const parity = await read("src/app/api/smartlead/campaign-parity/route.ts");
-  assert.match(parity, /smartleadRequest<unknown>\(`\/campaigns\/\$\{id\}`\)/);
-  assert.match(parity, /object\(detailRoot\.data\)/);
-  assert.match(parity, /DONT_EMAIL_OPEN/);
-  assert.match(parity, /DONT_LINK_CLICK/);
-  assert.match(parity, /copyMatches/);
-  assert.match(parity, /localizedSignatures/);
-  assert.match(parity, /legacySignatureRemoved/);
-});
-
-test("Smartlead sender reconciliation enforces Marita identity and pauses personal-domain leads", async () => {
-  const reconcile = await read("src/app/api/smartlead/sender-reconcile/route.ts");
-  assert.match(reconcile, /OUTREACH_SENDER_NAME/);
-  assert.match(reconcile, /signature: " "/);
-  assert.match(reconcile, /pauseActivePersonalLeads/);
-  assert.match(reconcile, /isPersonalEmail/);
-  assert.match(reconcile, /personalLeadSafety/);
-});
-
-test("Smartlead setup never rewrites a matching active sequence", async () => {
-  const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
-  assert.match(orchestrator, /smartleadSequenceMatchesLane\(lane, current\)/);
-  assert.match(orchestrator, /return "unchanged"/);
-  assert.match(orchestrator, /activeCampaignLeadCount\(campaign\)/);
-  assert.match(orchestrator, /Automatic sequence rewrite is blocked to prevent duplicate initial emails/);
-  assert.match(orchestrator, /updated_no_active_leads/);
-});
-
-test("Smartlead topology detects every non-visible Marita campaign and reports it", async () => {
-  const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
-
-  assert.match(orchestrator, /isMaritaOutreachCampaignName/);
-  assert.match(orchestrator, /!MANAGED_CAMPAIGN_NAMES\.has\(item\.name\)/);
-  assert.match(orchestrator, /legacyCampaigns: legacy\.campaigns/);
-  assert.doesNotMatch(orchestrator, /const LEGACY_CAMPAIGNS/);
-});
-
-test("Smartlead V2 migration pauses legacy campaigns and deduplicates bounce recipients", async () => {
-  const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
-  const reputation = await read("src/lib/smartlead-reputation.ts");
-
-  assert.match(orchestrator, /pauseCampaigns\(\[\.\.\.unsafeLanes\]/);
-  assert.match(orchestrator, /BOUNCE_GUARD_MIN_UNIQUE_RECIPIENTS = 3/);
-  assert.match(orchestrator, /SMARTLEAD_EMERGENCY_BOUNCE_THRESHOLD = 10/);
-  assert.match(orchestrator, /managed V2 lanes/);
-  assert.match(reputation, /uniqueBouncedLeadEmails/);
-  assert.match(reputation, /duplicateBounceEvents/);
-});
-
-test("Smartlead keeps the Riyadh send window and daily idempotence", async () => {
-  const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
-
-  assert.match(orchestrator, /start_hour: "09:30"/);
-  assert.match(orchestrator, /end_hour: "16:30"/);
-  assert.match(orchestrator, /lastSuccessfulDate === clock\.date/);
-});
-
-test("Smartlead dry-run reports masked routing without campaign writes", async () => {
-  const dryRun = await read("src/app/api/smartlead/language-test/route.ts");
-
-  assert.match(dryRun, /READ_ONLY_ROUTING_DRY_RUN/);
-  assert.match(dryRun, /productionSendingChanged: false/);
-  assert.match(dryRun, /maskedEmail\(lead\.email\)/);
-  assert.match(dryRun, /VISIBLE_SEQUENCE_LANES\[lane\]\.campaignName/);
-});
-
-
-
-test("Smartlead pauses on the first recorded spam complaint", async () => {
-  const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
-  assert.match(orchestrator, /analytics\[lane\]\.spamComplaints > 0/);
-  assert.match(orchestrator, /zero-complaint guardrail engaged/);
-  assert.doesNotMatch(orchestrator, /SPAM_GUARD_RATE/);
-});
-
-test("Smartlead page exposes one verified send path and individual verification visibility", async () => {
-  const page = await read("src/components/SmartleadCommandCenter.tsx");
-  const route = await read("src/app/api/smartlead/route.ts");
-  const waterfall = await read("src/lib/outreach-email-waterfall.ts");
-  const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
-
-  assert.match(page, /\/api\/smartlead\/send-today/);
-  assert.match(page, /lead\.verification\.status/);
-  assert.match(page, /lead\.campaignName/);
-  assert.doesNotMatch(page, /Bootstrap V2 campaigns|Queue prepared only|Start both|Sync sender pools/);
-  assert.match(route, /Legacy Smartlead write actions are retired/);
-  assert.match(waterfall, /linkedinMatches\(person, identifier\)/);
-  assert.match(waterfall, /companyMatches\(person, candidate\.companyName, candidate\.domain\)/);
-  assert.match(waterfall, /verified\.entry\.status === "valid"/);
-  assert.match(waterfall, /workEmailMatchesCurrentCompany/);
-  assert.match(waterfall, /item\.subType === "work"/);
-  assert.match(waterfall, /forceFresh: options\.forceReverify \?\? true/);
-  assert.match(waterfall, /HubSpot could not persist the fresh status/);
-  assert.match(page, /Needs fresh check/);
-  assert.match(orchestrator, /forceReverify: true/);
-  assert.match(orchestrator, /policy: "fresh-valid-only"/);
-  assert.doesNotMatch(waterfall, /replacement personal email/);
-});
-
-test("verified Smartlead autopilot is launched while every legacy send path stays disabled", async () => {
-  const deploy = await read(".github/workflows/deploy-hostinger.yml");
-  assert.match(deploy, /SMARTLEAD_AUTOPILOT_ENABLED=true/);
-  assert.match(deploy, /SMARTLEAD_LEGACY_SEND_ENABLED=false/);
-});
-
-test("Smartlead spam guard does not use the provider's broken is_spam query filter", async () => {
-  const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
-  assert.doesNotMatch(orchestrator, /emailStatus:\s*"is_spam"/);
-  assert.match(orchestrator, /leadRows\.filter/);
-  assert.match(orchestrator, /row\.is_spam/);
-});
-
-test("Smartlead retries transient fresh safety reads without weakening fail-closed sending", async () => {
-  const orchestrator = await read("src/app/api/smartlead/orchestrator-v3/route.ts");
-  assert.match(orchestrator, /async function freshHealthySnapshot/);
-  assert.match(orchestrator, /attempt <= 3/);
-  assert.match(orchestrator, /catch \(error\)/);
-  assert.match(orchestrator, /queue aborted after safety retries/);
-  assert.match(orchestrator, /await freshHealthySnapshot\("Fresh Sales safety was temporarily unavailable after email verification"\)/);
 });
 
 test("HubSpot association reads prefer the stable v4 endpoint with a versioned fallback", async () => {
