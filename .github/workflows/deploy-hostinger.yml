@@ -10,8 +10,6 @@ permissions:
   contents: read
   statuses: write
 
-# Hostinger Compose actions continue server-side after the GitHub runner exits.
-# Serialize GitHub deploys and also wait for any still-running Hostinger action.
 concurrency:
   group: hostinger-sdr-production
   cancel-in-progress: false
@@ -102,34 +100,88 @@ jobs:
           HOST='sdr.dashboardtalentera.tech'
           CONTENT_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${DEPLOY_SHA}/docker-compose.yml"
 
-          VM_CODE=$(curl -sS --connect-timeout 6 --max-time 15 \
-            -H "Authorization: $AUTH" -H 'Accept: application/json' \
-            -o /tmp/vm.json -w '%{http_code}' "$VM" || true)
-          VM_STATE=$(jq -r '.state // "unknown"' /tmp/vm.json 2>/dev/null || echo unknown)
-          echo "VPS: HTTP=${VM_CODE:-000} state=$VM_STATE"
-          [ "$VM_CODE" = 200 ] && [ "$VM_STATE" = running ] || exit 1
+          public_ready() {
+            local suffix="${1:-check}"
+            local health_code build_ref root_code admin_code admin_configured
+            rm -f /tmp/health.json /tmp/root.headers /tmp/root.html /tmp/admin.json
+            health_code=$(curl -sS --connect-timeout 4 --max-time 10 \
+              -H 'Cache-Control: no-cache' -o /tmp/health.json -w '%{http_code}' \
+              "https://${HOST}/api/health?deploy=${DEPLOY_SHA}&probe=${suffix}" || true)
+            build_ref=$(jq -r '.buildRef // ""' /tmp/health.json 2>/dev/null || true)
+            echo "Public probe ${suffix}: HTTP=${health_code:-000} build=${build_ref:-none}"
+            [ "$health_code" = 200 ] && [ "$build_ref" = "$DEPLOY_SHA" ] || return 1
 
-          # Hostinger actions keep running after a GitHub runner times out. Queue
-          # behind that server-side mutation instead of failing immediately and
-          # requiring a manual rerun. This is read-only polling; no overlap occurs.
-          ACTIVE_ID=''
-          for LOCK_ATTEMPT in $(seq 1 60); do
-            ACTIONS_CODE=$(curl -sS --connect-timeout 6 --max-time 15 \
-              -H "Authorization: $AUTH" -H 'Accept: application/json' \
-              -o /tmp/actions.json -w '%{http_code}' "$VM/actions?page=1" || true)
-            [ "$ACTIONS_CODE" = 200 ] || { echo "::error::Cannot verify Hostinger action lock."; exit 1; }
-            ACTIVE_ID=$(jq -r '[.data[]? | select(
+            root_code=$(curl -sS --connect-timeout 4 --max-time 10 \
+              -H 'Cache-Control: no-cache' -D /tmp/root.headers -o /tmp/root.html -w '%{http_code}' \
+              "https://${HOST}/" || true)
+            admin_code=$(curl -sS --connect-timeout 4 --max-time 10 \
+              -H 'Cache-Control: no-cache' -o /tmp/admin.json -w '%{http_code}' \
+              "https://${HOST}/api/sdr-admin" || true)
+            admin_configured=$(jq -r '.configured // false' /tmp/admin.json 2>/dev/null || echo false)
+            [ "$root_code" != 000 ] && [ "$root_code" != 401 ] && \
+              ! grep -qi '^WWW-Authenticate:' /tmp/root.headers && \
+              [ "$admin_code" = 200 ] && [ "$admin_configured" = true ]
+          }
+
+          fetch_actions() {
+            local api_attempt code
+            for api_attempt in 1 2 3 4; do
+              code=$(curl -sS --connect-timeout 5 --max-time 12 \
+                -H "Authorization: $AUTH" -H 'Accept: application/json' \
+                -o /tmp/actions.json -w '%{http_code}' "$VM/actions?page=1" || true)
+              if [ "$code" = 200 ]; then
+                return 0
+              fi
+              echo "::warning::Hostinger actions API transient failure: HTTP=${code:-000}, retry ${api_attempt}/4"
+              sleep $((api_attempt * 2))
+            done
+            return 1
+          }
+
+          active_compose_id() {
+            jq -r '[.data[]? | select(
               ((.name // "") | startswith("docker_compose_")) and
               ((.state // "") | IN("pending","queued","started","running","processing","in_progress"))
-            )][0].id // empty' /tmp/actions.json)
+            )][0].id // empty' /tmp/actions.json 2>/dev/null || true
+          }
+
+          # A previous GitHub runner may have timed out after Hostinger completed
+          # the deployment server-side. Never rebuild an already-live exact SHA.
+          if public_ready pre_hostinger; then
+            echo "Exact build is already healthy; no Hostinger API mutation needed."
+            exit 0
+          fi
+
+          # Do not use the Hostinger VM-details endpoint as a hard precondition.
+          # It has shown transient 15s timeouts while SSH, Docker, and the public
+          # SDR service were all healthy. The actions endpoint is the mutation lock.
+          ACTIVE_ID='unknown'
+          for LOCK_ATTEMPT in $(seq 1 60); do
+            if ! fetch_actions; then
+              echo "Hostinger lock status temporarily unavailable; waiting ${LOCK_ATTEMPT}/60"
+              sleep 5
+              continue
+            fi
+            ACTIVE_ID=$(active_compose_id)
             if [ -z "$ACTIVE_ID" ]; then
               break
             fi
             ACTIVE_STATE=$(jq -r --argjson id "$ACTIVE_ID" '.data[]? | select(.id == $id) | .state // "active"' /tmp/actions.json | head -1)
-            echo "A Hostinger Compose action is already active: id=$ACTIVE_ID state=${ACTIVE_STATE:-active}; waiting ${LOCK_ATTEMPT}/60"
+            echo "Hostinger Compose action active: id=$ACTIVE_ID state=${ACTIVE_STATE:-active}; waiting ${LOCK_ATTEMPT}/60"
             sleep 5
+            if public_ready "lock_${LOCK_ATTEMPT}"; then
+              echo "Exact build became healthy while waiting for the prior Hostinger action."
+              exit 0
+            fi
           done
-          [ -z "$ACTIVE_ID" ] || { echo "::error::Hostinger Compose action remained active after 5 minutes."; exit 1; }
+          [ -z "$ACTIVE_ID" ] || { echo "::error::Unable to obtain a verified Hostinger Compose mutation lock within 5 minutes."; exit 1; }
+
+          # Recheck after acquiring the lock; the previous action may have finished
+          # and published this SHA between the last public probe and lock release.
+          if public_ready after_lock; then
+            echo "Exact build is already healthy after Hostinger lock release."
+            exit 0
+          fi
 
           ENVIRONMENT=$(cat <<EOF
           SDR_BUILD_REF=${DEPLOY_SHA}
@@ -172,48 +224,46 @@ jobs:
             -H 'Content-Type: application/json' -d "$BODY" \
             -o /tmp/deploy.json -w '%{http_code}' "$VM/docker" || true)
           echo "Hostinger deploy request: HTTP=${DEPLOY_CODE:-000}"
-          if [ -z "$DEPLOY_CODE" ] || [ "$DEPLOY_CODE" -lt 200 ] || [ "$DEPLOY_CODE" -ge 300 ]; then
-            jq '{message,correlation_id,errors}' /tmp/deploy.json 2>/dev/null || true
-            exit 1
-          fi
 
           ACTION_ID=$(jq -r '.id // .action.id // empty' /tmp/deploy.json 2>/dev/null || true)
+          if [ -z "$DEPLOY_CODE" ] || [ "$DEPLOY_CODE" -lt 200 ] || [ "$DEPLOY_CODE" -ge 300 ]; then
+            # A POST timeout is ambiguous: Hostinger may have accepted it. Never
+            # retry a mutation blindly. Check the action lock and public build.
+            echo "::warning::Hostinger deploy response was inconclusive; checking for accepted server-side action."
+            sleep 3
+            if fetch_actions; then
+              ACTION_ID=$(active_compose_id)
+            fi
+            if [ -z "$ACTION_ID" ]; then
+              if public_ready post_inconclusive; then
+                echo "Exact build became healthy despite the inconclusive POST response."
+                exit 0
+              fi
+              jq '{message,correlation_id,errors}' /tmp/deploy.json 2>/dev/null || true
+              echo "::error::Hostinger deploy was not confirmed and no active Compose action was found."
+              exit 1
+            fi
+          fi
           echo "Hostinger action=${ACTION_ID:-not-returned}"
 
-          # Most builds should now hit BuildKit npm/Next caches and finish quickly.
-          # Keep enough headroom for a true cold build without declaring failure
-          # while Hostinger is still legitimately compiling the exact revision.
           READY=false
           for ATTEMPT in $(seq 1 150); do
-            HEALTH_CODE=$(curl -sS --connect-timeout 4 --max-time 10 \
-              -H 'Cache-Control: no-cache' -o /tmp/health.json -w '%{http_code}' \
-              "https://${HOST}/api/health?deploy=${DEPLOY_SHA}&attempt=${ATTEMPT}" || true)
-            BUILD_REF=$(jq -r '.buildRef // ""' /tmp/health.json 2>/dev/null || true)
-            echo "Gate ${ATTEMPT}/150: HTTP=${HEALTH_CODE:-000} build=${BUILD_REF:-none}"
-
-            if [ "$HEALTH_CODE" = 200 ] && [ "$BUILD_REF" = "$DEPLOY_SHA" ]; then
-              ROOT_CODE=$(curl -sS --connect-timeout 4 --max-time 10 \
-                -H 'Cache-Control: no-cache' -D /tmp/root.headers -o /tmp/root.html -w '%{http_code}' \
-                "https://${HOST}/" || true)
-              ADMIN_CODE=$(curl -sS --connect-timeout 4 --max-time 10 \
-                -H 'Cache-Control: no-cache' -o /tmp/admin.json -w '%{http_code}' \
-                "https://${HOST}/api/sdr-admin" || true)
-              ADMIN_CONFIGURED=$(jq -r '.configured // false' /tmp/admin.json 2>/dev/null || echo false)
-              if [ "$ROOT_CODE" != 000 ] && [ "$ROOT_CODE" != 401 ] && \
-                 ! grep -qi '^WWW-Authenticate:' /tmp/root.headers && \
-                 [ "$ADMIN_CODE" = 200 ] && [ "$ADMIN_CONFIGURED" = true ]; then
-                READY=true
-                break
-              fi
+            if public_ready "gate_${ATTEMPT}"; then
+              READY=true
+              break
             fi
 
             if [ -n "$ACTION_ID" ] && [ $((ATTEMPT % 6)) -eq 0 ]; then
               ACTION_CODE=$(curl -sS --connect-timeout 5 --max-time 12 \
                 -H "Authorization: $AUTH" -H 'Accept: application/json' \
                 -o /tmp/action.json -w '%{http_code}' "$VM/actions/$ACTION_ID" || true)
-              ACTION_STATE=$(jq -r '.state // "unknown"' /tmp/action.json 2>/dev/null || echo unknown)
-              echo "Hostinger action: HTTP=${ACTION_CODE:-000} state=$ACTION_STATE"
-              case "$ACTION_STATE" in failed|error) exit 1 ;; esac
+              if [ "$ACTION_CODE" = 200 ]; then
+                ACTION_STATE=$(jq -r '.state // "unknown"' /tmp/action.json 2>/dev/null || echo unknown)
+                echo "Hostinger action: HTTP=200 state=$ACTION_STATE"
+                case "$ACTION_STATE" in failed|error) exit 1 ;; esac
+              else
+                echo "::warning::Hostinger action-status API transient failure: HTTP=${ACTION_CODE:-000}; public exact-build gate remains authoritative."
+              fi
             fi
             sleep 5
           done
