@@ -1,0 +1,50 @@
+name: Hostinger SDR Project Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-sdr-project-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Inspect project container states
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          AUTH="$HOSTINGER_API_KEY"
+          case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
+          BASE='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
+          for TRY in 1 2 3 4 5; do
+            CODE=$(curl -sS --connect-timeout 6 --max-time 20 \
+              -H "Authorization: $AUTH" -H 'Accept: application/json' \
+              -o /tmp/containers.json -w '%{http_code}' "$BASE/docker/sdr-project/containers" || true)
+            echo "containers attempt=$TRY http=${CODE:-000}"
+            [ "$CODE" = 200 ] && break
+            sleep $((TRY*2))
+          done
+          [ "${CODE:-000}" = 200 ] || exit 1
+
+          # Print only structural/state information. Never dump raw API payloads.
+          jq -r '
+            "root_type=" + (type),
+            "root_keys=" + ((keys_unsorted // []) | join(",")),
+            (if type == "array" then
+               .[] | "container name=" + ((.name // .container_name // .service // "unknown")|tostring) +
+               " status=" + ((.status // .state // .container_status // "unknown")|tostring)
+             elif (.data|type) == "array" then
+               .data[] | "container name=" + ((.name // .container_name // .service // "unknown")|tostring) +
+               " status=" + ((.status // .state // .container_status // "unknown")|tostring) +
+               " keys=" + ((keys_unsorted // [])|join(","))
+             else
+               "data_type=" + ((.data|type)|tostring) + " data_keys=" + (((.data // {})|keys_unsorted // [])|join(","))
+             end)
+          ' /tmp/containers.json
