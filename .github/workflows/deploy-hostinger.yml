@@ -11,8 +11,8 @@ permissions:
   statuses: write
 
 # Hostinger Compose mutations continue server-side after the GitHub runner exits.
-# Never overlap production mutations. Transient Hostinger API read failures are
-# retried and a stalled Created stack is started once through Hostinger itself.
+# Never overlap production mutations. Deployment completion is verified from the
+# Hostinger API first; public HTTPS is then checked from a fresh GitHub runner.
 concurrency:
   group: hostinger-sdr-production
   cancel-in-progress: false
@@ -27,7 +27,7 @@ jobs:
       should_deploy: ${{ steps.freshness.outputs.should_deploy }}
       deploy_sha: ${{ steps.freshness.outputs.deploy_sha }}
     steps:
-      - name: Reject stale deployment candidates
+      - name: Reject stale or workflow-only deployment candidates
         id: freshness
         uses: actions/github-script@v7
         env:
@@ -37,27 +37,39 @@ jobs:
           script: |
             const candidate = String(process.env.CANDIDATE_SHA || '').trim();
             core.setOutput('deploy_sha', candidate);
-            if (context.eventName === 'workflow_dispatch') {
-              core.setOutput('should_deploy', 'true');
-              return;
+
+            if (context.eventName !== 'workflow_dispatch') {
+              const { data: branch } = await github.rest.repos.getBranch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                branch: 'main',
+              });
+              if (candidate !== branch.commit.sha) {
+                core.notice(`Skipping stale ${candidate}; current main is ${branch.commit.sha}.`);
+                core.setOutput('should_deploy', 'false');
+                return;
+              }
+
+              const { data: commit } = await github.rest.repos.getCommit({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: candidate,
+              });
+              const changed = (commit.files || []).map((file) => file.filename);
+              if (changed.length && changed.every((path) => path === '.github/workflows/deploy-hostinger.yml')) {
+                core.notice('Deployment workflow-only change; production application rebuild is not required.');
+                core.setOutput('should_deploy', 'false');
+                return;
+              }
             }
-            const { data: branch } = await github.rest.repos.getBranch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              branch: 'main',
-            });
-            if (candidate !== branch.commit.sha) {
-              core.notice(`Skipping stale ${candidate}; current main is ${branch.commit.sha}.`);
-              core.setOutput('should_deploy', 'false');
-              return;
-            }
+
             core.setOutput('should_deploy', 'true');
 
   deploy:
     needs: preflight
     if: needs.preflight.outputs.should_deploy == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 18
     env:
       DEPLOY_SHA: ${{ needs.preflight.outputs.deploy_sha }}
       DEPLOY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -73,7 +85,7 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'pending',
               context: 'hostinger/deploy',
-              description: 'Deploying lean Traefik SDR stack',
+              description: 'Hostinger deploy running',
               target_url: process.env.DEPLOY_URL,
             });
 
@@ -93,23 +105,23 @@ jobs:
           test -n "$HOSTINGER_API_KEY" || { echo "::error::Hostinger API token is missing."; exit 1; }
           test -n "$SDR_ADMIN_PASSWORD" || { echo "::error::SDR admin password is missing."; exit 1; }
 
-      - name: Deploy once and self-heal a stalled Created stack
+      - name: Deploy and wait for Hostinger containers
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
         run: |
           set -euo pipefail
           AUTH="$HOSTINGER_API_KEY"
           case "$AUTH" in Bearer\ *) ;; *) AUTH="Bearer $AUTH" ;; esac
+
           VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
-          HOST='sdr.dashboardtalentera.tech'
           PROJECT='sdr-project'
           CONTENT_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${DEPLOY_SHA}/docker-compose.yml"
 
           api_get() {
-            local url="$1" out="$2" tries="${3:-5}" max_time="${4:-20}"
+            local url="$1" out="$2" tries="${3:-3}" max_time="${4:-15}"
             local code='000'
             for try in $(seq 1 "$tries"); do
-              code=$(curl -sS --connect-timeout 6 --max-time "$max_time" \
+              code=$(curl -sS --connect-timeout 5 --max-time "$max_time" \
                 -H "Authorization: $AUTH" -H 'Accept: application/json' \
                 -o "$out" -w '%{http_code}' "$url" || true)
               if [ "$code" = 200 ]; then
@@ -123,14 +135,31 @@ jobs:
             return 1
           }
 
-          public_build() {
-            local suffix="$1"
-            local code ref
-            code=$(curl -sS --connect-timeout 4 --max-time 10 \
-              -H 'Cache-Control: no-cache' -o /tmp/health.json -w '%{http_code}' \
-              "https://${HOST}/api/health?${suffix}" || true)
-            ref=$(jq -r '.buildRef // ""' /tmp/health.json 2>/dev/null || true)
-            printf '%s|%s' "${code:-000}" "$ref"
+          read_core_state() {
+            local code
+            code=$(api_get "$VM/docker/$PROJECT/containers" /tmp/containers.json 1 12) || true
+            if [ "$code" != 200 ]; then
+              printf '0|0|%s' "${code:-000}"
+              return
+            fi
+
+            local total up
+            total=$(jq '[.[] | select((.name // "") | IN(
+              "sdr-project-postgres-1",
+              "sdr-project-dashboard-cache-api-1",
+              "sdr-project-sdr-dashboard-1",
+              "sdr-project-maqsam-sync-1"
+            ))] | length' /tmp/containers.json)
+            up=$(jq '[.[] | select(
+              ((.name // "") | IN(
+                "sdr-project-postgres-1",
+                "sdr-project-dashboard-cache-api-1",
+                "sdr-project-sdr-dashboard-1",
+                "sdr-project-maqsam-sync-1"
+              )) and
+              ((.status // "") | startswith("Up "))
+            )] | length' /tmp/containers.json)
+            printf '%s|%s|200' "$up" "$total"
           }
 
           VM_CODE=$(api_get "$VM" /tmp/vm.json 5 20) || true
@@ -143,23 +172,27 @@ jobs:
 
           ACTIVE_ID=''
           for LOCK_ATTEMPT in $(seq 1 60); do
-            ACTIONS_CODE=$(api_get "$VM/actions?page=1" /tmp/actions.json 3 15) || true
+            ACTIONS_CODE=$(api_get "$VM/actions?page=1" /tmp/actions.json 2 12) || true
             if [ "$ACTIONS_CODE" != 200 ]; then
               echo "Action lock read unavailable; retrying ${LOCK_ATTEMPT}/60"
               sleep 5
               continue
             fi
+
             ACTIVE_ID=$(jq -r '[.data[]? | select(
               ((.name // "") | startswith("docker_compose_")) and
               ((.state // "") | IN("pending","queued","started","running","processing","in_progress"))
             )][0].id // empty' /tmp/actions.json)
+
             if [ -z "$ACTIVE_ID" ]; then
               break
             fi
+
             ACTIVE_STATE=$(jq -r --argjson id "$ACTIVE_ID" '.data[]? | select(.id == $id) | .state // "active"' /tmp/actions.json | head -1)
             echo "Hostinger Compose action active: id=$ACTIVE_ID state=${ACTIVE_STATE:-active}; waiting ${LOCK_ATTEMPT}/60"
             sleep 5
           done
+
           [ -z "$ACTIVE_ID" ] || {
             echo "::error::Hostinger Compose action remained active after 5 minutes; refusing to overlap it."
             exit 1
@@ -214,89 +247,130 @@ jobs:
           ACTION_ID=$(jq -r '.id // .action.id // empty' /tmp/deploy.json 2>/dev/null || true)
           echo "Hostinger action=${ACTION_ID:-not-returned}"
 
-          READY=false
+          HOSTINGER_READY=false
           START_ATTEMPTED=false
           FAILED_ACTION_SEEN=false
 
+          # Poll the Hostinger control plane instead of repeatedly blocking on the
+          # public 443 route while Docker is still building/recreating containers.
           for ATTEMPT in $(seq 1 120); do
-            IFS='|' read -r HEALTH_CODE BUILD_REF <<EOF
-          $(public_build "deploy=${DEPLOY_SHA}&attempt=${ATTEMPT}")
-          EOF
-            echo "Gate ${ATTEMPT}/120: HTTP=${HEALTH_CODE:-000} build=${BUILD_REF:-none}"
-
-            if [ "$HEALTH_CODE" = 200 ] && [ "$BUILD_REF" = "$DEPLOY_SHA" ]; then
-              ROOT_CODE=$(curl -sS --connect-timeout 4 --max-time 10 \
-                -H 'Cache-Control: no-cache' -D /tmp/root.headers -o /tmp/root.html -w '%{http_code}' \
-                "https://${HOST}/" || true)
-              ADMIN_CODE=$(curl -sS --connect-timeout 4 --max-time 10 \
-                -H 'Cache-Control: no-cache' -o /tmp/admin.json -w '%{http_code}' \
-                "https://${HOST}/api/sdr-admin" || true)
-              ADMIN_CONFIGURED=$(jq -r '.configured // false' /tmp/admin.json 2>/dev/null || echo false)
-              if [ "$ROOT_CODE" != 000 ] && [ "$ROOT_CODE" != 401 ] && \
-                 ! grep -qi '^WWW-Authenticate:' /tmp/root.headers && \
-                 [ "$ADMIN_CODE" = 200 ] && [ "$ADMIN_CONFIGURED" = true ]; then
-                READY=true
-                break
+            ACTION_STATE='unknown'
+            ACTION_CODE='000'
+            if [ -n "$ACTION_ID" ]; then
+              ACTION_CODE=$(api_get "$VM/actions/$ACTION_ID" /tmp/action.json 1 10) || true
+              if [ "$ACTION_CODE" = 200 ]; then
+                ACTION_STATE=$(jq -r '.state // "unknown"' /tmp/action.json 2>/dev/null || echo unknown)
               fi
             fi
 
-            if [ $((ATTEMPT % 6)) -eq 0 ]; then
-              ACTION_STATE='unknown'
-              if [ -n "$ACTION_ID" ]; then
-                ACTION_CODE=$(api_get "$VM/actions/$ACTION_ID" /tmp/action.json 2 12) || true
-                if [ "$ACTION_CODE" = 200 ]; then
-                  ACTION_STATE=$(jq -r '.state // "unknown"' /tmp/action.json 2>/dev/null || echo unknown)
-                fi
-                echo "Hostinger action: HTTP=${ACTION_CODE:-000} state=$ACTION_STATE"
-                case "$ACTION_STATE" in failed|error) FAILED_ACTION_SEEN=true ;; esac
-              fi
+            IFS='|' read -r CORE_UP CORE_TOTAL CONTAINERS_CODE <<EOF
+          $(read_core_state)
+          EOF
 
-              CONTAINERS_CODE=$(api_get "$VM/docker/$PROJECT/containers" /tmp/containers.json 2 15) || true
-              if [ "$CONTAINERS_CODE" = 200 ]; then
-                CORE_TOTAL=$(jq '[.[] | select((.name // "") | IN(
-                  "sdr-project-postgres-1",
-                  "sdr-project-dashboard-cache-api-1",
-                  "sdr-project-sdr-dashboard-1",
-                  "sdr-project-maqsam-sync-1"
-                ))] | length' /tmp/containers.json)
-                CORE_UP=$(jq '[.[] | select(
-                  ((.name // "") | IN(
-                    "sdr-project-postgres-1",
-                    "sdr-project-dashboard-cache-api-1",
-                    "sdr-project-sdr-dashboard-1",
-                    "sdr-project-maqsam-sync-1"
-                  )) and
-                  ((.status // "") | startswith("Up "))
-                )] | length' /tmp/containers.json)
-                echo "Hostinger project: core_up=${CORE_UP}/${CORE_TOTAL}"
+            echo "Hostinger gate ${ATTEMPT}/120: action=${ACTION_STATE} core=${CORE_UP}/${CORE_TOTAL} containers_http=${CONTAINERS_CODE}"
 
-                if [ "$START_ATTEMPTED" = false ] && [ "$ATTEMPT" -ge 36 ] && \
-                   [ "$CORE_TOTAL" -ge 4 ] && [ "$CORE_UP" -lt "$CORE_TOTAL" ]; then
-                  START_ATTEMPTED=true
-                  echo "Detected stalled Created/stopped SDR stack; requesting one Hostinger project start."
-                  START_CODE=$(curl -sS --connect-timeout 8 --max-time 30 \
-                    -X POST -H "Authorization: $AUTH" -H 'Accept: application/json' \
-                    -o /tmp/start.json -w '%{http_code}' "$VM/docker/$PROJECT/start" || true)
-                  echo "Hostinger project start: HTTP=${START_CODE:-000}"
-                  if [ -n "$START_CODE" ] && [ "$START_CODE" -ge 200 ] && [ "$START_CODE" -lt 300 ]; then
-                    START_ACTION_ID=$(jq -r '.id // .action.id // empty' /tmp/start.json 2>/dev/null || true)
-                    echo "Start action=${START_ACTION_ID:-accepted}"
-                  else
-                    jq '{message,correlation_id,errors}' /tmp/start.json 2>/dev/null || true
-                  fi
-                fi
-              fi
+            case "$ACTION_STATE" in
+              failed|error)
+                FAILED_ACTION_SEEN=true
+                ;;
+            esac
 
-              if [ "$FAILED_ACTION_SEEN" = true ] && [ "$START_ATTEMPTED" = true ] && [ "$ATTEMPT" -ge 48 ]; then
-                echo "Hostinger create action failed and recovery has not produced the exact healthy build."
-                exit 1
+            # Container readiness is the authoritative hand-off point. The next
+            # job runs on a fresh runner and verifies the exact buildRef over HTTPS,
+            # so we do not wait for slow Hostinger action bookkeeping once 4/4 are up.
+            if [ "$CORE_TOTAL" -ge 4 ] && [ "$CORE_UP" -eq "$CORE_TOTAL" ]; then
+              HOSTINGER_READY=true
+              break
+            fi
+
+            if [ "$START_ATTEMPTED" = false ] && [ "$ATTEMPT" -ge 24 ] && \
+               [ "$CORE_TOTAL" -ge 4 ] && [ "$CORE_UP" -lt "$CORE_TOTAL" ]; then
+              START_ATTEMPTED=true
+              echo "Detected stalled Created/stopped SDR stack; requesting one Hostinger project start."
+              START_CODE=$(curl -sS --connect-timeout 8 --max-time 30 \
+                -X POST -H "Authorization: $AUTH" -H 'Accept: application/json' \
+                -o /tmp/start.json -w '%{http_code}' "$VM/docker/$PROJECT/start" || true)
+              echo "Hostinger project start: HTTP=${START_CODE:-000}"
+            fi
+
+            if [ "$FAILED_ACTION_SEEN" = true ] && [ "$START_ATTEMPTED" = true ] && [ "$ATTEMPT" -ge 36 ]; then
+              echo "::error::Hostinger create action failed and recovery did not bring all core containers up."
+              exit 1
+            fi
+
+            sleep 5
+          done
+
+          [ "$HOSTINGER_READY" = true ] || {
+            echo "::error::Hostinger did not report all four SDR containers up within the guarded deployment window."
+            exit 1
+          }
+
+      - name: Mark deployment failed
+        if: failure()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.DEPLOY_SHA,
+              state: 'failure',
+              context: 'hostinger/deploy',
+              description: 'Hostinger deployment failed',
+              target_url: process.env.DEPLOY_URL,
+            });
+
+  verify:
+    needs: [preflight, deploy]
+    if: needs.preflight.outputs.should_deploy == 'true' && needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      DEPLOY_SHA: ${{ needs.preflight.outputs.deploy_sha }}
+      DEPLOY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      HOST: sdr.dashboardtalentera.tech
+    steps:
+      - name: Verify exact production build from a fresh runner
+        run: |
+          set -euo pipefail
+
+          for ATTEMPT in $(seq 1 18); do
+            rm -f /tmp/health.json /tmp/root.headers /tmp/root.html /tmp/admin.json
+
+            HEALTH_CODE=$(curl -4 -sS --connect-timeout 3 --max-time 6 \
+              -H 'Cache-Control: no-cache' \
+              -o /tmp/health.json -w '%{http_code}' \
+              "https://${HOST}/api/health?deploy=${DEPLOY_SHA}&verify=${ATTEMPT}" || true)
+            BUILD_REF=$(jq -r '.buildRef // ""' /tmp/health.json 2>/dev/null || true)
+
+            echo "Public verify ${ATTEMPT}/18: HTTP=${HEALTH_CODE:-000} build=${BUILD_REF:-none}"
+
+            if [ "$HEALTH_CODE" = 200 ] && [ "$BUILD_REF" = "$DEPLOY_SHA" ]; then
+              ROOT_CODE=$(curl -4 -sS --connect-timeout 3 --max-time 6 \
+                -H 'Cache-Control: no-cache' \
+                -D /tmp/root.headers -o /tmp/root.html -w '%{http_code}' \
+                "https://${HOST}/" || true)
+              ADMIN_CODE=$(curl -4 -sS --connect-timeout 3 --max-time 6 \
+                -H 'Cache-Control: no-cache' \
+                -o /tmp/admin.json -w '%{http_code}' \
+                "https://${HOST}/api/sdr-admin" || true)
+              ADMIN_CONFIGURED=$(jq -r '.configured // false' /tmp/admin.json 2>/dev/null || echo false)
+
+              if [ "$ROOT_CODE" != 000 ] && [ "$ROOT_CODE" != 401 ] && \
+                 ! grep -qi '^WWW-Authenticate:' /tmp/root.headers && \
+                 [ "$ADMIN_CODE" = 200 ] && [ "$ADMIN_CONFIGURED" = true ]; then
+                echo "Exact production build verified."
+                exit 0
               fi
             fi
 
             sleep 5
           done
 
-          [ "$READY" = true ] || { echo "::error::Exact production build did not become healthy within the guarded deployment window."; exit 1; }
+          echo "::error::Hostinger containers are up, but the exact production build could not be verified over public HTTPS from a fresh runner."
+          exit 1
 
       - name: Mark deployment successful
         if: success()
@@ -310,7 +384,7 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'success',
               context: 'hostinger/deploy',
-              description: 'Lean Traefik SDR production verified',
+              description: 'SDR production verified',
               target_url: process.env.DEPLOY_URL,
             });
 
@@ -326,6 +400,6 @@ jobs:
               sha: process.env.DEPLOY_SHA,
               state: 'failure',
               context: 'hostinger/deploy',
-              description: 'SDR production deployment failed',
+              description: 'Public production verification failed',
               target_url: process.env.DEPLOY_URL,
             });
