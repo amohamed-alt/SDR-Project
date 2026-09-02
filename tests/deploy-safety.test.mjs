@@ -66,36 +66,63 @@ test("Maqsam worker reuses the application image instead of rebuilding it", asyn
   assert.doesNotMatch(section, /\n\s+build:/);
 });
 
-test("Hostinger workflow rejects stale CI candidates and queues behind server-side Compose work", async () => {
+test("Hostinger workflow rejects stale CI and obtains a verified mutation lock despite transient reads", async () => {
   const workflow = await read(".github/workflows/deploy-hostinger.yml");
 
   assert.match(workflow, /preflight:/);
   assert.match(workflow, /github\.rest\.repos\.getBranch/);
   assert.match(workflow, /candidate !== branch\.commit\.sha/);
-  assert.match(workflow, /needs: preflight/);
   assert.match(workflow, /needs\.preflight\.outputs\.should_deploy == 'true'/);
+  assert.match(workflow, /api_get\(\)/);
   assert.match(workflow, /for LOCK_ATTEMPT in \$\(seq 1 60\)/);
-  assert.match(workflow, /A Hostinger Compose action is already active/);
-  assert.match(workflow, /Hostinger Compose action remained active after 5 minutes/);
+  assert.match(workflow, /ACTIVE_ID='unknown'/);
+  assert.match(workflow, /Hostinger lock status temporarily unavailable/);
+  assert.match(workflow, /Unable to obtain a verified Hostinger Compose mutation lock within 5 minutes/);
+  assert.doesNotMatch(workflow, /VM_CODE=/);
+  assert.doesNotMatch(workflow, /VM_STATE=/);
 });
 
-test("deployment uses one exact-build gate with cold-build headroom", async () => {
+test("Hostinger deployment no-ops an already-live exact SHA and never blindly retries an ambiguous POST", async () => {
+  const workflow = await read(".github/workflows/deploy-hostinger.yml");
+
+  assert.match(workflow, /public_ready\(\)/);
+  assert.match(workflow, /if public_ready pre_hostinger/);
+  assert.match(workflow, /Exact build is already healthy; no Hostinger mutation needed/);
+  assert.match(workflow, /Hostinger deploy response was inconclusive; checking for an accepted server-side action/);
+  assert.match(workflow, /ACTION_ID=\$\(active_compose_id\)/);
+  assert.match(workflow, /Hostinger deploy was not confirmed and no active Compose action was found/);
+  assert.doesNotMatch(workflow, /curl[^\n]*--retry[^\n]*-X POST/);
+});
+
+test("Hostinger Created-stack self-heal can only start after the create mutation is terminal", async () => {
+  const workflow = await read(".github/workflows/deploy-hostinger.yml");
+
+  assert.match(workflow, /ACTION_TERMINAL=false/);
+  assert.match(workflow, /success\|completed\|finished\|failed\|error\) ACTION_TERMINAL=true/);
+  assert.match(workflow, /\[ "\$ACTION_TERMINAL" = true \].*\[ "\$CORE_TOTAL" -ge 4 \].*\[ "\$CORE_UP" -lt "\$CORE_TOTAL" \]/s);
+  assert.match(workflow, /Detected terminal-but-stalled SDR stack; requesting one guarded Hostinger project start/);
+  assert.match(workflow, /"\$VM\/docker\/\$PROJECT\/start"/);
+});
+
+test("deployment exact-build gate keeps cold-build headroom and public health authority", async () => {
   const workflow = await read(".github/workflows/deploy-hostinger.yml");
   const health = await read("src/app/api/health/route.ts");
 
-  assert.match(workflow, /Gate \$\{ATTEMPT\}\/150/);
+  assert.match(workflow, /for ATTEMPT in \$\(seq 1 150\)/);
   assert.match(workflow, /Cache-Control: no-cache/);
   assert.match(workflow, /deploy=\$\{DEPLOY_SHA\}/);
-  assert.match(workflow, /\[ "\$BUILD_REF" = "\$DEPLOY_SHA" \]/);
+  assert.match(workflow, /\[ "\$health_code" = 200 \] && \[ "\$build_ref" = "\$DEPLOY_SHA" \]/);
   assert.doesNotMatch(workflow, /docker-compose\.light\.yml/);
   assert.match(workflow, /docker-compose\.yml/);
   assert.match(health, /no-store, max-age=0/);
 });
 
-test("CI cancels stale branch work and keeps heavyweight integration checks on PRs", async () => {
+test("CI cancels stale work and validates deploy-workflow and safety-test edits", async () => {
   const workflow = await read(".github/workflows/ci.yml");
   assert.match(workflow, /cancel-in-progress: true/);
   assert.match(workflow, /npm ci --prefer-offline --no-audit/);
+  assert.match(workflow, /'tests\/\*\*'/);
+  assert.match(workflow, /'\.github\/workflows\/deploy-hostinger\.yml'/);
   assert.match(workflow, /if: github\.event_name == 'pull_request'/);
   assert.match(workflow, /Production build/);
   assert.match(workflow, /Validate production compose/);
