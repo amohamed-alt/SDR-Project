@@ -66,7 +66,7 @@ test("Maqsam worker reuses the application image instead of rebuilding it", asyn
   assert.doesNotMatch(section, /\n\s+build:/);
 });
 
-test("Hostinger workflow rejects stale CI candidates and queues behind server-side Compose work", async () => {
+test("Hostinger workflow rejects stale CI candidates, retries reads, and queues server-side Compose work", async () => {
   const workflow = await read(".github/workflows/deploy-hostinger.yml");
 
   assert.match(workflow, /preflight:/);
@@ -74,19 +74,25 @@ test("Hostinger workflow rejects stale CI candidates and queues behind server-si
   assert.match(workflow, /candidate !== branch\.commit\.sha/);
   assert.match(workflow, /needs: preflight/);
   assert.match(workflow, /needs\.preflight\.outputs\.should_deploy == 'true'/);
+  assert.match(workflow, /api_get\(\)/);
+  assert.match(workflow, /Hostinger GET retry/);
   assert.match(workflow, /for LOCK_ATTEMPT in \$\(seq 1 60\)/);
-  assert.match(workflow, /A Hostinger Compose action is already active/);
+  assert.match(workflow, /Hostinger Compose action active:/);
   assert.match(workflow, /Hostinger Compose action remained active after 5 minutes/);
 });
 
-test("deployment uses one exact-build gate with cold-build headroom", async () => {
+test("deployment exact-build gate self-heals a Created stack through Hostinger", async () => {
   const workflow = await read(".github/workflows/deploy-hostinger.yml");
   const health = await read("src/app/api/health/route.ts");
 
-  assert.match(workflow, /Gate \$\{ATTEMPT\}\/150/);
+  assert.match(workflow, /Gate \$\{ATTEMPT\}\/120/);
   assert.match(workflow, /Cache-Control: no-cache/);
   assert.match(workflow, /deploy=\$\{DEPLOY_SHA\}/);
   assert.match(workflow, /\[ "\$BUILD_REF" = "\$DEPLOY_SHA" \]/);
+  assert.match(workflow, /START_ATTEMPTED=false/);
+  assert.match(workflow, /ATTEMPT" -ge 36/);
+  assert.match(workflow, /docker\/\$PROJECT\/start/);
+  assert.match(workflow, /Detected stalled Created\/stopped SDR stack/);
   assert.doesNotMatch(workflow, /docker-compose\.light\.yml/);
   assert.match(workflow, /docker-compose\.yml/);
   assert.match(health, /no-store, max-age=0/);
