@@ -50,6 +50,14 @@ test("production compose is canonical, Traefik-only, and volume-safe", async () 
   assert.doesNotMatch(compose, /volume prune|--volumes/);
 });
 
+test("Hostinger builds application and cache service from the exact GitHub revision", async () => {
+  const compose = await read("docker-compose.yml");
+  assert.match(compose, /context: https:\/\/github\.com\/amohamed-alt\/SDR-Project\.git#\$\{SDR_BUILD_REF:\?SDR_BUILD_REF is required\}/);
+  assert.match(compose, /context: https:\/\/github\.com\/amohamed-alt\/SDR-Project\.git#\$\{SDR_BUILD_REF:\?SDR_BUILD_REF is required\}:services\/dashboard-cache/);
+  assert.doesNotMatch(compose, /build:\s*\n\s+context: \./);
+  assert.doesNotMatch(compose, /build:\s*\n\s+context: \.\/services\/dashboard-cache/);
+});
+
 test("Docker build persists npm and Next compilation caches", async () => {
   const dockerfile = await read("Dockerfile");
   assert.match(dockerfile, /# syntax=docker\/dockerfile:1\.7/);
@@ -98,9 +106,10 @@ test("deployment exact-build gate self-heals a Created stack through Hostinger",
   assert.match(health, /no-store, max-age=0/);
 });
 
-test("CI cancels stale branch work and keeps heavyweight integration checks on PRs", async () => {
+test("CI cancels stale branch work and verifies test-only changes", async () => {
   const workflow = await read(".github/workflows/ci.yml");
   assert.match(workflow, /cancel-in-progress: true/);
+  assert.match(workflow, /- 'tests\/\*\*'/);
   assert.match(workflow, /npm ci --prefer-offline --no-audit/);
   assert.match(workflow, /if: github\.event_name == 'pull_request'/);
   assert.match(workflow, /Production build/);
