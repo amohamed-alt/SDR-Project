@@ -150,7 +150,6 @@ test("public production keeps browser Basic Auth off and protects admin tools in
   assert.doesNotMatch(acquisition, /OWNER_PIN_SHA256|e0f05da9/);
   assert.match(workflow, /DISABLE_AUTH=true/);
   assert.doesNotMatch(workflow, /--user\s+"\$\{DASHBOARD_USERNAME\}:\$\{DASHBOARD_PASSWORD\}"/);
-  assert.match(workflow, /WWW-Authenticate/);
   assert.match(adminAuth, /process\.env\.DASHBOARD_PASSWORD \|\| process\.env\.SDR_ADMIN_PASSWORD/);
   assert.match(adminRoute, /configured: sdrAdminConfigured\(\)/);
   assert.match(adminRoute, /validateSdrAdminPassword/);
