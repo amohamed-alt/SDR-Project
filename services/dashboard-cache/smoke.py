@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import urllib.request
 
-BASE_URL = os.getenv("DASHBOARD_CACHE_SMOKE_URL", "http://127.0.0.1:18080").rstrip("/")
+BASE_URL = (
+    sys.argv[1]
+    if len(sys.argv) > 1 and sys.argv[1].strip()
+    else os.getenv("DASHBOARD_CACHE_SMOKE_URL", "http://127.0.0.1:18080")
+).rstrip("/")
 KEY = "a" * 64
 
 
@@ -47,7 +52,7 @@ def main() -> None:
 
     deleted = request_json(f"/v1/dashboard/{KEY}", method="DELETE")
     assert deleted["deleted"] is True, deleted
-    print("FastAPI dashboard cache smoke test passed")
+    print(f"FastAPI dashboard cache smoke test passed at {BASE_URL}")
 
 
 if __name__ == "__main__":

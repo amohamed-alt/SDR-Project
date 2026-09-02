@@ -1,99 +1,66 @@
 # SDR Command Center
 
-A secure, full-stack HubSpot dashboard for SDR performance, multi-touch attribution, data quality, account intelligence, meetings, tasks, calls, email engagement, and SDR-attributed pipeline.
+A production HubSpot SDR command center for performance reporting, CRM data quality, account intelligence, prospecting, calls, meetings, tasks, Google Calendar scheduling, SignalHire enrichment, MillionVerifier verification context, and SDR-attributed pipeline.
 
-The project is configured for Talentera's EU1 HubSpot portal and defaults to Marita Chedid (`ownerId=31644369`) with a reporting start date of `2026-07-01`.
+HubSpot is the CRM system of record. The production application is a Next.js service backed by a small dashboard-cache API and Postgres, with Maqsam sync as the only dedicated worker in this repository.
+
+## Production stack
+
+The canonical runtime is `docker-compose.yml` only:
+
+- `sdr-dashboard` — Next.js application
+- `dashboard-cache-api` — bounded dashboard cache service
+- `postgres` — persistent reporting/runtime store
+- `maqsam-sync` — lightweight Maqsam synchronization worker using the same SDR image
+- `runtime-bootstrap` — one-shot runtime environment/data migration guard
+
+Persistent data lives in named Docker volumes and must not be deleted during deploys or routine cleanup.
+
+The dashboard is exposed **only through Traefik** on the shared external `n8n_default` network. The application container does not publish a host port. Traefik owns TLS, routing, compression, and upstream health checks for `sdr.dashboardtalentera.tech`.
+
+## Active integrations
+
+- HubSpot
+- Google Calendar
+- Maqsam
+- SignalHire
+- MillionVerifier
+- Apollo where configured
+- Tavily / Gemini / OpenRouter where configured for bounded research and AI features
+
+Cancelled outbound vendors are intentionally absent from application code, production Compose, deployment environment generation, runtime environment loading, tests, and UI.
 
 ## What it measures
 
-- Current SDR portfolio and contacts created in the selected period
-- Original, latest, record, lead, contact, UTM, campaign, and meeting-booking sources
-- Calls, connection rate, daily activity, and call outcomes
-- Tasks due, completed, open, overdue, and due tomorrow
-- Deduplicated meetings, outcomes, booking source, creator, and assigned owner
-- Sales email sends, opens, clicks, replies, and reply rate
-- Contact data quality across email, phone, LinkedIn, company association, country, source, ICP, Apollo, SignalHire, and MillionVerifier fields
-- Company country, industry, employee count, ICP context, detected ATS, and ATS confidence already stored in HubSpot
-- Deals associated with SDR-owned contacts, stage conversion, open pipeline, and meeting-to-deal conversion
-- In-dashboard searchable drill-down drawers for KPI cards, alerts, funnel stages, chart slices, bars, and daily activity points
-- Safe HubSpot links inside every drill-down result: CRM records open directly, while activities open their associated contact timeline instead of unsupported standalone activity URLs
-- A separate Marita Workspace top tab with My Day queues, direct call/email shortcuts, priority leads, separate Marita and Abdullah Google Calendar OAuth connections, Sales Rep Free/Busy checks, Google Meet invitations, and HubSpot meeting logging
+- SDR portfolio and contacts
+- source and attribution fields
+- calls, connection rate, daily activity, and outcomes
+- tasks due/completed/open/overdue
+- deduplicated meetings and booking attribution
+- HubSpot sales-email engagement
+- contact/company data quality and enrichment context
+- ATS / recruiting-system context already stored in HubSpot
+- SDR-attributed deals, pipeline, and conversion
 
-See [docs/METRICS.md](docs/METRICS.md) for exact property definitions and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the data flow.
+See `docs/METRICS.md`, `docs/ARCHITECTURE.md`, and `docs/DASHBOARD_GUIDE_AR.md` for feature details.
 
-For a detailed Arabic walkthrough of every dashboard tab, KPI, filter, HubSpot field, source rule, and drill-down link, see [docs/DASHBOARD_GUIDE_AR.md](docs/DASHBOARD_GUIDE_AR.md).
+## Security
 
-## Security model
+- Private tokens remain server-side.
+- Google refresh tokens are encrypted and persisted in the application data volume.
+- CRM/API secrets must never be committed or printed by workflows.
+- Runtime bootstrap sanitizes retired vendor keys without printing the environment file.
+- Production data volumes are preserved across image rebuilds.
 
-- `HUBSPOT_PRIVATE_APP_TOKEN` is server-only and is never sent to the browser.
-- Google refresh tokens are encrypted with AES-256-GCM, stored separately per organizer, and persisted only in the Docker data volume.
-- A booking requires an explicit preview and browser confirmation before invitations are sent.
-- The selected Sales Rep must return an explicit Google Free/Busy result. Busy or inaccessible calendars are never treated as available, and availability is checked again immediately before event creation.
-- Production requests require HTTP Basic Auth unless platform-level authentication is used and `DISABLE_AUTH=true` is deliberately set. During migration, `ACQUISITION_OWNER_TOKEN` is used when `DASHBOARD_PASSWORD` is empty.
-- No CRM data, API token, or generated HubSpot snapshot is committed to Git.
-- The repository may remain public only while it contains code and synthetic demo data. Make it private before adding exports, logs, screenshots, or CRM snapshots.
-
-## Local setup
+## Local development
 
 ```bash
 cp .env.example .env.local
-npm install
+npm ci
 npm run dev
 ```
 
-Open `http://localhost:3000`. The supplied environment template starts in synthetic `DEMO_MODE=true`.
-
-For live data:
-
-1. Create a HubSpot private app.
-2. Add the required read scopes listed below.
-3. Set `HUBSPOT_PRIVATE_APP_TOKEN` in `.env.local`.
-4. Set `DEMO_MODE=false`.
-5. Configure `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD` for production.
-
-## HubSpot private app scopes
-
-The live dashboard needs read access for:
-
-- Contacts
-- Companies
-- Deals
-- Owners
-- Calls
-- Meetings
-- Tasks
-- Emails
-- CRM associations
-- Deal pipelines
-
-Marita Workspace also needs **write access for Meetings** so a confirmed Google Calendar booking can be logged and associated with the selected contact. No other CRM object is written by the workspace.
-
-HubSpot scope names differ slightly between private-app screens and API versions. Enable the corresponding `crm.objects.*.read` scopes for every object above. The dashboard handles an optional data source being unavailable and surfaces a warning instead of silently replacing it with fake data.
-
-Google OAuth requests the least-privilege Calendar scopes needed to create events and read Free/Busy availability. Marita remains the default organizer and uses the unchanged Workspace URL. Abdullah uses `/?workspace=1&organizer=abdullah`; his Calendar connection is stored independently and cannot replace Marita's connection. The existing version-1 token store is migrated in memory to Marita automatically when version 2 is first written. The `bayt.net` and `talentera.com` Google Workspace domains must share Free/Busy availability with each organizer account; event titles and details are not requested.
-
-## Environment variables
-
-| Variable | Purpose |
-|---|---|
-| `HUBSPOT_PRIVATE_APP_TOKEN` | Server-only HubSpot token |
-| `HUBSPOT_PORTAL_ID` | HubSpot portal ID; defaults to `145742477` |
-| `HUBSPOT_UI_DOMAIN` | EU1 UI domain for drill-down URLs |
-| `HUBSPOT_TIMEZONE` | Reporting timezone; defaults to `Asia/Riyadh` |
-| `DEFAULT_SDR_OWNER_ID` | Default SDR owner; Marita is `31644369` |
-| `NEXT_PUBLIC_DEFAULT_START_DATE` | Initial dashboard start date |
-| `DASHBOARD_USERNAME` | Internal dashboard username |
-| `DASHBOARD_PASSWORD` | Internal dashboard password |
-| `DISABLE_AUTH` | Disable built-in auth only when deployment protection replaces it |
-| `GOOGLE_CLIENT_ID` | Server-only Google OAuth web client ID |
-| `GOOGLE_CLIENT_SECRET` | Server-only Google OAuth client secret |
-| `GOOGLE_REDIRECT_URI` | Exact OAuth callback URL |
-| `GOOGLE_TOKEN_ENCRYPTION_KEY` | 32-byte key used to encrypt stored refresh tokens |
-| `MARITA_GOOGLE_EMAIL` | Google account accepted for the default Marita organizer |
-| `ABDULLAH_GOOGLE_EMAIL` | Google account accepted for the Abdullah organizer link |
-| `GOOGLE_TOKEN_STORE_PATH` | Encrypted credential path; defaults to `/app/data/google-calendar.json` |
-| `TAVILY_API_KEY` | Server-only public-web search key used by bounded prospecting research |
-| `DEMO_MODE` | Use safe synthetic data without calling HubSpot |
+The environment template defaults to safe demo data where supported.
 
 ## Quality checks
 
@@ -104,27 +71,26 @@ npm test
 npm run build
 ```
 
-GitHub Actions runs all checks on every push and pull request.
+Pull requests run the full quality/integration suite. Main-branch CI runs only for production-relevant code/config changes and is intentionally smaller so deployments are not delayed by duplicate heavyweight checks.
 
-## Docker deployment on Hostinger
+## Production deployment
+
+Production deployment is owned by `.github/workflows/deploy-hostinger.yml` after a successful main-branch CI run. Do not use ad-hoc `docker compose down`, host-port recovery overlays, or no-cache manual rebuild scripts as a normal deployment path.
+
+For local Compose validation only:
 
 ```bash
-cp .env.example .env
-# Fill the production values in .env
-docker compose -f docker-compose.light.yml up -d --build
-docker compose -f docker-compose.light.yml ps
-curl http://127.0.0.1:3010/api/health
+docker compose -f docker-compose.yml config
 ```
 
-Put the service behind the existing reverse proxy and TLS. Do not expose port `3010` publicly. The named `sdr_runtime_env`, `sdr_app_data`, `sdr_dashboard_cache`, and `sdr_postgres_data` volumes preserve runtime state across image rebuilds.
+Production flow:
+
+1. CI validates the exact main revision.
+2. The deploy workflow rejects stale candidates and overlapping Hostinger Compose mutations.
+3. Hostinger deploys the canonical `docker-compose.yml`.
+4. The workflow waits for the exact commit SHA to appear at `/api/health` and verifies the public route/admin state.
+5. Traefik remains the single public ingress.
 
 ## Scaling path
 
-The current live adapter queries HubSpot and uses the persistent dashboard cache for repeated reads. For the full acquisition team or higher refresh frequency:
-
-1. Use the existing n8n server to extract changed HubSpot records every 15 minutes.
-2. Materialize contacts, companies, activities, associations, and deals in Postgres.
-3. Change the dashboard adapter from HubSpot search to Postgres views.
-4. Keep HubSpot record URLs for drill-down and HubSpot as the system of record.
-
-This avoids repeatedly scanning CRM activities and provides stable historical snapshots for assignment changes.
+For higher reporting volume, prefer incremental HubSpot extraction through the existing orchestration layer and materialized Postgres views rather than repeated full CRM scans. HubSpot remains authoritative and drill-downs should link back to original HubSpot records.

@@ -11,7 +11,6 @@ import {
   ChevronUp,
   ListTodo,
   LoaderCircle,
-  MailCheck,
   Menu,
   PhoneCall,
   Radar,
@@ -23,7 +22,7 @@ import {
 import { Dashboard as ExistingDashboard } from "@/components/DashboardMotion";
 import styles from "@/components/DashboardShell.module.css";
 
-type ShellView = "core" | "maqsam" | "marita-priority" | "smartlead" | "team-activity" | "net-new" | "gtm-brain";
+type ShellView = "core" | "maqsam" | "marita-priority" | "team-activity" | "net-new" | "gtm-brain";
 
 function ViewLoading() {
   return <main className={styles.viewLoading}><LoaderCircle size={24}/><strong>Loading workspace…</strong></main>;
@@ -35,10 +34,6 @@ const MaqsamCallsDashboard = dynamic(
 );
 const MaritaPriorityQueue = dynamic(
   () => import("@/components/MaritaPriorityQueue").then((module) => module.MaritaPriorityQueue),
-  { ssr: false, loading: ViewLoading },
-);
-const SmartleadCommandCenter = dynamic(
-  () => import("@/components/SmartleadCommandCenter").then((module) => module.SmartleadCommandCenter),
   { ssr: false, loading: ViewLoading },
 );
 const TeamActivity = dynamic(
@@ -58,7 +53,6 @@ function viewFromUrl(): ShellView {
   const view = new URLSearchParams(window.location.search).get("view");
   if (view === "maqsam") return "maqsam";
   if (view === "marita-priority") return "marita-priority";
-  if (view === "smartlead") return "smartlead";
   if (view === "team-activity") return "team-activity";
   if (view === "net-new") return "net-new";
   if (view === "gtm-brain") return "gtm-brain";
@@ -182,7 +176,6 @@ export function Dashboard() {
 
   if (view === "maqsam") return <MaqsamCallsDashboard onBack={() => changeView("core")}/>;
   if (view === "marita-priority") return <MaritaPriorityQueue onBack={() => changeView("core")}/>;
-  if (view === "smartlead") return <SmartleadCommandCenter onBack={() => changeView("core")}/>;
   if (view === "team-activity") return <TeamActivity onBack={() => changeView("core")}/>;
   if (view === "net-new") return <BestAccounts onBack={() => changeView("core")}/>;
   if (view === "gtm-brain") return <TalenteraIntelligenceWorkspace onBack={() => changeView("core")}/>;
@@ -194,10 +187,7 @@ export function Dashboard() {
       {toolsOpen ? (
         <div className={styles.toolsMenu} id="sdr-tools-menu">
           <div className={styles.toolsHeader}>
-            <div>
-              <span>SDR WORKSPACE</span>
-              <strong>Daily workflow</strong>
-            </div>
+            <div><span>SDR WORKSPACE</span><strong>Daily workflow</strong></div>
             <button type="button" onClick={() => setToolsOpen(false)} aria-label="Close tools menu"><X size={16}/></button>
           </div>
 
@@ -210,10 +200,6 @@ export function Dashboard() {
             <button className={styles.toolItem} type="button" onClick={() => changeView("net-new")}>
               <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Target size={17}/></span>
               <span className={styles.toolCopy}><strong>Prospecting</strong><small>Apollo discovery · ranked net-new accounts</small></span>
-            </button>
-            <button className={styles.toolItem} type="button" onClick={() => changeView("smartlead")}>
-              <span className={`${styles.toolIcon} ${styles.priorityIcon}`}><MailCheck size={17}/></span>
-              <span className={styles.toolCopy}><strong>Outreach</strong><small>Verified Smartlead queue · live execution</small></span>
             </button>
             <button className={styles.toolItem} type="button" onClick={() => changeView("maqsam")}>
               <span className={`${styles.toolIcon} ${styles.callsIcon}`}><PhoneCall size={17}/></span>
@@ -266,7 +252,7 @@ export function Dashboard() {
         aria-expanded={toolsOpen}
         aria-controls="sdr-tools-menu"
       >
-        {toolsOpen ? <X size={18}/> : <Menu size={18}/>}<span>{toolsOpen ? "Close" : "SDR Tools"}</span><small>4</small>
+        {toolsOpen ? <X size={18}/> : <Menu size={18}/>}<span>{toolsOpen ? "Close" : "SDR Tools"}</span><small>3</small>
       </button>
     </div>
   </div>;

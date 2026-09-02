@@ -3,52 +3,93 @@ name: CI
 on:
   push:
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'docker/**'
+      - 'services/dashboard-cache/**'
+      - 'scripts/**'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'next.config.ts'
+      - 'tsconfig.json'
+      - 'eslint.config.mjs'
   pull_request:
+    paths:
+      - 'src/**'
+      - 'docker/**'
+      - 'services/dashboard-cache/**'
+      - 'scripts/**'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'next.config.ts'
+      - 'tsconfig.json'
+      - 'eslint.config.mjs'
 
-# Only the newest CI run for a branch/PR is useful. Cancelling superseded runs
-# prevents rapid pushes from turning into a queue of successful CI runs that
-# each trigger a Hostinger deployment.
+permissions:
+  contents: read
+
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      DEMO_MODE: "true"
-      DISABLE_AUTH: "true"
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
-      - run: npm run smoke
-      - name: Validate FastAPI dashboard cache
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      - name: Validate production compose
+        run: docker compose -f docker-compose.yml config >/tmp/sdr-compose.yml
+
+      # Slower quality/integration checks run on PRs only. Main receives the
+      # same compiled code after a reviewed green PR without rebuilding Docker twice.
+      - name: Lint
+        if: github.event_name == 'pull_request'
+        run: npm run lint
+
+      - name: Application smoke tests
+        if: github.event_name == 'pull_request'
+        run: npm run smoke
+
+      - name: Dashboard cache Python syntax
+        if: github.event_name == 'pull_request'
+        run: python -m py_compile services/dashboard-cache/app.py services/dashboard-cache/smoke.py
+
+      - name: Dashboard cache container smoke
+        if: github.event_name == 'pull_request'
         run: |
-          python -m py_compile services/dashboard-cache/app.py services/dashboard-cache/smoke.py
-          docker build -t sdr-dashboard-cache-ci services/dashboard-cache
-          docker run -d --rm --name sdr-dashboard-cache-ci -p 127.0.0.1:18080:8000 sdr-dashboard-cache-ci
-          trap 'docker rm -f sdr-dashboard-cache-ci >/dev/null 2>&1 || true' EXIT
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:18080/health >/dev/null; then
-              break
-            fi
-            if [ "$attempt" -eq 30 ]; then
-              docker logs sdr-dashboard-cache-ci
-              exit 1
+          set -euo pipefail
+          docker build -t sdr-dashboard-cache-ci ./services/dashboard-cache
+          CID=$(docker run -d --rm -p 127.0.0.1:18000:8000 sdr-dashboard-cache-ci)
+          trap 'docker rm -f "$CID" >/dev/null 2>&1 || true' EXIT
+          for I in $(seq 1 20); do
+            if curl -fsS --connect-timeout 2 --max-time 3 http://127.0.0.1:18000/health >/dev/null; then
+              python services/dashboard-cache/smoke.py http://127.0.0.1:18000
+              exit 0
             fi
             sleep 1
           done
-          python services/dashboard-cache/smoke.py
-      - name: Validate production Docker Compose
-        run: SDR_ENV_FILE=.env.example docker compose -f docker-compose.yml config >/dev/null
-      - name: Validate CPU-light Docker Compose
-        run: SDR_ENV_FILE=.env.example docker compose -f docker-compose.light.yml config >/dev/null
+          docker logs "$CID" || true
+          exit 1

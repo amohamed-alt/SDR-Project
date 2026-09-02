@@ -1,29 +1,18 @@
 # Claude Instructions — SDR Project
 
-Use `AGENTS.md` as the authoritative operating contract for this repository.
-
-Before any non-trivial task:
-
-1. Read `AGENTS.md`.
-2. Read `.agent/PROJECT_CONTEXT.md`.
-3. Inspect the relevant current code, docs, tests, and workflows.
-4. Route the task with `.agent/ROUTER.md`.
-5. Apply the trust hierarchy in `.agent/TIERS.md`.
-6. Consult only the relevant external references in `.agent/skill-sources.json` plus the curated `.agent/approved-stack.json` / `.agent/APPROVED_STACK.md`.
-7. For meaningful frontend/design work, read `.agent/UI_UX_RULES.md` before designing or editing the interface.
-8. Prefer local project truth first, then official upstream/vendor/framework sources, then lower tiers only as needed.
-9. Normally use no more than three external sources per task.
-10. Decide on the smallest safe approach, implement it, and verify it.
+Use `AGENTS.md` as the authoritative operating contract, then read `.agent/PROJECT_CONTEXT.md` and inspect current code/tests/workflows before non-trivial changes.
 
 Project defaults:
 
-- HubSpot remains the CRM system of record.
-- SmartLead remains the current production cold-email sender.
-- n8n remains the preferred orchestration platform.
-- Public research should verify SearXNG before use, then prefer SearXNG discovery → Firecrawl extraction → Browser Use only for interactive/agentic flows → Playwright for deterministic browser automation/testing.
-- Reacher is the preferred open-source first-pass email-verification reference; MillionVerifier remains the paid fallback according to explicit project rules.
-- Meaningful UI/design work must inspect the current product first and use Vercel/Next.js + UI UX Pro Max, with Taste only when an additional polish review is useful.
+- HubSpot is the CRM system of record.
+- SDR-Project currently has **no production cold-email sender integration**. Do not revive retired outbound vendors from legacy code, env keys, workflows, tests, or docs without a new explicit requirement and controlled production plan.
+- n8n is the preferred orchestration platform when needed and is managed outside the SDR application Compose stack.
+- `docker-compose.yml` is the canonical production definition.
+- Traefik on `n8n_default` is the only normal public ingress for `sdr.dashboardtalentera.tech`.
+- `.github/workflows/deploy-hostinger.yml` is the normal production deploy path after main CI.
+- SignalHire and MillionVerifier remain enrichment/verification tools; do not turn those paths into implicit outbound sending.
+- Persistent Docker volumes and server-side secrets must be preserved and never logged.
 
-Never assume a task is complete just because code was produced. Preserve SDR business logic, HubSpot data integrity, secret isolation, automation idempotency, and existing production safety paths.
+Use `.agent/ROUTER.md` and the curated references only when they materially improve the task. For meaningful UI/design work, follow `.agent/UI_UX_RULES.md`.
 
-Treat discovery and fallback references as support only. Validate upstream documentation, compatibility, permissions, maintenance, license, operational burden, and data handling before adopting a dependency, service, workflow, MCP server, or scraping provider.
+Never claim completion from code generation alone; verify with the relevant checks and live evidence when production is affected.

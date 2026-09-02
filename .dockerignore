@@ -2,6 +2,10 @@
 .github
 .agent
 docs
+tests
+chrome-companion
+ops
+services
 node_modules
 .next
 coverage
@@ -13,3 +17,7 @@ yarn-error.log*
 .env.*
 !.env.example
 .DS_Store
+docker-compose*.yml
+README.md
+AGENTS.md
+CLAUDE.md
