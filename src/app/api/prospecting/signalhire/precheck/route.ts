@@ -11,6 +11,8 @@ const CONNECTED_CALL_DISPOSITIONS = new Set([
   "2e7360c1-6b71-40e9-ab2b-30ae98a4678c", // Meeting booked
 ]);
 const MEANINGFUL_MEETING_OUTCOMES = new Set(["SCHEDULED", "COMPLETED", "RESCHEDULED"]);
+const ENGAGEMENT_BLOCK_WINDOW_DAYS = 60;
+const ENGAGEMENT_BLOCK_WINDOW_MS = ENGAGEMENT_BLOCK_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 const MAX_CONTACTS_PER_COMPANY_SCAN = 100;
 const ENGAGEMENT_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -92,6 +94,11 @@ function latestIso(values: Array<string | undefined>) {
   return latest ? new Date(latest).toISOString() : "";
 }
 
+function timestampMs(value: unknown) {
+  const parsed = Date.parse(String(value || ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 async function safeAssociations(fromObjectType: string, toObjectType: string, fromIds: string[]) {
   if (!fromIds.length) return new Map<string, string[]>();
   try {
@@ -127,16 +134,26 @@ async function scanCompanyEngagement(companyId: string): Promise<EngagementCheck
       batchRead("meetings", [...meetingIds], ["hs_meeting_outcome", "hs_meeting_title", "hs_meeting_start_time", "hs_timestamp"]),
     ]);
 
-    const connectedCalls = calls.filter((call) => CONNECTED_CALL_DISPOSITIONS.has(String(call.properties.hs_call_disposition || "")));
-    const meaningfulMeetings = meetings.filter((meeting) => MEANINGFUL_MEETING_OUTCOMES.has(String(meeting.properties.hs_meeting_outcome || "").toUpperCase()));
+    // Company engagement is a recency guard, not a permanent lifetime block.
+    // Historical calls/meetings older than 60 days remain in HubSpot but no longer
+    // prevent prospecting a genuinely new person at an Acquisition account.
+    const engagementCutoff = Date.now() - ENGAGEMENT_BLOCK_WINDOW_MS;
+    const connectedCalls = calls.filter((call) =>
+      CONNECTED_CALL_DISPOSITIONS.has(String(call.properties.hs_call_disposition || ""))
+      && timestampMs(call.properties.hs_timestamp) >= engagementCutoff);
+    const meaningfulMeetings = meetings.filter((meeting) => {
+      const outcome = String(meeting.properties.hs_meeting_outcome || "").toUpperCase();
+      const happenedAt = meeting.properties.hs_meeting_start_time || meeting.properties.hs_timestamp;
+      return MEANINGFUL_MEETING_OUTCOMES.has(outcome) && timestampMs(happenedAt) >= engagementCutoff;
+    });
     const latestConnectedCallAt = latestIso(connectedCalls.map((call) => String(call.properties.hs_timestamp || "")));
     const latestMeetingAt = latestIso(meaningfulMeetings.map((meeting) => String(meeting.properties.hs_meeting_start_time || meeting.properties.hs_timestamp || "")));
     const latestEngagementAt = latestIso([latestConnectedCallAt, latestMeetingAt]);
     const engaged = connectedCalls.length > 0 || meaningfulMeetings.length > 0;
 
     const reasonParts: string[] = [];
-    if (connectedCalls.length) reasonParts.push(`${connectedCalls.length} connected call${connectedCalls.length === 1 ? "" : "s"}`);
-    if (meaningfulMeetings.length) reasonParts.push(`${meaningfulMeetings.length} meeting${meaningfulMeetings.length === 1 ? "" : "s"}`);
+    if (connectedCalls.length) reasonParts.push(`${connectedCalls.length} recent connected call${connectedCalls.length === 1 ? "" : "s"}`);
+    if (meaningfulMeetings.length) reasonParts.push(`${meaningfulMeetings.length} recent meeting${meaningfulMeetings.length === 1 ? "" : "s"}`);
 
     if (!engaged && allContactIds.length > MAX_CONTACTS_PER_COMPANY_SCAN) {
       return {
@@ -249,7 +266,7 @@ async function companyCheck(input: z.infer<typeof schema>, shouldCheckEngagement
   const retentionAccount = accountType.toLowerCase() === "retention";
 
   // An open Acquisition deal is a warning, not a hard block. For a genuinely new
-  // person we still scan the company for connected calls / meaningful meetings.
+  // person we still scan the company's recent connected calls / meaningful meetings.
   // Retention remains protected, and an unknown engagement result remains blocked.
   const engagement = shouldCheckEngagement && !retentionAccount
     ? await companyEngagementCheck(String(match.id))
