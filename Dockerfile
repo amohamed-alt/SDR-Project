@@ -1,14 +1,21 @@
+# syntax=docker/dockerfile:1.7
+
 FROM node:24-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,id=sdr-npm-cache,target=/root/.npm \
+    npm ci --prefer-offline --no-audit --no-fund
 
 FROM node:24-alpine AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+# Keep Turbopack/Next incremental artifacts in the BuildKit cache. Hostinger
+# uses buildx, so source-only deploys can reuse expensive compilation work
+# instead of burning several CPU cores on a cold build every time.
+RUN --mount=type=cache,id=sdr-next-cache,target=/app/.next/cache \
+    npm run build
 
 FROM node:24-alpine AS runner
 WORKDIR /app
