@@ -89,18 +89,23 @@ test("Hostinger workflow rejects stale CI candidates, retries reads, and queues 
   assert.match(workflow, /Hostinger Compose action remained active after 5 minutes/);
 });
 
-test("deployment exact-build gate self-heals a Created stack through Hostinger", async () => {
+test("deployment waits on Hostinger containers then verifies the exact build from a fresh runner", async () => {
   const workflow = await read(".github/workflows/deploy-hostinger.yml");
   const health = await read("src/app/api/health/route.ts");
 
-  assert.match(workflow, /Gate \$\{ATTEMPT\}\/120/);
-  assert.match(workflow, /Cache-Control: no-cache/);
-  assert.match(workflow, /deploy=\$\{DEPLOY_SHA\}/);
-  assert.match(workflow, /\[ "\$BUILD_REF" = "\$DEPLOY_SHA" \]/);
-  assert.match(workflow, /START_ATTEMPTED=false/);
-  assert.match(workflow, /ATTEMPT" -ge 36/);
+  assert.match(workflow, /read_core_state\(\)/);
+  assert.match(workflow, /Hostinger gate \$\{ATTEMPT\}\/120/);
+  assert.match(workflow, /HOSTINGER_READY=false/);
+  assert.match(workflow, /CORE_UP CORE_TOTAL CONTAINERS_CODE/);
+  assert.match(workflow, /ATTEMPT" -ge 24/);
   assert.match(workflow, /docker\/\$PROJECT\/start/);
   assert.match(workflow, /Detected stalled Created\/stopped SDR stack/);
+  assert.match(workflow, /verify:/);
+  assert.match(workflow, /needs: \[preflight, deploy\]/);
+  assert.match(workflow, /Public verify \$\{ATTEMPT\}\/18/);
+  assert.match(workflow, /Cache-Control: no-cache/);
+  assert.match(workflow, /deploy=\$\{DEPLOY_SHA\}&verify=\$\{ATTEMPT\}/);
+  assert.match(workflow, /\[ "\$BUILD_REF" = "\$DEPLOY_SHA" \]/);
   assert.doesNotMatch(workflow, /docker-compose\.light\.yml/);
   assert.match(workflow, /docker-compose\.yml/);
   assert.match(health, /no-store, max-age=0/);
