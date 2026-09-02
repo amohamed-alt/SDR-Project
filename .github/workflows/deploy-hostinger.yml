@@ -218,7 +218,7 @@ jobs:
           GOOGLE_REDIRECT_URI=https://sdr.dashboardtalentera.tech/api/google/callback
           GOOGLE_TOKEN_ENCRYPTION_KEY=${{ secrets.GOOGLE_TOKEN_ENCRYPTION_KEY }}
           MAQSAM_INGEST_SECRET=${{ secrets.MAQSAM_INGEST_SECRET }}
-          MAQSAM_BASIC_AUTH=${{ secrets.MAQSam_BASIC_AUTH }}
+          MAQSAM_BASIC_AUTH=${{ secrets.MAQSAM_BASIC_AUTH }}
           MAQSAM_ACCESS_KEY=${{ secrets.MAQSAM_ACCESS_KEY }}
           MAQSAM_ACCESS_SECRET=${{ secrets.MAQSAM_ACCESS_SECRET }}
           MAQSAM_TARGET_AGENT_EMAIL=${{ secrets.MAQSAM_TARGET_AGENT_EMAIL || 'm.chedid@bayt.net' }}
