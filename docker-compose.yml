@@ -97,11 +97,14 @@ services:
       - default
       - data_private
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"]
-      interval: 60s
+      # Readiness must stay cheap. The /health endpoint also checks optional
+      # Postgres-backed usage/acquisition state, which must not block the whole
+      # dashboard from starting when that optional path is temporarily slow.
+      test: ["CMD", "python3", "-c", "import socket; s=socket.create_connection(('127.0.0.1',8000),3); s.close()"]
+      interval: 30s
       timeout: 5s
       start_period: 20s
-      retries: 3
+      retries: 5
     logging: *default-logging
 
   sdr-dashboard:
