@@ -84,6 +84,7 @@ jobs:
 
       - name: Validate canonical compose and required secrets
         env:
+          SDR_BUILD_REF: ${{ env.DEPLOY_SHA }}
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
           SDR_ADMIN_PASSWORD: ${{ secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
         run: |
@@ -132,7 +133,6 @@ jobs:
             printf '%s|%s' "${code:-000}" "$ref"
           }
 
-          # A single transient Hostinger API timeout must not fail a healthy deploy.
           VM_CODE=$(api_get "$VM" /tmp/vm.json 5 20) || true
           VM_STATE=$(jq -r '.state // "unknown"' /tmp/vm.json 2>/dev/null || echo unknown)
           echo "VPS: HTTP=${VM_CODE:-000} state=$VM_STATE"
@@ -141,8 +141,6 @@ jobs:
             exit 1
           }
 
-          # Queue behind a previous server-side Compose mutation. Transient reads
-          # do not break the queue check; we retry on the next pass.
           ACTIVE_ID=''
           for LOCK_ATTEMPT in $(seq 1 60); do
             ACTIONS_CODE=$(api_get "$VM/actions?page=1" /tmp/actions.json 3 15) || true
@@ -203,8 +201,6 @@ jobs:
             --arg environment "$ENVIRONMENT" \
             '{project_name:$project_name,content:$content,environment:$environment}')
 
-          # POST is intentionally not blindly retried: a network timeout after the
-          # request reaches Hostinger could otherwise launch a duplicate mutation.
           DEPLOY_CODE=$(curl -sS --connect-timeout 8 --max-time 45 \
             -X POST -H "Authorization: $AUTH" -H 'Accept: application/json' \
             -H 'Content-Type: application/json' -d "$BODY" \
@@ -222,10 +218,6 @@ jobs:
           START_ATTEMPTED=false
           FAILED_ACTION_SEEN=false
 
-          # Cached builds should normally finish quickly. At ~3 minutes, if
-          # Hostinger has already created the new project containers but left core
-          # services stopped/Created, call the documented project start endpoint
-          # exactly once. This reproduces the successful manual recovery without SSH.
           for ATTEMPT in $(seq 1 120); do
             IFS='|' read -r HEALTH_CODE BUILD_REF <<EOF
           $(public_build "deploy=${DEPLOY_SHA}&attempt=${ATTEMPT}")
@@ -295,9 +287,6 @@ jobs:
                 fi
               fi
 
-              # A failed Hostinger create action is not immediately fatal if the
-              # replacement containers can be recovered through /start. Give the
-              # fallback one cycle to make the exact build healthy first.
               if [ "$FAILED_ACTION_SEEN" = true ] && [ "$START_ATTEMPTED" = true ] && [ "$ATTEMPT" -ge 48 ]; then
                 echo "Hostinger create action failed and recovery has not produced the exact healthy build."
                 exit 1
