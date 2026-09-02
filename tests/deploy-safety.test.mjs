@@ -66,27 +66,41 @@ test("Maqsam worker reuses the application image instead of rebuilding it", asyn
   assert.doesNotMatch(section, /\n\s+build:/);
 });
 
-test("Hostinger workflow rejects stale CI candidates and queues behind server-side Compose work", async () => {
+test("Hostinger workflow rejects stale CI and tolerates transient control-plane reads without unsafe overlap", async () => {
   const workflow = await read(".github/workflows/deploy-hostinger.yml");
 
   assert.match(workflow, /preflight:/);
   assert.match(workflow, /github\.rest\.repos\.getBranch/);
   assert.match(workflow, /candidate !== branch\.commit\.sha/);
-  assert.match(workflow, /needs: preflight/);
   assert.match(workflow, /needs\.preflight\.outputs\.should_deploy == 'true'/);
+  assert.match(workflow, /public_ready\(\)/);
+  assert.match(workflow, /if public_ready pre_hostinger/);
+  assert.match(workflow, /fetch_actions\(\)/);
+  assert.match(workflow, /for api_attempt in 1 2 3 4/);
   assert.match(workflow, /for LOCK_ATTEMPT in \$\(seq 1 60\)/);
-  assert.match(workflow, /A Hostinger Compose action is already active/);
-  assert.match(workflow, /Hostinger Compose action remained active after 5 minutes/);
+  assert.match(workflow, /Hostinger lock status temporarily unavailable/);
+  assert.match(workflow, /Unable to obtain a verified Hostinger Compose mutation lock within 5 minutes/);
+  assert.doesNotMatch(workflow, /VM_CODE=.*virtual-machines/);
+  assert.doesNotMatch(workflow, /VM_STATE=.*state/);
 });
 
-test("deployment uses one exact-build gate with cold-build headroom", async () => {
+test("Hostinger deploy never blindly retries an ambiguous mutation", async () => {
+  const workflow = await read(".github/workflows/deploy-hostinger.yml");
+  assert.match(workflow, /Hostinger deploy response was inconclusive; checking for accepted server-side action/);
+  assert.match(workflow, /ACTION_ID=\$\(active_compose_id\)/);
+  assert.match(workflow, /Hostinger deploy was not confirmed and no active Compose action was found/);
+  assert.doesNotMatch(workflow, /curl[^\n]*--retry[^\n]*-X POST/);
+});
+
+test("deployment exact-build gate has a no-op fast path and cold-build headroom", async () => {
   const workflow = await read(".github/workflows/deploy-hostinger.yml");
   const health = await read("src/app/api/health/route.ts");
 
-  assert.match(workflow, /Gate \$\{ATTEMPT\}\/150/);
+  assert.match(workflow, /Exact build is already healthy; no Hostinger API mutation needed/);
+  assert.match(workflow, /for ATTEMPT in \$\(seq 1 150\)/);
   assert.match(workflow, /Cache-Control: no-cache/);
   assert.match(workflow, /deploy=\$\{DEPLOY_SHA\}/);
-  assert.match(workflow, /\[ "\$BUILD_REF" = "\$DEPLOY_SHA" \]/);
+  assert.match(workflow, /\[ "\$health_code" = 200 \] && \[ "\$build_ref" = "\$DEPLOY_SHA" \]/);
   assert.doesNotMatch(workflow, /docker-compose\.light\.yml/);
   assert.match(workflow, /docker-compose\.yml/);
   assert.match(health, /no-store, max-age=0/);
