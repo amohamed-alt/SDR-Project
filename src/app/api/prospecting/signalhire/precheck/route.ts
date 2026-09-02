@@ -70,6 +70,10 @@ function unique(values: string[]) {
   });
 }
 
+function hasUsablePhone(values: string[]) {
+  return unique(values).some((value) => /\d{6,}/.test(value.replace(/\D/g, "")));
+}
+
 function workDomain(emails: string[]) {
   const blocked = /^(gmail|googlemail|yahoo|hotmail|outlook|live|icloud|me|aol|protonmail|proton)\./i;
   for (const email of emails) {
@@ -290,6 +294,13 @@ export async function POST(request: NextRequest) {
   try {
     const parsed = schema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: "Invalid SignalHire precheck payload." }, { status: 400 });
+
+    if (!parsed.data.name) {
+      return NextResponse.json({ error: "Missing person name — review before Push." }, { status: 422 });
+    }
+    if (!hasUsablePhone([parsed.data.phone, ...parsed.data.phones])) {
+      return NextResponse.json({ error: "No phone number — not ready to Push." }, { status: 422 });
+    }
 
     // Existing people are decisive: do not run a company-wide activity scan for rows
     // that will be skipped anyway. This keeps CSV dry-runs responsive and reduces HubSpot load.
