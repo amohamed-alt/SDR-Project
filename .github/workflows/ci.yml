@@ -63,6 +63,8 @@ jobs:
         run: npm run build
 
       - name: Validate production compose
+        env:
+          SDR_BUILD_REF: ${{ github.sha }}
         run: docker compose -f docker-compose.yml config >/tmp/sdr-compose.yml
 
       # Slower quality/integration checks run on PRs only. Main receives the
