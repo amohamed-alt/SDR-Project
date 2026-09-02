@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 
 const GOOGLE_TOKEN_STORE = process.env.GOOGLE_TOKEN_STORE_PATH || "/app/data/google-calendar.json";
 const NO_CACHE_HEADERS = { "Cache-Control": "no-store, max-age=0", Pragma: "no-cache" };
+const DEPLOY_MODE = "traefik-self-heal-v2";
 
 async function fileExists(filePath: string) {
   try {
@@ -45,7 +46,7 @@ export async function GET(request: NextRequest) {
 
   if (!deep) {
     return NextResponse.json(
-      { status: "ok", service: "sdr-project", buildRef, timestamp },
+      { status: "ok", service: "sdr-project", buildRef, deployMode: DEPLOY_MODE, timestamp },
       { headers: NO_CACHE_HEADERS },
     );
   }
@@ -61,6 +62,7 @@ export async function GET(request: NextRequest) {
       status: ready ? "ok" : "warming",
       service: "sdr-project",
       buildRef,
+      deployMode: DEPLOY_MODE,
       ready,
       runtimeConfig,
       googleTokenStorePresent,
