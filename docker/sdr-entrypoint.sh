@@ -55,7 +55,13 @@ done
 restore_if_set() {
   key="$1"
   value="$2"
-  [ -n "$value" ] && export "$key=$value"
+  # Empty deploy-time values are intentionally optional. Under `set -e`, the
+  # old `[ -n "$value" ] && export ...` form returned status 1 for an empty
+  # value and killed PID 1 before the app could emit any logs.
+  if [ -n "$value" ]; then
+    export "$key=$value"
+  fi
+  return 0
 }
 
 restore_if_set SDR_BUILD_REF "$DEPLOY_SDR_BUILD_REF"
