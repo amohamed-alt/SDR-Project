@@ -42,11 +42,20 @@ test("production compose is canonical, Traefik-only, and volume-safe", async () 
   assert.match(compose, /traefik_proxy:\s*\n\s*external: true\s*\n\s*name: n8n_default/);
   assert.match(compose, /traefik\.http\.routers\.sdr-dashboard\.service=sdr-dashboard/);
   assert.match(compose, /traefik\.http\.services\.sdr-dashboard\.loadbalancer\.healthcheck\.path=\/api\/health/);
+  assert.match(compose, /socket\.create_connection\(\('127\.0\.0\.1',8000\),3\)/);
   assert.match(compose, /max-size: "10m"/);
   assert.match(compose, /max-file: "3"/);
   assert.match(compose, /sdr_postgres_data:/);
   assert.match(compose, /sdr_runtime_env:/);
   assert.doesNotMatch(compose, /volume prune|--volumes/);
+});
+
+test("Docker build persists npm and Next compilation caches", async () => {
+  const dockerfile = await read("Dockerfile");
+  assert.match(dockerfile, /# syntax=docker\/dockerfile:1\.7/);
+  assert.match(dockerfile, /--mount=type=cache,id=sdr-npm-cache,target=\/root\/\.npm/);
+  assert.match(dockerfile, /npm ci --prefer-offline --no-audit --no-fund/);
+  assert.match(dockerfile, /--mount=type=cache,id=sdr-next-cache,target=\/app\/\.next\/cache/);
 });
 
 test("Maqsam worker reuses the application image instead of rebuilding it", async () => {
@@ -57,7 +66,7 @@ test("Maqsam worker reuses the application image instead of rebuilding it", asyn
   assert.doesNotMatch(section, /\n\s+build:/);
 });
 
-test("Hostinger workflow rejects stale CI candidates before production mutation", async () => {
+test("Hostinger workflow rejects stale CI candidates and queues behind server-side Compose work", async () => {
   const workflow = await read(".github/workflows/deploy-hostinger.yml");
 
   assert.match(workflow, /preflight:/);
@@ -65,14 +74,16 @@ test("Hostinger workflow rejects stale CI candidates before production mutation"
   assert.match(workflow, /candidate !== branch\.commit\.sha/);
   assert.match(workflow, /needs: preflight/);
   assert.match(workflow, /needs\.preflight\.outputs\.should_deploy == 'true'/);
+  assert.match(workflow, /for LOCK_ATTEMPT in \$\(seq 1 60\)/);
   assert.match(workflow, /A Hostinger Compose action is already active/);
+  assert.match(workflow, /Hostinger Compose action remained active after 5 minutes/);
 });
 
-test("deployment uses one exact-build gate instead of sequential long waits", async () => {
+test("deployment uses one exact-build gate with cold-build headroom", async () => {
   const workflow = await read(".github/workflows/deploy-hostinger.yml");
   const health = await read("src/app/api/health/route.ts");
 
-  assert.match(workflow, /Gate \$\{ATTEMPT\}\/108/);
+  assert.match(workflow, /Gate \$\{ATTEMPT\}\/150/);
   assert.match(workflow, /Cache-Control: no-cache/);
   assert.match(workflow, /deploy=\$\{DEPLOY_SHA\}/);
   assert.match(workflow, /\[ "\$BUILD_REF" = "\$DEPLOY_SHA" \]/);
