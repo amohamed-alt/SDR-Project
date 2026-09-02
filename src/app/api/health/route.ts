@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 const GOOGLE_TOKEN_STORE = process.env.GOOGLE_TOKEN_STORE_PATH || "/app/data/google-calendar.json";
 const NO_CACHE_HEADERS = { "Cache-Control": "no-store, max-age=0", Pragma: "no-cache" };
-const DEPLOY_MODE = "traefik-self-heal-v2.2";
+const DEPLOY_MODE = "hostinger-fast-verify-v1";
 
 async function fileExists(filePath: string) {
   try {
