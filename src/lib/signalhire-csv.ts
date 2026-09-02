@@ -14,12 +14,14 @@ export type SignalHireCsvLead = {
   personalEmails: string[];
   phone: string;
   phones: string[];
+  validationIssues: string[];
 };
 
 export type SignalHireCsvParseResult = {
   leads: SignalHireCsvLead[];
   skipped: number;
   headers: string[];
+  totalRows: number;
 };
 
 function unique(values: string[]) {
@@ -79,12 +81,26 @@ function parseCsvRows(text: string) {
   return rows;
 }
 
+function isPlaceholder(value: string) {
+  return /^(?:-|--|—|n\/?a|na|none|null|undefined|unknown|not available)$/i.test(value.trim());
+}
+
+function validPublicHostname(hostname: string) {
+  const host = hostname.toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
+  if (!host || isPlaceholder(host) || host.length > 253 || !host.includes(".")) return false;
+  const labels = host.split(".");
+  if (labels.some((label) => !label || label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label))) return false;
+  const tld = labels.at(-1) || "";
+  return /[a-z]/i.test(tld) && tld.length >= 2;
+}
+
 function normalizeWebsite(value: string) {
   const raw = value.trim();
-  if (!raw) return "";
+  if (!raw || isPlaceholder(raw)) return "";
   try {
     const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
-    if (!/^https?:$/.test(url.protocol)) return "";
+    if (!/^https?:$/.test(url.protocol) || !validPublicHostname(url.hostname)) return "";
+    url.hash = "";
     return url.toString().replace(/\/$/, "");
   } catch {
     return "";
@@ -95,7 +111,8 @@ function domainFromWebsite(value: string) {
   const website = normalizeWebsite(value);
   if (!website) return "";
   try {
-    return new URL(website).hostname.toLowerCase().replace(/^www\./, "");
+    const hostname = new URL(website).hostname.toLowerCase().replace(/^www\./, "");
+    return validPublicHostname(hostname) ? hostname : "";
   } catch {
     return "";
   }
@@ -103,7 +120,7 @@ function domainFromWebsite(value: string) {
 
 function cleanLinkedIn(value: string) {
   const raw = value.trim();
-  if (!raw) return "";
+  if (!raw || isPlaceholder(raw)) return "";
   try {
     const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
     if (!/(^|\.)linkedin\.com$/i.test(url.hostname) || !/^\/in\//i.test(url.pathname)) return "";
@@ -118,15 +135,16 @@ function cleanLinkedIn(value: string) {
 }
 
 function emailValues(values: string[]) {
-  return unique(values).filter((value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value));
+  return unique(values).filter((value) => !isPlaceholder(value) && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value));
 }
 
 function phoneValues(values: string[]) {
-  return unique(values).filter((value) => /\d{6,}/.test(value.replace(/\D/g, "")));
+  return unique(values).filter((value) => !isPlaceholder(value) && /\d{6,}/.test(value.replace(/\D/g, "")));
 }
 
 function cell(record: Record<string, string>, name: string) {
-  return String(record[name] || "").trim();
+  const value = String(record[name] || "").trim();
+  return isPlaceholder(value) ? "" : value;
 }
 
 export function parseSignalHireCsv(text: string): SignalHireCsvParseResult {
@@ -141,8 +159,9 @@ export function parseSignalHireCsv(text: string): SignalHireCsvParseResult {
 
   const leads: SignalHireCsvLead[] = [];
   let skipped = 0;
+  const dataRows = rows.slice(1);
 
-  for (const values of rows.slice(1)) {
+  for (const values of dataRows) {
     const record: Record<string, string> = {};
     headers.forEach((header, index) => { record[header] = values[index] || ""; });
 
@@ -165,11 +184,14 @@ export function parseSignalHireCsv(text: string): SignalHireCsvParseResult {
       || normalizeWebsite(cell(record, "Company Website2"))
       || normalizeWebsite(cell(record, "Company Website3"));
 
-    if (!name || (!company && !linkedinUrl && !emails.length && !phones.length)) {
-      skipped += 1;
-      continue;
-    }
+    const validationIssues: string[] = [];
+    if (!name) validationIssues.push("Missing person name");
+    if (!phones.length) validationIssues.push("No phone number");
+    if (!company && !linkedinUrl && !emails.length && !phones.length) validationIssues.push("Missing person/company identifiers");
 
+    // Keep every non-empty SignalHire data row visible in the import UI. Invalid or
+    // incomplete records must be reviewed explicitly instead of disappearing from
+    // the Uploaded count (for example, a 100-row file silently becoming 84 rows).
     leads.push({
       id: cell(record, "Id"),
       name,
@@ -186,9 +208,10 @@ export function parseSignalHireCsv(text: string): SignalHireCsvParseResult {
       personalEmails,
       phone: phones[0] || "",
       phones,
+      validationIssues,
     });
   }
 
-  if (!leads.length) throw new Error("No usable contacts were found in this SignalHire export.");
-  return { leads, skipped, headers };
+  if (!leads.length) throw new Error("No SignalHire contacts were found in this export.");
+  return { leads, skipped, headers, totalRows: dataRows.length };
 }
