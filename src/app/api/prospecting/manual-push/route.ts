@@ -19,9 +19,12 @@ const triggerLabels = {
 } as const;
 
 const LINKEDIN_SALES_NAV_SOURCE = "LinkedIn Sales Navigator";
-const RESEARCH_PROVENANCE = "LinkedIn Sales Navigator; SignalHire";
+const SIGNALHIRE_ENRICHMENT = "SignalHire";
+const RESEARCH_PROVENANCE = `${LINKEDIN_SALES_NAV_SOURCE}; ${SIGNALHIRE_ENRICHMENT}`;
 
 type TriggerKey = keyof typeof triggerLabels;
+
+const excludedTaskTriggers = new Set<TriggerKey>(["hiring_now", "hr_growth", "ats_change"]);
 
 const schema = z.object({
   taskOwnerId: z.string().trim().min(1).max(80),
@@ -73,6 +76,52 @@ function safeWebsite(value: unknown) {
   }
 }
 
+function simplifyTaskBody(body: string, ownerName: string, triggers: TriggerKey[]) {
+  let next = body.replace(/\r\n/g, "\n");
+
+  next = next.replace(
+    /👥 \*\*(?:Assigned SDR|Assigned Task Owner)\*\*\n[^\n]+/,
+    `👥 **Assigned Task Owner**\n${ownerName}`,
+  );
+
+  next = next.replace(
+    /🎯 \*\*Source\*\*\n[^\n]+(?:\n\n🔎 \*\*Enrichment\*\*\n[^\n]+)?/,
+    `🎯 **Source**\n${LINKEDIN_SALES_NAV_SOURCE}\n\n🔎 **Enrichment**\n${SIGNALHIRE_ENRICHMENT}`,
+  );
+
+  next = next.replace(/📌 \*\*Why Now \/ Trigger\*\*\n(?:•[^\n]*\n)*\n?/g, "");
+  next = next.replace(/📈 \*\*Person Signal\*\*\n[^\n]*\n/g, "");
+
+  next = next
+    .split("\n")
+    .filter((line) => !/^(?:Career Page|ATS \/ Application|Hiring|Active Jobs|Hiring Score):/i.test(line.trim()))
+    .filter((line) => !/^HR \/ Recruiting roles are currently open/i.test(line.trim()))
+    .join("\n");
+
+  next = next.replace(/\n?💼 \*\*Sample Open Roles\*\*\n[\s\S]*?(?=\n⭐ \*\*Priority Score\*\*)/g, "\n");
+
+  if (triggers.length) {
+    const triggerBlock = [
+      "📌 **Why Now / Trigger**",
+      ...triggers.map((key) => `• ${triggerLabels[key]}`),
+      "",
+    ].join("\n");
+    next = next.replace(/🏢 \*\*Company Intelligence\*\*/, `${triggerBlock}🏢 **Company Intelligence**`);
+  }
+
+  const suggestedAction = triggers.length
+    ? "Use the selected trigger as the opening, then qualify current recruitment priorities, process, pain points, and next steps."
+    : "Qualify current recruitment priorities, process, pain points, decision process, and next steps.";
+
+  if (/💡 \*\*Suggested Action\*\*/.test(next)) {
+    next = next.replace(/💡 \*\*Suggested Action\*\*[\s\S]*$/, `💡 **Suggested Action**\n${suggestedAction}`);
+  } else {
+    next = `${next.trim()}\n\n💡 **Suggested Action**\n${suggestedAction}`;
+  }
+
+  return next.replace(/\n{3,}/g, "\n\n").trim();
+}
+
 async function patchTask(taskId: string, ownerId: string, ownerName: string, triggers: TriggerKey[]) {
   const read = await fetch(`https://api.hubapi.com/crm/v3/objects/tasks/${encodeURIComponent(taskId)}?properties=hs_task_body`, {
     headers: { Authorization: `Bearer ${hubspotToken()}` },
@@ -81,19 +130,7 @@ async function patchTask(taskId: string, ownerId: string, ownerName: string, tri
   });
   if (!read.ok) throw new Error(`Could not read HubSpot task (${read.status}).`);
   const current = await read.json() as { properties?: { hs_task_body?: string } };
-  let body = String(current.properties?.hs_task_body || "");
-  body = body.replace(/👥 \*\*(?:Assigned SDR|Assigned Task Owner)\*\*\n[^\n]+/, `👥 **Assigned Task Owner**\n${ownerName}`);
-
-  const triggerBlockPattern = /📌 \*\*Why Now \/ Trigger\*\*\n(?:•[^\n]*\n)*\n?/;
-  body = body.replace(triggerBlockPattern, "");
-  if (triggers.length) {
-    const triggerBlock = ["📌 **Why Now / Trigger**", ...triggers.map((key) => `• ${triggerLabels[key]}`), ""].join("\n");
-    if (/📈 \*\*Person Signal\*\*/.test(body)) {
-      body = body.replace(/📈 \*\*Person Signal\*\*\n[^\n]*\n/, `${triggerBlock}📈 **Person Signal**\n${triggers.map((key) => triggerLabels[key]).join(" · ")}\n`);
-    } else {
-      body = `${triggerBlock}${body}`;
-    }
-  }
+  const body = simplifyTaskBody(String(current.properties?.hs_task_body || ""), ownerName, triggers);
 
   const patch = await fetch(`https://api.hubapi.com/crm/v3/objects/tasks/${encodeURIComponent(taskId)}`, {
     method: "PATCH",
@@ -133,7 +170,8 @@ export async function POST(request: NextRequest) {
     const owner = acquisitionOwners().find((item) => item.id === parsed.data.taskOwnerId);
     if (!owner) return NextResponse.json({ error: "Select an enabled Acquisition task owner." }, { status: 400 });
 
-    const labels = parsed.data.triggers.map((key) => triggerLabels[key]);
+    const activeTriggers = parsed.data.triggers.filter((key) => !excludedTaskTriggers.has(key));
+    const labels = activeTriggers.map((key) => triggerLabels[key]);
     const cleanedWebsite = safeWebsite(parsed.data.prospect.companyWebsite);
     const cleanedDomain = safeDomain(parsed.data.prospect.companyDomain) || (cleanedWebsite ? safeDomain(new URL(cleanedWebsite).hostname) : "");
     const prospect = {
@@ -143,7 +181,7 @@ export async function POST(request: NextRequest) {
       companyDomain: cleanedDomain,
       recentSignal: labels.length
         ? { type: "manual_trigger", label: labels.join(" · ") }
-        : { type: "signalhire_csv", label: "Imported from SignalHire CSV" },
+        : { type: "", label: "" },
     };
 
     const forwarded = new Request(request.url, {
@@ -166,9 +204,9 @@ export async function POST(request: NextRequest) {
     }
 
     if (payload.taskId) {
-      // Keep the existing task-body merge behavior: only owner/trigger blocks are
-      // patched; the rest of the generated body remains intact.
-      await patchTask(payload.taskId, owner.id, owner.name, parsed.data.triggers);
+      // Keep the existing generated body as the base, then normalize only this
+      // SignalHire/Sales Navigator flow into the concise operational task format.
+      await patchTask(payload.taskId, owner.id, owner.name, activeTriggers);
     }
 
     return NextResponse.json({
