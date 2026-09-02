@@ -247,16 +247,17 @@ async function companyCheck(input: z.infer<typeof schema>, shouldCheckEngagement
   const accountStatus = String(p.account_status || "").trim();
   const openDeals = Math.max(0, Number(p.hs_num_open_deals || 0) || 0);
   const retentionAccount = accountType.toLowerCase() === "retention";
-  const crmProtected = Boolean(retentionAccount || openDeals > 0);
-  const engagement = shouldCheckEngagement && !crmProtected
+
+  // An open Acquisition deal is a warning, not a hard block. For a genuinely new
+  // person we still scan the company for connected calls / meaningful meetings.
+  // Retention remains protected, and an unknown engagement result remains blocked.
+  const engagement = shouldCheckEngagement && !retentionAccount
     ? await companyEngagementCheck(String(match.id))
     : emptyEngagement(false);
   const crmProtectedReason = retentionAccount
     ? `Retention account${accountStatus ? ` · ${accountStatus}` : ""}`
-    : openDeals > 0
-      ? `${openDeals} open deal${openDeals === 1 ? "" : "s"}`
-      : "";
-  const engagementUnknown = shouldCheckEngagement && !crmProtected && !engagement.checked;
+    : "";
+  const engagementUnknown = shouldCheckEngagement && !retentionAccount && !engagement.checked;
   const protectedReason = crmProtectedReason || (engagementUnknown
     ? engagement.error || engagement.reason || "Company engagement could not be verified. Review before Push."
     : "");
@@ -285,7 +286,7 @@ async function companyCheck(input: z.infer<typeof schema>, shouldCheckEngagement
     latestMeetingAt: engagement.latestMeetingAt,
     latestEngagementAt: engagement.latestEngagementAt,
     engagementReason: engagement.reason,
-    protected: Boolean(crmProtected || engagementUnknown),
+    protected: Boolean(retentionAccount || engagementUnknown),
     protectedReason,
   };
 }
