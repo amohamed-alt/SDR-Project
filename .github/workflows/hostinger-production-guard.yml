@@ -20,9 +20,9 @@ concurrency:
 jobs:
   guard:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 5
     steps:
-      - name: Check VPS, public health, actions, and container pressure
+      - name: Check active production only
         id: guard
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
@@ -41,7 +41,7 @@ jobs:
           echo >> "$REPORT"
 
           if [ -z "${HOSTINGER_API_KEY:-}" ]; then
-            echo "- CRITICAL: HOSTINGER_API_KEY / HOSTINGER_API_TOKEN is missing." >> "$REPORT"
+            echo "- CRITICAL: Hostinger API credential is missing." >> "$REPORT"
             ALERT=1
           else
             AUTH="$HOSTINGER_API_KEY"
@@ -49,18 +49,29 @@ jobs:
             VM='https://developers.hostinger.com/api/vps/v1/virtual-machines/1604210'
 
             req() {
-              curl --silent --show-error --connect-timeout 8 --max-time 30 \
-                -H "Authorization: $AUTH" -H 'Accept: application/json' \
-                -o "$2" -w '%{http_code}' "$1" || true
+              local url="$1" out="$2" tries="${3:-3}"
+              local code='000'
+              for try in $(seq 1 "$tries"); do
+                code=$(curl --silent --show-error --connect-timeout 6 --max-time 18 \
+                  -H "Authorization: $AUTH" -H 'Accept: application/json' \
+                  -o "$out" -w '%{http_code}' "$url" || true)
+                [ "$code" = 200 ] && { printf '%s' "$code"; return 0; }
+                sleep $((try * 2))
+              done
+              printf '%s' "${code:-000}"
+              return 1
             }
 
             echo "## VPS" >> "$REPORT"
-            VCODE=$(req "$VM" /tmp/vm.json)
+            VCODE=$(req "$VM" /tmp/vm.json 3) || true
             VSTATE=$(jq -r '.state // "unknown"' /tmp/vm.json 2>/dev/null || echo unknown)
             echo "- API: HTTP ${VCODE:-000}; state: $VSTATE" >> "$REPORT"
-            if [ "$VCODE" != "200" ] || [ "$VSTATE" != "running" ]; then
+            if [ "$VCODE" != 200 ]; then
+              WARN=1
+              echo "- WARNING: VPS API unavailable after retries; public health remains authoritative." >> "$REPORT"
+            elif [ "$VSTATE" != running ]; then
               ALERT=1
-              echo "- CRITICAL: VPS is not confirmed running." >> "$REPORT"
+              echo "- CRITICAL: VPS is not running." >> "$REPORT"
             fi
 
             echo >> "$REPORT"
@@ -73,94 +84,84 @@ jobs:
                 "https://sdr.dashboardtalentera.tech/api/health?guard=${GITHUB_RUN_ID}-${ATTEMPT}" || true)
               HSTATUS=$(jq -r '.status // "unknown"' /tmp/health.json 2>/dev/null || echo unknown)
               BUILD=$(jq -r '.buildRef // "unknown"' /tmp/health.json 2>/dev/null || echo unknown)
-              echo "- Attempt $ATTEMPT: HTTP ${HCODE:-000}; status=$HSTATUS; build=$BUILD" >> "$REPORT"
-              if [ "$HCODE" = "200" ] && [ "$HSTATUS" = "ok" ]; then
-                HEALTH_OK=true
-                break
-              fi
+              MODE=$(jq -r '.deployMode // "unknown"' /tmp/health.json 2>/dev/null || echo unknown)
+              echo "- Attempt $ATTEMPT: HTTP ${HCODE:-000}; status=$HSTATUS; build=$BUILD; mode=$MODE" >> "$REPORT"
+              if [ "$HCODE" = 200 ] && [ "$HSTATUS" = ok ]; then HEALTH_OK=true; break; fi
               sleep 3
             done
-            if [ "$HEALTH_OK" != "true" ]; then
+            if [ "$HEALTH_OK" != true ]; then
               ALERT=1
               echo "- CRITICAL: public SDR health failed three probes." >> "$REPORT"
             fi
 
             echo >> "$REPORT"
-            echo "## Hostinger actions" >> "$REPORT"
-            ACODE=$(req "$VM/actions?page=1" /tmp/actions.json)
-            echo "- API: HTTP ${ACODE:-000}" >> "$REPORT"
-            if [ "$ACODE" = "200" ]; then
+            echo "## Hostinger Compose actions" >> "$REPORT"
+            ACODE=$(req "$VM/actions?page=1" /tmp/actions.json 3) || true
+            if [ "$ACODE" = 200 ]; then
               ACTIVE=$(jq -r '[.data[]? | select(
                 ((.name // "") | startswith("docker_compose_")) and
                 ((.state // "") | IN("pending","queued","started","running","processing","in_progress"))
               )] | length' /tmp/actions.json)
               echo "- Active Docker Compose actions: $ACTIVE" >> "$REPORT"
-              if [ "$ACTIVE" -gt 1 ]; then
-                ALERT=1
-                echo "- CRITICAL: overlapping Hostinger Compose actions detected." >> "$REPORT"
-              fi
+              [ "$ACTIVE" -gt 1 ] && { ALERT=1; echo "- CRITICAL: overlapping Compose actions detected." >> "$REPORT"; }
 
               while IFS=$'\t' read -r ID NAME STATE CREATED; do
                 [ -n "${ID:-}" ] || continue
                 CREATED_EPOCH=$(date -u -d "$CREATED" +%s 2>/dev/null || echo "$NOW_EPOCH")
                 AGE_MIN=$(( (NOW_EPOCH - CREATED_EPOCH) / 60 ))
                 echo "- Active: $ID $NAME $STATE (${AGE_MIN}m old)" >> "$REPORT"
-                if [ "$AGE_MIN" -ge 25 ]; then
-                  ALERT=1
-                  echo "- CRITICAL: Compose action $ID has been active for ${AGE_MIN} minutes." >> "$REPORT"
-                fi
+                [ "$AGE_MIN" -ge 20 ] && { ALERT=1; echo "- CRITICAL: Compose action $ID is stale (${AGE_MIN}m)." >> "$REPORT"; }
               done < <(jq -r '.data[]? | select(
                 ((.name // "") | startswith("docker_compose_")) and
                 ((.state // "") | IN("pending","queued","started","running","processing","in_progress"))
               ) | [.id,.name,.state,.created_at] | @tsv' /tmp/actions.json)
-
-              RECENT_DEPLOYS=$(jq --argjson cutoff "$((NOW_EPOCH - 3600))" -r '[.data[]? | select(
-                ((.name // "") | startswith("docker_compose_")) and
-                ((.created_at // "1970-01-01T00:00:00Z") | fromdateiso8601) >= $cutoff
-              )] | length' /tmp/actions.json 2>/dev/null || echo 0)
-              echo "- Docker Compose actions in last 60m: $RECENT_DEPLOYS" >> "$REPORT"
-              if [ "$RECENT_DEPLOYS" -gt 3 ]; then
-                ALERT=1
-                echo "- CRITICAL: deploy storm threshold exceeded (>3 Compose actions/hour)." >> "$REPORT"
-              fi
             else
               WARN=1
-              echo "- WARNING: Hostinger actions endpoint unavailable; public health remains authoritative." >> "$REPORT"
+              echo "- WARNING: actions API unavailable after retries." >> "$REPORT"
             fi
 
             echo >> "$REPORT"
-            echo "## Container pressure" >> "$REPORT"
-            PROJECTS='sdr-project n8n ollama career-judge-ollama gtm-career-browser open-webui coolify'
-            for PROJECT in $PROJECTS; do
+            echo "## Active container pressure" >> "$REPORT"
+            # Retired/empty projects are deliberately not polled. This keeps the
+            # guard cheap and avoids Hostinger API noise from dead project shells.
+            for PROJECT in sdr-project n8n; do
               SAFE=$(printf '%s' "$PROJECT" | tr -c 'A-Za-z0-9_.-' '_')
-              CCODE=$(req "$VM/docker/$PROJECT/containers" "/tmp/containers-$SAFE.json")
-              if [ "$CCODE" != "200" ]; then
-                echo "- $PROJECT: inventory HTTP ${CCODE:-000} (not treated as outage)" >> "$REPORT"
+              CCODE=$(req "$VM/docker/$PROJECT/containers" "/tmp/containers-$SAFE.json" 3) || true
+              if [ "$CCODE" != 200 ]; then
                 WARN=1
+                echo "- $PROJECT: inventory unavailable after retries" >> "$REPORT"
                 continue
               fi
 
               COUNT=$(jq -r 'length' "/tmp/containers-$SAFE.json" 2>/dev/null || echo 0)
               echo "- $PROJECT: $COUNT container(s)" >> "$REPORT"
-              jq -r '.[]? | "  - \(.name): state=\(.state // "unknown") health=\(.health // "") cpu=\(.stats.cpu_percentage // 0)% mem=\(.stats.memory_percentage // 0)%"' "/tmp/containers-$SAFE.json" >> "$REPORT" 2>/dev/null || true
+              jq -r '.[]? | "  - \(.name): \(.status // .state // "unknown") cpu=\(.stats.cpu_percentage // 0)% mem=\(.stats.memory_percentage // 0)%"' "/tmp/containers-$SAFE.json" >> "$REPORT" 2>/dev/null || true
 
               HOT=$(jq -r '[.[]? | select(
-                ((.state // "") == "running") and
-                (((.stats.cpu_percentage // 0) | tonumber) >= 70 or ((.stats.memory_percentage // 0) | tonumber) >= 90)
+                ((.status // "") | startswith("Up ")) and
+                ((((.stats.cpu_percentage // 0) | tonumber) >= 70) or (((.stats.memory_percentage // 0) | tonumber) >= 90))
               )] | length' "/tmp/containers-$SAFE.json" 2>/dev/null || echo 0)
-              if [ "$HOT" -gt 0 ]; then
-                ALERT=1
-                echo "- CRITICAL: $PROJECT has $HOT running container(s) above CPU 70% or memory 90%." >> "$REPORT"
-              fi
+              [ "$HOT" -gt 0 ] && { ALERT=1; echo "- CRITICAL: $PROJECT has $HOT hot container(s)." >> "$REPORT"; }
 
-              if [ "$PROJECT" = "sdr-project" ]; then
-                CORE_BAD=$(jq -r '[.[]? | select(
-                  ((.name // "") | test("sdr-dashboard|dashboard-cache-api|postgres|maqsam-sync")) and
-                  (((.state // "") != "running") or (((.health // "") != "") and ((.health // "") != "healthy")))
-                )] | length' "/tmp/containers-$SAFE.json" 2>/dev/null || echo 0)
-                if [ "$CORE_BAD" -gt 0 ]; then
+              if [ "$PROJECT" = sdr-project ]; then
+                CORE_TOTAL=$(jq -r '[.[]? | select((.name // "") | IN(
+                  "sdr-project-postgres-1",
+                  "sdr-project-dashboard-cache-api-1",
+                  "sdr-project-sdr-dashboard-1",
+                  "sdr-project-maqsam-sync-1"
+                ))] | length' "/tmp/containers-$SAFE.json")
+                CORE_UP=$(jq -r '[.[]? | select(
+                  ((.name // "") | IN(
+                    "sdr-project-postgres-1",
+                    "sdr-project-dashboard-cache-api-1",
+                    "sdr-project-sdr-dashboard-1",
+                    "sdr-project-maqsam-sync-1"
+                  )) and ((.status // "") | startswith("Up "))
+                )] | length' "/tmp/containers-$SAFE.json")
+                echo "- SDR core: $CORE_UP/$CORE_TOTAL up" >> "$REPORT"
+                if [ "$CORE_TOTAL" -lt 4 ] || [ "$CORE_UP" -lt 4 ]; then
                   ALERT=1
-                  echo "- CRITICAL: $CORE_BAD core SDR container(s) are stopped/unhealthy." >> "$REPORT"
+                  echo "- CRITICAL: SDR core stack is incomplete or stopped." >> "$REPORT"
                 fi
               fi
             done
@@ -170,7 +171,7 @@ jobs:
           if [ "$ALERT" -eq 1 ]; then
             echo "**Result: ALERT**" >> "$REPORT"
           elif [ "$WARN" -eq 1 ]; then
-            echo "**Result: HEALTHY WITH HOSTINGER API WARNINGS**" >> "$REPORT"
+            echo "**Result: HEALTHY WITH API WARNINGS**" >> "$REPORT"
           else
             echo "**Result: HEALTHY**" >> "$REPORT"
           fi
@@ -204,16 +205,14 @@ jobs:
                   issue_number: existing.number,
                   body,
                 });
-                core.warning(`Updated Hostinger alert issue #${existing.number}.`);
               } else {
-                const { data: created } = await github.rest.issues.create({
+                await github.rest.issues.create({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   title,
                   body,
                   labels: [],
                 });
-                core.warning(`Created Hostinger alert issue #${created.number}.`);
               }
             } else if (existing) {
               await github.rest.issues.createComment({
@@ -229,9 +228,6 @@ jobs:
                 state: 'closed',
                 state_reason: 'completed',
               });
-              core.notice(`Closed recovered Hostinger alert issue #${existing.number}.`);
-            } else {
-              core.notice('Hostinger production guard is healthy.');
             }
 
       - name: Fail run when production needs attention
