@@ -1,0 +1,95 @@
+name: Create Contact Current Package Property
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/create-contact-current-package.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  create-property:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create or update Contact Current Package dropdown
+        env:
+          HUBSPOT_PRIVATE_APP_TOKEN: ${{ secrets.HUBSPOT_PRIVATE_APP_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          test -n "${HUBSPOT_PRIVATE_APP_TOKEN:-}" || {
+            echo "::error::HUBSPOT_PRIVATE_APP_TOKEN secret is missing"
+            exit 1
+          }
+
+          API='https://api.hubapi.com/crm/v3/properties/contacts'
+          AUTH="Authorization: Bearer ${HUBSPOT_PRIVATE_APP_TOKEN}"
+
+          cat > /tmp/property.json <<'JSON'
+          {
+            "groupName": "contactinformation",
+            "name": "current_package_v2",
+            "label": "Current Package",
+            "type": "enumeration",
+            "fieldType": "select",
+            "description": "Current active Evalufy package.",
+            "options": [
+              {"label":"Assessment Enterprise Pro","value":"Assessment Enterprise Pro","displayOrder":0,"hidden":false},
+              {"label":"Assessment Professional Pro","value":"Assessment Professional Pro","displayOrder":1,"hidden":false},
+              {"label":"Assessment Standard Pro","value":"Assessment Standard Pro","displayOrder":2,"hidden":false},
+              {"label":"Assessment Starter Pro","value":"Assessment Starter Pro","displayOrder":3,"hidden":false},
+              {"label":"Assessment Enterprise Core","value":"Assessment Enterprise Core","displayOrder":4,"hidden":false},
+              {"label":"Assessment Professional Core","value":"Assessment Professional Core","displayOrder":5,"hidden":false},
+              {"label":"Assessment Standard Core","value":"Assessment Standard Core","displayOrder":6,"hidden":false},
+              {"label":"Assessment Starter Core","value":"Assessment Starter Core","displayOrder":7,"hidden":false},
+              {"label":"AI Interview Custom","value":"AI Interview Custom","displayOrder":8,"hidden":false},
+              {"label":"AI Interview Enterprise","value":"AI Interview Enterprise","displayOrder":9,"hidden":false},
+              {"label":"AI Interview Professional","value":"AI Interview Professional","displayOrder":10,"hidden":false},
+              {"label":"AI Interview Standard","value":"AI Interview Standard","displayOrder":11,"hidden":false},
+              {"label":"AI Interview Starter","value":"AI Interview Starter","displayOrder":12,"hidden":false}
+            ]
+          }
+          JSON
+
+          STATUS=$(curl -sS -o /tmp/existing.json -w '%{http_code}' \
+            -H "$AUTH" \
+            -H 'Accept: application/json' \
+            "$API/current_package_v2")
+
+          if [ "$STATUS" = '200' ]; then
+            jq '{label,type,fieldType,description,options}' /tmp/property.json > /tmp/update.json
+            UPDATE_STATUS=$(curl -sS -o /tmp/result.json -w '%{http_code}' \
+              -X PATCH \
+              -H "$AUTH" \
+              -H 'Content-Type: application/json' \
+              --data @/tmp/update.json \
+              "$API/current_package_v2")
+            echo "Update HTTP=$UPDATE_STATUS"
+            cat /tmp/result.json
+            [ "$UPDATE_STATUS" -ge 200 ] && [ "$UPDATE_STATUS" -lt 300 ]
+          elif [ "$STATUS" = '404' ]; then
+            CREATE_STATUS=$(curl -sS -o /tmp/result.json -w '%{http_code}' \
+              -X POST \
+              -H "$AUTH" \
+              -H 'Content-Type: application/json' \
+              --data @/tmp/property.json \
+              "$API")
+            echo "Create HTTP=$CREATE_STATUS"
+            cat /tmp/result.json
+            [ "$CREATE_STATUS" -ge 200 ] && [ "$CREATE_STATUS" -lt 300 ]
+          else
+            echo "::error::Unexpected lookup HTTP=$STATUS"
+            cat /tmp/existing.json
+            exit 1
+          fi
+
+          VERIFY_STATUS=$(curl -sS -o /tmp/verify.json -w '%{http_code}' \
+            -H "$AUTH" \
+            -H 'Accept: application/json' \
+            "$API/current_package_v2")
+          echo "Verify HTTP=$VERIFY_STATUS"
+          jq '{name,label,type,fieldType,description,options}' /tmp/verify.json
+          [ "$VERIFY_STATUS" = '200' ]
