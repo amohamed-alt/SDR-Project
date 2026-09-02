@@ -52,8 +52,8 @@ test("production compose is canonical, Traefik-only, and volume-safe", async () 
 
 test("Hostinger builds application and cache service from the exact GitHub revision", async () => {
   const compose = await read("docker-compose.yml");
-  assert.match(compose, /context: https:\/\/github\.com\/amohamed-alt\/SDR-Project\.git#\$\{SDR_BUILD_REF:\?SDR_BUILD_REF is required\}/);
-  assert.match(compose, /context: https:\/\/github\.com\/amohamed-alt\/SDR-Project\.git#\$\{SDR_BUILD_REF:\?SDR_BUILD_REF is required\}:services\/dashboard-cache/);
+  assert.match(compose, /context:\s*"https:\/\/github\.com\/amohamed-alt\/SDR-Project\.git#\$\{SDR_BUILD_REF:\?SDR_BUILD_REF is required\}"/);
+  assert.match(compose, /context:\s*"https:\/\/github\.com\/amohamed-alt\/SDR-Project\.git#\$\{SDR_BUILD_REF:\?SDR_BUILD_REF is required\}:services\/dashboard-cache"/);
   assert.doesNotMatch(compose, /build:\s*\n\s+context: \./);
   assert.doesNotMatch(compose, /build:\s*\n\s+context: \.\/services\/dashboard-cache/);
 });
@@ -69,7 +69,7 @@ test("Docker build persists npm and Next compilation caches", async () => {
 test("Maqsam worker reuses the application image instead of rebuilding it", async () => {
   const compose = await read("docker-compose.yml");
   const section = compose.slice(compose.indexOf("  maqsam-sync:"));
-  assert.match(section, /image: sdr-dashboard:\$\{SDR_BUILD_REF:-unknown\}/);
+  assert.match(section, /image: sdr-dashboard:\$\{SDR_BUILD_REF:\?SDR_BUILD_REF is required\}/);
   assert.match(section, /pull_policy: never/);
   assert.doesNotMatch(section, /\n\s+build:/);
 });
