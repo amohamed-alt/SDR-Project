@@ -9,6 +9,7 @@ from psycopg.types.json import Jsonb
 from app import app, clean_text, initialize_usage_db, iso, normalize_domain, usage_db
 
 APP_EXTENSION_VERSION = "coverage-ledger-v3"
+COVERAGE_SOURCE = "Apollo · GCC+Egypt market coverage"
 
 
 def account_json(row: dict[str, Any]) -> dict[str, Any]:
@@ -63,6 +64,7 @@ def global_summary(connection) -> dict[str, Any]:
             COUNT(*) FILTER (WHERE status='existing_hubspot' OR hubspot_company_id <> '') AS existing_hubspot,
             COUNT(*) FILTER (WHERE employee_count BETWEEN 251 AND 5000) AS sweet_pool,
             COUNT(*) FILTER (WHERE employee_count BETWEEN 5001 AND 50000) AS enterprise_extension,
+            COUNT(*) FILTER (WHERE employee_count = 0) AS size_pending,
             COUNT(*) FILTER (WHERE domain LIKE '%.invalid') AS domain_pending,
             COUNT(*) FILTER (WHERE exclusion_status='eligible' AND gtm_tier='A') AS tier_a,
             COUNT(*) FILTER (WHERE status='pushed') AS pushed,
@@ -99,7 +101,9 @@ def global_summary(connection) -> dict[str, Any]:
                   )
             ) AS phone_ready
         FROM acquisition_accounts
-        """
+        WHERE source = %s
+        """,
+        (COVERAGE_SOURCE,),
     ).fetchone() or {}
     return {key: int(value or 0) for key, value in row.items()}
 
@@ -114,10 +118,11 @@ def country_facets(connection) -> list[dict[str, Any]]:
                COUNT(*) FILTER (WHERE exclusion_status='excluded') AS excluded,
                COUNT(*) FILTER (WHERE status='existing_hubspot' OR hubspot_company_id <> '') AS existing_hubspot
         FROM acquisition_accounts
-        WHERE country <> ''
+        WHERE source = %s AND country <> ''
         GROUP BY country
         ORDER BY country ASC
-        """
+        """,
+        (COVERAGE_SOURCE,),
     ).fetchall()
     return [
         {
@@ -147,8 +152,8 @@ def acquisition_accounts_v2(
     include_excluded: bool = Query(default=False),
 ) -> dict[str, Any]:
     initialize_usage_db()
-    clauses: list[str] = []
-    params: list[Any] = []
+    clauses: list[str] = ["a.source = %s"]
+    params: list[Any] = [COVERAGE_SOURCE]
     if not include_excluded:
         clauses.append("a.exclusion_status = 'eligible'")
     if status:
@@ -179,7 +184,7 @@ def acquisition_accounts_v2(
     elif readiness == "search_only":
         readiness_clause = " AND a.exclusion_status='eligible' AND COALESCE(p.people_count,0)>0 AND COALESCE(p.enriched_count,0)=0"
 
-    where = f"WHERE {' AND '.join(clauses)}" if clauses else "WHERE TRUE"
+    where = f"WHERE {' AND '.join(clauses)}"
     with usage_db() as connection:
         base_join = """
             FROM acquisition_accounts a
@@ -247,8 +252,9 @@ def acquisition_reclassify_v2(response: Response) -> dict[str, Any]:
             """
             SELECT domain, hubspot_company_id, status, exclusion_status, exclusion_reason, evidence
             FROM acquisition_accounts
-            WHERE source = 'Apollo · GCC+Egypt market coverage'
-            """
+            WHERE source = %s
+            """,
+            (COVERAGE_SOURCE,),
         ).fetchall()
         changed = 0
         for row in rows:
