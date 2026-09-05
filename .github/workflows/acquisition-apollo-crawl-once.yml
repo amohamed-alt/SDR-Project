@@ -5,10 +5,10 @@ on:
     branches: [main]
     paths:
       - .github/workflows/acquisition-apollo-crawl-once.yml
-      - src/app/api/acquisition/coverage/route.ts
-      - src/app/api/acquisition/coverage-progress/route.ts
+      - services/dashboard-cache/**
       - src/app/api/acquisition/coverage-status/route.ts
-      - src/lib/acquisition-coverage-progress.ts
+      - src/app/api/acquisition/reclassify/route.ts
+      - src/lib/acquisition-data-api.ts
 
 permissions:
   contents: read
@@ -18,7 +18,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  crawl:
+  finalize:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -30,24 +30,23 @@ jobs:
           set -euo pipefail
           test -n "$ACQUISITION_OWNER_TOKEN" || { echo "::error::No acquisition/admin authorization secret is configured."; exit 1; }
 
-      - name: Wait for domain-safe production crawl API
+      - name: Wait for coverage-ledger-v3 production API
         run: |
           set -euo pipefail
-          URL="$BASE_URL/api/acquisition/coverage-progress"
+          URL="$BASE_URL/api/acquisition/reclassify"
           for attempt in $(seq 1 180); do
             code=$(curl -sS --connect-timeout 8 --max-time 20 -o /tmp/live.json -w '%{http_code}' "$URL" || true)
-            version=$(jq -r '.crawlVersion // ""' /tmp/live.json 2>/dev/null || true)
-            echo "Production crawl API: HTTP=${code:-000} version=${version:-missing} (${attempt}/180)"
-            if [ "$code" = 200 ] && [ "$version" = "apollo-coverage-v2" ]; then
-              jq '{crawlVersion,completedPages,failedSpentPages,updatedAt}' /tmp/live.json 2>/dev/null || true
+            version=$(jq -r '.version // ""' /tmp/live.json 2>/dev/null || true)
+            echo "Production coverage API: HTTP=${code:-000} version=${version:-missing} (${attempt}/180)"
+            if [ "$code" = 200 ] && [ "$version" = "coverage-ledger-v3" ]; then
               exit 0
             fi
             sleep 5
           done
-          echo "::error::Domain-safe production crawl API did not become live; no additional Apollo credits were spent."
+          echo "::error::coverage-ledger-v3 did not become live; no provider calls were made."
           exit 1
 
-      - name: Record page 30 as spent but unresolved
+      - name: Preserve page 30 as spent partial coverage
         run: |
           set -euo pipefail
           http=$(curl -sS --connect-timeout 10 --max-time 30 \
@@ -56,85 +55,63 @@ jobs:
             -H 'Content-Type: application/json' \
             --data '{"page":30,"status":"failed_spent"}' \
             -o /tmp/page30.json -w '%{http_code}' || true)
-          [ "$http" = 200 ] || { echo "::error::Could not persist page 30 spent-gap checkpoint."; cat /tmp/page30.json; exit 1; }
-          jq '{completedPages,failedSpentPages,updatedAt}' /tmp/page30.json
+          [ "$http" = 200 ] || { echo "::error::Could not persist page 30 spent checkpoint."; cat /tmp/page30.json; exit 1; }
 
-      - name: Crawl Apollo pages 31 through 89 exactly once
+      - name: Verify no remaining approved Apollo page calls
         run: |
           set -euo pipefail
-          PROGRESS_URL="$BASE_URL/api/acquisition/coverage-progress"
-          CRAWL_URL="$BASE_URL/api/acquisition/coverage-crawl-page"
-
-          curl -sS --connect-timeout 10 --max-time 30 "$PROGRESS_URL" -o /tmp/progress.json
+          curl -sS --connect-timeout 10 --max-time 30 "$BASE_URL/api/acquisition/coverage-progress" -o /tmp/progress.json
           completed=$(jq -c '.completedPages // []' /tmp/progress.json)
-          failed_spent=$(jq -c '.failedSpentPages // []' /tmp/progress.json)
-          echo "Existing completed checkpoints: $completed"
-          echo "Spent but unresolved checkpoints: $failed_spent"
-
-          pages_spent=0
-          pages_skipped=0
-          companies_stored=0
+          missing=0
           for page in $(seq 31 89); do
-            if echo "$completed" | jq -e --argjson page "$page" 'index($page) != null' >/dev/null; then
-              echo "Page $page already checkpointed; skipping without credit spend."
-              pages_skipped=$((pages_skipped + 1))
-              continue
+            if ! echo "$completed" | jq -e --argjson page "$page" 'index($page) != null' >/dev/null; then
+              echo "::error::Page $page is not checkpointed. Refusing any new Apollo request because the approved 88-credit envelope is already exhausted."
+              missing=$((missing + 1))
             fi
-
-            if [ "$pages_spent" -ge 59 ]; then
-              echo "::error::59-credit resume budget reached; refusing any additional Apollo calls."
-              exit 1
-            fi
-
-            echo "Apollo page $page/89: authorized 1 organization-search credit."
-            http=$(curl -sS --connect-timeout 10 --max-time 90 \
-              -X POST "$CRAWL_URL" \
-              -H "x-acquisition-owner-token: $ACQUISITION_OWNER_TOKEN" \
-              -H 'Content-Type: application/json' \
-              --data "{\"page\":$page}" \
-              -o /tmp/page.json -w '%{http_code}' || true)
-
-            if [ "$http" != 200 ]; then
-              echo "::error::Apollo page $page failed with HTTP ${http:-000}. Stopping immediately; this workflow never retries a failed page automatically."
-              jq '{error,crawlPage,startPage,lastPage,stored,checkpointed,checkpointWarning}' /tmp/page.json 2>/dev/null || true
-              exit 1
-            fi
-
-            stored=$(jq -r '.stored // 0' /tmp/page.json)
-            retained=$(jq -r '.retainedOrganizations // .stored // 0' /tmp/page.json)
-            synthetic=$(jq -r '.syntheticDomainKeys // 0' /tmp/page.json)
-            checkpointed=$(jq -r '.checkpointed // false' /tmp/page.json)
-            warning=$(jq -r '.checkpointWarning // ""' /tmp/page.json)
-            echo "Page $page stored=$stored retained=$retained domain_pending=$synthetic checkpointed=$checkpointed"
-            if [ "$checkpointed" != true ]; then
-              echo "::error::Page $page was fetched but not checkpointed: $warning"
-              exit 1
-            fi
-            pages_spent=$((pages_spent + 1))
-            companies_stored=$((companies_stored + stored))
-            completed=$(echo "$completed" | jq -c --argjson page "$page" '. + [$page] | unique | sort')
-            sleep 1
           done
+          [ "$missing" -eq 0 ] || exit 1
+          echo "Pages 31–89 are already checkpointed. Apollo calls in this finalization: 0."
 
-          echo "Apollo resume complete: new_pages=$pages_spent already_checkpointed=$pages_skipped stored_rows=$companies_stored SignalHire_contact_credits=0"
-          {
-            echo "## Apollo Coverage Resume"
-            echo "- Newly executed Apollo pages in this resume: $pages_spent"
-            echo "- Already checkpointed pages skipped: $pages_skipped"
-            echo "- Stored/upserted account rows reported: $companies_stored"
-            echo "- Page 30: spent previously, unresolved, not re-queried"
-            echo "- SignalHire contact credits used: 0"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Verify approved 88-credit envelope
+      - name: Reclassify stored coverage with zero provider credits
         run: |
           set -euo pipefail
-          curl -sS --connect-timeout 10 --max-time 30 "$BASE_URL/api/acquisition/coverage-status" -o /tmp/final.json
-          jq '{stored:.ledger.stored, eligible:.ledger.eligible, completedPages:.probe.completedPageCount, spentPages:.probe.spentPageCount, failedSpentPages:.probe.failedSpentPages, totalPages:.probe.totalPages, pageCoveragePercent:.probe.pageCoveragePercent, additionalCredits:.probe.estimatedAdditionalSearchCreditsToFinish}' /tmp/final.json
-          completed=$(jq -r '.probe.completedPageCount // 0' /tmp/final.json)
+          http=$(curl -sS --connect-timeout 10 --max-time 120 \
+            -X POST "$BASE_URL/api/acquisition/reclassify" \
+            -H "x-acquisition-owner-token: $ACQUISITION_OWNER_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data '{}' \
+            -o /tmp/reclassify.json -w '%{http_code}' || true)
+          [ "$http" = 200 ] || { echo "::error::Zero-credit reclassification failed HTTP=${http:-000}."; cat /tmp/reclassify.json; exit 1; }
+          jq '{status,scanned,changed,before,after,providerCreditsUsed}' /tmp/reclassify.json
+          apollo=$(jq -r '.providerCreditsUsed.apollo // -1' /tmp/reclassify.json)
+          sh_contact=$(jq -r '.providerCreditsUsed.signalHireContact // -1' /tmp/reclassify.json)
+          sh_search=$(jq -r '.providerCreditsUsed.signalHireSearch // -1' /tmp/reclassify.json)
+          [ "$apollo" -eq 0 ] && [ "$sh_contact" -eq 0 ] && [ "$sh_search" -eq 0 ] || {
+            echo "::error::Reclassification reported unexpected provider spend."; exit 1;
+          }
+
+      - name: Verify final persistent coverage state
+        run: |
+          set -euo pipefail
+          curl -sS --connect-timeout 10 --max-time 30 "$BASE_URL/api/acquisition/coverage-status?page=1&limit=20" -o /tmp/final.json
+          jq '{stored:.ledger.stored,eligible:.ledger.eligible,review:.ledger.review,hubspot:.ledger.existingHubSpot,ready:.ledger.ready,needsPeople:.ledger.needsPeople,completedPages:.probe.completedPageCount,spentPages:.probe.spentPageCount,partialSpentPages:.probe.partialSpentPages,totalPages:.probe.totalPages,additionalCredits:.probe.estimatedAdditionalSearchCreditsToFinish}' /tmp/final.json
           spent=$(jq -r '.probe.spentPageCount // 0' /tmp/final.json)
+          completed=$(jq -r '.probe.completedPageCount // 0' /tmp/final.json)
+          partial=$(jq -r '(.probe.partialSpentPages // []) | length' /tmp/final.json)
           total=$(jq -r '.probe.totalPages // 89' /tmp/final.json)
-          page30=$(jq -r '(.probe.failedSpentPages // []) | index(30) != null' /tmp/final.json)
-          [ "$spent" -eq "$total" ] || { echo "::error::Spend coverage is ${spent}/${total}, expected all authorized page calls accounted for."; exit 1; }
-          [ "$completed" -eq 88 ] || { echo "::error::Stored page coverage is ${completed}/89, expected 88 with page 30 unresolved."; exit 1; }
-          [ "$page30" = true ] || { echo "::error::Page 30 unresolved spend checkpoint is missing."; exit 1; }
+          additional=$(jq -r '.probe.estimatedAdditionalSearchCreditsToFinish // -1' /tmp/final.json)
+          stored=$(jq -r '.ledger.stored // 0' /tmp/final.json)
+          eligible=$(jq -r '.ledger.eligible // 0' /tmp/final.json)
+          [ "$spent" -eq "$total" ] || { echo "::error::Spend accounting is ${spent}/${total}."; exit 1; }
+          [ $((completed + partial)) -eq "$total" ] || { echo "::error::Completed+partial coverage does not equal ${total}."; exit 1; }
+          [ "$additional" -eq 0 ] || { echo "::error::Dashboard incorrectly reports additional Apollo credits required."; exit 1; }
+          [ "$stored" -ge 5000 ] || { echo "::error::Persistent ledger unexpectedly contains only $stored records."; exit 1; }
+          [ "$eligible" -gt 1000 ] || { echo "::error::Reclassification still reports only $eligible targetable accounts."; exit 1; }
+          {
+            echo "## Coverage Ledger Finalized"
+            echo "- Apollo calls in this finalization: 0"
+            echo "- SignalHire contact/search calls in this finalization: 0"
+            echo "- Stored accounts: $stored"
+            echo "- Targetable accounts: $eligible"
+            echo "- Page spend accounting: $spent/$total"
+          } >> "$GITHUB_STEP_SUMMARY"

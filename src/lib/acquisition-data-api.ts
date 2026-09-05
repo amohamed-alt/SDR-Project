@@ -59,6 +59,48 @@ export type AcquisitionPerson = {
   updatedAt?: string;
 };
 
+export type AcquisitionLedgerSummary = {
+  total: number;
+  eligible: number;
+  review: number;
+  excluded: number;
+  existing_hubspot: number;
+  sweet_pool: number;
+  enterprise_extension: number;
+  domain_pending: number;
+  tier_a: number;
+  pushed: number;
+  ready: number;
+  needs_people: number;
+  search_only: number;
+  phone_ready: number;
+  people_ready?: number;
+};
+
+export type AcquisitionCountryFacet = {
+  country: string;
+  stored: number;
+  eligible: number;
+  review: number;
+  excluded: number;
+  existingHubSpot: number;
+};
+
+export type AcquisitionLedgerResponse = {
+  version?: string;
+  database: string;
+  generatedAt: number;
+  summary: AcquisitionLedgerSummary;
+  countries?: AcquisitionCountryFacet[];
+  pagination?: {
+    limit: number;
+    offset: number;
+    returned: number;
+    filteredTotal: number;
+  };
+  accounts: AcquisitionAccount[];
+};
+
 export function acquisitionAccountWritePayload(account: AcquisitionAccount) {
   const writePayload = { ...account };
   delete writePayload.peopleCount;
@@ -97,23 +139,45 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs = READ
 
 export async function listAcquisitionAccounts(filters: {
   limit?: number;
+  offset?: number;
   status?: string;
   country?: string;
   tier?: string;
+  exclusionStatus?: string;
+  domain?: string;
+  q?: string;
+  readiness?: "ready" | "needs_people" | "search_only" | "";
   includeExcluded?: boolean;
 } = {}) {
   const query = new URLSearchParams();
   query.set("limit", String(Math.min(1000, Math.max(1, filters.limit ?? 300))));
+  query.set("offset", String(Math.max(0, Math.trunc(filters.offset ?? 0))));
   if (filters.status) query.set("status", filters.status);
   if (filters.country) query.set("country", filters.country);
   if (filters.tier) query.set("tier", filters.tier);
+  if (filters.exclusionStatus) query.set("exclusion_status", filters.exclusionStatus);
+  if (filters.domain) query.set("domain", filters.domain);
+  if (filters.q) query.set("q", filters.q);
+  if (filters.readiness) query.set("readiness", filters.readiness);
   if (filters.includeExcluded) query.set("include_excluded", "true");
+  return request<AcquisitionLedgerResponse>(`/v2/acquisition/accounts?${query.toString()}`, {}, Math.max(READ_TIMEOUT_MS, 2_500));
+}
+
+export async function getAcquisitionAccount(domain: string) {
+  const data = await listAcquisitionAccounts({ limit: 1, domain, includeExcluded: true });
+  return data.accounts[0] || null;
+}
+
+export async function reclassifyStoredAcquisitionCoverage() {
   return request<{
-    database: string;
-    generatedAt: number;
-    summary: Record<string, number>;
-    accounts: AcquisitionAccount[];
-  }>(`/v1/acquisition/accounts?${query.toString()}`);
+    version: string;
+    status: string;
+    providerCreditsUsed: { apollo: number; signalHireContact: number; signalHireSearch: number };
+    scanned: number;
+    changed: number;
+    before: AcquisitionLedgerSummary;
+    after: AcquisitionLedgerSummary;
+  }>("/v2/acquisition/reclassify", { method: "POST", body: "{}" }, 60_000);
 }
 
 export async function upsertAcquisitionAccounts(accounts: AcquisitionAccount[]) {

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ArrowLeft, BadgeCheck, Building2, CheckCircle2, CircleAlert, Database,
   Layers3, Radar, Search, Server, ShieldCheck, Target, UsersRound,
@@ -31,18 +31,14 @@ type CountryRow = {
   stored: number;
   eligible: number;
   review: number;
+  excluded: number;
   existingHubSpot: number;
   targetSectors: number;
 };
 
 type CoveragePayload = {
   generatedAt: string;
-  storage: {
-    database: string;
-    mode: string;
-    autoLoad: boolean;
-    sourceOfTruth: string;
-  };
+  storage: { database: string; mode: string; autoLoad: boolean; sourceOfTruth: string; paginated?: boolean };
   scope: {
     countries: string[];
     employeeRanges: string[];
@@ -60,7 +56,11 @@ type CoveragePayload = {
     initialCreditsUsed: number;
     completedPages: number[];
     completedPageCount: number;
+    partialSpentPages?: number[];
+    spentPageCount?: number;
     pageCoveragePercent: number;
+    dataCoveragePercent?: number;
+    spendCoveragePercent?: number;
     estimatedAdditionalSearchCreditsToFinish: number;
     note: string;
   };
@@ -72,13 +72,19 @@ type CoveragePayload = {
     excluded: number;
     sweetPool: number;
     enterpriseExtension: number;
+    domainPending?: number;
+    ready?: number;
+    needsPeople?: number;
+    searchOnly?: number;
+    pushed?: number;
   };
+  pagination: { page: number; limit: number; filteredTotal: number; totalPages: number; returned: number };
   countries: CountryRow[];
   accounts: CoverageAccount[];
   error?: string;
 };
 
-type StatusFilter = "all" | "net-new" | "hubspot" | "review";
+type StatusFilter = "all" | "net-new" | "hubspot" | "review" | "excluded";
 
 function fmt(value: number) {
   return new Intl.NumberFormat("en-US").format(value || 0);
@@ -106,11 +112,15 @@ export function ProspectingCoverage({ onBack }: { onBack: () => void }) {
   const [query, setQuery] = useState("");
   const [country, setCountry] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
+  const [page, setPage] = useState(1);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const response = await fetch("/api/acquisition/coverage-status", { cache: "no-store" });
+      const params = new URLSearchParams({ page: String(page), limit: "100", status });
+      if (country) params.set("country", country);
+      if (query.trim()) params.set("q", query.trim());
+      const response = await fetch(`/api/acquisition/coverage-status?${params.toString()}`, { cache: "no-store" });
       const data = await response.json() as CoveragePayload;
       if (!response.ok) throw new Error(data.error || "Unable to load market coverage.");
       setPayload(data);
@@ -120,10 +130,10 @@ export function ProspectingCoverage({ onBack }: { onBack: () => void }) {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, []);
+  }, [country, page, query, status]);
 
   useEffect(() => {
-    const initial = window.setTimeout(() => void load(false), 0);
+    const initial = window.setTimeout(() => void load(false), 120);
     const interval = window.setInterval(() => void load(true), 30_000);
     const refreshVisible = () => {
       if (document.visibilityState === "visible") void load(true);
@@ -139,26 +149,12 @@ export function ProspectingCoverage({ onBack }: { onBack: () => void }) {
     };
   }, [load]);
 
-  const filtered = useMemo(() => {
-    const text = query.trim().toLowerCase();
-    return (payload?.accounts || []).filter((account) => {
-      if (country && account.country !== country) return false;
-      if (status === "net-new" && account.exclusionStatus !== "eligible") return false;
-      if (status === "hubspot" && !(account.status === "existing_hubspot" || account.hubspotCompanyId)) return false;
-      if (status === "review" && account.exclusionStatus !== "review") return false;
-      if (!text) return true;
-      return [account.name, account.domain, account.country, account.industry, account.primaryPersona]
-        .join(" ").toLowerCase().includes(text);
-    }).sort((a, b) => {
-      const aExisting = Number(Boolean(a.hubspotCompanyId));
-      const bExisting = Number(Boolean(b.hubspotCompanyId));
-      if (aExisting !== bExisting) return aExisting - bExisting;
-      return b.gtmScore - a.gtmScore || a.name.localeCompare(b.name);
-    });
-  }, [country, payload, query, status]);
-
   const probe = payload?.probe;
   const ledger = payload?.ledger;
+  const pagination = payload?.pagination;
+  const accounts = payload?.accounts || [];
+  const from = pagination?.filteredTotal ? ((pagination.page - 1) * pagination.limit) + 1 : 0;
+  const to = pagination ? Math.min(pagination.filteredTotal, from + pagination.returned - 1) : 0;
 
   return <main className={styles.page}>
     <header className={styles.header}>
@@ -181,32 +177,33 @@ export function ProspectingCoverage({ onBack }: { onBack: () => void }) {
     <section className={styles.hero}>
       <div className={styles.heroMain}>
         <span><Database size={14}/> PERSISTENT COVERAGE LEDGER</span>
-        <h2>{probe ? fmt(probe.totalEntries) : "—"} target companies in the current Apollo universe.</h2>
-        <p>Every discovered company is kept as Net-new, Already covered in HubSpot, Review, or Excluded. Deploys and browser sessions do not reset the ledger.</p>
+        <h2>{probe ? fmt(probe.totalEntries) : "—"} companies in the Apollo search universe.</h2>
+        <p>All authorized Apollo page calls are accounted for. Every stored company remains searchable after deploys and browser refreshes.</p>
         <div className={styles.heroBadges}>
           <span><ShieldCheck size={12}/> Government + semi-government included</span>
           <span><Target size={12}/> 251–5,000 sweet pool</span>
           <span><Layers3 size={12}/> 5,001–50,000 enterprise extension</span>
-          <span><ShieldCheck size={12}/> SignalHire paid enrichment blocked from automatic flow</span>
+          <span><ShieldCheck size={12}/> SignalHire paid enrichment blocked automatically</span>
         </div>
       </div>
       <div className={styles.coverageRing}>
-        <strong>{probe ? `${probe.completedPageCount}/${probe.totalPages}` : "—"}</strong>
-        <span>Apollo pages captured</span>
-        <small>{probe ? `${probe.pageCoveragePercent}% search-page coverage` : "Loading…"}</small>
+        <strong>{probe ? `${probe.spentPageCount || probe.completedPageCount}/${probe.totalPages}` : "—"}</strong>
+        <span>Apollo page calls accounted</span>
+        <small>{probe ? `${probe.spendCoveragePercent ?? probe.pageCoveragePercent}% spend coverage` : "Loading…"}</small>
       </div>
       <div className={styles.heroSide}>
-        <div><span>Apollo pages captured</span><strong>{fmt(probe?.completedPageCount || 0)}</strong></div>
-        <div><span>Additional pages remaining</span><strong>{fmt(probe?.estimatedAdditionalSearchCreditsToFinish || 0)}</strong></div>
+        <div><span>Fully persisted pages</span><strong>{fmt(probe?.completedPageCount || 0)}</strong></div>
+        <div><span>Partial spent pages</span><strong>{fmt(probe?.partialSpentPages?.length || 0)}</strong></div>
+        <div><span>Additional Apollo credits required</span><strong>{fmt(probe?.estimatedAdditionalSearchCreditsToFinish || 0)}</strong></div>
         <small>SignalHire contact credits are never spent automatically.</small>
       </div>
     </section>
 
     <section className={styles.metrics}>
       <article><div><Database size={15}/><span>Stored ledger</span></div><strong>{fmt(ledger?.stored || 0)}</strong><small>Persistent Postgres account records</small></article>
-      <article className={styles.hot}><div><Target size={15}/><span>Net-new</span></div><strong>{fmt(ledger?.eligible || 0)}</strong><small>Eligible for persona discovery</small></article>
-      <article><div><BadgeCheck size={15}/><span>HubSpot covered</span></div><strong>{fmt(ledger?.existingHubSpot || 0)}</strong><small>Known CRM companies kept out of duplicate creation</small></article>
-      <article><div><CircleAlert size={15}/><span>Review</span></div><strong>{fmt(ledger?.review || 0)}</strong><small>Unknown / ambiguous industry retained</small></article>
+      <article className={styles.hot}><div><Target size={15}/><span>Net-new</span></div><strong>{fmt(ledger?.eligible || 0)}</strong><small>In-scope and targetable</small></article>
+      <article><div><BadgeCheck size={15}/><span>HubSpot covered</span></div><strong>{fmt(ledger?.existingHubSpot || 0)}</strong><small>Blocked from duplicate creation</small></article>
+      <article><div><CircleAlert size={15}/><span>Review</span></div><strong>{fmt(ledger?.review || 0)}</strong><small>Domain pending or explicit guardrail review</small></article>
       <article><div><UsersRound size={15}/><span>Sweet pool stored</span></div><strong>{fmt(ledger?.sweetPool || 0)}</strong><small>251–5,000 employee accounts</small></article>
       <article><div><Building2 size={15}/><span>Enterprise stored</span></div><strong>{fmt(ledger?.enterpriseExtension || 0)}</strong><small>5,001–50,000 employee accounts</small></article>
     </section>
@@ -214,9 +211,9 @@ export function ProspectingCoverage({ onBack }: { onBack: () => void }) {
     <ZeroCreditReadyPanel />
 
     <section className={styles.countries}>
-      <div className={styles.sectionTitle}><div><span>COUNTRY COVERAGE</span><h3>Seven markets, one persistent universe</h3></div><small>Target sector matrix stays visible even before every page is discovered.</small></div>
+      <div className={styles.sectionTitle}><div><span>COUNTRY COVERAGE</span><h3>Seven markets, one persistent universe</h3></div><small>Country totals come from the full Postgres ledger, not only the visible page.</small></div>
       <div className={styles.countryGrid}>
-        {(payload?.countries || []).map((row) => <button type="button" key={row.country} className={country === row.country ? styles.countryActive : ""} onClick={() => setCountry((current) => current === row.country ? "" : row.country)}>
+        {(payload?.countries || []).map((row) => <button type="button" key={row.country} className={country === row.country ? styles.countryActive : ""} onClick={() => { setCountry((current) => current === row.country ? "" : row.country); setPage(1); }}>
           <span>{row.country}</span>
           <strong>{fmt(row.stored)}</strong>
           <small>{row.targetSectors} target sectors · {fmt(row.eligible)} net-new · {fmt(row.existingHubSpot)} HubSpot</small>
@@ -230,34 +227,41 @@ export function ProspectingCoverage({ onBack }: { onBack: () => void }) {
         <Link href="/best-accounts" className={styles.bestAccounts}>Open Best Accounts →</Link>
       </div>
       <div className={styles.toolbar}>
-        <label><Search size={15}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search company, domain, industry, persona…"/></label>
-        <select value={country} onChange={(event) => setCountry(event.target.value)}><option value="">All 7 markets</option>{(payload?.scope.countries || []).map((item) => <option key={item} value={item}>{item}</option>)}</select>
-        <select value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)}><option value="all">All statuses</option><option value="net-new">Net-new</option><option value="hubspot">Already covered</option><option value="review">Review</option></select>
+        <label><Search size={15}/><input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="Search company, domain, industry, persona…"/></label>
+        <select value={country} onChange={(event) => { setCountry(event.target.value); setPage(1); }}><option value="">All 7 markets</option>{(payload?.scope.countries || []).map((item) => <option key={item} value={item}>{item}</option>)}</select>
+        <select value={status} onChange={(event) => { setStatus(event.target.value as StatusFilter); setPage(1); }}><option value="all">All statuses</option><option value="net-new">Net-new</option><option value="hubspot">Already covered</option><option value="review">Review</option><option value="excluded">Excluded</option></select>
       </div>
 
       <div className={styles.tableWrap}>
         <table>
           <thead><tr><th>Company</th><th>Market</th><th>Headcount</th><th>Industry</th><th>GTM</th><th>Best persona</th><th>Status</th></tr></thead>
           <tbody>
-            {filtered.map((account) => <tr key={account.domain}>
-              <td><strong>{account.name}</strong><small>{account.domain}</small></td>
-              <td>{account.country || "Unknown"}</td>
+            {accounts.map((account) => <tr key={account.domain}>
+              <td><strong>{account.name}</strong><small>{account.domain.endsWith(".invalid") ? "Domain resolution pending" : account.domain}</small></td>
+              <td>{account.country || "In-scope · country pending"}</td>
               <td>{headcountLabel(account)}</td>
-              <td>{account.industry || String(account.evidence?.coverageSector || "Review")}</td>
+              <td>{account.industry || String(account.evidence?.coverageSector || "Sector unmapped")}</td>
               <td><span className={styles.tier}>Tier {account.gtmTier}</span><b>{account.gtmScore}</b></td>
               <td>{account.primaryPersona || "TA / HR leadership"}</td>
               <td><span className={`${styles.status} ${accountStatus(account) === "Net-new" ? styles.netNew : accountStatus(account) === "Already covered" ? styles.covered : accountStatus(account) === "Review" ? styles.review : styles.excluded}`}>{accountStatus(account)}</span></td>
             </tr>)}
-            {!loading && !filtered.length ? <tr><td colSpan={7}><div className={styles.empty}><Database size={22}/><strong>No stored accounts in this filter yet</strong><span>The coverage state is still preserved; approved Apollo pages append here automatically.</span></div></td></tr> : null}
+            {!loading && !accounts.length ? <tr><td colSpan={7}><div className={styles.empty}><Database size={22}/><strong>No stored accounts in this filter</strong><span>Change the filters or search query; the persistent ledger is unchanged.</span></div></td></tr> : null}
           </tbody>
         </table>
+      </div>
+
+      <div className={styles.toolbar}>
+        <span>{pagination ? `Showing ${fmt(from)}–${fmt(to)} of ${fmt(pagination.filteredTotal)}` : "Loading…"}</span>
+        <button type="button" className={styles.bestAccounts} disabled={!pagination || pagination.page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))}>← Previous</button>
+        <span>{pagination ? `Page ${pagination.page} / ${pagination.totalPages}` : ""}</span>
+        <button type="button" className={styles.bestAccounts} disabled={!pagination || pagination.page >= pagination.totalPages || loading} onClick={() => setPage((current) => current + 1)}>Next →</button>
       </div>
     </section>
 
     <footer className={styles.footer}>
       <CheckCircle2 size={14}/>
       <span>{payload?.storage.sourceOfTruth || "Postgres acquisition ledger + HubSpot dedupe"}</span>
-      <small>Auto-load on open · refreshes every 30 seconds · SignalHire paid enrichment never runs automatically</small>
+      <small>Server-paginated full ledger · auto-refresh · SignalHire paid enrichment never runs automatically</small>
     </footer>
   </main>;
 }

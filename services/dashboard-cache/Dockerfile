@@ -13,7 +13,8 @@ COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=appuser:appuser app.py ./app.py
+COPY --chown=appuser:appuser extended_app.py ./extended_app.py
 USER appuser
 
 EXPOSE 8000
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-access-log"]
+CMD ["uvicorn", "extended_app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-access-log"]

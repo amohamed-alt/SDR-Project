@@ -79,7 +79,7 @@ jobs:
 
       - name: Dashboard cache Python syntax
         if: github.event_name == 'pull_request'
-        run: python -m py_compile services/dashboard-cache/app.py services/dashboard-cache/smoke.py
+        run: python -m py_compile services/dashboard-cache/app.py services/dashboard-cache/extended_app.py services/dashboard-cache/smoke.py
 
       - name: Dashboard cache container smoke
         if: github.event_name == 'pull_request'

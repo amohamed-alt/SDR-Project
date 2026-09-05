@@ -3,6 +3,7 @@ import { z } from "zod";
 import { POST as acquisitionPost } from "@/app/api/acquisition/route";
 import { POST as prospectingPushPost } from "@/app/api/prospecting/push/route";
 import {
+  getAcquisitionAccount,
   listAcquisitionAccounts,
   listAcquisitionPeople,
   type AcquisitionAccount,
@@ -68,6 +69,7 @@ async function pushExistingReadyContact(
   const assigned = await assignment(origin, request, account);
   const ownerToken = clean(process.env.ACQUISITION_OWNER_TOKEN || process.env.DASHBOARD_PASSWORD || process.env.SDR_ADMIN_PASSWORD, 500);
   if (!ownerToken) throw new Error("Acquisition owner authorization is not configured.");
+  if (account.domain.endsWith(".invalid")) throw new Error("Domain-pending coverage records cannot be pushed to HubSpot.");
 
   const pushRequest = new Request(`${origin}/api/prospecting/push`, {
     method: "POST",
@@ -128,10 +130,20 @@ async function pushExistingReadyContact(
   return { assigned, result };
 }
 
+async function allReadyAccounts() {
+  const first = await listAcquisitionAccounts({ limit: 1000, offset: 0, includeExcluded: true, readiness: "ready" });
+  const accounts = [...first.accounts];
+  const total = Number(first.pagination?.filteredTotal || accounts.length);
+  for (let offset = 1000; offset < total; offset += 1000) {
+    const page = await listAcquisitionAccounts({ limit: 1000, offset, includeExcluded: true, readiness: "ready" });
+    accounts.push(...page.accounts);
+  }
+  return { data: first, accounts };
+}
+
 export async function GET() {
   try {
-    const data = await listAcquisitionAccounts({ limit: 1000, includeExcluded: true });
-    const accounts = data.accounts || [];
+    const { data, accounts } = await allReadyAccounts();
     const rows = accounts.map((account) => ({
       domain: account.domain,
       name: account.name,
@@ -146,17 +158,19 @@ export async function GET() {
       pushCount: Number(account.pushCount || 0),
       ready: account.exclusionStatus === "eligible"
         && account.status !== "pushed"
+        && !account.domain.endsWith(".invalid")
         && Number(account.enrichedCount || 0) > 0,
     }));
+    const summary = data.summary;
     return NextResponse.json({
       zeroCreditMode: true,
       policy: "Uses only people and contact details already stored in Postgres. No Apollo search and no SignalHire contact reveal is performed.",
       summary: {
-        stored: rows.length,
-        ready: rows.filter((row) => row.ready).length,
-        needsPeople: rows.filter((row) => row.exclusionStatus === "eligible" && row.peopleCount === 0).length,
-        searchOnly: rows.filter((row) => row.exclusionStatus === "eligible" && row.peopleCount > 0 && row.enrichedCount === 0).length,
-        pushed: rows.filter((row) => row.status === "pushed" || row.pushCount > 0).length,
+        stored: Number(summary.total || 0),
+        ready: Number(summary.ready || 0),
+        needsPeople: Number(summary.needs_people || 0),
+        searchOnly: Number(summary.search_only || 0),
+        pushed: Number(summary.pushed || 0),
       },
       accounts: rows,
     }, { headers: { "Cache-Control": "private, no-store, max-age=0" } });
@@ -172,13 +186,10 @@ export async function POST(request: NextRequest) {
     const parsed = inputSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) return NextResponse.json({ error: "Invalid zero-credit ready action." }, { status: 400 });
 
-    const data = await listAcquisitionAccounts({ limit: 1000, includeExcluded: true });
-    const byDomain = new Map((data.accounts || []).map((account) => [account.domain, account]));
     const outcomes: Array<Record<string, unknown>> = [];
-
     for (const domain of [...new Set(parsed.data.domains)]) {
-      const account = byDomain.get(domain);
-      if (!account || account.exclusionStatus !== "eligible" || account.status === "pushed") {
+      const account = await getAcquisitionAccount(domain);
+      if (!account || account.exclusionStatus !== "eligible" || account.status === "pushed" || account.domain.endsWith(".invalid")) {
         outcomes.push({ domain, status: "not_eligible" });
         continue;
       }
