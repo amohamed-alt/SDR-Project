@@ -23,7 +23,7 @@ export type AcquisitionAccount = {
   exclusionStatus: "eligible" | "excluded" | "review";
   exclusionReason: string;
   hubspotCompanyId: string;
-  status: "candidate" | "qualified" | "people_ready" | "enriched" | "pushed" | "excluded";
+  status: "candidate" | "qualified" | "people_ready" | "enriched" | "pushed" | "excluded" | "existing_hubspot";
   primaryPersona: string;
   secondaryPersona: string;
   economicBuyer: string;
