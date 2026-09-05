@@ -122,7 +122,7 @@ export function ProspectingCoverage({ onBack }: { onBack: () => void }) {
   }, []);
 
   useEffect(() => {
-    void load(false);
+    const initial = window.setTimeout(() => void load(false), 0);
     const interval = window.setInterval(() => void load(true), 30_000);
     const refreshVisible = () => {
       if (document.visibilityState === "visible") void load(true);
@@ -131,6 +131,7 @@ export function ProspectingCoverage({ onBack }: { onBack: () => void }) {
     document.addEventListener("visibilitychange", refreshVisible);
     window.addEventListener("focus", refreshFocus);
     return () => {
+      window.clearTimeout(initial);
       window.clearInterval(interval);
       document.removeEventListener("visibilitychange", refreshVisible);
       window.removeEventListener("focus", refreshFocus);
