@@ -65,7 +65,7 @@ def global_summary(connection) -> dict[str, Any]:
             COUNT(*) FILTER (WHERE employee_count BETWEEN 251 AND 5000) AS sweet_pool,
             COUNT(*) FILTER (WHERE employee_count BETWEEN 5001 AND 50000) AS enterprise_extension,
             COUNT(*) FILTER (WHERE employee_count = 0) AS size_pending,
-            COUNT(*) FILTER (WHERE domain LIKE '%.invalid') AS domain_pending,
+            COUNT(*) FILTER (WHERE RIGHT(domain, 8) = '.invalid') AS domain_pending,
             COUNT(*) FILTER (WHERE exclusion_status='eligible' AND gtm_tier='A') AS tier_a,
             COUNT(*) FILTER (WHERE status='pushed') AS pushed,
             COUNT(*) FILTER (
