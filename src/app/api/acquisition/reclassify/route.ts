@@ -29,9 +29,8 @@ export async function POST(request: NextRequest) {
     if (!sdrAdminAuthorized(request)) return NextResponse.json({ error: "Admin authorization is required." }, { status: 401 });
     const result = await reclassifyStoredAcquisitionCoverage();
     return NextResponse.json({
-      version: VERSION,
-      zeroCredit: true,
       ...result,
+      zeroCredit: true,
     }, { headers: { "Cache-Control": "private, no-store, max-age=0" } });
   } catch (error) {
     return NextResponse.json({
