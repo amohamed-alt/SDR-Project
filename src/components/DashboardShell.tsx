@@ -40,8 +40,8 @@ const TeamActivity = dynamic(
   () => import("@/components/TeamActivity").then((module) => module.TeamActivity),
   { ssr: false, loading: ViewLoading },
 );
-const BestAccounts = dynamic(
-  () => import("@/components/BestAccounts").then((module) => module.BestAccounts),
+const ProspectingCoverage = dynamic(
+  () => import("@/components/ProspectingCoverage").then((module) => module.ProspectingCoverage),
   { ssr: false, loading: ViewLoading },
 );
 const TalenteraIntelligenceWorkspace = dynamic(
@@ -177,7 +177,7 @@ export function Dashboard() {
   if (view === "maqsam") return <MaqsamCallsDashboard onBack={() => changeView("core")}/>;
   if (view === "marita-priority") return <MaritaPriorityQueue onBack={() => changeView("core")}/>;
   if (view === "team-activity") return <TeamActivity onBack={() => changeView("core")}/>;
-  if (view === "net-new") return <BestAccounts onBack={() => changeView("core")}/>;
+  if (view === "net-new") return <ProspectingCoverage onBack={() => changeView("core")}/>;
   if (view === "gtm-brain") return <TalenteraIntelligenceWorkspace onBack={() => changeView("core")}/>;
 
   return <div className={styles.shell}>
@@ -199,7 +199,7 @@ export function Dashboard() {
             </button>
             <button className={styles.toolItem} type="button" onClick={() => changeView("net-new")}>
               <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Target size={17}/></span>
-              <span className={styles.toolCopy}><strong>Prospecting</strong><small>Apollo discovery · ranked net-new accounts</small></span>
+              <span className={styles.toolCopy}><strong>Prospecting</strong><small>Persistent market coverage · Apollo universe · HubSpot dedupe</small></span>
             </button>
             <button className={styles.toolItem} type="button" onClick={() => changeView("maqsam")}>
               <span className={`${styles.toolIcon} ${styles.callsIcon}`}><PhoneCall size={17}/></span>
