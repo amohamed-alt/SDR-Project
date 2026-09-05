@@ -46,6 +46,7 @@ type CoveragePayload = {
     enterpriseExtension: string;
     governmentIncluded: boolean;
     unknownIndustryPolicy: string;
+    sizePolicy?: string;
   };
   probe: {
     provider: string;
@@ -72,6 +73,9 @@ type CoveragePayload = {
     excluded: number;
     sweetPool: number;
     enterpriseExtension: number;
+    apolloSizeQualified?: number;
+    sizePending?: number;
+    exactHeadcountKnown?: number;
     domainPending?: number;
     ready?: number;
     needsPeople?: number;
@@ -99,10 +103,7 @@ function accountStatus(account: CoverageAccount) {
 
 function headcountLabel(account: CoverageAccount) {
   if (account.employeeCount > 0) return `${fmt(account.employeeCount)} employees`;
-  const raw = String(account.evidence?.employeeCoverageTier || "");
-  if (raw === "sweet_pool") return "251–5,000 pool";
-  if (raw === "enterprise_extension") return "5,001–50,000 extension";
-  return "Size pending";
+  return "251–50k qualified · exact pending";
 }
 
 export function ProspectingCoverage({ onBack }: { onBack: () => void }) {
@@ -181,8 +182,8 @@ export function ProspectingCoverage({ onBack }: { onBack: () => void }) {
         <p>All authorized Apollo page calls are accounted for. Every stored company remains searchable after deploys and browser refreshes.</p>
         <div className={styles.heroBadges}>
           <span><ShieldCheck size={12}/> Government + semi-government included</span>
-          <span><Target size={12}/> 251–5,000 sweet pool</span>
-          <span><Layers3 size={12}/> 5,001–50,000 enterprise extension</span>
+          <span><Target size={12}/> Apollo filter: 251–50,000 employees</span>
+          <span><Layers3 size={12}/> Exact headcount shown only when sourced</span>
           <span><ShieldCheck size={12}/> SignalHire paid enrichment blocked automatically</span>
         </div>
       </div>
@@ -200,18 +201,18 @@ export function ProspectingCoverage({ onBack }: { onBack: () => void }) {
     </section>
 
     <section className={styles.metrics}>
-      <article><div><Database size={15}/><span>Stored ledger</span></div><strong>{fmt(ledger?.stored || 0)}</strong><small>Persistent Postgres account records</small></article>
+      <article><div><Database size={15}/><span>Stored ledger</span></div><strong>{fmt(ledger?.stored || 0)}</strong><small>Persistent GCC + Egypt Postgres records</small></article>
       <article className={styles.hot}><div><Target size={15}/><span>Net-new</span></div><strong>{fmt(ledger?.eligible || 0)}</strong><small>In-scope and targetable</small></article>
       <article><div><BadgeCheck size={15}/><span>HubSpot covered</span></div><strong>{fmt(ledger?.existingHubSpot || 0)}</strong><small>Blocked from duplicate creation</small></article>
       <article><div><CircleAlert size={15}/><span>Review</span></div><strong>{fmt(ledger?.review || 0)}</strong><small>Domain pending or explicit guardrail review</small></article>
-      <article><div><UsersRound size={15}/><span>Sweet pool stored</span></div><strong>{fmt(ledger?.sweetPool || 0)}</strong><small>251–5,000 employee accounts</small></article>
-      <article><div><Building2 size={15}/><span>Enterprise stored</span></div><strong>{fmt(ledger?.enterpriseExtension || 0)}</strong><small>5,001–50,000 employee accounts</small></article>
+      <article><div><UsersRound size={15}/><span>Apollo size-qualified</span></div><strong>{fmt(ledger?.apolloSizeQualified ?? ledger?.stored ?? 0)}</strong><small>All came through the 251–50,000 employee search filter</small></article>
+      <article><div><Building2 size={15}/><span>Exact headcount pending</span></div><strong>{fmt(ledger?.sizePending || 0)}</strong><small>{fmt(ledger?.exactHeadcountKnown || 0)} exact counts stored · no guessed headcount</small></article>
     </section>
 
     <ZeroCreditReadyPanel />
 
     <section className={styles.countries}>
-      <div className={styles.sectionTitle}><div><span>COUNTRY COVERAGE</span><h3>Seven markets, one persistent universe</h3></div><small>Country totals come from the full Postgres ledger, not only the visible page.</small></div>
+      <div className={styles.sectionTitle}><div><span>COUNTRY COVERAGE</span><h3>Seven markets, one persistent universe</h3></div><small>Country totals come from the full GCC + Egypt Postgres ledger, not only the visible page.</small></div>
       <div className={styles.countryGrid}>
         {(payload?.countries || []).map((row) => <button type="button" key={row.country} className={country === row.country ? styles.countryActive : ""} onClick={() => { setCountry((current) => current === row.country ? "" : row.country); setPage(1); }}>
           <span>{row.country}</span>

@@ -67,6 +67,7 @@ export type AcquisitionLedgerSummary = {
   existing_hubspot: number;
   sweet_pool: number;
   enterprise_extension: number;
+  size_pending: number;
   domain_pending: number;
   tier_a: number;
   pushed: number;
@@ -160,7 +161,9 @@ export async function listAcquisitionAccounts(filters: {
   if (filters.q) query.set("q", filters.q);
   if (filters.readiness) query.set("readiness", filters.readiness);
   if (filters.includeExcluded) query.set("include_excluded", "true");
-  return request<AcquisitionLedgerResponse>(`/v2/acquisition/accounts?${query.toString()}`, {}, Math.max(READ_TIMEOUT_MS, 2_500));
+  // The persistent ledger can hold thousands of rows. Give the local Postgres API
+  // enough time to compute aggregate readiness without making the UI fragile.
+  return request<AcquisitionLedgerResponse>(`/v2/acquisition/accounts?${query.toString()}`, {}, Math.max(READ_TIMEOUT_MS, 8_000));
 }
 
 export async function getAcquisitionAccount(domain: string) {

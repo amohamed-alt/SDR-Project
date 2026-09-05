@@ -84,6 +84,8 @@ export async function GET(request: NextRequest) {
     const filteredTotal = Number(data.pagination?.filteredTotal || data.accounts.length);
     const totalPages = Math.max(1, Math.ceil(filteredTotal / limit));
     const summary = data.summary;
+    const stored = Number(summary.total || 0);
+    const sizePending = Number(summary.size_pending || 0);
 
     return NextResponse.json({
       version: "coverage-ledger-v3",
@@ -102,6 +104,7 @@ export async function GET(request: NextRequest) {
         enterpriseExtension: "5,001–50,000 employees",
         governmentIncluded: true,
         unknownIndustryPolicy: "In-scope Apollo accounts remain targetable; unmapped sector is metadata, not a hard exclusion.",
+        sizePolicy: "Apollo discovery was filtered to 251–50,000 employees. Exact headcount is shown only when returned by the source; missing exact counts are never guessed.",
       },
       probe: {
         ...APOLLO_PROBE,
@@ -117,13 +120,16 @@ export async function GET(request: NextRequest) {
         checkpointUpdatedAt: progress.updatedAt,
       },
       ledger: {
-        stored: Number(summary.total || 0),
+        stored,
         eligible: Number(summary.eligible || 0),
         existingHubSpot: Number(summary.existing_hubspot || 0),
         review: Number(summary.review || 0),
         excluded: Number(summary.excluded || 0),
         sweetPool: Number(summary.sweet_pool || 0),
         enterpriseExtension: Number(summary.enterprise_extension || 0),
+        apolloSizeQualified: stored,
+        sizePending,
+        exactHeadcountKnown: Math.max(0, stored - sizePending),
         domainPending: Number(summary.domain_pending || 0),
         ready: Number(summary.ready || 0),
         needsPeople: Number(summary.needs_people || 0),
