@@ -8,11 +8,10 @@ on:
 
 permissions:
   contents: read
-  statuses: read
 
 concurrency:
   group: approved-apollo-coverage-crawl
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   crawl:
@@ -21,31 +20,26 @@ jobs:
     env:
       BASE_URL: https://sdr.dashboardtalentera.tech
       ACQUISITION_OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN || secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD }}
-      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Validate authorization
         run: |
           set -euo pipefail
           test -n "$ACQUISITION_OWNER_TOKEN" || { echo "::error::No acquisition/admin authorization secret is configured."; exit 1; }
 
-      - name: Wait for this exact revision to finish Hostinger deployment
+      - name: Wait for production crawl API to be live
         run: |
           set -euo pipefail
-          API="https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/status"
-          for attempt in $(seq 1 150); do
-            curl -sS --connect-timeout 5 --max-time 15 \
-              -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
-              "$API" -o /tmp/status.json || true
-            state=$(jq -r '[.statuses[]? | select(.context=="hostinger/deploy")][0].state // "pending"' /tmp/status.json 2>/dev/null || echo pending)
-            echo "Hostinger deploy status: $state (${attempt}/150)"
-            if [ "$state" = success ]; then exit 0; fi
-            if [ "$state" = failure ] || [ "$state" = error ]; then
-              echo "::error::Hostinger deployment failed; refusing to spend Apollo credits."
-              exit 1
+          URL="$BASE_URL/api/acquisition/coverage-progress"
+          for attempt in $(seq 1 180); do
+            code=$(curl -sS --connect-timeout 8 --max-time 20 -o /tmp/live.json -w '%{http_code}' "$URL" || true)
+            echo "Production crawl API: HTTP=${code:-000} (${attempt}/180)"
+            if [ "$code" = 200 ]; then
+              jq '{completedPages,updatedAt}' /tmp/live.json 2>/dev/null || true
+              exit 0
             fi
             sleep 5
           done
-          echo "::error::Timed out waiting for Hostinger deployment; no Apollo crawl started."
+          echo "::error::Production crawl API did not become live; no Apollo credits were spent."
           exit 1
 
       - name: Crawl Apollo pages 2 through 89 exactly once
