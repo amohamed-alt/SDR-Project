@@ -35,8 +35,6 @@ function workerAuthorized(request: Request) {
 }
 
 function ensureOwnerBridge(workerKey: string) {
-  // The browser owner gate stays closed when ACQUISITION_OWNER_TOKEN is not configured.
-  // This temporary in-process bridge exists only for the authenticated internal autorun request.
   if (!clean(process.env.ACQUISITION_OWNER_TOKEN, 500)) {
     process.env.ACQUISITION_OWNER_TOKEN = workerKey;
   }
@@ -181,21 +179,20 @@ export async function POST(request: NextRequest) {
         }
 
         const ranked = [...people].sort((a, b) => contactPriority(b) - contactPriority(a));
-        let person = ranked.find(hasReachableContact) || ranked[0];
+        const person = ranked.find(hasReachableContact) || ranked[0];
         if (!person) {
           outcomes.push({ domain: account.domain, status: "no_person_found" });
           continue;
         }
 
         if (!hasReachableContact(person)) {
-          // One paid SignalHire Person API attempt per account per autorun keeps the batch cost bounded.
-          await acquisitionAction(origin, ownerKey, { action: "enrich_person", domain: account.domain, uid: person.uid });
-          const refreshed = (await listAcquisitionPeople(account.domain)).people;
-          person = refreshed.find((item) => item.uid === person?.uid) || refreshed.sort((a, b) => contactPriority(b) - contactPriority(a))[0];
-        }
-
-        if (!person || !hasReachableContact(person)) {
-          outcomes.push({ domain: account.domain, status: "no_verified_contact", person: person?.fullName || "" });
+          outcomes.push({
+            domain: account.domain,
+            account: account.name,
+            person: person.fullName,
+            status: "signalhire_credit_guard",
+            reason: "Paid SignalHire Person enrichment is disabled in autorun; contact remains search-only until explicitly approved.",
+          });
           continue;
         }
 
@@ -231,8 +228,13 @@ export async function POST(request: NextRequest) {
       selected: candidates.length,
       pushed: outcomes.filter((item) => item.status === "pushed").length,
       duplicates: outcomes.filter((item) => item.status === "duplicate_task").length,
-      unresolved: outcomes.filter((item) => item.status === "no_person_found" || item.status === "no_verified_contact").length,
+      signalHireCreditGuarded: outcomes.filter((item) => item.status === "signalhire_credit_guard").length,
+      unresolved: outcomes.filter((item) => item.status === "no_person_found" || item.status === "signalhire_credit_guard").length,
       failed: outcomes.filter((item) => item.status === "failed").length,
+      costGuard: {
+        automaticSignalHirePersonEnrichmentCredits: 0,
+        rule: "Autorun never calls paid SignalHire Person enrichment.",
+      },
       outcomes,
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

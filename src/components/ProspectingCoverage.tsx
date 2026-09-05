@@ -7,6 +7,7 @@ import {
   Layers3, Radar, Search, Server, ShieldCheck, Target, UsersRound,
 } from "lucide-react";
 import styles from "./ProspectingCoverage.module.css";
+import { ZeroCreditReadyPanel } from "./ZeroCreditReadyPanel";
 
 type CoverageAccount = {
   domain: string;
@@ -186,6 +187,7 @@ export function ProspectingCoverage({ onBack }: { onBack: () => void }) {
           <span><ShieldCheck size={12}/> Government + semi-government included</span>
           <span><Target size={12}/> 251–5,000 sweet pool</span>
           <span><Layers3 size={12}/> 5,001–50,000 enterprise extension</span>
+          <span><ShieldCheck size={12}/> SignalHire paid enrichment blocked from automatic flow</span>
         </div>
       </div>
       <div className={styles.coverageRing}>
@@ -194,9 +196,9 @@ export function ProspectingCoverage({ onBack }: { onBack: () => void }) {
         <small>{probe ? `${probe.pageCoveragePercent}% search-page coverage` : "Loading…"}</small>
       </div>
       <div className={styles.heroSide}>
-        <div><span>Search credits used</span><strong>{fmt(probe?.completedPageCount || 0)}</strong></div>
-        <div><span>Additional pages not yet authorized</span><strong>{fmt(probe?.estimatedAdditionalSearchCreditsToFinish || 0)}</strong></div>
-        <small>No additional Apollo search is run from this screen.</small>
+        <div><span>Apollo pages captured</span><strong>{fmt(probe?.completedPageCount || 0)}</strong></div>
+        <div><span>Additional pages remaining</span><strong>{fmt(probe?.estimatedAdditionalSearchCreditsToFinish || 0)}</strong></div>
+        <small>SignalHire contact credits are never spent automatically.</small>
       </div>
     </section>
 
@@ -208,6 +210,8 @@ export function ProspectingCoverage({ onBack }: { onBack: () => void }) {
       <article><div><UsersRound size={15}/><span>Sweet pool stored</span></div><strong>{fmt(ledger?.sweetPool || 0)}</strong><small>251–5,000 employee accounts</small></article>
       <article><div><Building2 size={15}/><span>Enterprise stored</span></div><strong>{fmt(ledger?.enterpriseExtension || 0)}</strong><small>5,001–50,000 employee accounts</small></article>
     </section>
+
+    <ZeroCreditReadyPanel />
 
     <section className={styles.countries}>
       <div className={styles.sectionTitle}><div><span>COUNTRY COVERAGE</span><h3>Seven markets, one persistent universe</h3></div><small>Target sector matrix stays visible even before every page is discovered.</small></div>
@@ -244,7 +248,7 @@ export function ProspectingCoverage({ onBack }: { onBack: () => void }) {
               <td>{account.primaryPersona || "TA / HR leadership"}</td>
               <td><span className={`${styles.status} ${accountStatus(account) === "Net-new" ? styles.netNew : accountStatus(account) === "Already covered" ? styles.covered : accountStatus(account) === "Review" ? styles.review : styles.excluded}`}>{accountStatus(account)}</span></td>
             </tr>)}
-            {!loading && !filtered.length ? <tr><td colSpan={7}><div className={styles.empty}><Database size={22}/><strong>No stored accounts in this filter yet</strong><span>The coverage state is still preserved; future approved Apollo pages append here automatically.</span></div></td></tr> : null}
+            {!loading && !filtered.length ? <tr><td colSpan={7}><div className={styles.empty}><Database size={22}/><strong>No stored accounts in this filter yet</strong><span>The coverage state is still preserved; approved Apollo pages append here automatically.</span></div></td></tr> : null}
           </tbody>
         </table>
       </div>
@@ -253,7 +257,7 @@ export function ProspectingCoverage({ onBack }: { onBack: () => void }) {
     <footer className={styles.footer}>
       <CheckCircle2 size={14}/>
       <span>{payload?.storage.sourceOfTruth || "Postgres acquisition ledger + HubSpot dedupe"}</span>
-      <small>Auto-load on open · refreshes every 30 seconds · refreshes again when this tab regains focus</small>
+      <small>Auto-load on open · refreshes every 30 seconds · SignalHire paid enrichment never runs automatically</small>
     </footer>
   </main>;
 }
