@@ -158,7 +158,7 @@ export function parseSignalHireCsv(text: string): SignalHireCsvParseResult {
   }
 
   const leads: SignalHireCsvLead[] = [];
-  let skipped = 0;
+  const skipped = 0;
   const dataRows = rows.slice(1);
 
   for (const values of dataRows) {
