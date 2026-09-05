@@ -20,13 +20,13 @@ jobs:
     timeout-minutes: 45
     env:
       BASE_URL: https://sdr.dashboardtalentera.tech
-      ACQUISITION_OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN }}
+      ACQUISITION_OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN || secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Validate authorization
         run: |
           set -euo pipefail
-          test -n "$ACQUISITION_OWNER_TOKEN" || { echo "::error::ACQUISITION_OWNER_TOKEN is missing."; exit 1; }
+          test -n "$ACQUISITION_OWNER_TOKEN" || { echo "::error::No acquisition/admin authorization secret is configured."; exit 1; }
 
       - name: Wait for this exact revision to finish Hostinger deployment
         run: |
