@@ -74,6 +74,7 @@ export type AcquisitionLedgerSummary = {
   needs_people: number;
   search_only: number;
   phone_ready: number;
+  people_ready?: number;
 };
 
 export type AcquisitionCountryFacet = {
