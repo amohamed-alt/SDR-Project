@@ -1,0 +1,71 @@
+name: Prospecting Coverage Production Smoke
+
+on:
+  workflow_run:
+    workflows: [Deploy SDR Dashboard to Hostinger]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      BASE_URL: https://sdr.dashboardtalentera.tech
+      EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Verify exact production build
+        run: |
+          set -euo pipefail
+          curl -4 -sS --connect-timeout 5 --max-time 20 \
+            -H 'Cache-Control: no-cache' \
+            "$BASE_URL/api/health?coverage-smoke=$EXPECTED_SHA" -o /tmp/health.json
+          build=$(jq -r '.buildRef // ""' /tmp/health.json)
+          echo "Production build: $build"
+          [ "$build" = "$EXPECTED_SHA" ] || { echo "::error::Production build $build does not match $EXPECTED_SHA"; exit 1; }
+
+      - name: Verify persistent GCC Egypt coverage ledger
+        run: |
+          set -euo pipefail
+          curl -4 -sS --connect-timeout 5 --max-time 30 \
+            -H 'Cache-Control: no-cache' \
+            "$BASE_URL/api/acquisition/coverage-status?page=1&limit=20" -o /tmp/coverage.json
+          jq '{version,ledger,countries,probe:{completedPageCount:.probe.completedPageCount,spentPageCount:.probe.spentPageCount,partialSpentPages:.probe.partialSpentPages,totalPages:.probe.totalPages,additionalCredits:.probe.estimatedAdditionalSearchCreditsToFinish},pagination}' /tmp/coverage.json
+
+          version=$(jq -r '.version // ""' /tmp/coverage.json)
+          stored=$(jq -r '.ledger.stored // 0' /tmp/coverage.json)
+          eligible=$(jq -r '.ledger.eligible // 0' /tmp/coverage.json)
+          spent=$(jq -r '.probe.spentPageCount // 0' /tmp/coverage.json)
+          total=$(jq -r '.probe.totalPages // 89' /tmp/coverage.json)
+          additional=$(jq -r '.probe.estimatedAdditionalSearchCreditsToFinish // -1' /tmp/coverage.json)
+          legacy=$(jq '[.accounts[]? | select(.country == "South Africa")] | length' /tmp/coverage.json)
+
+          [ "$version" = "coverage-ledger-v3" ] || { echo "::error::Unexpected coverage API version $version"; exit 1; }
+          [ "$stored" -ge 5000 ] || { echo "::error::Only $stored persisted coverage accounts"; exit 1; }
+          [ "$eligible" -gt 1000 ] || { echo "::error::Only $eligible targetable coverage accounts"; exit 1; }
+          [ "$spent" -eq "$total" ] || { echo "::error::Apollo spend accounting $spent/$total"; exit 1; }
+          [ "$additional" -eq 0 ] || { echo "::error::Coverage incorrectly requests $additional additional Apollo credits"; exit 1; }
+          [ "$legacy" -eq 0 ] || { echo "::error::Legacy South Africa rows leaked into GCC+Egypt coverage"; exit 1; }
+
+      - name: Verify zero-credit Ready queue responds
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          curl -4 -sS --connect-timeout 5 --max-time 30 \
+            -H 'Cache-Control: no-cache' \
+            "$BASE_URL/api/acquisition/zero-credit-ready" -o /tmp/ready.json
+          elapsed=$(( $(date +%s) - start ))
+          jq '{zeroCreditMode,summary,policy}' /tmp/ready.json
+          mode=$(jq -r '.zeroCreditMode // false' /tmp/ready.json)
+          [ "$mode" = true ] || { echo "::error::Ready queue is not in zero-credit mode"; exit 1; }
+          echo "Ready queue response time: ${elapsed}s"
+          {
+            echo "## Prospecting Coverage Production"
+            echo "- Exact build: $EXPECTED_SHA"
+            echo "- Apollo calls in smoke: 0"
+            echo "- SignalHire calls in smoke: 0"
+            echo "- Ready queue response: ${elapsed}s"
+          } >> "$GITHUB_STEP_SUMMARY"
