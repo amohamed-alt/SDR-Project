@@ -44,6 +44,10 @@ export async function GET() {
     }
 
     const completedPages = [...discoveredPages].sort((a, b) => a - b);
+    const failedSpentPages = progress.failedSpentPages
+      .filter((page) => page >= 1 && page <= APOLLO_PROBE.totalPages && !discoveredPages.has(page))
+      .sort((a, b) => a - b);
+    const spentPages = new Set([...completedPages, ...failedSpentPages]);
     const pageCoveragePercent = Math.min(100, Math.round((completedPages.length / APOLLO_PROBE.totalPages) * 10_000) / 100);
     const countryRows = ACQUISITION_COVERAGE_COUNTRIES.map((country) => {
       const rows = accounts.filter((account) => account.country === country);
@@ -86,8 +90,11 @@ export async function GET() {
         ...APOLLO_PROBE,
         completedPages,
         completedPageCount: completedPages.length,
+        failedSpentPages,
+        spentPageCount: spentPages.size,
         pageCoveragePercent,
-        estimatedAdditionalSearchCreditsToFinish: Math.max(0, APOLLO_PROBE.totalPages - completedPages.length),
+        estimatedAdditionalSearchCreditsToFinish: Math.max(0, APOLLO_PROBE.totalPages - spentPages.size),
+        unresolvedCoveragePages: failedSpentPages,
         checkpointUpdatedAt: progress.updatedAt,
       },
       ledger: {

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
@@ -43,9 +44,17 @@ type ApolloOrganization = Record<string, unknown> & {
   seo_description?: string;
 };
 
+type CoverageIdentity = {
+  key: string;
+  realDomain: string;
+  rawDomain: string;
+  synthetic: boolean;
+};
+
 const COMPETITOR_PATTERN = /\b(applicant tracking system|\bats\b software|recruitment software|recruiting software|talent acquisition platform|recruitment platform|recruiting platform|candidate tracking|job board|jobs marketplace|hiring software)\b/i;
 const KNOWN_COMPETITOR_PATTERN = /\b(elevatus|manatal|workable|greenhouse|lever|recruitee|teamtailor|smartrecruiters|icims|jobvite|sniperhire|cazar|akhtaboot|bayt|naukrigulf)\b/i;
 const RECRUITMENT_SERVICE_PATTERN = /\b(recruitment agency|staffing agency|staffing services|executive search|manpower|recruitment services|talent consultancy)\b/i;
+const POSTGRES_DOMAIN_PATTERN = /^[a-z0-9][a-z0-9.-]{1,252}[a-z0-9]$/;
 
 function clean(value: unknown, max = 1_000) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -73,6 +82,7 @@ function sameOrigin(request: NextRequest) {
 
 function configuration() {
   return {
+    version: "gcc-egypt-sweet-pool-v2",
     apolloConfigured: Boolean(clean(process.env.APOLLO_API_KEY, 1_000)),
     ownerActionsConfigured: sdrAdminConfigured(),
     apolloCost: "1 credit per results page; up to 100 companies per page",
@@ -84,6 +94,7 @@ function configuration() {
     sectorsByCountry: ACQUISITION_COUNTRY_SECTORS,
     governmentPolicy: "Government and semi-government accounts are targetable and remain in the coverage ledger.",
     unknownIndustryPolicy: "Store as review instead of dropping, so coverage gaps stay visible.",
+    missingDomainPolicy: "Retain Apollo organizations under an internal .invalid coverage key and require domain resolution before CRM push.",
     hubspotPolicy: "Existing HubSpot companies stay in the ledger but are blocked from net-new creation.",
   };
 }
@@ -110,8 +121,33 @@ function organizationCountry(org: ApolloOrganization) {
   return clean(location?.country || org.country || org.organization_location || "", 160);
 }
 
-function organizationDomain(org: ApolloOrganization) {
-  return normalizeCompanyDomain(clean(org.primary_domain || org.domain || org.website_url, 1_000));
+function rawOrganizationDomain(org: ApolloOrganization) {
+  return clean(org.primary_domain || org.domain || org.website_url, 1_000);
+}
+
+function postgresSafeDomain(value: unknown) {
+  const normalized = normalizeCompanyDomain(clean(value, 1_000));
+  if (!normalized || !normalized.includes(".")) return "";
+  if (!POSTGRES_DOMAIN_PATTERN.test(normalized)) return "";
+  return normalized;
+}
+
+function coverageIdentity(org: ApolloOrganization): CoverageIdentity {
+  const rawDomain = rawOrganizationDomain(org);
+  const realDomain = postgresSafeDomain(rawDomain);
+  if (realDomain) return { key: realDomain, realDomain, rawDomain, synthetic: false };
+
+  const sourceId = clean(org.id || org.organization_id, 160);
+  const fingerprint = createHash("sha256")
+    .update(sourceId || `${clean(org.name, 300)}|${accountText(org)}`)
+    .digest("hex")
+    .slice(0, 24);
+  return {
+    key: `apollo-${fingerprint}.invalid`,
+    realDomain: "",
+    rawDomain,
+    synthetic: true,
+  };
 }
 
 function classifyGuardrail(org: ApolloOrganization) {
@@ -179,7 +215,7 @@ async function apolloPage(page: number) {
 
 async function existingHubSpotDomains(domains: string[]) {
   const result = new Map<string, string>();
-  const unique = [...new Set(domains.filter(Boolean))];
+  const unique = [...new Set(domains.map(postgresSafeDomain).filter(Boolean))];
   for (let index = 0; index < unique.length; index += 100) {
     const chunk = unique.slice(index, index + 100);
     try {
@@ -189,7 +225,7 @@ async function existingHubSpotDomains(domains: string[]) {
         [{ propertyName: "domain", operator: "IN", values: chunk }],
       );
       for (const match of matches) {
-        const domain = normalizeCompanyDomain(clean(match.properties.domain));
+        const domain = postgresSafeDomain(match.properties.domain);
         if (domain) result.set(domain, String(match.id));
       }
     } catch {
@@ -208,10 +244,11 @@ async function existingHubSpotDomains(domains: string[]) {
 
 function accountFromOrganization(
   org: ApolloOrganization,
-  domain: string,
+  identity: CoverageIdentity,
   page: number,
   hubspotCompanyId: string,
 ): AcquisitionAccount {
+  const domain = identity.key;
   const name = clean(org.name, 300) || domain;
   const rawCountry = organizationCountry(org);
   const rawIndustry = clean(org.industry, 300);
@@ -223,14 +260,17 @@ function accountFromOrganization(
   const jobs = verifiedActiveJobCount(org);
   const coverage = classifyCoverageSector(rawCountry, text);
   const guardrail = classifyGuardrail(org);
-  const coverageDecision = guardrail || {
+  const domainGuard = identity.synthetic
+    ? { status: "review" as const, reason: "Apollo organization retained without a Postgres-safe company domain; domain resolution required before CRM push" }
+    : null;
+  const coverageDecision = guardrail || domainGuard || {
     status: coverage.status,
     reason: coverage.reason,
   };
   const scored = scoreTalenteraAccount({
     companyId: clean(org.id || org.organization_id, 160) || domain,
     name,
-    domain,
+    domain: identity.realDomain,
     country: coverage.country || rawCountry,
     employeeCount,
     industry: rawIndustry,
@@ -279,17 +319,21 @@ function accountFromOrganization(
     assignedOwnerId: "",
     assignedOwnerName: "",
     evidence: {
-      coverageVersion: "gcc-egypt-sweet-pool-v1",
+      coverageVersion: "gcc-egypt-sweet-pool-v2",
       apolloPage: page,
       rawCountry,
       rawIndustry,
       rawKeywords: org.keywords || [],
+      rawApolloDomain: identity.rawDomain,
+      realCompanyDomain: identity.realDomain,
+      domainStatus: identity.synthetic ? "needs_resolution" : "postgres_safe",
+      syntheticDomainKey: identity.synthetic,
       coverageCountry: coverage.country || "",
       coverageSector: coverage.sector,
       targetIndustry: coverage.targeted,
       employeeCoverageTier: employeeCoverageTier(employeeCount),
       governmentTargetingAllowed: true,
-      hubspotCoverageState: hubspotCompanyId ? "existing" : "net_new",
+      hubspotCoverageState: identity.synthetic ? "domain_pending" : hubspotCompanyId ? "existing" : "net_new",
       guardrail: guardrail || null,
       sourceText: text.slice(0, 3_000),
     },
@@ -297,7 +341,7 @@ function accountFromOrganization(
 }
 
 async function discoverCoverage(startPage: number, pages: number) {
-  const collected: Array<{ org: ApolloOrganization; page: number }> = [];
+  const collected: Array<{ org: ApolloOrganization; page: number; identity: CoverageIdentity }> = [];
   let rawTotal = 0;
   let pagesFetched = 0;
 
@@ -306,28 +350,31 @@ async function discoverCoverage(startPage: number, pages: number) {
     const result = await apolloPage(page);
     pagesFetched += 1;
     rawTotal = Math.max(rawTotal, result.total);
-    collected.push(...result.organizations.map((org) => ({ org, page })));
+    collected.push(...result.organizations.map((org) => ({ org, page, identity: coverageIdentity(org) })));
     if (!result.organizations.length) break;
   }
 
-  const unique = new Map<string, { org: ApolloOrganization; page: number }>();
+  const unique = new Map<string, { org: ApolloOrganization; page: number; identity: CoverageIdentity }>();
   for (const item of collected) {
-    const domain = organizationDomain(item.org);
-    if (domain && !unique.has(domain)) unique.set(domain, item);
+    if (!unique.has(item.identity.key)) unique.set(item.identity.key, item);
   }
 
-  const hubspot = await existingHubSpotDomains([...unique.keys()]);
-  const accounts = [...unique.entries()].map(([domain, item]) => accountFromOrganization(
+  const realDomains = [...unique.values()]
+    .filter((item) => !item.identity.synthetic)
+    .map((item) => item.identity.realDomain);
+  const hubspot = await existingHubSpotDomains(realDomains);
+  const accounts = [...unique.values()].map((item) => accountFromOrganization(
     item.org,
-    domain,
+    item.identity,
     item.page,
-    hubspot.get(domain) || "",
+    item.identity.realDomain ? hubspot.get(item.identity.realDomain) || "" : "",
   ));
 
   if (accounts.length) await upsertAcquisitionAccounts(accounts);
 
   const totalPages = rawTotal > 0 ? Math.ceil(rawTotal / 100) : 0;
   const lastPage = pagesFetched > 0 ? startPage + pagesFetched - 1 : startPage - 1;
+  const syntheticDomainKeys = accounts.filter((account) => account.evidence?.syntheticDomainKey === true).length;
   return {
     rawTotal,
     estimatedTotalPages: totalPages,
@@ -338,7 +385,9 @@ async function discoverCoverage(startPage: number, pages: number) {
     pagesFetched,
     creditsUsedUpperBound: pagesFetched,
     fetched: collected.length,
-    uniqueDomains: accounts.length,
+    retainedOrganizations: accounts.length,
+    uniqueDomains: accounts.length - syntheticDomainKeys,
+    syntheticDomainKeys,
     stored: accounts.length,
     eligible: accounts.filter((account) => account.exclusionStatus === "eligible").length,
     review: accounts.filter((account) => account.exclusionStatus === "review").length,
@@ -356,6 +405,7 @@ async function discoverCoverage(startPage: number, pages: number) {
       industry: account.industry,
       coverageSector: account.evidence?.coverageSector || "",
       employeeCoverageTier: account.evidence?.employeeCoverageTier || "",
+      domainStatus: account.evidence?.domainStatus || "",
       activeJobs: account.activeJobs,
       gtmScore: account.gtmScore,
       gtmTier: account.gtmTier,
