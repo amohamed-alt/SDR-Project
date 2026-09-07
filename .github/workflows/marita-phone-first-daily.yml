@@ -3,6 +3,10 @@ name: Marita Phone-First Priority
 on:
   schedule:
     - cron: '15 6 * * *'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/marita-phone-first-daily.yml'
   workflow_dispatch:
     inputs:
       target_phones:
@@ -54,15 +58,35 @@ jobs:
             const headers = { Authorization: auth, 'x-acquisition-owner-token': ownerToken, 'Content-Type': 'application/json' };
 
             async function request(path, init = {}) {
-              const response = await fetch(`${base}${path}`, {
-                ...init,
-                headers: { ...headers, ...(init.headers || {}) },
-              });
-              const text = await response.text();
-              let body = {};
-              try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text.slice(0, 1000) }; }
-              if (!response.ok) throw new Error(`${path} failed ${response.status}: ${JSON.stringify(body).slice(0, 1200)}`);
-              return body;
+              const maxAttempts = Number(init.maxAttempts || 4);
+              const requestInit = { ...init };
+              delete requestInit.maxAttempts;
+
+              let lastError;
+              for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 45000);
+                try {
+                  const response = await fetch(`${base}${path}`, {
+                    ...requestInit,
+                    signal: controller.signal,
+                    headers: { ...headers, ...(requestInit.headers || {}) },
+                  });
+                  const text = await response.text();
+                  let body = {};
+                  try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text.slice(0, 1000) }; }
+                  if (!response.ok) throw new Error(`${path} failed ${response.status}: ${JSON.stringify(body).slice(0, 1200)}`);
+                  return body;
+                } catch (error) {
+                  lastError = error;
+                  const transient = /timeout|abort|fetch failed|ECONNRESET|ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT/i.test(String(error?.message || error));
+                  if (!transient || attempt === maxAttempts) break;
+                  await new Promise((resolve) => setTimeout(resolve, attempt * 5000));
+                } finally {
+                  clearTimeout(timeout);
+                }
+              }
+              throw lastError;
             }
 
             const marketRank = new Map([
@@ -168,8 +192,11 @@ jobs:
               return request('/api/prospecting/push', { method: 'POST', body: JSON.stringify(payload) });
             }
 
+            const excludedAccountPattern = /binzagr/i;
+
             const queue = await request('/api/acquisition?limit=1000');
             const accounts = (Array.isArray(queue.accounts) ? queue.accounts : [])
+              .filter((account) => account && !excludedAccountPattern.test(String(account.name || account.domain || '')))
               .filter((account) => account && account.exclusionStatus === 'eligible')
               .filter((account) => account.status !== 'pushed')
               .filter((account) => account.evidence?.feedMaritaRequested === true)
