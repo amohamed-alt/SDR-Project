@@ -21,6 +21,7 @@ import {
   Target,
   UserRound,
   UsersRound,
+  type LucideIcon,
 } from "lucide-react";
 import {
   CartesianGrid,
@@ -34,7 +35,7 @@ import {
 } from "recharts";
 import { DrilldownDrawer, type Drilldown } from "@/components/DrilldownDrawer";
 import { WhatsAppQuickAction } from "@/components/WhatsAppQuickAction";
-import type { ActivityRow, ContactRow, DashboardData, DailyActivityDatum } from "@/lib/types";
+import type { ActivityRow, ContactRow, DashboardData } from "@/lib/types";
 import styles from "@/components/SdrTeamCommandCenter.module.css";
 
 type RepId = "marita" | "daniel";
@@ -82,8 +83,8 @@ const SDRS: RepConfig[] = [
   },
 ];
 
-const defaultStart = process.env.NEXT_PUBLIC_DEFAULT_START_DATE ?? `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}-01`;
-const today = new Date().toISOString().slice(0, 10);
+const DEFAULT_START = process.env.NEXT_PUBLIC_DEFAULT_START_DATE ?? `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}-01`;
+const TODAY = new Date().toISOString().slice(0, 10);
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(value);
@@ -91,7 +92,11 @@ function formatNumber(value: number) {
 
 function dateLabel(value: string) {
   if (!value) return "—";
-  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(`${value}T12:00:00Z`));
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(`${value}T12:00:00Z`));
 }
 
 function dateTime(value: string, timezone?: string) {
@@ -133,7 +138,7 @@ function metricHelper(data: DashboardData | null) {
   return `${data.kpis.connectionRate}% connected · ${data.kpis.completedTasks} tasks completed`;
 }
 
-function queueRows(data: DashboardData, mode: QueueMode) {
+function queueRows(data: DashboardData, mode: QueueMode): ActivityRow[] | ContactRow[] {
   const now = new Date(data.meta.generatedAt).getTime();
   const localToday = zonedDay(data.meta.generatedAt, data.meta.timezone);
 
@@ -179,7 +184,7 @@ function MetricCard({
   label: string;
   value: string;
   helper: string;
-  icon: typeof Gauge;
+  icon: LucideIcon;
   onClick?: () => void;
 }) {
   return <button type="button" className={styles.metricCard} onClick={onClick} disabled={!onClick}>
@@ -230,9 +235,9 @@ export function SdrTeamCommandCenter({
   const [view, setView] = useState<View>("management");
   const [selectedRep, setSelectedRep] = useState<RepId>("marita");
   const [queueMode, setQueueMode] = useState<QueueMode>("tasks");
-  const [from, setFrom] = useState(defaultStart);
-  const [to, setTo] = useState(today);
-  const [appliedRange, setAppliedRange] = useState({ from: defaultStart, to: today });
+  const [from, setFrom] = useState(DEFAULT_START);
+  const [to, setTo] = useState(TODAY);
+  const [appliedRange, setAppliedRange] = useState({ from: DEFAULT_START, to: TODAY });
   const [snapshots, setSnapshots] = useState<SnapshotMap>({ marita: null, daniel: null });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -263,10 +268,16 @@ export function SdrTeamCommandCenter({
     }
   }, [appliedRange, refreshKey]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
 
   const management = useMemo(() => {
-    const available = SDRS.map((rep) => ({ rep, data: snapshots[rep.id] })).filter((entry): entry is { rep: RepConfig; data: DashboardData } => Boolean(entry.data));
+    const available = SDRS
+      .map((rep) => ({ rep, data: snapshots[rep.id] }))
+      .filter((entry): entry is { rep: RepConfig; data: DashboardData } => Boolean(entry.data));
+
     const totals = available.reduce((sum, { data }) => ({
       calls: sum.calls + data.kpis.calls,
       connected: sum.connected + data.kpis.connectedCalls,
@@ -279,6 +290,7 @@ export function SdrTeamCommandCenter({
 
     const connectionRate = totals.calls ? Math.round((totals.connected / totals.calls) * 1000) / 10 : 0;
     const dailyMap = new Map<string, TeamDailyDatum>();
+
     for (const { rep, data } of available) {
       for (const point of data.dailyActivities) {
         const current = dailyMap.get(point.date) ?? {
@@ -339,11 +351,19 @@ export function SdrTeamCommandCenter({
     setSelectedRep(rep);
     setQueueMode("tasks");
     setView("workspace");
-    window.dispatchEvent(new CustomEvent("sdr:usage", { detail: { eventType: "feature_open", feature: `${rep}-workspace` } }));
+    window.dispatchEvent(new CustomEvent("sdr:usage", {
+      detail: { eventType: "feature_open", feature: `${rep}-workspace` },
+    }));
   }
 
   function openActivities(data: DashboardData, title: string, description: string, rows: ActivityRow[]) {
-    setDrilldown({ kind: "activities", title, description, rows, hubspotUrl: data.meta.hubspotUrls.calls });
+    const type = rows[0]?.type;
+    const hubspotUrl = type === "Task"
+      ? data.meta.hubspotUrls.tasks
+      : type === "Meeting"
+        ? data.meta.hubspotUrls.meetings
+        : data.meta.hubspotUrls.calls;
+    setDrilldown({ kind: "activities", title, description, rows, hubspotUrl });
   }
 
   function openContacts(data: DashboardData, title: string, description: string, rows: ContactRow[]) {
@@ -351,7 +371,7 @@ export function SdrTeamCommandCenter({
   }
 
   const queue = selectedData ? queueRows(selectedData, queueMode) : [];
-  const selectedToday = selectedData ? zonedDay(selectedData.meta.generatedAt, selectedData.meta.timezone) : today;
+  const selectedToday = selectedData ? zonedDay(selectedData.meta.generatedAt, selectedData.meta.timezone) : TODAY;
   const todayCalls = selectedData?.recentActivities.filter((row) => row.type === "Call" && zonedDay(row.metricAt || row.occurredAt, selectedData.meta.timezone) === selectedToday) ?? [];
   const todayConnected = todayCalls.filter((row) => row.status === "Connected");
   const todayMeetings = selectedData?.recentActivities.filter((row) => row.type === "Meeting" && zonedDay(row.occurredAt || row.metricAt, selectedData.meta.timezone) === selectedToday) ?? [];
@@ -363,11 +383,15 @@ export function SdrTeamCommandCenter({
       <div>
         <span className={styles.eyebrow}>SDR COMMAND CENTER · TALENTERA + EVALUFY</span>
         <h1>{view === "management" ? "SDR Team Command Center" : `${selected.shortName} Workspace`}</h1>
-        <p>{view === "management" ? "Management view across both SDR lanes with live HubSpot execution, activity and workload." : `${selected.product} execution workspace · HubSpot owner ${selected.ownerId}`}</p>
+        <p>{view === "management"
+          ? "Management view across both SDR lanes with live HubSpot execution, activity and workload."
+          : `${selected.product} execution workspace · HubSpot owner ${selected.ownerId}`}</p>
       </div>
       <div className={styles.topActions}>
         <span className={styles.livePill}><i/>LIVE · HUBSPOT</span>
-        <button type="button" onClick={() => setRefreshKey((current) => current + 1)} disabled={loading}><RefreshCw size={15} className={loading ? styles.spin : ""}/>Refresh</button>
+        <button type="button" onClick={() => setRefreshKey((current) => current + 1)} disabled={loading}>
+          <RefreshCw size={15} className={loading ? styles.spin : ""}/>Refresh
+        </button>
       </div>
     </header>
 
@@ -377,7 +401,12 @@ export function SdrTeamCommandCenter({
         {SDRS.map((rep) => <button key={rep.id} className={view === "workspace" && selectedRep === rep.id ? styles.activeTab : ""} onClick={() => openRepWorkspace(rep.id)}><UserRound size={15}/>{rep.shortName} · {rep.product}</button>)}
       </div>
       <div className={styles.rangeControls}>
-        <div className={styles.presets}><button onClick={() => applyPreset(1)}>Today</button><button onClick={() => applyPreset(7)}>7D</button><button onClick={() => applyPreset(30)}>30D</button><button onClick={() => applyPreset("month")}>MTD</button></div>
+        <div className={styles.presets}>
+          <button onClick={() => applyPreset(1)}>Today</button>
+          <button onClick={() => applyPreset(7)}>7D</button>
+          <button onClick={() => applyPreset(30)}>30D</button>
+          <button onClick={() => applyPreset("month")}>MTD</button>
+        </div>
         <label><span>From</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)}/></label>
         <label><span>To</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)}/></label>
         <button className={styles.applyButton} disabled={!from || !to || from > to} onClick={() => setAppliedRange({ from, to })}>Apply</button>
@@ -393,11 +422,11 @@ export function SdrTeamCommandCenter({
           <h2>Two SDR lanes. One operating view.</h2>
           <p>Marita owns Talentera execution. Daniel owns Evalufy execution. HubSpot owner IDs remain the reporting source of truth.</p>
         </div>
-        <div className={styles.managementStatus}><ShieldCheck size={18}/><div><strong>{loading ? "Refreshing team data" : "Both owner views loaded"}</strong><span>{management.totals.portfolio} owned contacts in the selected period scope</span></div></div>
+        <div className={styles.managementStatus}><ShieldCheck size={18}/><div><strong>{loading ? "Refreshing team data" : "Both owner views loaded"}</strong><span>{management.totals.portfolio} owned contacts in the selected scope</span></div></div>
       </section>
 
       <section className={styles.metricGrid}>
-        <MetricCard label="Calls" value={formatNumber(management.totals.calls)} helper="Both SDRs" icon={PhoneCall} onClick={snapshots.marita && snapshots.daniel ? () => openActivities(snapshots.marita!, "Team calls", "Calls across Marita and Daniel for the selected period.", [...snapshots.marita!.recentActivities.filter((row) => row.type === "Call"), ...snapshots.daniel!.recentActivities.filter((row) => row.type === "Call")]) : undefined}/>
+        <MetricCard label="Calls" value={formatNumber(management.totals.calls)} helper="Both SDRs" icon={PhoneCall}/>
         <MetricCard label="Connected" value={formatNumber(management.totals.connected)} helper={`${management.connectionRate}% team connection rate`} icon={CheckCircle2}/>
         <MetricCard label="Meetings" value={formatNumber(management.totals.meetings)} helper="Booked in period" icon={CalendarDays}/>
         <MetricCard label="Completed tasks" value={formatNumber(management.totals.completedTasks)} helper="Execution completed" icon={ListTodo}/>
@@ -411,7 +440,11 @@ export function SdrTeamCommandCenter({
           return <article className={styles.repCard} key={rep.id}>
             <div className={styles.repCardHeader}>
               <span className={styles.repAvatar}>{rep.initials}</span>
-              <div><span>{rep.product.toUpperCase()} · {rep.lane}</span><h3>{rep.name}</h3><p>{data?.meta.ownerName && data.meta.ownerName !== rep.name ? `HubSpot: ${data.meta.ownerName}` : `HubSpot owner ${rep.ownerId}`}</p></div>
+              <div>
+                <span>{rep.product.toUpperCase()} · {rep.lane}</span>
+                <h3>{rep.name}</h3>
+                <p>{data?.meta.ownerName && data.meta.ownerName !== rep.name ? `HubSpot: ${data.meta.ownerName}` : `HubSpot owner ${rep.ownerId}`}</p>
+              </div>
               <span className={styles.ownerState}><i/>{data ? "Live" : loading ? "Loading" : "Unavailable"}</span>
             </div>
             <div className={styles.repStats}>
@@ -435,10 +468,10 @@ export function SdrTeamCommandCenter({
               <YAxis tick={{ fontSize: 11 }}/>
               <Tooltip/>
               <Legend/>
-              <Line type="monotone" dataKey="maritaCalls" name="Marita · Calls" strokeWidth={2.4} dot={false}/>
-              <Line type="monotone" dataKey="maritaConnected" name="Marita · Connected" strokeWidth={2} dot={false}/>
-              <Line type="monotone" dataKey="danielCalls" name="Daniel · Calls" strokeWidth={2.4} dot={false}/>
-              <Line type="monotone" dataKey="danielConnected" name="Daniel · Connected" strokeWidth={2} dot={false}/>
+              <Line type="monotone" dataKey="maritaCalls" name="Marita · Calls" stroke="#087a50" strokeWidth={2.4} dot={false}/>
+              <Line type="monotone" dataKey="maritaConnected" name="Marita · Connected" stroke="#3a7de0" strokeWidth={2} dot={false}/>
+              <Line type="monotone" dataKey="danielCalls" name="Daniel · Calls" stroke="#744bc4" strokeWidth={2.4} dot={false}/>
+              <Line type="monotone" dataKey="danielConnected" name="Daniel · Connected" stroke="#d98d25" strokeWidth={2} dot={false}/>
             </LineChart>
           </ResponsiveContainer> : <div className={styles.empty}>No activity trend is available for this period.</div>}
         </div>
@@ -467,7 +500,7 @@ export function SdrTeamCommandCenter({
             <div className={styles.feedSubject}><strong>{row.subject || `${row.type} activity`}</strong><span>{row.relatedContactName || row.detail || "No associated contact"}</span></div>
             <span className={styles.feedStatus}>{row.status || (row.isOpen ? "Open" : "Completed")}</span>
             <span className={styles.feedWhen}>{dateTime(activityTime(row), data.meta.timezone)}</span>
-            {row.url ? <a href={row.url} target="_blank" rel="noreferrer"><ExternalLink size={13}/></a> : null}
+            {row.url ? <a href={row.url} target="_blank" rel="noreferrer" aria-label="Open activity"><ExternalLink size={13}/></a> : null}
           </div>)}
           {!management.recent.length ? <div className={styles.empty}>No recent activity in this range.</div> : null}
         </div>
@@ -479,7 +512,7 @@ export function SdrTeamCommandCenter({
           <div><span>{selected.product.toUpperCase()} · {selected.lane}</span><h2>{selected.shortName}&apos;s execution workspace</h2><p>Tasks, leads, calls, meetings and HubSpot actions for owner {selected.ownerId}.</p></div>
         </div>
         <div className={styles.workspaceActions}>
-          <button type="button" onClick={() => onOpenAnalytics(selected.ownerId)}><BarChart3 size={15}/>Open deep analytics</button>
+          <button type="button" onClick={() => onOpenAnalytics(selected.ownerId)}><BarChart3 size={15}/>Compare with existing dashboard</button>
           {selectedData?.meta.hubspotUrls.contacts ? <a href={selectedData.meta.hubspotUrls.contacts} target="_blank" rel="noreferrer">Open HubSpot portfolio<ExternalLink size={14}/></a> : null}
         </div>
       </section>
