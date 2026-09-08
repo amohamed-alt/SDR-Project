@@ -3,10 +3,11 @@ import type { DashboardData } from "@/lib/types";
 const daily = [36, 59, 0, 0, 0, 31, 37, 46, 37, 0, 0, 33, 20, 34, 35, 17, 0, 0, 39];
 
 export function createMockDashboard(from: string, to: string, ownerId: string): DashboardData {
+  const ownerName = ownerId === "37624223" ? "Daniel Beaini" : "Marita Chedid";
   return {
     meta: {
       generatedAt: new Date().toISOString(), from, to, timezone: "Asia/Riyadh", ownerId,
-      ownerName: "Marita Chedid", portalId: "145742477", isDemo: true,
+      ownerName, portalId: "145742477", isDemo: true,
       warnings: ["Demo mode is active. Connect a HubSpot private app token to load live CRM data."],
       hubspotUrls: {
         contacts: "#", companies: "#", calls: "#", meetings: "#", tasks: "#", emails: "#", communications: "#", deals: "#",
@@ -87,10 +88,10 @@ export function createMockDashboard(from: string, to: string, ownerId: string): 
       hasOpenDeal: Number(score) >= 93, qualityIssues: ["hs_time_to_first_engagement"], priorityScore: Number(score), url: "#",
     })),
     recentActivities: [
-      { id: "whatsapp-1", type: "WhatsApp", subject: "WhatsApp message", status: "Logged", detail: "Shared the meeting availability and next steps.", assignedTo: "Marita Chedid", occurredAt: "2026-07-19T11:00:00Z", metricAt: "2026-07-19T11:00:00Z", dueAt: "", dueBucket: "", isOpen: false, isHighPriority: false, opened: false, clicked: false, replied: false, url: "#" },
-      { id: "call-1", type: "Call", subject: "Discovery call", status: "Connected", detail: "Connected", assignedTo: "Marita Chedid", occurredAt: "2026-07-19T10:30:00Z", metricAt: "2026-07-19T10:30:00Z", dueAt: "", dueBucket: "", isOpen: false, isHighPriority: false, opened: false, clicked: false, replied: false, url: "#" },
-      { id: "meeting-1", type: "Meeting", subject: "Talentera demo", status: "Completed", detail: "Meetings Public", assignedTo: "Marita Chedid", occurredAt: "2026-07-19T09:00:00Z", metricAt: "2026-07-19T09:00:00Z", dueAt: "", dueBucket: "", isOpen: false, isHighPriority: false, opened: false, clicked: false, replied: false, url: "#" },
-      { id: "task-1", type: "Task", subject: "Follow up with HR Director", status: "Not Started", detail: "High", assignedTo: "Marita Chedid", occurredAt: "2026-07-19T08:00:00Z", metricAt: "2026-07-19T08:00:00Z", dueAt: "2026-07-19T08:00:00Z", dueBucket: "Due today", isOpen: true, isHighPriority: true, opened: false, clicked: false, replied: false, url: "#" },
+      { id: "whatsapp-1", type: "WhatsApp", subject: "WhatsApp message", status: "Logged", detail: "Shared the meeting availability and next steps.", assignedTo: ownerName, occurredAt: "2026-07-19T11:00:00Z", metricAt: "2026-07-19T11:00:00Z", dueAt: "", dueBucket: "", isOpen: false, isHighPriority: false, opened: false, clicked: false, replied: false, url: "#" },
+      { id: "call-1", type: "Call", subject: "Discovery call", status: "Connected", detail: "Connected", assignedTo: ownerName, occurredAt: "2026-07-19T10:30:00Z", metricAt: "2026-07-19T10:30:00Z", dueAt: "", dueBucket: "", isOpen: false, isHighPriority: false, opened: false, clicked: false, replied: false, url: "#" },
+      { id: "meeting-1", type: "Meeting", subject: "Talentera demo", status: "Completed", detail: "Meetings Public", assignedTo: ownerName, occurredAt: "2026-07-19T09:00:00Z", metricAt: "2026-07-19T09:00:00Z", dueAt: "", dueBucket: "", isOpen: false, isHighPriority: false, opened: false, clicked: false, replied: false, url: "#" },
+      { id: "task-1", type: "Task", subject: "Follow up with HR Director", status: "Not Started", detail: "High", assignedTo: ownerName, occurredAt: "2026-07-19T08:00:00Z", metricAt: "2026-07-19T08:00:00Z", dueAt: "2026-07-19T08:00:00Z", dueBucket: "Due today", isOpen: true, isHighPriority: true, opened: false, clicked: false, replied: false, url: "#" },
     ],
     companies: [
       ["1", "Gulf Health Group", "gulfhealth.example", "Saudi Arabia", "Healthcare", "5000", "A", "Oracle HCM", 4],
@@ -110,7 +111,7 @@ export function createMockDashboard(from: string, to: string, ownerId: string): 
       latestSources: [{ value: "DIRECT_TRAFFIC", label: "Direct Traffic" }, { value: "EMAIL_MARKETING", label: "Email Marketing" }, { value: "OFFLINE", label: "Offline Sources" }, { value: "ORGANIC_SEARCH", label: "Organic Search" }],
       tiers: ["A", "B", "C"].map((value) => ({ value, label: `Tier ${value}` })),
       personas: ["CHRO", "HR Director", "Talent Acquisition"].map((value) => ({ value, label: value })),
-      owners: [{ id: ownerId, name: "Marita Chedid" }],
+      owners: [{ id: ownerId, name: ownerName }],
     },
   };
 }

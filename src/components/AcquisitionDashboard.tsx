@@ -19,13 +19,17 @@ import {
   UsersRound,
   type LucideIcon,
 } from "lucide-react";
+import dynamic from "next/dynamic";
+const SdrComparison = dynamic(() => import("@/components/SdrComparison").then(module => module.SdrComparison));
+import { SDR_OWNERS } from "@/lib/sdr-owners";
 import { AcquisitionDailyPulse } from "@/components/AcquisitionDailyPulse";
+import { Dashboard as SdrDashboard } from "@/components/DashboardMotion";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardShell";
 import { DrilldownDrawer, type Drilldown } from "@/components/DrilldownDrawer";
 import type { ActivityRow, DashboardData } from "@/lib/types";
 
-type AcquisitionOwnerKey = "marita" | "ursula" | "zein";
-type RepOwnerKey = Exclude<AcquisitionOwnerKey, "marita">;
+type AcquisitionOwnerKey = "marita" | "daniel" | "comparison" | "ursula" | "zein";
+type RepOwnerKey = "ursula" | "zein";
 
 type AcquisitionOwner = {
   key: AcquisitionOwnerKey;
@@ -60,6 +64,8 @@ const ACQUISITION_OWNERS: Record<AcquisitionOwnerKey, AcquisitionOwner> = {
     ownerId: "31644369",
     initials: "MC",
   },
+  daniel: { ...SDR_OWNERS.daniel },
+  comparison: { key: "comparison", name: "SDR Comparison", ownerId: "", initials: "SDR" },
   ursula: {
     key: "ursula",
     name: "Ursula Waked",
@@ -77,7 +83,7 @@ const ACQUISITION_OWNERS: Record<AcquisitionOwnerKey, AcquisitionOwner> = {
 function acquisitionOwnerFromUrl(): AcquisitionOwnerKey {
   if (typeof window === "undefined") return "marita";
   const value = new URLSearchParams(window.location.search).get("acq");
-  return value === "ursula" || value === "zein" ? value : "marita";
+  return value === "ursula" || value === "zein" || value === "daniel" || value === "comparison" ? value : "marita";
 }
 
 function repClientCacheKey(ownerId: string) {
@@ -105,7 +111,7 @@ function AcquisitionNav({
   onSelect: (owner: AcquisitionOwnerKey) => void;
 }) {
   return <>
-    <div className="nav-label">ACQUISITION</div>
+    <div className="nav-label">TEAM WORKSPACES</div>
     <nav>
       {(Object.values(ACQUISITION_OWNERS) as AcquisitionOwner[]).map((owner) => (
         <button
@@ -115,7 +121,7 @@ function AcquisitionNav({
           onClick={() => onSelect(owner.key)}
         >
           <UsersRound size={17}/>
-          <span>{owner.name.split(" ")[0]}</span>
+          <span>{owner.key === "comparison" ? "SDR Comparison" : owner.name.split(" ")[0]}{(owner.key === "marita" || owner.key === "daniel") && <small className="sdr-nav-brand">{SDR_OWNERS[owner.key].brand}</small>}</span>
           {activeOwner === owner.key && <ChevronRight size={15}/>} 
         </button>
       ))}
@@ -123,7 +129,7 @@ function AcquisitionNav({
   </>;
 }
 
-function SidebarAcquisitionPortal({ onSelect }: { onSelect: (owner: AcquisitionOwnerKey) => void }) {
+function SidebarAcquisitionPortal({ onSelect, ownerKey = "marita" }: { onSelect: (owner: AcquisitionOwnerKey) => void; ownerKey?: "marita" | "daniel" }) {
   const [target, setTarget] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -132,7 +138,7 @@ function SidebarAcquisitionPortal({ onSelect }: { onSelect: (owner: AcquisitionO
     let host: HTMLDivElement | null = null;
 
     const attach = () => {
-      const sidebar = document.querySelector<HTMLElement>("[data-marita-dashboard-host] .sidebar");
+      const sidebar = document.querySelector<HTMLElement>(`[data-sdr-host="${ownerKey}"] .sidebar`);
       if (!sidebar) {
         attempts += 1;
         if (attempts < 120) frame = window.requestAnimationFrame(attach);
@@ -158,10 +164,10 @@ function SidebarAcquisitionPortal({ onSelect }: { onSelect: (owner: AcquisitionO
       if (frame) window.cancelAnimationFrame(frame);
       if (host?.isConnected) host.remove();
     };
-  }, []);
+  }, [ownerKey]);
 
   if (!target) return null;
-  return createPortal(<AcquisitionNav activeOwner="marita" onSelect={onSelect}/>, target);
+  return createPortal(<AcquisitionNav activeOwner={ownerKey} onSelect={onSelect}/>, target);
 }
 
 function MetricButton({ label, value, helper, icon: Icon, tone, onClick }: MetricCard) {
@@ -399,10 +405,16 @@ export function AcquisitionDashboard() {
   }
 
   return <>
-    <div data-marita-dashboard-host hidden={activeOwner !== "marita"}>
-      <ExistingDashboard/>
+    <div data-sdr-host="marita" hidden={activeOwner !== "marita"}>
+      <ExistingDashboard active={activeOwner === "marita"}/>
       <SidebarAcquisitionPortal onSelect={selectOwner}/>
     </div>
+
+    {visitedOwners.has("daniel") && <div data-sdr-host="daniel" data-brand="evalufy" hidden={activeOwner !== "daniel"}>
+      <SdrDashboard sdr="daniel" active={activeOwner === "daniel"}/>
+      <SidebarAcquisitionPortal ownerKey="daniel" onSelect={selectOwner}/>
+    </div>}
+    {activeOwner === "comparison" && <SdrComparison onSelect={selectOwner}/>}
 
     {visitedOwners.has("ursula") ? <div hidden={activeOwner !== "ursula"}>
       <RepKpiDashboard ownerKey="ursula" onSelectOwner={selectOwner}/>

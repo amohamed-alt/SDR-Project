@@ -124,6 +124,8 @@ export function MaritaWorkspace({
   onOpen: (drilldown: Drilldown) => void;
   organizerId?: CalendarOrganizerId;
 }) {
+  const ownerName = data.meta.ownerName.split(" ")[0];
+  const bookingEnabled = data.meta.ownerId === "31644369";
   const [queueMode, setQueueMode] = useState<QueueMode>("tasks");
   const [selectedContacts, setSelectedContacts] = useState<MeetingContact[]>([]);
   const [contactEmail, setContactEmail] = useState("");
@@ -201,11 +203,11 @@ export function MaritaWorkspace({
       }
     }
 
-    void loadCalendarStatus();
+    if (bookingEnabled) void loadCalendarStatus();
     return () => {
       active = false;
     };
-  }, [calendarStatusUrl]);
+  }, [calendarStatusUrl, bookingEnabled]);
 
   useEffect(() => {
     if (
@@ -438,12 +440,12 @@ export function MaritaWorkspace({
 
   return <div className="marita-workspace">
     <section className="workspace-hero">
-      <div><span className="workspace-eyebrow"><Sparkles size={13}/>MARITA WORKSPACE</span><h2>Good morning, Marita</h2><p>Your online lead follow-up queue, live tasks, and meeting preparation in one place.</p></div>
+      <div><span className="workspace-eyebrow"><Sparkles size={13}/>{ownerName.toUpperCase()} WORKSPACE</span><h2>Welcome, {ownerName}</h2><p>Your online lead follow-up queue, live tasks, and meeting preparation in one place.</p></div>
       <div className={"calendar-connection" + (calendarStatus?.connected ? " connected" : "")}><span><i/>{organizer.shortName.toUpperCase()} · GOOGLE CALENDAR</span><strong>{calendarStatus?.connected ? "Connected" : calendarStatus ? calendarStatus.configured ? "Ready to connect" : "Server setup missing" : "Checking connection…"}</strong><small>{calendarStatus?.connected ? calendarStatus.email : calendarError || `${organizer.shortName} organizes · Sales rep + selected contacts receive the invite`}</small><div className="calendar-connection-actions">{calendarStatus?.configured && !calendarStatus.connected && <a href={calendarConnectUrl}>Connect calendar</a>}{calendarStatus?.connected && <button type="button" onClick={() => void disconnectCalendar()}>Disconnect</button>}</div></div>
     </section>
 
     <div className="workspace-stat-grid">
-      <WorkspaceStat icon={CalendarDays} label="Tasks due today" value={dueToday.length} helper="Open execution queue" tone="green" onClick={() => openActivities("Tasks due today", "Open tasks due today for Marita.", dueToday, data.meta.hubspotUrls.tasks)}/>
+      <WorkspaceStat icon={CalendarDays} label="Tasks due today" value={dueToday.length} helper="Open execution queue" tone="green" onClick={() => openActivities("Tasks due today", "Open tasks due today for the selected SDR.", dueToday, data.meta.hubspotUrls.tasks)}/>
       <WorkspaceStat icon={AlertTriangle} label="High-priority tasks" value={highPriorityTasks.length} helper="Needs attention" tone="purple" onClick={() => openActivities("High-priority tasks", "Open tasks marked High priority.", highPriorityTasks, data.meta.hubspotUrls.tasks)}/>
       <WorkspaceStat
   icon={Target}
@@ -451,7 +453,7 @@ export function MaritaWorkspace({
   value={onlineLeads.length}
   helper={`${untouchedOnlineLeads.length} not contacted`}
   tone="amber"
-  onClick={() => openContacts("Online leads", "Only Marita contacts whose Original Traffic Source is online. Offline Sources and unknown sources are excluded.", onlineLeads)}
+  onClick={() => openContacts("Online leads", "Only selected SDR contacts whose Original Traffic Source is online. Offline Sources and unknown sources are excluded.", onlineLeads)}
   helperOnClick={() => openContacts("Online leads not contacted", "Online leads with no logged Last Contacted value. Unqualified contacts are excluded.", untouchedOnlineLeads)}
 />
       <WorkspaceStat icon={Video} label="Meetings today" value={meetingsToday.length} helper={upcomingMeetings.length + " upcoming"} tone="blue" onClick={() => openActivities("Meetings today", "Scheduled meetings starting today.", meetingsToday, data.meta.hubspotUrls.meetings)}/>
@@ -470,17 +472,17 @@ export function MaritaWorkspace({
           {queueMode === "leads" && onlineLeads.slice(0, 7).map((row) => <LeadQueueItem key={row.id} row={row} timezone={data.meta.timezone}/>) }
           {queueMode === "meetings" && upcomingMeetings.slice(0, 7).map((row) => <MeetingQueueItem key={row.id} row={row} timezone={data.meta.timezone}/>) }
           {queueMode === "tasks" && !dueToday.length && <QueueEmpty label="No tasks due today" helper="You are clear for today’s task queue."/>}
-          {queueMode === "leads" && !onlineLeads.length && <QueueEmpty label="No online leads" helper="No contacts with an online Original Traffic Source are assigned to Marita."/>}
+          {queueMode === "leads" && !onlineLeads.length && <QueueEmpty label="No online leads" helper="No contacts with an online Original Traffic Source are assigned to this SDR."/>}
           {queueMode === "meetings" && !upcomingMeetings.length && <QueueEmpty label="No upcoming meetings" helper="Use the composer to prepare a new meeting."/>}
         </div>
         <button className="queue-view-all" onClick={() => {
           if (queueMode === "tasks") openActivities("Tasks due today", "All open tasks due today.", dueToday, data.meta.hubspotUrls.tasks);
-          if (queueMode === "leads") openContacts("Online leads", "Only Marita contacts whose Original Traffic Source is online, newest first.", onlineLeads);
+          if (queueMode === "leads") openContacts("Online leads", "Only selected SDR contacts whose Original Traffic Source is online, newest first.", onlineLeads);
           if (queueMode === "meetings") openActivities("Upcoming meetings", "All upcoming scheduled meetings.", upcomingMeetings, data.meta.hubspotUrls.meetings);
         }}>View full list<ChevronRight size={14}/></button>
       </section>
 
-      <section className="workspace-card meeting-composer">
+      {bookingEnabled ? <section className="workspace-card meeting-composer">
         <div className="workspace-card-heading"><div><span>MEETING COMPOSER</span><h3>Book a Google Meet for Sales</h3><p>Choose the Sales Rep and time. Their Google Free/Busy status is verified before preview and again before booking.</p></div><Video size={20}/></div>
         <form onSubmit={submitPreview}>
           <label><span>Sales Rep · Meeting owner</span><select value={selectedSalesOwnerId} onChange={(event) => { const ownerId = event.target.value; invalidateSchedule(); setSelectedSalesOwnerId(ownerId); if (ownerId === BASSAM_OWNER_ID) setIncludeBassamAsAttendee(false); }} required disabled={!salesOwners.length}><option value="">Select Sales Rep</option>{salesOwners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}{owner.email ? " · " + owner.email : ""}</option>)}</select></label>
@@ -535,11 +537,11 @@ export function MaritaWorkspace({
           {sendError && <div className="meeting-send-message error"><AlertTriangle size={14}/><span><strong>Meeting not created</strong>{sendError}</span></div>}
           {bookingResult && <div className="meeting-send-message success"><CheckCircle2 size={15}/><span><strong>Meeting created and invitations sent</strong>{bookingResult.salesOwner.name}, {bookingResult.contacts.map((contact) => contact.name).join(", ")}{bookingResult.bassamIncluded ? ", and Bassam Hamed" : ""} were invited.</span><div><a href={bookingResult.meetLink || bookingResult.calendarUrl} target="_blank" rel="noreferrer">Open Google Meet<ExternalLink size={11}/></a><a href={bookingResult.hubspotContactUrl} target="_blank" rel="noreferrer">{bookingResult.hubspotLinkLabel}<ExternalLink size={11}/></a></div></div>}
         </div>}
-      </section>
+      </section> : <section className="workspace-card meeting-composer"><div className="workspace-card-heading"><div><span>MEETINGS</span><h3>{ownerName}’s meeting activity</h3><p>Manage bookings in HubSpot. A dedicated calendar connection is required to send invitations from this workspace.</p></div><Video size={20}/></div><a className="secondary-button" href={data.meta.hubspotUrls.meetings} target="_blank" rel="noreferrer">Open HubSpot meetings</a></section>}
     </div>
 
     <section className="workspace-card priority-workspace">
-      <div className="workspace-card-heading"><div><span>ONLINE LEADS</span><h3>Newest online follow-up leads</h3><p>Only online-source contacts, ordered by when they reached Marita.</p></div><UserRound size={20}/></div>
+      <div className="workspace-card-heading"><div><span>ONLINE LEADS</span><h3>Newest online follow-up leads</h3><p>Only online-source contacts, ordered by when they entered the selected SDR portfolio.</p></div><UserRound size={20}/></div>
       <div className="priority-workspace-grid">{onlineLeads.slice(0, 8).map((row) => <PriorityLeadCard key={row.id} row={row}/>)}</div>
     </section>
   </div>;

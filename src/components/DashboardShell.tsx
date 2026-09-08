@@ -1,5 +1,7 @@
 "use client";
 
+import type { SdrDashboardProps } from "@/lib/sdr-owners";
+
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
@@ -65,7 +67,7 @@ function trackFeature(feature: string) {
   }));
 }
 
-export function Dashboard() {
+export function Dashboard({ sdr = "marita", active = true }: SdrDashboardProps) {
   const [view, setView] = useState<ShellView>("core");
   const [toolsOpen, setToolsOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -181,7 +183,7 @@ export function Dashboard() {
   if (view === "gtm-brain") return <TalenteraIntelligenceWorkspace onBack={() => changeView("core")}/>;
 
   return <div className={styles.shell}>
-    <ExistingDashboard/>
+    <ExistingDashboard sdr={sdr} active={active}/>
 
     <div className={styles.toolsDock} ref={toolsRef}>
       {toolsOpen ? (

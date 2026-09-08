@@ -10,6 +10,7 @@ export interface HubSpotRecord {
 
 export interface HubSpotOwner {
   id: string;
+  userId?: string;
   name: string;
   email?: string;
 }
