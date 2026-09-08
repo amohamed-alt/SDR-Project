@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { POST as pushProspect } from "@/app/api/prospecting/push/route";
-import { acquisitionOwners } from "@/lib/acquisition-routing";
+import { manualTaskOwners } from "@/lib/acquisition-routing";
 import { sdrAdminAuthorized } from "@/lib/sdr-admin-auth";
 
 export const runtime = "nodejs";
@@ -259,8 +259,8 @@ export async function POST(request: NextRequest) {
     const parsed = schema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: "Invalid manual push payload.", details: parsed.error.flatten() }, { status: 400 });
 
-    const owner = acquisitionOwners().find((item) => item.id === parsed.data.taskOwnerId);
-    if (!owner) return NextResponse.json({ error: "Select an enabled Acquisition task owner." }, { status: 400 });
+    const owner = manualTaskOwners().find((item) => item.id === parsed.data.taskOwnerId);
+    if (!owner) return NextResponse.json({ error: "Select an enabled SDR task owner." }, { status: 400 });
 
     const activeTriggers = parsed.data.triggers.filter((key) => !excludedTaskTriggers.has(key));
     const labels = activeTriggers.map((key) => triggerLabels[key]);
