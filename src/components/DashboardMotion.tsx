@@ -1,5 +1,7 @@
 "use client";
 
+import { SDR_OWNERS, type SdrDashboardProps, type SdrKey } from "@/lib/sdr-owners";
+
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
@@ -68,7 +70,7 @@ type MetricButtonProps = {
 
 const defaultStart = process.env.NEXT_PUBLIC_DEFAULT_START_DATE ?? new Date().toISOString().slice(0, 7) + "-01";
 const today = new Date().toISOString().slice(0, 10);
-const MARITA_OWNER_ID = "31644369";
+
 const GRID = "#dce7e2";
 const TICK = "#667a71";
 const INBOUND_COLORS = ["#087a50", "#14956a", "#1aa6a0", "#3a7de0", "#5d9ce8", "#8ab9ee"];
@@ -225,7 +227,7 @@ function FunnelPanel({
   </section>;
 }
 
-export function Dashboard() {
+export function Dashboard({ sdr = "marita", active = true }: SdrDashboardProps) {
   const [view, setView] = useState<ViewMode>("core");
 
   useEffect(() => {
@@ -241,17 +243,17 @@ export function Dashboard() {
     window.history.replaceState({}, "", url);
   }
 
-  if (view === "motion") return <MotionDashboard onBack={() => changeView("core")}/>;
+  if (view === "motion") return <MotionDashboard sdr={sdr} onBack={() => changeView("core")}/>;
 
   return <div className={styles.coreWrapper}>
-    <OriginalDashboard/>
+    <OriginalDashboard sdr={sdr} active={active}/>
     <button type="button" className={styles.motionLauncher} onClick={() => changeView("motion")}>
       <PhoneIncoming size={17}/>Inbound vs Outbound
     </button>
   </div>;
 }
 
-function MotionDashboard({ onBack }: { onBack: () => void }) {
+function MotionDashboard({ onBack, sdr }: { onBack: () => void; sdr: SdrKey }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [from, setFrom] = useState(defaultStart);
   const [to, setTo] = useState(today);
@@ -268,7 +270,7 @@ function MotionDashboard({ onBack }: { onBack: () => void }) {
       const query = new URLSearchParams({
         from: appliedRange.from,
         to: appliedRange.to,
-        ownerId: MARITA_OWNER_ID,
+        ownerId: SDR_OWNERS[sdr].ownerId,
       });
       if (refreshKey) query.set("refresh", "1");
       const response = await fetch(`/api/dashboard?${query.toString()}`, { cache: "no-store" });
@@ -280,7 +282,7 @@ function MotionDashboard({ onBack }: { onBack: () => void }) {
     } finally {
       setLoading(false);
     }
-  }, [appliedRange, refreshKey]);
+  }, [appliedRange, refreshKey, sdr]);
 
   useEffect(() => { void loadData(); }, [loadData]);
 
@@ -462,7 +464,7 @@ function MotionDashboard({ onBack }: { onBack: () => void }) {
     <header className={styles.topbar}>
       <div className={styles.titleGroup}>
         <button type="button" className={styles.backButton} onClick={onBack}><ArrowLeft size={15}/>Analytics Dashboard</button>
-        <div className={styles.titleText}><strong>Inbound vs Outbound Performance</strong><span>Live HubSpot activity attribution for Marita</span></div>
+        <div className={styles.titleText}><strong>Inbound vs Outbound Performance</strong><span>HubSpot activity attribution for {SDR_OWNERS[sdr].shortName}</span></div>
       </div>
       <div className={styles.topActions}>
         <label className={styles.dateField}><span>From</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)}/></label>

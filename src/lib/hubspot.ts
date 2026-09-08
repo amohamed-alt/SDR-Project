@@ -47,6 +47,8 @@ interface AssociationResponse {
 interface OwnersResponse {
   results: Array<{
     id: string;
+    userId?: number;
+    userIdIncludingInactive?: number;
     email?: string;
     firstName?: string;
     lastName?: string;
@@ -307,6 +309,7 @@ export async function listOwners(): Promise<HubSpotOwner[]> {
           id: String(owner.id),
           name: [owner.firstName, owner.lastName].filter(Boolean).join(" ") || owner.email || String(owner.id),
           email: owner.email,
+          userId: owner.userId != null ? String(owner.userId) : owner.userIdIncludingInactive != null ? String(owner.userIdIncludingInactive) : undefined,
         })),
       );
       after = response.paging?.next?.after;

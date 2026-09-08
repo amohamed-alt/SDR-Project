@@ -439,3 +439,21 @@ textarea:focus-visible {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* SDR identity follows the selected owner, with shared operational geometry. */
+[data-brand="evalufy"]{--bg:#f5f4fa;--surface-2:#f8f7fc;--sidebar:#230c65;--sidebar-soft:#372079;--green:#4714ce;--green-soft:#eeebfb;--text:#251c3b;--muted:#746d86;--border:#e2ddec;--border-soft:#eeeaf5;--teal:#07999f}
+[data-brand="evalufy"] .sidebar{background:var(--sidebar)}
+[data-brand="evalufy"] .sidebar nav button.active{background:#4a2c91;color:#fff}
+[data-brand="evalufy"] .sidebar .nav-label{color:#b8a5e7}
+[data-brand="evalufy"] .sidebar nav button{color:#e2daf5}
+[data-brand="evalufy"] .brand-subtitle{color:#cfbff2}
+[data-brand="evalufy"] .refresh-button,[data-brand="evalufy"] .primary-button{background:var(--green);border-color:var(--green)}
+.evalufy-logo{width:180px;max-width:100%;height:auto;border-radius:8px;background:#fff}
+.sdr-nav-brand{display:block;font-size:11px;opacity:.78;margin-top:3px;font-weight:400}
+.sidebar{overflow-y:auto;scrollbar-width:thin}
+.sidebar nav button{min-height:40px}
+.sidebar .nav-label{font-size:11px;letter-spacing:.09em;padding-top:18px}
+.sidebar nav button,.owner-card strong{font-size:13px}
+.kpi-card strong,.mini-metric strong{font-variant-numeric:tabular-nums}
+button:focus-visible,a:focus-visible{outline:3px solid #8f80c9;outline-offset:3px}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}

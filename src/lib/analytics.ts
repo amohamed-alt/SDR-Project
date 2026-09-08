@@ -1,3 +1,4 @@
+import { meetingCreatorId } from "@/lib/owner-attribution";
 import {
   BOOKING_MEETING_SOURCES,
   CALL_DISPOSITION_LABELS,
@@ -235,6 +236,9 @@ function activityFilters(ownerId: string, dateProperty: string, from: string, to
 
 export async function buildDashboard(filters: DashboardFilters): Promise<DashboardData> {
   const warnings: string[] = [];
+  const reportingOwners = await optional("Owners", warnings, () => listOwners(), [] as HubSpotOwner[]);
+  const creatorId = meetingCreatorId(reportingOwners, filters.ownerId);
+  if (!creatorId) warnings.push("Meeting creator mapping unavailable; meeting totals are incomplete.");
   const cohortFilterEnabled = Boolean(filters.country || filters.originalSource || filters.latestSource || filters.tier || filters.persona);
 
   const [
@@ -254,7 +258,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   ] = await Promise.all([
     searchAll("contacts", CONTACT_PROPERTIES, [{ propertyName: "sdr_owner", operator: "EQ", value: filters.ownerId }], ["createdate"]),
     optional("Calls", warnings, () => searchAll("calls", CALL_PROPERTIES, activityFilters(filters.ownerId, "hs_timestamp", filters.from, filters.to), ["hs_timestamp"]), []),
-    optional("Meetings", warnings, () => searchAll("meetings", MEETING_PROPERTIES, activityFilters(filters.ownerId, "hs_createdate", filters.from, filters.to, "hs_created_by_user_id"), ["hs_createdate"]), []),
+    optional("Meetings", warnings, () => creatorId ? searchAll("meetings", MEETING_PROPERTIES, activityFilters(creatorId, "hs_createdate", filters.from, filters.to, "hs_created_by_user_id"), ["hs_createdate"]) : Promise.resolve([]), []),
     optional("Tasks due", warnings, () => searchAll("tasks", TASK_PROPERTIES, activityFilters(filters.ownerId, "hs_timestamp", filters.from, filters.to), ["hs_timestamp"]), []),
     optional("Tasks completed", warnings, () => searchAll("tasks", TASK_PROPERTIES, activityFilters(filters.ownerId, "hs_task_completion_date", filters.from, filters.to), ["hs_task_completion_date"]), []),
     optional("Emails", warnings, () => searchAll("emails", EMAIL_PROPERTIES, activityFilters(filters.ownerId, "hs_timestamp", filters.from, filters.to), ["hs_timestamp"]), []),
@@ -262,7 +266,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       ...activityFilters(filters.ownerId, "hs_timestamp", filters.from, filters.to),
       { propertyName: "hs_communication_channel_type", operator: "EQ", value: "WHATS_APP" },
     ], ["hs_timestamp"]), []),
-    optional("Owners", warnings, () => listOwners(), [] as HubSpotOwner[]),
+    Promise.resolve(reportingOwners),
     optional("Deal stages", warnings, () => listDealStages(), new Map<string, string>()),
     optional("Contact property labels", warnings, () => getPropertyDefinitions("contacts", [
       "hs_analytics_source", "hs_latest_source", "hs_object_source_label", "hs_lead_status",

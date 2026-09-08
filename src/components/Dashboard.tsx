@@ -1,6 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import Image from "next/image";
+import { SDR_OWNERS, type SdrDashboardProps } from "@/lib/sdr-owners";
+import { useDashboard } from "@/hooks/use-dashboard";
+
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Activity, AlertTriangle, ArrowUpRight, BadgeCheck, BarChart3, BriefcaseBusiness,
   Building2, CalendarDays, CheckCircle2, ChevronRight, CircleDollarSign, Clock3, Database,
@@ -128,17 +132,15 @@ function FilterSelect({ label, value, options, onChange }: { label: string; valu
   return <label className="filter-field"><span>{label}</span><select value={value} onChange={(event) => onChange(event.target.value)}><option value="">All</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>;
 }
 
-export function Dashboard() {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+export function Dashboard({ sdr = "marita", active = true }: SdrDashboardProps) {
+  const owner = SDR_OWNERS[sdr];
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [pageMode, setPageMode] = useState<PageMode>("analytics");
   const [organizerId, setOrganizerId] = useState<CalendarOrganizerId>("marita");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [drilldown, setDrilldown] = useState<Drilldown | null>(null);
-  const [draft, setDraft] = useState<DashboardFilters>({ from: defaultStart, to: today, ownerId: "31644369" });
+  const [draft, setDraft] = useState<DashboardFilters>({ from: defaultStart, to: today, ownerId: owner.ownerId });
   const [applied, setApplied] = useState<DashboardFilters>(draft);
 
   // Return directly to Marita Workspace after the Google OAuth callback.
@@ -149,26 +151,7 @@ export function Dashboard() {
     setOrganizerId(calendarOrganizerId(query.get("organizer")));
   }, []);
 
-  const loadDashboard = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    const query = new URLSearchParams();
-    Object.entries(applied).forEach(([key, item]) => { if (item) query.set(key, item); });
-    if (refreshKey) query.set("refresh", "1");
-    try {
-      const response = await fetch("/api/dashboard?" + query.toString(), { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.details || payload.error || "Dashboard request failed");
-      setData(payload as DashboardData);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to load dashboard");
-    } finally {
-      setLoading(false);
-    }
-  }, [applied, refreshKey]);
-
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { void loadDashboard(); }, [loadDashboard]);
+  const { data, loading, error, refreshing } = useDashboard(applied, refreshKey, active);
 
   function showContacts(title: string, description: string, rows: ContactRow[]) {
     if (!data) return;
@@ -254,7 +237,7 @@ export function Dashboard() {
   }
 
   function resetFilters() {
-    const reset = { from: defaultStart, to: today, ownerId: "31644369" };
+    const reset = { from: defaultStart, to: today, ownerId: owner.ownerId };
     setDraft(reset);
     setApplied(reset);
   }
@@ -271,19 +254,19 @@ export function Dashboard() {
   ] : [];
 
   return <main className="app-shell">
-    <header className="topbar"><div className="top-title"><strong>SDR Command Center</strong><span>Live HubSpot performance & attribution</span></div><div className="top-actions"><span className={"status-pill " + (data?.meta.isDemo ? "demo" : "live")}><i/>{data?.meta.isDemo ? "Demo data" : "LIVE · HUBSPOT"}</span>{pageMode === "analytics" && <button className="icon-button" onClick={() => setFiltersOpen(!filtersOpen)} aria-label="Toggle filters"><Filter size={18}/></button>}<button className="refresh-button" onClick={() => setRefreshKey((key) => key + 1)} disabled={loading}><RefreshCw size={16} className={loading ? "spin" : ""}/>Refresh data</button></div></header>
+    <header className="topbar"><div className="top-title"><strong>SDR Command Center</strong><span>Live HubSpot performance & attribution</span></div><div className="top-actions"><span className={"status-pill " + (data?.meta.isDemo ? "demo" : "live")}><i/>{data?.meta.isDemo ? "Demo data" : refreshing ? "UPDATING · HUBSPOT" : "HUBSPOT SNAPSHOT"}</span>{pageMode === "analytics" && <button className="icon-button" onClick={() => setFiltersOpen(!filtersOpen)} aria-label="Toggle filters"><Filter size={18}/></button>}<button className="refresh-button" onClick={() => setRefreshKey((key) => key + 1)} disabled={loading}><RefreshCw size={16} className={loading ? "spin" : ""}/>Refresh data</button></div></header>
 
     <div className="workspace">
-      <aside className="sidebar"><div className="brand"><div className="brand-logo" role="img" aria-label="Talentera ATS"/><span className="brand-subtitle">SDR Intelligence</span></div><div className="nav-label">MAIN</div><nav>{tabs.map(({ id, label, icon: Icon }) => <button key={id} className={pageMode === "analytics" && activeTab === id ? "active" : ""} onClick={() => { setActiveTab(id); setPageMode("analytics"); }}><Icon size={17}/><span>{label}</span>{pageMode === "analytics" && activeTab === id && <ChevronRight size={15}/>}</button>)}</nav><div className="nav-label owner-label">SDR OWNER</div><div className="owner-card"><div className="avatar">MC</div><div><span>Reporting for</span><strong>{data?.meta.ownerName ?? "Marita Chedid"}</strong></div><BadgeCheck size={17}/></div><div className="sync-card"><Database size={18}/><div><strong>Last sync</strong><span>{data ? new Date(data.meta.generatedAt).toLocaleString("en-GB") : "Loading…"}</span></div></div></aside>
+      <aside className="sidebar"><div className="brand">{sdr === "daniel" ? <Image src="/evalufy-logo.png" alt="Evalufy" width={180} height={94} className="evalufy-logo" priority/> : <div className="brand-logo" role="img" aria-label="Talentera ATS"/>}<span className="brand-subtitle">SDR Intelligence</span></div><div className="nav-label">MAIN</div><nav>{tabs.map(({ id, label, icon: Icon }) => <button key={id} className={pageMode === "analytics" && activeTab === id ? "active" : ""} onClick={() => { setActiveTab(id); setPageMode("analytics"); }}><Icon size={17}/><span>{label}</span>{pageMode === "analytics" && activeTab === id && <ChevronRight size={15}/>}</button>)}</nav><div className="nav-label owner-label">SDR OWNER</div><div className="owner-card"><div className="avatar">{owner.initials}</div><div><span>Reporting for</span><strong>{data?.meta.ownerName ?? owner.name}</strong></div><BadgeCheck size={17}/></div><div className="sync-card"><Database size={18}/><div><strong>Last sync</strong><span>{data ? new Date(data.meta.generatedAt).toLocaleString("en-GB") : "Loading…"}</span></div></div></aside>
 
-      <div className="content"><div className="page-title"><div><span className="eyebrow">TALENTERA · SDR PERFORMANCE</span><h1>{pageMode === "workspace" ? "Marita Workspace" : tabs.find((tab) => tab.id === activeTab)?.label}</h1><p>{data ? pageMode === "workspace" ? "Daily execution center · Live HubSpot data" : shortDate(data.meta.from) + " – " + shortDate(data.meta.to) + " · " + data.meta.timezone : "Loading dashboard data…"}</p></div></div>
+      <div className="content"><div className="page-title"><div><span className="eyebrow">{owner.brand.toUpperCase()} · SDR PERFORMANCE</span><h1>{pageMode === "workspace" ? `${owner.shortName} Workspace` : tabs.find((tab) => tab.id === activeTab)?.label}</h1><p>{data ? pageMode === "workspace" ? "Daily execution center · Live HubSpot data" : shortDate(data.meta.from) + " – " + shortDate(data.meta.to) + " · " + data.meta.timezone : "Loading dashboard data…"}</p></div></div>
 
-        <div className="page-mode-tabs"><button className={pageMode === "analytics" ? "active" : ""} onClick={() => setPageMode("analytics")}><Gauge size={15}/><span>Analytics Dashboard</span></button><button className={pageMode === "workspace" ? "active" : ""} onClick={() => { setPageMode("workspace"); setFiltersOpen(false); }}><UsersRound size={15}/><span>Marita Workspace</span><i>NEW</i></button></div>
+        <div className="page-mode-tabs"><button className={pageMode === "analytics" ? "active" : ""} onClick={() => setPageMode("analytics")}><Gauge size={15}/><span>Analytics Dashboard</span></button><button className={pageMode === "workspace" ? "active" : ""} onClick={() => { setPageMode("workspace"); setFiltersOpen(false); }}><UsersRound size={15}/><span>{owner.shortName} Workspace</span></button></div>
 
         {pageMode === "analytics" && <div className={"filter-drawer " + (filtersOpen ? "open" : "")}><div className="preset-row"><span>Quick range</span><button onClick={() => setPreset("today")}>Today</button><button onClick={() => setPreset("week")}>This week</button><button onClick={() => setPreset("month")}>This month</button><button onClick={() => setPreset("sinceJuly")}>Since 1 July</button></div><div className="filter-grid"><label className="filter-field"><span>From</span><input type="date" value={draft.from} onChange={(event) => setDraft({ ...draft, from: event.target.value })}/></label><label className="filter-field"><span>To</span><input type="date" value={draft.to} onChange={(event) => setDraft({ ...draft, to: event.target.value })}/></label><FilterSelect label="Country" value={draft.country ?? ""} options={data?.filterOptions.countries ?? []} onChange={(country) => setDraft({ ...draft, country })}/><FilterSelect label="Original Traffic Source" value={draft.originalSource ?? ""} options={data?.filterOptions.originalSources ?? []} onChange={(originalSource) => setDraft({ ...draft, originalSource })}/><FilterSelect label="Latest Traffic Source" value={draft.latestSource ?? ""} options={data?.filterOptions.latestSources ?? []} onChange={(latestSource) => setDraft({ ...draft, latestSource })}/><FilterSelect label="ICP Tier" value={draft.tier ?? ""} options={data?.filterOptions.tiers ?? []} onChange={(tier) => setDraft({ ...draft, tier })}/><FilterSelect label="Persona" value={draft.persona ?? ""} options={data?.filterOptions.personas ?? []} onChange={(persona) => setDraft({ ...draft, persona })}/><div className="filter-actions"><button className="secondary-button" onClick={resetFilters}>Reset</button><button className="primary-button" onClick={() => setApplied(draft)}><Search size={15}/>Apply</button></div></div><p className="filter-note">Labels are loaded from HubSpot. Internal values are used only behind the scenes for filtering.</p></div>}
 
         {data?.meta.warnings.length ? <div className="warning-banner"><AlertTriangle size={17}/><div><strong>{data.meta.isDemo ? "Demo mode" : "Some HubSpot data sources were unavailable"}</strong><span>{data.meta.warnings.join(" · ")}</span></div></div> : null}
-        {error && <div className="error-banner"><AlertTriangle size={20}/><div><strong>Dashboard failed to load</strong><span>{error}</span></div><button onClick={() => void loadDashboard()}>Try again</button></div>}
+        {error && <div className="error-banner"><AlertTriangle size={20}/><div><strong>Dashboard failed to load</strong><span>{error}</span></div><button onClick={() => setRefreshKey(key => key + 1)}>Try again</button></div>}
 
         {data && pageMode === "workspace" && <MaritaWorkspace data={data} onOpen={setDrilldown} organizerId={organizerId}/>}
         {data && pageMode === "analytics" && <>

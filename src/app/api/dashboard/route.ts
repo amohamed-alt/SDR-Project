@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import { DEFAULT_SDR_OWNER_ID } from "@/lib/config";
 import { getDashboardSnapshot } from "@/lib/dashboard-snapshot";
 import { createMockDashboard } from "@/lib/mock-data";
@@ -58,13 +59,18 @@ export async function GET(request: NextRequest) {
         }
       : await getDashboardSnapshot(filters, params.get("refresh") === "1");
 
-    return compressedJsonResponse(request, snapshot.data, {
-        "Cache-Control": "private, max-age=0, must-revalidate, stale-while-revalidate=60",
-        "X-Dashboard-Cache-Version": "v7-fastapi-persistent",
-        "X-Dashboard-Cache": snapshot.cacheStatus,
-        "X-Dashboard-Snapshot-Age": String(snapshot.ageSeconds),
-        "X-Dashboard-Refreshing": snapshot.refreshing ? "1" : "0",
-    });
+    const etag = `W/"${createHash("sha256").update(JSON.stringify(filters) + snapshot.data.meta.generatedAt).digest("hex").slice(0, 32)}"`;
+    const headers = {
+      "Cache-Control": "private, max-age=0, must-revalidate",
+      "X-Dashboard-Cache-Version": "v8-dual-sdr",
+      "X-Dashboard-Cache": snapshot.cacheStatus,
+      "X-Dashboard-Snapshot-Age": String(snapshot.ageSeconds),
+      "X-Dashboard-Refreshing": snapshot.refreshing ? "1" : "0",
+      "ETag": etag,
+      "Vary": "Accept-Encoding",
+    };
+    if (request.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
+    return compressedJsonResponse(request, snapshot.data, headers);
   } catch (error) {
     console.error("Dashboard load failed", error);
     return NextResponse.json({

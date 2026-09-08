@@ -364,11 +364,14 @@ jobs:
     needs: [preflight, deploy]
     if: needs.preflight.outputs.should_deploy == 'true' && needs.deploy.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 1
+    timeout-minutes: 2
     env:
       DEPLOY_SHA: ${{ needs.preflight.outputs.deploy_sha }}
       HOST: sdr.dashboardtalentera.tech
     steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
       - name: Advisory public HTTPS check
         run: |
           set -u
@@ -392,3 +395,7 @@ jobs:
 
           echo "::warning::GitHub runner could not verify public 443. Hostinger deployment remains successful because the Hostinger action completed and 4/4 core containers are Up."
           exit 0
+
+      - name: Advisory owner isolation and warm API timing
+        continue-on-error: true
+        run: node scripts/dashboard-performance.mjs
