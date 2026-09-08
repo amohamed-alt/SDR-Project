@@ -1,53 +1,108 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, LayoutDashboard } from "lucide-react";
+import { BarChart3, MessageCircle, Sparkles, UserRound } from "lucide-react";
 import { AcquisitionDashboard } from "@/components/AcquisitionDashboard";
-import { SdrTeamCommandCenter } from "@/components/SdrTeamCommandCenter";
+import {
+  preloadSdrTeamData,
+  SdrTeamCommandCenter,
+  type SdrTeamView,
+} from "@/components/SdrTeamCommandCenter";
 import styles from "@/components/SdrCommandCenterRoot.module.css";
 
-type RootMode = "team" | "legacy";
+type RootMode = "marita" | SdrTeamView;
 
 function modeFromUrl(): RootMode {
-  if (typeof window === "undefined") return "team";
-  return new URLSearchParams(window.location.search).get("legacy") === "1" ? "legacy" : "team";
+  if (typeof window === "undefined") return "marita";
+  const value = new URLSearchParams(window.location.search).get("sdr");
+  if (value === "daniel" || value === "management") return value;
+  return "marita";
+}
+
+function modeLabel(mode: RootMode) {
+  if (mode === "daniel") return "Daniel · Evalufy";
+  if (mode === "management") return "Management";
+  return "Marita · Talentera";
 }
 
 export function SdrCommandCenterRoot() {
-  const [mode, setMode] = useState<RootMode>("team");
+  const [mode, setMode] = useState<RootMode>("marita");
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setMode(modeFromUrl()), 0);
-    return () => window.clearTimeout(timer);
+    const syncTimer = window.setTimeout(() => setMode(modeFromUrl()), 0);
+    const preloadTimer = window.setTimeout(() => void preloadSdrTeamData(), 250);
+    const onPopState = () => setMode(modeFromUrl());
+    window.addEventListener("popstate", onPopState);
+    return () => {
+      window.clearTimeout(syncTimer);
+      window.clearTimeout(preloadTimer);
+      window.removeEventListener("popstate", onPopState);
+    };
   }, []);
 
-  function openLegacy(ownerId: string) {
-    const url = new URL(window.location.href);
-    url.searchParams.set("legacy", "1");
-    url.searchParams.set("previewOwner", ownerId);
-    window.history.pushState({}, "", url);
-    setMode("legacy");
-  }
-
-  function openTeam() {
+  function changeMode(next: RootMode) {
     const url = new URL(window.location.href);
     url.searchParams.delete("legacy");
     url.searchParams.delete("previewOwner");
     url.searchParams.delete("acq");
     url.searchParams.delete("view");
+    if (next === "marita") url.searchParams.delete("sdr");
+    else url.searchParams.set("sdr", next);
     window.history.pushState({}, "", url);
-    setMode("team");
+    setMode(next);
+    window.dispatchEvent(new CustomEvent("sdr:usage", {
+      detail: { eventType: "feature_open", feature: `sdr-${next}` },
+    }));
   }
 
-  if (mode === "legacy") {
-    return <div className={styles.legacyWrap}>
-      <div className={styles.previewNotice}>
-        <div><LayoutDashboard size={17}/><span><strong>Preview mode</strong> · Existing production-style dashboard is available only for side-by-side comparison. This branch is not in production.</span></div>
-        <button type="button" onClick={openTeam}><ArrowLeft size={14}/>Back to new team dashboard</button>
+  return <div className={styles.root} data-sdr-mode={mode}>
+    {mode === "marita"
+      ? <AcquisitionDashboard/>
+      : <SdrTeamCommandCenter view={mode} onOpenMarita={() => changeMode("marita")}/>} 
+
+    <aside className={styles.switcher} aria-label="SDR workspace switcher">
+      <div className={styles.switcherHeader}>
+        <span><i/>SDR LIVE</span>
+        <strong>{modeLabel(mode)}</strong>
       </div>
-      <AcquisitionDashboard/>
-    </div>;
-  }
+      <div className={styles.switcherActions}>
+        <button
+          type="button"
+          className={mode === "marita" ? styles.activeMarita : ""}
+          onClick={() => changeMode("marita")}
+          aria-pressed={mode === "marita"}
+          title="Open Marita Talentera dashboard"
+        >
+          <span className={styles.personIcon}>MC</span>
+          <span><strong>Marita</strong><small>Talentera</small></span>
+        </button>
+        <button
+          type="button"
+          className={mode === "daniel" ? styles.activeDaniel : ""}
+          onClick={() => changeMode("daniel")}
+          aria-pressed={mode === "daniel"}
+          title="Open Daniel Evalufy workspace"
+        >
+          <span className={`${styles.personIcon} ${styles.danielIcon}`}>DB</span>
+          <span><strong>Daniel</strong><small>Evalufy</small></span>
+        </button>
+        <button
+          type="button"
+          className={mode === "management" ? styles.activeManagement : ""}
+          onClick={() => changeMode("management")}
+          aria-pressed={mode === "management"}
+          title="Open management overview"
+        >
+          <BarChart3 size={16}/>
+          <span><strong>Overview</strong><small>Management</small></span>
+        </button>
+      </div>
+      <div className={styles.switcherFooter}>
+        <span><MessageCircle size={12}/>WhatsApp enabled</span>
+        <span><Sparkles size={12}/>Prewarmed</span>
+      </div>
+    </aside>
 
-  return <SdrTeamCommandCenter onOpenAnalytics={openLegacy}/>;
+    <div className={styles.mobileModeBadge}><UserRound size={13}/>{modeLabel(mode)}</div>
+  </div>;
 }
