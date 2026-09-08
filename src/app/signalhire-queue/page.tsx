@@ -1,7 +1,7 @@
-import { LeadImportPushV2 } from "@/components/LeadImportPushV2";
+import { SalesNavPipeline } from "@/components/SalesNavPipeline";
 
 export const dynamic = "force-dynamic";
 
 export default function SignalHireQueuePage() {
-  return <LeadImportPushV2/>;
+  return <SalesNavPipeline/>;
 }
