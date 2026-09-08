@@ -4,6 +4,8 @@ import { dirname } from "node:path";
 
 const PAIRING_STORE = process.env.SALESNAV_COMPANION_STORE_PATH || "/app/data/salesnav-companion.json";
 const LATEST_BATCH_STORE = process.env.SALESNAV_COMPANION_BATCH_PATH || "/app/data/salesnav-companion-latest.json";
+const FULL_RUN_STORE = process.env.SALESNAV_COMPANION_FULL_RUN_PATH || "/app/data/salesnav-companion-full-run.json";
+const FULL_RUN_MAX_LEADS = 2500;
 
 export type CompanionLead = {
   name: string;
@@ -32,8 +34,27 @@ export type CompanionBatch = {
   leads: CompanionLead[];
 };
 
+export type CompanionFullRun = {
+  id: string;
+  startedAt: string;
+  updatedAt: string;
+  completedAt: string;
+  complete: boolean;
+  stopReason: string;
+  sourceUrl: string;
+  searchFingerprint: string;
+  pagesRead: number;
+  clientVersion?: string;
+  parserVersion?: string;
+  leads: CompanionLead[];
+};
+
 function sha256(value: string) {
   return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function leadKey(lead: CompanionLead) {
+  return lead.salesLeadUrl || lead.linkedinUrl || `${lead.name.toLowerCase()}:${lead.company.toLowerCase()}`;
 }
 
 async function atomicWrite(path: string, payload: string) {
@@ -105,4 +126,80 @@ export async function getLatestCompanionBatch(): Promise<CompanionBatch | null> 
   } catch {
     return null;
   }
+}
+
+export async function getLatestCompanionFullRun(): Promise<CompanionFullRun | null> {
+  try {
+    const parsed = JSON.parse(await readFile(/* turbopackIgnore: true */ FULL_RUN_STORE, "utf8")) as CompanionFullRun;
+    if (!parsed?.id || !Array.isArray(parsed.leads)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveCompanionFullRunPage(input: {
+  id: string;
+  sourceUrl: string;
+  searchFingerprint: string;
+  pageNumber: number;
+  clientVersion?: string;
+  parserVersion?: string;
+  leads: CompanionLead[];
+}) {
+  const now = new Date().toISOString();
+  const existing = await getLatestCompanionFullRun();
+  const sameRun = existing?.id === input.id;
+  const base: CompanionFullRun = sameRun && existing ? existing : {
+    id: input.id,
+    startedAt: now,
+    updatedAt: now,
+    completedAt: "",
+    complete: false,
+    stopReason: "",
+    sourceUrl: input.sourceUrl,
+    searchFingerprint: input.searchFingerprint,
+    pagesRead: 0,
+    clientVersion: input.clientVersion,
+    parserVersion: input.parserVersion,
+    leads: [],
+  };
+
+  const unique = new Map<string, CompanionLead>();
+  for (const lead of [...base.leads, ...input.leads]) {
+    const key = leadKey(lead);
+    if (!key || unique.has(key)) continue;
+    unique.set(key, lead);
+    if (unique.size >= FULL_RUN_MAX_LEADS) break;
+  }
+
+  const next: CompanionFullRun = {
+    ...base,
+    updatedAt: now,
+    complete: false,
+    stopReason: "",
+    sourceUrl: base.sourceUrl || input.sourceUrl,
+    searchFingerprint: base.searchFingerprint || input.searchFingerprint,
+    pagesRead: Math.max(base.pagesRead || 0, input.pageNumber),
+    clientVersion: input.clientVersion || base.clientVersion,
+    parserVersion: input.parserVersion || base.parserVersion,
+    leads: [...unique.values()],
+  };
+  await atomicWrite(FULL_RUN_STORE, JSON.stringify(next));
+  return next;
+}
+
+export async function finishCompanionFullRun(id: string, stopReason: string) {
+  const existing = await getLatestCompanionFullRun();
+  if (!existing || existing.id !== id) return null;
+  const now = new Date().toISOString();
+  const next: CompanionFullRun = {
+    ...existing,
+    complete: true,
+    completedAt: now,
+    updatedAt: now,
+    stopReason,
+  };
+  await atomicWrite(FULL_RUN_STORE, JSON.stringify(next));
+  return next;
 }
