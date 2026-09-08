@@ -22,6 +22,10 @@ const DEFAULT_OWNERS: AcquisitionOwner[] = [
   { id: "76369998", name: "Fadi Zanona", weight: 1 },
 ];
 
+const MANUAL_TASK_OWNER_OVERRIDES: AcquisitionOwner[] = [
+  { id: "37624223", name: "Daniel Beaini", weight: 1 },
+];
+
 function clean(value: unknown) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
@@ -54,6 +58,15 @@ export function acquisitionOwners() {
   return DEFAULT_OWNERS
     .filter((owner) => !allowed || allowed.has(owner.id))
     .map((owner) => ({ ...owner, weight: weights.get(owner.id) ?? owner.weight }));
+}
+
+export function manualTaskOwners() {
+  const owners = acquisitionOwners();
+  const includedIds = new Set(owners.map((owner) => owner.id));
+  return [
+    ...owners,
+    ...MANUAL_TASK_OWNER_OVERRIDES.filter((owner) => !includedIds.has(owner.id)),
+  ];
 }
 
 export function signalHirePersonaQuery(primaryPersona: string, secondaryPersona = "") {
