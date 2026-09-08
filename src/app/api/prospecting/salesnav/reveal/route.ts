@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
     const cached = await lookupSalesNavLead(lead);
     if (cached?.revealAttemptedAt) {
       if (cached.cachedProspect) {
-        const cachedProspect = cached.cachedProspect;
+        const cachedProspect: JsonObject = cached.cachedProspect;
         const precheckResponse = await hubspotPrecheck(requestLike(request, "/api/prospecting/signalhire/precheck", {
           name: cachedProspect.fullName || lead.name,
           company: cachedProspect.company || lead.company,
@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
       scoreReasons: baseProspect.scoreReasons || [],
     }));
     const intelPayload = await jsonFrom(intelResponse);
-    const prospect = {
+    const prospect: JsonObject = {
       ...baseProspect,
       ...(intelResponse.ok && intelPayload.patch && typeof intelPayload.patch === "object" ? intelPayload.patch as JsonObject : {}),
       source: "Sales Nav Full Search",
@@ -123,8 +123,6 @@ export async function POST(request: NextRequest) {
 
     await saveSalesNavReveal({ identity: lead, prospect, runId, attempted: true });
 
-    // Exact public LinkedIn/email/phone matching is repeated after reveal. This catches
-    // people Sales Navigator could not match before the public /in/ URL was known.
     const precheckResponse = await hubspotPrecheck(requestLike(request, "/api/prospecting/signalhire/precheck", {
       name: prospect.fullName || lead.name,
       company: prospect.company || lead.company,
