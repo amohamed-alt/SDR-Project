@@ -11,7 +11,7 @@
     <header>
       <div class="eyebrow">TALENTERA SDR</div>
       <h1>Prospecting Companion</h1>
-      <p>Reads only the Sales Navigator or SignalHire page you explicitly trigger. It never reads or exports browser cookies.</p>
+      <p>Sales Navigator is the lead source. Everything goes to one persistent SDR queue; SignalHire reveal stays manual.</p>
       <div id="versionStatus" class="status muted">Loading version…</div>
     </header>
 
@@ -28,27 +28,28 @@
     </section>
 
     <section class="card">
-      <h2>Extract Sales Nav search</h2>
-      <p class="small">Open a Sales Navigator People Search first. 1st-degree connections are filtered before import. Full capture saves every page to the dashboard before clicking Next, so progress survives a closed popup and can resume.</p>
-      <button id="extract25" class="primary">Extract current page</button>
-      <button id="extract50" class="primary">Extract up to 50 · 2 pages</button>
-      <button id="extractFull" class="primary">Capture full search · up to 2,500</button>
+      <h2>Sales Navigator → Persistent Queue</h2>
+      <p class="small">For normal prospecting use the full-search button below. It saves each page before moving to Next and can resume after the popup closes.</p>
+      <button id="extractFull" class="primary">Capture FULL search · up to 2,500</button>
+      <div id="fullRunStatus" class="status muted">Recommended · up to 100 pages / 2,500 leads</div>
+      <p class="small">Quick extracts are only for testing. They now go to the same persistent queue too.</p>
+      <button id="extract25" class="secondary">Quick test · current 25</button>
+      <button id="extract50" class="secondary">Quick test · up to 50</button>
       <div class="row">
-        <a class="secondaryLink" href="https://sdr.dashboardtalentera.tech/salesnav-full-run" target="_blank" rel="noreferrer">Open full-run queue</a>
-        <button id="resetFull" class="secondary">Reset saved progress</button>
+        <a class="secondaryLink" href="https://sdr.dashboardtalentera.tech/signalhire-queue" target="_blank" rel="noreferrer">Open persistent queue</a>
+        <button id="resetFull" class="secondary">Reset local resume state</button>
       </div>
       <div id="runStatus" class="status muted">Quick extract ready</div>
-      <div id="fullRunStatus" class="status muted">Full capture ready · up to 100 pages / 2,500 leads</div>
     </section>
 
     <section class="card">
-      <h2>Sync SignalHire Lead List</h2>
-      <p class="small">Open SignalHire → Lead Lists → Abdullah, then sync the current list. The dashboard checks HubSpot contacts and companies before spending another SignalHire enrichment call.</p>
-      <button id="extractSignalHire" class="primary">Sync current SignalHire list</button>
+      <h2>SignalHire Lead List</h2>
+      <p class="small">Use this only for an existing SignalHire list. Sales Nav remains the primary discovery source; contact reveal in the SDR queue is manual.</p>
+      <button id="extractSignalHire" class="secondary">Sync current SignalHire list</button>
       <div id="signalHireStatus" class="status muted">Ready</div>
     </section>
 
-    <footer>User-triggered · no cookie permission · no hidden profile fetches · full Sales Nav capture saves page-by-page and stops at 100 pages / 2,500 leads</footer>
+    <footer>User-triggered · no LinkedIn cookie permission · no hidden profile fetches · persistent queue is the single destination</footer>
   </main>
   <script src="popup.js"></script>
   <script src="popup-signalhire.js"></script>
