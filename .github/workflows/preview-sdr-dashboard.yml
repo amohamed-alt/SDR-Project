@@ -65,8 +65,77 @@ jobs:
             echo "Chrome/Chromium is not available on the runner" >&2
             exit 1
           fi
-          "$CHROME" --headless=new --no-sandbox --disable-gpu --hide-scrollbars --virtual-time-budget=9000 --window-size=1600,1200 --screenshot=preview-management-desktop.png http://127.0.0.1:3111/
-          "$CHROME" --headless=new --no-sandbox --disable-gpu --hide-scrollbars --virtual-time-budget=9000 --window-size=430,1100 --screenshot=preview-management-mobile.png http://127.0.0.1:3111/
+
+          "$CHROME" --headless=new --no-sandbox --disable-gpu --hide-scrollbars --remote-debugging-port=9222 --user-data-dir=/tmp/sdr-preview-chrome about:blank >/tmp/chrome.log 2>&1 &
+          for I in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:9222/json/version >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          cat >/tmp/capture-preview.mjs <<'EOF'
+          import { writeFileSync } from "node:fs";
+
+          const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+          const targets = await fetch("http://127.0.0.1:9222/json").then((response) => response.json());
+          const target = targets.find((item) => item.type === "page");
+          if (!target?.webSocketDebuggerUrl) throw new Error("No Chrome page target found");
+
+          const socket = new WebSocket(target.webSocketDebuggerUrl);
+          await new Promise((resolve, reject) => {
+            socket.addEventListener("open", resolve, { once: true });
+            socket.addEventListener("error", reject, { once: true });
+          });
+
+          let sequence = 0;
+          const pending = new Map();
+          socket.addEventListener("message", (event) => {
+            const message = JSON.parse(String(event.data));
+            if (!message.id || !pending.has(message.id)) return;
+            const { resolve, reject } = pending.get(message.id);
+            pending.delete(message.id);
+            if (message.error) reject(new Error(message.error.message));
+            else resolve(message.result || {});
+          });
+
+          function command(method, params = {}) {
+            const id = ++sequence;
+            socket.send(JSON.stringify({ id, method, params }));
+            return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+          }
+
+          async function screenshot(path, width, height) {
+            await command("Emulation.setDeviceMetricsOverride", {
+              width,
+              height,
+              deviceScaleFactor: 1,
+              mobile: width < 600,
+            });
+            await command("Page.reload", { ignoreCache: true });
+            await sleep(7500);
+            const result = await command("Page.captureScreenshot", {
+              format: "png",
+              fromSurface: true,
+              captureBeyondViewport: false,
+            });
+            writeFileSync(path, Buffer.from(result.data, "base64"));
+          }
+
+          await command("Page.enable");
+          await command("Runtime.enable");
+          await command("Emulation.setDeviceMetricsOverride", { width: 1600, height: 1200, deviceScaleFactor: 1, mobile: false });
+          await command("Page.navigate", { url: "http://127.0.0.1:3111/" });
+          await sleep(1800);
+          await command("Runtime.evaluate", {
+            expression: `localStorage.setItem("sdr_v2_visitor_name", "Preview Reviewer"); localStorage.setItem("sdr_v2_visitor_id", "preview_reviewer"); sessionStorage.setItem("sdr_v2_session_id", "preview_session");`,
+          });
+          await screenshot("preview-management-desktop.png", 1600, 1200);
+          await screenshot("preview-management-mobile.png", 430, 1100);
+          socket.close();
+          EOF
+
+          node /tmp/capture-preview.mjs
           test -s preview-management-desktop.png
           test -s preview-management-mobile.png
 
