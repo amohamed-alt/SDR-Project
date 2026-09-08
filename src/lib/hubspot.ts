@@ -174,7 +174,21 @@ async function hubspotRequest<T>(path: string, init: RequestInit = {}): Promise<
 
       if (response.ok) {
         if (response.status === 204) return undefined as T;
-        return (await response.json()) as T;
+        const body = await response.text();
+        if (!body.trim()) return undefined as T;
+        try {
+          return JSON.parse(body) as T;
+        } catch {
+          if (attempt < MAX_RETRIES) {
+            await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+            continue;
+          }
+          throw new HubSpotApiError(
+            `HubSpot returned a non-JSON response: ${path}`,
+            502,
+            body.slice(0, 1_000),
+          );
+        }
       }
 
       const body = await response.text();
