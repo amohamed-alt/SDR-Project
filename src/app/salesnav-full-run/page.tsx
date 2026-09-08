@@ -1,7 +1,7 @@
-import { SalesNavFullRunQueue } from "@/components/SalesNavFullRunQueue";
+import { SalesNavPipeline } from "@/components/SalesNavPipeline";
 
 export const dynamic = "force-dynamic";
 
 export default function SalesNavFullRunPage() {
-  return <SalesNavFullRunQueue />;
+  return <SalesNavPipeline/>;
 }
