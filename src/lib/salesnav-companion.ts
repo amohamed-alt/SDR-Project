@@ -1,10 +1,11 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { chmod, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 const PAIRING_STORE = process.env.SALESNAV_COMPANION_STORE_PATH || "/app/data/salesnav-companion.json";
 const LATEST_BATCH_STORE = process.env.SALESNAV_COMPANION_BATCH_PATH || "/app/data/salesnav-companion-latest.json";
 const FULL_RUN_STORE = process.env.SALESNAV_COMPANION_FULL_RUN_PATH || "/app/data/salesnav-companion-full-run.json";
+const FULL_RUN_HISTORY_DIR = process.env.SALESNAV_COMPANION_HISTORY_DIR || "/app/data/salesnav-full-runs";
 const FULL_RUN_MAX_LEADS = 2500;
 
 export type CompanionLead = {
@@ -49,12 +50,18 @@ export type CompanionFullRun = {
   leads: CompanionLead[];
 };
 
+export type CompanionFullRunSummary = Omit<CompanionFullRun, "leads"> & { total: number };
+
 function sha256(value: string) {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function leadKey(lead: CompanionLead) {
   return lead.salesLeadUrl || lead.linkedinUrl || `${lead.name.toLowerCase()}:${lead.company.toLowerCase()}`;
+}
+
+function historyPath(id: string) {
+  return join(FULL_RUN_HISTORY_DIR, `${id}.json`);
 }
 
 async function atomicWrite(path: string, payload: string) {
@@ -78,6 +85,24 @@ async function readPairingStore(): Promise<PairingStore | null> {
   } catch {
     return null;
   }
+}
+
+async function readFullRun(path: string): Promise<CompanionFullRun | null> {
+  try {
+    const parsed = JSON.parse(await readFile(/* turbopackIgnore: true */ path, "utf8")) as CompanionFullRun;
+    if (!parsed?.id || !Array.isArray(parsed.leads)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function persistFullRun(run: CompanionFullRun) {
+  const payload = JSON.stringify(run);
+  await Promise.all([
+    atomicWrite(FULL_RUN_STORE, payload),
+    atomicWrite(historyPath(run.id), payload),
+  ]);
 }
 
 export async function companionStatus() {
@@ -129,13 +154,44 @@ export async function getLatestCompanionBatch(): Promise<CompanionBatch | null> 
 }
 
 export async function getLatestCompanionFullRun(): Promise<CompanionFullRun | null> {
+  return readFullRun(FULL_RUN_STORE);
+}
+
+export async function getCompanionFullRun(id: string): Promise<CompanionFullRun | null> {
+  const direct = await readFullRun(historyPath(id));
+  if (direct) return direct;
+  const latest = await getLatestCompanionFullRun();
+  return latest?.id === id ? latest : null;
+}
+
+export async function listCompanionFullRuns(limit = 50): Promise<CompanionFullRunSummary[]> {
+  const summaries: CompanionFullRunSummary[] = [];
+  const seen = new Set<string>();
   try {
-    const parsed = JSON.parse(await readFile(/* turbopackIgnore: true */ FULL_RUN_STORE, "utf8")) as CompanionFullRun;
-    if (!parsed?.id || !Array.isArray(parsed.leads)) return null;
-    return parsed;
+    await mkdir(/* turbopackIgnore: true */ FULL_RUN_HISTORY_DIR, { recursive: true });
+    const files = (await readdir(/* turbopackIgnore: true */ FULL_RUN_HISTORY_DIR))
+      .filter((name) => name.endsWith(".json"))
+      .slice(-Math.max(limit * 3, limit));
+    for (const file of files) {
+      const run = await readFullRun(join(FULL_RUN_HISTORY_DIR, file));
+      if (!run || seen.has(run.id)) continue;
+      seen.add(run.id);
+      const { leads, ...rest } = run;
+      summaries.push({ ...rest, total: leads.length });
+    }
   } catch {
-    return null;
+    // History is additive. Fall back to latest for old deployments/migrations.
   }
+
+  const latest = await getLatestCompanionFullRun();
+  if (latest && !seen.has(latest.id)) {
+    const { leads, ...rest } = latest;
+    summaries.push({ ...rest, total: leads.length });
+  }
+
+  return summaries
+    .sort((a, b) => Date.parse(b.updatedAt || b.startedAt) - Date.parse(a.updatedAt || a.startedAt))
+    .slice(0, Math.max(1, limit));
 }
 
 export async function saveCompanionFullRunPage(input: {
@@ -148,9 +204,8 @@ export async function saveCompanionFullRunPage(input: {
   leads: CompanionLead[];
 }) {
   const now = new Date().toISOString();
-  const existing = await getLatestCompanionFullRun();
-  const sameRun = existing?.id === input.id;
-  const base: CompanionFullRun = sameRun && existing ? existing : {
+  const existing = await getCompanionFullRun(input.id);
+  const base: CompanionFullRun = existing || {
     id: input.id,
     startedAt: now,
     updatedAt: now,
@@ -185,13 +240,13 @@ export async function saveCompanionFullRunPage(input: {
     parserVersion: input.parserVersion || base.parserVersion,
     leads: [...unique.values()],
   };
-  await atomicWrite(FULL_RUN_STORE, JSON.stringify(next));
+  await persistFullRun(next);
   return next;
 }
 
 export async function finishCompanionFullRun(id: string, stopReason: string) {
-  const existing = await getLatestCompanionFullRun();
-  if (!existing || existing.id !== id) return null;
+  const existing = await getCompanionFullRun(id);
+  if (!existing) return null;
   const now = new Date().toISOString();
   const next: CompanionFullRun = {
     ...existing,
@@ -200,6 +255,6 @@ export async function finishCompanionFullRun(id: string, stopReason: string) {
     updatedAt: now,
     stopReason,
   };
-  await atomicWrite(FULL_RUN_STORE, JSON.stringify(next));
+  await persistFullRun(next);
   return next;
 }
