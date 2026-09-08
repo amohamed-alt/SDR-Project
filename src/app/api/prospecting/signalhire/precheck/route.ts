@@ -11,8 +11,6 @@ const CONNECTED_CALL_DISPOSITIONS = new Set([
   "2e7360c1-6b71-40e9-ab2b-30ae98a4678c", // Meeting booked
 ]);
 const MEANINGFUL_MEETING_OUTCOMES = new Set(["SCHEDULED", "COMPLETED", "RESCHEDULED"]);
-const ENGAGEMENT_BLOCK_WINDOW_DAYS = 60;
-const ENGAGEMENT_BLOCK_WINDOW_MS = ENGAGEMENT_BLOCK_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 const MAX_CONTACTS_PER_COMPANY_SCAN = 100;
 const ENGAGEMENT_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -72,8 +70,8 @@ function unique(values: string[]) {
   });
 }
 
-function hasUsablePhone(values: string[]) {
-  return unique(values).some((value) => /\d{6,}/.test(value.replace(/\D/g, "")));
+function normalizeText(value: unknown) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9\u0600-\u06ff]+/g, " ").trim();
 }
 
 function workDomain(emails: string[]) {
@@ -92,11 +90,6 @@ function latestIso(values: Array<string | undefined>) {
     if (Number.isFinite(parsed)) latest = Math.max(latest, parsed);
   }
   return latest ? new Date(latest).toISOString() : "";
-}
-
-function timestampMs(value: unknown) {
-  const parsed = Date.parse(String(value || ""));
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 async function safeAssociations(fromObjectType: string, toObjectType: string, fromIds: string[]) {
@@ -134,17 +127,13 @@ async function scanCompanyEngagement(companyId: string): Promise<EngagementCheck
       batchRead("meetings", [...meetingIds], ["hs_meeting_outcome", "hs_meeting_title", "hs_meeting_start_time", "hs_timestamp"]),
     ]);
 
-    // Company engagement is a recency guard, not a permanent lifetime block.
-    // Historical calls/meetings older than 60 days remain in HubSpot but no longer
-    // prevent prospecting a genuinely new person at an Acquisition account.
-    const engagementCutoff = Date.now() - ENGAGEMENT_BLOCK_WINDOW_MS;
+    // For this prospecting gate, a meaningful meeting at any time is a hard blocker.
+    // A connected call without a meeting is explicitly allowed and remains visible as context.
     const connectedCalls = calls.filter((call) =>
-      CONNECTED_CALL_DISPOSITIONS.has(String(call.properties.hs_call_disposition || ""))
-      && timestampMs(call.properties.hs_timestamp) >= engagementCutoff);
+      CONNECTED_CALL_DISPOSITIONS.has(String(call.properties.hs_call_disposition || "")));
     const meaningfulMeetings = meetings.filter((meeting) => {
       const outcome = String(meeting.properties.hs_meeting_outcome || "").toUpperCase();
-      const happenedAt = meeting.properties.hs_meeting_start_time || meeting.properties.hs_timestamp;
-      return MEANINGFUL_MEETING_OUTCOMES.has(outcome) && timestampMs(happenedAt) >= engagementCutoff;
+      return MEANINGFUL_MEETING_OUTCOMES.has(outcome);
     });
     const latestConnectedCallAt = latestIso(connectedCalls.map((call) => String(call.properties.hs_timestamp || "")));
     const latestMeetingAt = latestIso(meaningfulMeetings.map((meeting) => String(meeting.properties.hs_meeting_start_time || meeting.properties.hs_timestamp || "")));
@@ -152,8 +141,8 @@ async function scanCompanyEngagement(companyId: string): Promise<EngagementCheck
     const engaged = connectedCalls.length > 0 || meaningfulMeetings.length > 0;
 
     const reasonParts: string[] = [];
-    if (connectedCalls.length) reasonParts.push(`${connectedCalls.length} recent connected call${connectedCalls.length === 1 ? "" : "s"}`);
-    if (meaningfulMeetings.length) reasonParts.push(`${meaningfulMeetings.length} recent meeting${meaningfulMeetings.length === 1 ? "" : "s"}`);
+    if (connectedCalls.length) reasonParts.push(`${connectedCalls.length} connected call${connectedCalls.length === 1 ? "" : "s"}`);
+    if (meaningfulMeetings.length) reasonParts.push(`${meaningfulMeetings.length} meeting${meaningfulMeetings.length === 1 ? "" : "s"}`);
 
     if (!engaged && allContactIds.length > MAX_CONTACTS_PER_COMPANY_SCAN) {
       return {
@@ -227,10 +216,31 @@ async function contactCheck(input: z.infer<typeof schema>) {
     if (mobile[0]) return { inHubSpot: true, id: String(mobile[0].id), matchedBy: "mobilephone", properties: mobile[0].properties };
   }
 
+  // Sales Navigator often exposes no email/phone/public /in/ URL. Use a conservative
+  // name + company fallback so we can still avoid revealing a person already in HubSpot.
+  const nameParts = input.name.split(/\s+/).filter(Boolean);
+  if (nameParts.length >= 2) {
+    const firstname = nameParts[0];
+    const lastname = nameParts[nameParts.length - 1];
+    const matches = await searchAll("contacts", props, [
+      { propertyName: "firstname", operator: "EQ", value: firstname },
+      { propertyName: "lastname", operator: "EQ", value: lastname },
+    ]);
+    const targetCompany = normalizeText(input.company);
+    const compatible = matches.find((match) => {
+      if (!targetCompany) return matches.length === 1;
+      const existingCompany = normalizeText(match.properties.company);
+      return existingCompany === targetCompany
+        || existingCompany.includes(targetCompany)
+        || targetCompany.includes(existingCompany);
+    });
+    if (compatible) return { inHubSpot: true, id: String(compatible.id), matchedBy: "name+company", properties: compatible.properties };
+  }
+
   return { inHubSpot: false, id: "", matchedBy: "", properties: {} as Record<string, unknown> };
 }
 
-async function companyCheck(input: z.infer<typeof schema>, shouldCheckEngagement: boolean) {
+async function companyCheck(input: z.infer<typeof schema>) {
   const properties = [
     "name", "domain", "account_type", "account_status", "hs_num_open_deals", "search_status",
     "detected_ats", "ats_status", "career_page_url", "hs_lead_status", "hubspot_owner_id",
@@ -263,21 +273,14 @@ async function companyCheck(input: z.infer<typeof schema>, shouldCheckEngagement
   const accountType = String(p.account_type || "").trim();
   const accountStatus = String(p.account_status || "").trim();
   const openDeals = Math.max(0, Number(p.hs_num_open_deals || 0) || 0);
-  const retentionAccount = accountType.toLowerCase() === "retention";
-
-  // An open Acquisition deal is a warning, not a hard block. For a genuinely new
-  // person we still scan the company's recent connected calls / meaningful meetings.
-  // Retention remains protected, and an unknown engagement result remains blocked.
-  const engagement = shouldCheckEngagement && !retentionAccount
-    ? await companyEngagementCheck(String(match.id))
-    : emptyEngagement(false);
-  const crmProtectedReason = retentionAccount
-    ? `Retention account${accountStatus ? ` · ${accountStatus}` : ""}`
-    : "";
-  const engagementUnknown = shouldCheckEngagement && !retentionAccount && !engagement.checked;
-  const protectedReason = crmProtectedReason || (engagementUnknown
-    ? engagement.error || engagement.reason || "Company engagement could not be verified. Review before Push."
-    : "");
+  const engagement = await companyEngagementCheck(String(match.id));
+  const engagementUnknown = !engagement.checked;
+  const hasMeeting = engagement.meetingCount > 0;
+  const protectedReason = hasMeeting
+    ? `${engagement.meetingCount} existing meeting${engagement.meetingCount === 1 ? "" : "s"}${engagement.latestMeetingAt ? ` · latest ${engagement.latestMeetingAt}` : ""}`
+    : engagementUnknown
+      ? engagement.error || engagement.reason || "Company engagement could not be verified. Review before Push."
+      : "";
 
   return {
     inHubSpot: true,
@@ -303,7 +306,7 @@ async function companyCheck(input: z.infer<typeof schema>, shouldCheckEngagement
     latestMeetingAt: engagement.latestMeetingAt,
     latestEngagementAt: engagement.latestEngagementAt,
     engagementReason: engagement.reason,
-    protected: Boolean(retentionAccount || engagementUnknown),
+    protected: Boolean(hasMeeting || engagementUnknown),
     protectedReason,
   };
 }
@@ -316,14 +319,14 @@ export async function POST(request: NextRequest) {
     if (!parsed.data.name) {
       return NextResponse.json({ error: "Missing person name — review before Push." }, { status: 422 });
     }
-    if (!hasUsablePhone([parsed.data.phone, ...parsed.data.phones])) {
-      return NextResponse.json({ error: "No phone number — not ready to Push." }, { status: 422 });
-    }
 
-    // Existing people are decisive: do not run a company-wide activity scan for rows
-    // that will be skipped anyway. This keeps CSV dry-runs responsive and reduces HubSpot load.
-    const contact = await contactCheck(parsed.data);
-    const company = await companyCheck(parsed.data, !contact.inHubSpot);
+    // This is intentionally a pre-reveal gate. Phone/email are optional here: HubSpot
+    // must be checked first so existing contacts and meeting-blocked companies do not
+    // burn a SignalHire contact credit unnecessarily.
+    const [contact, company] = await Promise.all([
+      contactCheck(parsed.data),
+      companyCheck(parsed.data),
+    ]);
 
     return NextResponse.json({ contact, company, checkedAt: new Date().toISOString() }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

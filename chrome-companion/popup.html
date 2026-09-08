@@ -28,11 +28,17 @@
     </section>
 
     <section class="card">
-      <h2>Extract current Sales Nav search</h2>
-      <p class="small">Open a Sales Navigator People Search first. 1st-degree connections are filtered before import. Missing public /in/ URLs are resolved by SignalHire after import instead of hidden LinkedIn profile requests.</p>
+      <h2>Extract Sales Nav search</h2>
+      <p class="small">Open a Sales Navigator People Search first. 1st-degree connections are filtered before import. Full capture saves every page to the dashboard before clicking Next, so progress survives a closed popup and can resume.</p>
       <button id="extract25" class="primary">Extract current page</button>
       <button id="extract50" class="primary">Extract up to 50 · 2 pages</button>
-      <div id="runStatus" class="status muted">Ready</div>
+      <button id="extractFull" class="primary">Capture full search · up to 2,500</button>
+      <div class="row">
+        <a class="secondaryLink" href="https://sdr.dashboardtalentera.tech/salesnav-full-run" target="_blank" rel="noreferrer">Open full-run queue</a>
+        <button id="resetFull" class="secondary">Reset saved progress</button>
+      </div>
+      <div id="runStatus" class="status muted">Quick extract ready</div>
+      <div id="fullRunStatus" class="status muted">Full capture ready · up to 100 pages / 2,500 leads</div>
     </section>
 
     <section class="card">
@@ -42,7 +48,7 @@
       <div id="signalHireStatus" class="status muted">Ready</div>
     </section>
 
-    <footer>User-triggered only · no cookie permission · no hidden profile fetches · no background crawler</footer>
+    <footer>User-triggered · no cookie permission · no hidden profile fetches · full Sales Nav capture saves page-by-page and stops at 100 pages / 2,500 leads</footer>
   </main>
   <script src="popup.js"></script>
   <script src="popup-signalhire.js"></script>

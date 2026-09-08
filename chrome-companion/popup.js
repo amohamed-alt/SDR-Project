@@ -1,7 +1,11 @@
 const $ = (id) => document.getElementById(id);
 const DEFAULT_DASHBOARD = 'https://sdr.dashboardtalentera.tech';
 const CLIENT_VERSION = chrome.runtime.getManifest().version;
-const PARSER_VERSION = 'card-v2';
+const PARSER_VERSION = 'card-v3-full-search';
+const FULL_RUN_KEY = 'salesNavFullRunV1';
+const FULL_RUN_MAX_PAGES = 100;
+const FULL_RUN_MAX_LEADS = 2500;
+const FULL_RUN_PAGE_WAIT_MS = 2200;
 
 function setStatus(id, message, state = 'muted') {
   const node = $(id);
@@ -20,11 +24,49 @@ function cleanDashboard(raw) {
   }
 }
 
+function searchFingerprint(raw) {
+  try {
+    const url = new URL(String(raw || ''));
+    ['page', 'start', 'offset'].forEach((key) => url.searchParams.delete(key));
+    url.hash = '';
+    return `${url.origin}${url.pathname}?${[...url.searchParams.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join('&')}`;
+  } catch {
+    return String(raw || '').trim();
+  }
+}
+
+function leadKey(lead) {
+  return lead.salesLeadUrl || lead.linkedinUrl || `${String(lead.name || '').toLowerCase()}:${String(lead.company || '').toLowerCase()}`;
+}
+
+function compactLead(lead) {
+  return {
+    name: String(lead.name || '').trim(),
+    title: String(lead.title || '').trim(),
+    company: String(lead.company || '').trim(),
+    location: String(lead.location || '').trim(),
+    connectionDegree: String(lead.connectionDegree || '').trim(),
+    salesLeadUrl: String(lead.salesLeadUrl || '').trim(),
+    linkedinUrl: String(lead.linkedinUrl || '').trim(),
+  };
+}
+
+function pageSignature(leads) {
+  return (leads || []).slice(0, 5).map(leadKey).join('|');
+}
+
 async function loadSettings() {
-  const stored = await chrome.storage.local.get(['dashboardUrl', 'pairingToken']);
+  const stored = await chrome.storage.local.get(['dashboardUrl', 'pairingToken', FULL_RUN_KEY]);
   $('dashboard').value = cleanDashboard(stored.dashboardUrl || DEFAULT_DASHBOARD);
   $('token').value = stored.pairingToken || '';
   setStatus('versionStatus', `Companion v${CLIENT_VERSION} · parser ${PARSER_VERSION}`);
+  const run = stored[FULL_RUN_KEY];
+  if (run && !run.complete) {
+    $('extractFull').textContent = `Resume full search · ${Number(run.pagesRead || 0)} pages / ${Number(run.total || 0)} leads`;
+    setStatus('fullRunStatus', `Saved run ready to resume · ${Number(run.pagesRead || 0)} pages · ${Number(run.total || 0)} unique leads.`);
+  } else if (run?.complete) {
+    setStatus('fullRunStatus', `Last full run finished · ${Number(run.pagesRead || 0)} pages · ${Number(run.total || 0)} unique leads.`, 'ok');
+  }
 }
 
 async function saveSettings() {
@@ -223,7 +265,24 @@ async function extractCurrentSalesNavPage() {
 }
 
 function clickSalesNavPager(direction) {
-  const label = direction === 'next' ? /next/i : /previous|prev/i;
+  const nextMode = direction === 'next';
+  const preferred = nextMode
+    ? ['button[aria-label*="Next" i]', 'button[data-control-name*="next" i]', 'button[class*="pagination"]']
+    : ['button[aria-label*="Previous" i]', 'button[aria-label*="Prev" i]'];
+  for (const selector of preferred) {
+    const matches = [...document.querySelectorAll(selector)];
+    const candidate = matches.find((node) => {
+      if (!(node instanceof HTMLButtonElement) || node.disabled) return false;
+      const aria = String(node.getAttribute('aria-label') || '');
+      const text = String(node.innerText || '').trim();
+      return nextMode ? /next/i.test(`${aria} ${text}`) : /previous|prev/i.test(`${aria} ${text}`);
+    });
+    if (candidate) {
+      candidate.click();
+      return true;
+    }
+  }
+  const label = nextMode ? /next/i : /previous|prev/i;
   const buttons = [...document.querySelectorAll('button')];
   const button = buttons.find((node) => {
     const aria = String(node.getAttribute('aria-label') || '');
@@ -258,13 +317,13 @@ async function clickPager(tabId, direction) {
   return Boolean(result?.[0]?.result);
 }
 
-function dedupe(leads) {
+function dedupe(leads, limit = 50) {
   const map = new Map();
   for (const lead of leads) {
-    const key = lead.salesLeadUrl || lead.linkedinUrl || `${lead.name}:${lead.company}`;
+    const key = leadKey(lead);
     if (!map.has(key)) map.set(key, lead);
   }
-  return [...map.values()].slice(0, 50);
+  return [...map.values()].slice(0, limit);
 }
 
 async function importBatch(leads, sourceUrl, pagesRead) {
@@ -291,9 +350,53 @@ async function importBatch(leads, sourceUrl, pagesRead) {
   return payload;
 }
 
+async function postFullRunPage({ runId, sourceUrl, fingerprint, pageNumber, leads }) {
+  const { dashboardUrl, pairingToken } = await settings();
+  if (!pairingToken) throw new Error('Pair the companion with the SDR Dashboard first.');
+  const response = await fetch(`${dashboardUrl}/api/prospecting/salesnav/companion`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${pairingToken}`,
+      'Content-Type': 'application/json',
+      'X-Companion-Version': CLIENT_VERSION,
+    },
+    body: JSON.stringify({
+      action: 'full_run_page',
+      runId,
+      sourceUrl,
+      searchFingerprint: fingerprint,
+      pageNumber,
+      clientVersion: CLIENT_VERSION,
+      parserVersion: PARSER_VERSION,
+      leads: leads.map(compactLead),
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.ok) throw new Error(payload.error || `Dashboard returned HTTP ${response.status}`);
+  return payload;
+}
+
+async function finishFullRun(runId, stopReason) {
+  const { dashboardUrl, pairingToken } = await settings();
+  if (!pairingToken) throw new Error('Pair the companion with the SDR Dashboard first.');
+  const response = await fetch(`${dashboardUrl}/api/prospecting/salesnav/companion`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${pairingToken}`,
+      'Content-Type': 'application/json',
+      'X-Companion-Version': CLIENT_VERSION,
+    },
+    body: JSON.stringify({ action: 'full_run_finish', runId, stopReason }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.ok) throw new Error(payload.error || `Dashboard returned HTTP ${response.status}`);
+  return payload;
+}
+
 async function run(twoPages) {
   $('extract25').disabled = true;
   $('extract50').disabled = true;
+  $('extractFull').disabled = true;
   setStatus('runStatus', 'Reading the visible Sales Navigator result cards…');
   try {
     const tab = await activeTab();
@@ -306,7 +409,7 @@ async function run(twoPages) {
       setStatus('runStatus', `Page 1: ${leads.length}. Moving to page 2…`);
       const moved = await clickPager(tab.id, 'next');
       if (moved) {
-        await new Promise((resolve) => setTimeout(resolve, 2200));
+        await new Promise((resolve) => setTimeout(resolve, FULL_RUN_PAGE_WAIT_MS));
         const second = await extractPage(tab.id);
         if (second.ok) {
           leads = dedupe([...leads, ...(second.leads || [])]);
@@ -324,17 +427,134 @@ async function run(twoPages) {
     const withCompany = clean.filter((lead) => Boolean(lead.company)).length;
     setStatus('runStatus', `Importing ${clean.length} leads · ${withCompany} companies parsed · ${directProfiles} direct profile URLs visible…`);
     const payload = await importBatch(clean, first.sourceUrl, pagesRead);
-    setStatus('runStatus', `Done · ${payload.imported} sent · v${CLIENT_VERSION}. Dashboard will resolve missing profile URLs through SignalHire, not extra LinkedIn requests.`, 'ok');
+    setStatus('runStatus', `Done · ${payload.imported} sent · v${CLIENT_VERSION}.`, 'ok');
   } catch (error) {
     setStatus('runStatus', error instanceof Error ? error.message : 'Extraction failed.', 'bad');
   } finally {
     $('extract25').disabled = false;
     $('extract50').disabled = false;
+    $('extractFull').disabled = false;
   }
+}
+
+async function runFullSearch() {
+  $('extract25').disabled = true;
+  $('extract50').disabled = true;
+  $('extractFull').disabled = true;
+  $('resetFull').disabled = true;
+  setStatus('fullRunStatus', 'Starting full Sales Navigator capture…');
+  try {
+    const tab = await activeTab();
+    let first = await extractPage(tab.id);
+    if (!first.ok) throw new Error(first.error || 'Could not read Sales Navigator.');
+    const fingerprint = searchFingerprint(first.sourceUrl);
+    const stored = await chrome.storage.local.get([FULL_RUN_KEY]);
+    let run = stored[FULL_RUN_KEY];
+    if (!run || run.complete || run.searchFingerprint !== fingerprint) {
+      run = {
+        runId: crypto.randomUUID(),
+        searchFingerprint: fingerprint,
+        sourceUrl: first.sourceUrl,
+        pagesRead: 0,
+        total: 0,
+        signatures: [],
+        complete: false,
+        startedAt: new Date().toISOString(),
+      };
+    }
+
+    let current = first;
+    let skipAlreadyCapturedPage = Boolean(run.signatures?.includes(pageSignature(current.leads || [])));
+    if (skipAlreadyCapturedPage) {
+      const moved = await clickPager(tab.id, 'next');
+      if (!moved) {
+        const finished = await finishFullRun(run.runId, 'Already captured final page');
+        run = { ...run, complete: true, total: Number(finished.total || run.total), completedAt: new Date().toISOString() };
+        await chrome.storage.local.set({ [FULL_RUN_KEY]: run });
+        setStatus('fullRunStatus', `Finished · ${run.pagesRead} pages · ${run.total} unique leads.`, 'ok');
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, FULL_RUN_PAGE_WAIT_MS));
+      current = await extractPage(tab.id);
+      if (!current.ok) throw new Error(current.error || 'Could not read the next Sales Navigator page.');
+    }
+
+    while (run.pagesRead < FULL_RUN_MAX_PAGES && run.total < FULL_RUN_MAX_LEADS) {
+      const signature = pageSignature(current.leads || []);
+      if (!signature) throw new Error('No Sales Navigator lead cards were found on this page.');
+      if (run.signatures?.includes(signature)) {
+        const moved = await clickPager(tab.id, 'next');
+        if (!moved) break;
+        await new Promise((resolve) => setTimeout(resolve, FULL_RUN_PAGE_WAIT_MS));
+        current = await extractPage(tab.id);
+        if (!current.ok) throw new Error(current.error || 'Could not read the next Sales Navigator page.');
+        continue;
+      }
+
+      const pageLeads = dedupe((current.leads || []).filter((lead) => String(lead.connectionDegree || '').toLowerCase() !== '1st'), 25);
+      const nextPageNumber = Number(run.pagesRead || 0) + 1;
+      setStatus('fullRunStatus', `Page ${nextPageNumber}/${FULL_RUN_MAX_PAGES} · saving ${pageLeads.length} clean leads…`);
+      const payload = await postFullRunPage({
+        runId: run.runId,
+        sourceUrl: run.sourceUrl || current.sourceUrl,
+        fingerprint,
+        pageNumber: nextPageNumber,
+        leads: pageLeads,
+      });
+      run = {
+        ...run,
+        pagesRead: nextPageNumber,
+        total: Number(payload.total || run.total || 0),
+        signatures: [...(run.signatures || []), signature].slice(-FULL_RUN_MAX_PAGES),
+        lastPageUrl: current.sourceUrl,
+        updatedAt: new Date().toISOString(),
+      };
+      await chrome.storage.local.set({ [FULL_RUN_KEY]: run });
+      $('extractFull').textContent = `Resume full search · ${run.pagesRead} pages / ${run.total} leads`;
+      setStatus('fullRunStatus', `Saved page ${run.pagesRead} · ${run.total} unique leads. Moving to next page…`);
+
+      if (run.pagesRead >= FULL_RUN_MAX_PAGES || run.total >= FULL_RUN_MAX_LEADS) break;
+      const moved = await clickPager(tab.id, 'next');
+      if (!moved) break;
+      await new Promise((resolve) => setTimeout(resolve, FULL_RUN_PAGE_WAIT_MS));
+      current = await extractPage(tab.id);
+      if (!current.ok) throw new Error(current.error || 'Could not read the next Sales Navigator page.');
+    }
+
+    let stopReason = 'No next page';
+    if (run.pagesRead >= FULL_RUN_MAX_PAGES) stopReason = `Reached ${FULL_RUN_MAX_PAGES}-page safety cap`;
+    if (run.total >= FULL_RUN_MAX_LEADS) stopReason = `Reached ${FULL_RUN_MAX_LEADS}-lead safety cap`;
+    const finished = await finishFullRun(run.runId, stopReason);
+    run = {
+      ...run,
+      total: Number(finished.total || run.total || 0),
+      complete: true,
+      completedAt: new Date().toISOString(),
+      stopReason,
+    };
+    await chrome.storage.local.set({ [FULL_RUN_KEY]: run });
+    $('extractFull').textContent = 'Capture full search · up to 2,500';
+    setStatus('fullRunStatus', `Finished · ${run.pagesRead} pages · ${run.total} unique leads saved · ${stopReason}.`, 'ok');
+  } catch (error) {
+    setStatus('fullRunStatus', `${error instanceof Error ? error.message : 'Full capture failed.'} Progress is saved; reopen the extension and press Resume.`, 'bad');
+  } finally {
+    $('extract25').disabled = false;
+    $('extract50').disabled = false;
+    $('extractFull').disabled = false;
+    $('resetFull').disabled = false;
+  }
+}
+
+async function resetFullSearch() {
+  await chrome.storage.local.remove([FULL_RUN_KEY]);
+  $('extractFull').textContent = 'Capture full search · up to 2,500';
+  setStatus('fullRunStatus', 'Saved local run cleared. The server keeps the last completed run for review.');
 }
 
 $('save').addEventListener('click', () => void saveSettings());
 $('ping').addEventListener('click', () => void ping());
 $('extract25').addEventListener('click', () => void run(false));
 $('extract50').addEventListener('click', () => void run(true));
+$('extractFull').addEventListener('click', () => void runFullSearch());
+$('resetFull').addEventListener('click', () => void resetFullSearch());
 void loadSettings();

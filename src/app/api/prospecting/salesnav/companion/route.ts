@@ -4,9 +4,12 @@ import { z } from "zod";
 import { SALESNAV_SETUP_COOKIE, clearLinkedInSession, verifySalesNavSetupKey } from "@/lib/salesnav-session";
 import {
   companionStatus,
+  finishCompanionFullRun,
   generateCompanionToken,
   getLatestCompanionBatch,
+  getLatestCompanionFullRun,
   saveCompanionBatch,
+  saveCompanionFullRunPage,
   touchCompanionToken,
   verifyCompanionToken,
 } from "@/lib/salesnav-companion";
@@ -15,6 +18,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MIN_CLIENT_VERSION = "1.2.0";
+const FULL_RUN_MIN_CLIENT_VERSION = "1.5.0";
 
 const leadSchema = z.object({
   name: z.string().trim().min(1).max(200),
@@ -34,6 +38,23 @@ const importSchema = z.object({
   clientVersion: z.string().trim().max(30).default(""),
   parserVersion: z.string().trim().max(60).default(""),
   leads: z.array(leadSchema).min(1).max(50),
+});
+
+const fullRunPageSchema = z.object({
+  action: z.literal("full_run_page"),
+  runId: z.string().uuid(),
+  sourceUrl: z.string().trim().url().max(6000),
+  searchFingerprint: z.string().trim().min(1).max(7000),
+  pageNumber: z.number().int().min(1).max(100),
+  clientVersion: z.string().trim().max(30).default(""),
+  parserVersion: z.string().trim().max(60).default(""),
+  leads: z.array(leadSchema).max(25).default([]),
+});
+
+const fullRunFinishSchema = z.object({
+  action: z.literal("full_run_finish"),
+  runId: z.string().uuid(),
+  stopReason: z.string().trim().max(240).default("Completed"),
 });
 
 const generateSchema = z.object({ action: z.literal("generate_token") });
@@ -56,11 +77,39 @@ function bearer(request: NextRequest) {
   return value.replace(/^Bearer\s+/i, "").trim();
 }
 
-function supportedClient(version: string) {
-  const match = String(version || "").match(/^(\d+)\.(\d+)\.(\d+)/);
-  if (!match) return false;
-  const [, major, minor] = match.map(Number);
-  return major > 1 || (major === 1 && minor >= 2);
+function versionAtLeast(version: string, minimum: string) {
+  const parse = (value: string) => String(value || "").match(/^(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number) || [];
+  const current = parse(version);
+  const required = parse(minimum);
+  if (current.length !== 3 || required.length !== 3) return false;
+  for (let index = 0; index < 3; index += 1) {
+    if (current[index] > required[index]) return true;
+    if (current[index] < required[index]) return false;
+  }
+  return true;
+}
+
+function validSalesNavSource(raw: string) {
+  try {
+    const source = new URL(raw);
+    const host = source.hostname.toLowerCase().replace(/^www\./, "");
+    return (host === "linkedin.com" || host.endsWith(".linkedin.com"))
+      && /^\/sales\/search\/people\/?$/i.test(source.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function uniqueCleanLeads(leads: z.infer<typeof leadSchema>[], limit: number) {
+  const unique = new Map<string, z.infer<typeof leadSchema>>();
+  for (const lead of leads) {
+    if (lead.connectionDegree.toLowerCase() === "1st") continue;
+    const key = lead.salesLeadUrl || lead.linkedinUrl || `${lead.name.toLowerCase()}:${lead.company.toLowerCase()}`;
+    if (!key || unique.has(key)) continue;
+    unique.set(key, lead);
+    if (unique.size >= limit) break;
+  }
+  return [...unique.values()];
 }
 
 export async function OPTIONS() {
@@ -74,11 +123,18 @@ export async function GET(request: NextRequest) {
     const ok = await verifyCompanionToken(token);
     if (!ok) return NextResponse.json({ ok: false, paired: status.paired }, { status: 401, headers: corsHeaders() });
     await touchCompanionToken();
-    return NextResponse.json({ ok: true, paired: true, minimumClientVersion: MIN_CLIENT_VERSION }, { headers: corsHeaders() });
+    return NextResponse.json({
+      ok: true,
+      paired: true,
+      minimumClientVersion: MIN_CLIENT_VERSION,
+      fullRunMinimumClientVersion: FULL_RUN_MIN_CLIENT_VERSION,
+    }, { headers: corsHeaders() });
   }
 
   const isUnlocked = unlocked(request);
-  const latest = isUnlocked ? await getLatestCompanionBatch() : null;
+  const [latest, fullRun] = isUnlocked
+    ? await Promise.all([getLatestCompanionBatch(), getLatestCompanionFullRun()])
+    : [null, null];
   return NextResponse.json({
     ok: true,
     paired: status.paired,
@@ -87,7 +143,21 @@ export async function GET(request: NextRequest) {
     unlocked: isUnlocked,
     signalHireConfigured: Boolean(process.env.SIGNALHIRE_API_KEY),
     minimumClientVersion: MIN_CLIENT_VERSION,
+    fullRunMinimumClientVersion: FULL_RUN_MIN_CLIENT_VERSION,
     latestBatch: latest,
+    latestFullRun: fullRun ? {
+      id: fullRun.id,
+      startedAt: fullRun.startedAt,
+      updatedAt: fullRun.updatedAt,
+      completedAt: fullRun.completedAt,
+      complete: fullRun.complete,
+      stopReason: fullRun.stopReason,
+      sourceUrl: fullRun.sourceUrl,
+      pagesRead: fullRun.pagesRead,
+      total: fullRun.leads.length,
+      clientVersion: fullRun.clientVersion,
+      parserVersion: fullRun.parserVersion,
+    } : null,
   }, { headers: corsHeaders() });
 }
 
@@ -108,37 +178,78 @@ export async function POST(request: NextRequest) {
     }, { headers: corsHeaders() });
   }
 
-  const parsed = importSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid Sales Nav companion payload." }, { status: 400, headers: corsHeaders() });
-  }
-
   const token = bearer(request);
   if (!await verifyCompanionToken(token)) {
     return NextResponse.json({ error: "Invalid or expired companion pairing token." }, { status: 401, headers: corsHeaders() });
   }
 
-  if (!supportedClient(parsed.data.clientVersion)) {
+  const fullRunPage = fullRunPageSchema.safeParse(body);
+  if (fullRunPage.success) {
+    if (!versionAtLeast(fullRunPage.data.clientVersion, FULL_RUN_MIN_CLIENT_VERSION)) {
+      return NextResponse.json({
+        error: `Update the Chrome Companion to v${FULL_RUN_MIN_CLIENT_VERSION} or newer for full-search capture.`,
+        minimumClientVersion: FULL_RUN_MIN_CLIENT_VERSION,
+      }, { status: 426, headers: corsHeaders() });
+    }
+    if (!validSalesNavSource(fullRunPage.data.sourceUrl)) {
+      return NextResponse.json({ error: "Only LinkedIn Sales Navigator People Search pages can be captured." }, { status: 400, headers: corsHeaders() });
+    }
+    const leads = uniqueCleanLeads(fullRunPage.data.leads, 25);
+    const run = await saveCompanionFullRunPage({
+      id: fullRunPage.data.runId,
+      sourceUrl: fullRunPage.data.sourceUrl,
+      searchFingerprint: fullRunPage.data.searchFingerprint,
+      pageNumber: fullRunPage.data.pageNumber,
+      clientVersion: fullRunPage.data.clientVersion,
+      parserVersion: fullRunPage.data.parserVersion,
+      leads,
+    });
+    await touchCompanionToken();
+    return NextResponse.json({
+      ok: true,
+      runId: run.id,
+      pageNumber: fullRunPage.data.pageNumber,
+      accepted: leads.length,
+      pagesRead: run.pagesRead,
+      total: run.leads.length,
+      complete: run.complete,
+    }, { headers: corsHeaders() });
+  }
+
+  const fullRunFinish = fullRunFinishSchema.safeParse(body);
+  if (fullRunFinish.success) {
+    const run = await finishCompanionFullRun(fullRunFinish.data.runId, fullRunFinish.data.stopReason);
+    if (!run) {
+      return NextResponse.json({ error: "Full-search run was not found or was replaced by a newer run." }, { status: 404, headers: corsHeaders() });
+    }
+    await touchCompanionToken();
+    return NextResponse.json({
+      ok: true,
+      runId: run.id,
+      pagesRead: run.pagesRead,
+      total: run.leads.length,
+      complete: run.complete,
+      stopReason: run.stopReason,
+    }, { headers: corsHeaders() });
+  }
+
+  const parsed = importSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid Sales Nav companion payload." }, { status: 400, headers: corsHeaders() });
+  }
+
+  if (!versionAtLeast(parsed.data.clientVersion, MIN_CLIENT_VERSION)) {
     return NextResponse.json({
       error: `Update the Chrome Companion to v${MIN_CLIENT_VERSION} or newer before importing. Older parsers can misread company and profile fields.`,
       minimumClientVersion: MIN_CLIENT_VERSION,
     }, { status: 426, headers: corsHeaders() });
   }
 
-  const source = new URL(parsed.data.sourceUrl);
-  const host = source.hostname.toLowerCase().replace(/^www\./, "");
-  if ((host !== "linkedin.com" && !host.endsWith(".linkedin.com")) || !/^\/sales\/search\/people\/?$/i.test(source.pathname)) {
+  if (!validSalesNavSource(parsed.data.sourceUrl)) {
     return NextResponse.json({ error: "Only LinkedIn Sales Navigator People Search pages can be imported." }, { status: 400, headers: corsHeaders() });
   }
 
-  const unique = new Map<string, z.infer<typeof leadSchema>>();
-  for (const lead of parsed.data.leads) {
-    const degree = lead.connectionDegree.toLowerCase();
-    if (degree === "1st") continue;
-    const key = lead.salesLeadUrl || lead.linkedinUrl || `${lead.name.toLowerCase()}:${lead.company.toLowerCase()}`;
-    if (!unique.has(key)) unique.set(key, lead);
-  }
-  const leads = [...unique.values()].slice(0, 50);
+  const leads = uniqueCleanLeads(parsed.data.leads, 50);
   if (!leads.length) {
     return NextResponse.json({ error: "All extracted people were 1st-degree or duplicates." }, { status: 422, headers: corsHeaders() });
   }
