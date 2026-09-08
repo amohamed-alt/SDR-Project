@@ -264,6 +264,21 @@ export async function POST(request: NextRequest) {
     leads,
   };
   await saveCompanionBatch(batch);
+
+  // Quick 25/50 extracts now enter the same persistent history as full-search runs.
+  // This keeps every Companion action in one queue and prevents the legacy viewer
+  // from becoming a second destination for leads.
+  const quickRunId = randomUUID();
+  const quickRun = await saveCompanionFullRunPage({
+    id: quickRunId,
+    sourceUrl: parsed.data.sourceUrl,
+    searchFingerprint: parsed.data.sourceUrl,
+    pageNumber: Math.max(1, parsed.data.pagesRead),
+    clientVersion: parsed.data.clientVersion,
+    parserVersion: parsed.data.parserVersion,
+    leads,
+  });
+  const persistedRun = await finishCompanionFullRun(quickRunId, `Quick extract · ${parsed.data.pagesRead} page${parsed.data.pagesRead === 1 ? "" : "s"}`);
   await touchCompanionToken();
 
   const companyParsed = leads.filter((lead) => Boolean(lead.company)).length;
@@ -271,6 +286,8 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     ok: true,
     batchId: batch.id,
+    runId: (persistedRun || quickRun).id,
+    persistentQueue: true,
     imported: leads.length,
     clientVersion: batch.clientVersion,
     parserVersion: batch.parserVersion,
