@@ -2,7 +2,7 @@ name: Daniel Evalufy Daily
 
 on:
   schedule:
-    - cron: '15 6 * * 0-4'
+    - cron: '45 5 * * 0-4'
   workflow_dispatch:
     inputs:
       due_date:
