@@ -73,7 +73,7 @@ const today = new Date().toISOString().slice(0, 10);
 
 const GRID = "#dce7e2";
 const TICK = "#667a71";
-const INBOUND_COLORS = ["#087a50", "#14956a", "#1aa6a0", "#3a7de0", "#5d9ce8", "#8ab9ee"];
+const INBOUND_COLORS = ["var(--green)", "var(--brand-bright, #14956a)", "var(--teal)", "var(--blue)", "var(--chart-light, #5d9ce8)", "var(--chart-pale, #8ab9ee)"];
 const OUTBOUND_COLORS = ["#744bc4", "#8b64cf", "#a07ed8", "#d98d25", "#e6a84f", "#edbd78"];
 
 function formatNumber(value: number) {
@@ -512,8 +512,8 @@ function MotionDashboard({ onBack, sdr }: { onBack: () => void; sdr: SdrKey }) {
                 <YAxis tick={{ fill: TICK, fontSize: 10 }} axisLine={false}/>
                 <Tooltip content={<ChartTooltip/>}/>
                 <Legend/>
-                <Line type="monotone" dataKey="inboundCalls" name="Inbound calls" stroke="#087a50" strokeWidth={2.4} dot={false} cursor="pointer" onClick={(entry) => openDailyCalls(entry, "Inbound", false)}/>
-                <Line type="monotone" dataKey="inboundConnected" name="Inbound connected" stroke="#1aa6a0" strokeWidth={2.4} dot={false} cursor="pointer" onClick={(entry) => openDailyCalls(entry, "Inbound", true)}/>
+                <Line type="monotone" dataKey="inboundCalls" name="Inbound calls" stroke="var(--green)" strokeWidth={2.4} dot={false} cursor="pointer" onClick={(entry) => openDailyCalls(entry, "Inbound", false)}/>
+                <Line type="monotone" dataKey="inboundConnected" name="Inbound connected" stroke="var(--teal)" strokeWidth={2.4} dot={false} cursor="pointer" onClick={(entry) => openDailyCalls(entry, "Inbound", true)}/>
                 <Line type="monotone" dataKey="outboundCalls" name="Outbound calls" stroke="#744bc4" strokeWidth={2.4} dot={false} cursor="pointer" onClick={(entry) => openDailyCalls(entry, "Outbound", false)}/>
                 <Line type="monotone" dataKey="outboundConnected" name="Outbound connected" stroke="#e85d4a" strokeWidth={2.4} dot={false} cursor="pointer" onClick={(entry) => openDailyCalls(entry, "Outbound", true)}/>
               </LineChart>
@@ -544,7 +544,7 @@ function MotionDashboard({ onBack, sdr }: { onBack: () => void; sdr: SdrKey }) {
                 <YAxis tick={{ fill: TICK, fontSize: 10 }}/>
                 <Tooltip content={<ChartTooltip/>}/>
                 <Legend/>
-                <Bar dataKey="inboundActivities" name="Inbound activities" stackId="activities" fill="#087a50" radius={[5, 5, 0, 0]} cursor="pointer" onClick={(entry) => openDailyActivities(entry, "Inbound")}/>
+                <Bar dataKey="inboundActivities" name="Inbound activities" stackId="activities" fill="var(--green)" radius={[5, 5, 0, 0]} cursor="pointer" onClick={(entry) => openDailyActivities(entry, "Inbound")}/>
                 <Bar dataKey="outboundActivities" name="Outbound activities" stackId="activities" fill="#744bc4" radius={[5, 5, 0, 0]} cursor="pointer" onClick={(entry) => openDailyActivities(entry, "Outbound")}/>
               </BarChart>
             </ResponsiveContainer>

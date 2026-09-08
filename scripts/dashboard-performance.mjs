@@ -8,7 +8,7 @@ for (const ownerId of ['31644369', '37624223']) {
   for (let sample = 0; sample < 3; sample++) {
     const start = performance.now();
     const response = await fetch(`${base}/api/dashboard?ownerId=${ownerId}`, {
-      signal: AbortSignal.timeout(10_000), headers: etag ? { 'If-None-Match': etag } : {},
+      signal: AbortSignal.timeout(sample === 0 ? 60_000 : 10_000), headers: etag ? { 'If-None-Match': etag } : {},
     });
     const body = response.status === 304 ? '' : await response.text();
     if (response.status !== 304 && !response.ok) throw new Error(`Owner ${ownerId}: HTTP ${response.status}`);

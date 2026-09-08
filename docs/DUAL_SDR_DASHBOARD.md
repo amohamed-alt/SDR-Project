@@ -19,3 +19,10 @@ Daniel's analytics and work queue are operational independently of Marita. His m
 - UI timestamps show actual snapshot age. This is eventual refresh, not a webhook-driven realtime feed. Cold first builds, HubSpot indexing, upstream failures and large custom ranges can still take time. A refresh never claims unseen data is current.
 
 Deployment remains main CI → existing Hostinger workflow. No persistent volumes, ingress, secrets, server allocations or unrelated services are changed. Validate production buildRef and measure warm API timings after deployment; local demo timings are not evidence of live HubSpot latency.
+
+
+## Evalufy visual follow-up
+
+Violet tokens now cover the workspace hero, country filter, queues, chart primary series, hover/focus states and sidebar lighting. Shared CSS modules inherit brand tokens. Red/amber operational alerts remain distinct. The original PNG is retained unchanged and displayed as a cropped white wordmark using CSS screen blending; it is not a newly exported alpha PNG. Generated checkerboard images were rejected and are not shipped. Duplicate SVG chart gradient IDs are owner-scoped. Daniel no longer sees Marita's calendar status card.
+
+Post-deployment timing distinguishes first-load warmup (up to 60 seconds allowed by the probe) from subsequent warm/conditional requests. Increasing the probe timeout does not change API latency or claim the cold path is instantaneous.

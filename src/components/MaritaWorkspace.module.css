@@ -12,23 +12,23 @@
   justify-content: center;
   gap: 5px;
   padding: 0 12px;
-  border: 1px solid #087a50;
+  border: 1px solid var(--green);
   border-radius: 8px;
-  background: #f1f9f5;
-  color: #087a50;
+  background: var(--surface-2);
+  color: var(--green);
   font-size: 8px;
   font-weight: 800;
   cursor: pointer;
 }
 
 .addContactButton:hover:not(:disabled) {
-  background: #e5f4ec;
+  background: var(--green-soft);
 }
 
 .addContactButton:disabled {
-  border-color: #d5dfda;
-  background: #f3f6f4;
-  color: #95a39c;
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
   cursor: not-allowed;
 }
 
@@ -62,15 +62,15 @@
   align-items: center;
   gap: 8px;
   padding: 10px;
-  border: 1px dashed #c7d9d0;
+  border: 1px dashed var(--border);
   border-radius: 9px;
-  background: #f8fbf9;
-  color: #70847a;
+  background: var(--surface-2);
+  color: var(--muted);
   font-size: 8px;
 }
 
 .contactEmpty svg {
-  color: #087a50;
+  color: var(--green);
   flex: 0 0 auto;
 }
 
@@ -109,8 +109,8 @@
 .contactRole {
   padding: 4px 7px;
   border-radius: 999px;
-  background: #e2f2e9;
-  color: #087a50;
+  background: var(--green-soft);
+  color: var(--green);
   font-size: 6px;
   font-style: normal;
   font-weight: 800;
@@ -150,9 +150,9 @@
   align-items: center;
   gap: 9px;
   padding: 9px 10px;
-  border: 1px solid #dbe5e0;
+  border: 1px solid var(--border);
   border-radius: 9px;
-  background: #fbfcfb;
+  background: var(--surface-2);
   text-align: left;
   cursor: pointer;
 }
@@ -163,8 +163,8 @@
   display: grid;
   place-items: center;
   border-radius: 8px;
-  background: #eef4f1;
-  color: #73877d;
+  background: var(--surface-2);
+  color: var(--muted);
 }
 
 .organizerToggle > div {
@@ -179,18 +179,18 @@
 
 .organizerToggle small {
   margin-top: 2px;
-  color: #71847a;
+  color: var(--muted);
   font-size: 7px;
 }
 
 .organizerToggleActive {
-  border-color: #b8daca;
-  background: #f1f9f5;
+  border-color: var(--border-strong);
+  background: var(--surface-2);
 }
 
 .organizerToggleActive > span {
-  background: #e2f2e9;
-  color: #087a50;
+  background: var(--green-soft);
+  color: var(--green);
 }
 
 .organizerToggle:disabled {
@@ -251,9 +251,9 @@
 }
 
 .availabilityChecking {
-  border-color: #cbdcd4;
-  background: #f4f8f6;
-  color: #567066;
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
 }
 
 .availabilityChecking > svg {
@@ -261,9 +261,9 @@
 }
 
 .availabilityAvailable {
-  border-color: #b9decc;
-  background: #edf9f3;
-  color: #087a50;
+  border-color: var(--border);
+  background: var(--green-soft);
+  color: var(--green);
 }
 
 .availabilityBusy {
