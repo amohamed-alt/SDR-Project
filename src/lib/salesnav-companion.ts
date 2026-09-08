@@ -57,7 +57,7 @@ function sha256(value: string) {
 }
 
 function leadKey(lead: CompanionLead) {
-  return lead.salesLeadUrl || lead.linkedinUrl || `${lead.name.toLowerCase()}:${lead.company.toLowerCase()}`;
+  return lead.linkedinUrl || lead.salesLeadUrl || `${lead.name.toLowerCase()}:${lead.company.toLowerCase()}`;
 }
 
 function historyPath(id: string) {
@@ -103,6 +103,13 @@ async function persistFullRun(run: CompanionFullRun) {
     atomicWrite(FULL_RUN_STORE, payload),
     atomicWrite(historyPath(run.id), payload),
   ]);
+}
+
+async function archiveLegacyLatest(nextRunId = "") {
+  const latest = await readFullRun(FULL_RUN_STORE);
+  if (!latest || latest.id === nextRunId) return;
+  const archived = await readFullRun(historyPath(latest.id));
+  if (!archived) await atomicWrite(historyPath(latest.id), JSON.stringify(latest));
 }
 
 export async function companionStatus() {
@@ -170,8 +177,7 @@ export async function listCompanionFullRuns(limit = 50): Promise<CompanionFullRu
   try {
     await mkdir(/* turbopackIgnore: true */ FULL_RUN_HISTORY_DIR, { recursive: true });
     const files = (await readdir(/* turbopackIgnore: true */ FULL_RUN_HISTORY_DIR))
-      .filter((name) => name.endsWith(".json"))
-      .slice(-Math.max(limit * 3, limit));
+      .filter((name) => name.endsWith(".json"));
     for (const file of files) {
       const run = await readFullRun(join(FULL_RUN_HISTORY_DIR, file));
       if (!run || seen.has(run.id)) continue;
@@ -204,6 +210,7 @@ export async function saveCompanionFullRunPage(input: {
   leads: CompanionLead[];
 }) {
   const now = new Date().toISOString();
+  await archiveLegacyLatest(input.id);
   const existing = await getCompanionFullRun(input.id);
   const base: CompanionFullRun = existing || {
     id: input.id,
