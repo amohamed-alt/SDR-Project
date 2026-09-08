@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { acquisitionOwners } from "@/lib/acquisition-routing";
+import { manualTaskOwners } from "@/lib/acquisition-routing";
 import { sdrAdminAuthorized } from "@/lib/sdr-admin-auth";
 
 export const runtime = "nodejs";
@@ -11,6 +11,6 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({
-    owners: acquisitionOwners().map((owner) => ({ id: owner.id, name: owner.name })),
+    owners: manualTaskOwners().map((owner) => ({ id: owner.id, name: owner.name })),
   }, { headers: { "Cache-Control": "no-store" } });
 }
