@@ -1,5 +1,5 @@
-import { AcquisitionDashboard } from "@/components/AcquisitionDashboard";
+import { SdrCommandCenterRoot } from "@/components/SdrCommandCenterRoot";
 
 export default function Home() {
-  return <AcquisitionDashboard />;
+  return <SdrCommandCenterRoot/>;
 }
