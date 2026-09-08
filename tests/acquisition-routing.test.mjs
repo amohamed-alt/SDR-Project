@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  acquisitionOwners,
   chooseAcquisitionOwner,
+  manualTaskOwners,
   rankAcquisitionCandidates,
   signalHirePersonaQuery,
 } from "../src/lib/acquisition-routing.ts";
@@ -25,6 +27,14 @@ test("ranks current-company senior TA candidates first", () => {
   });
   assert.equal(ranked[0].uid, "2");
   assert.ok(ranked[0].score > ranked[1].score);
+});
+
+test("manual task owners include Daniel without adding him to automatic acquisition routing", () => {
+  assert.equal(acquisitionOwners().some((owner) => owner.id === "37624223"), false);
+
+  const daniel = manualTaskOwners().find((owner) => owner.id === "37624223");
+  assert.ok(daniel);
+  assert.equal(daniel.name, "Daniel Beaini");
 });
 
 test("smart routing preserves configured existing owner and otherwise picks lower load", () => {
