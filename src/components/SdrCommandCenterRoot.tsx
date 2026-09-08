@@ -17,7 +17,8 @@ export function SdrCommandCenterRoot() {
   const [mode, setMode] = useState<RootMode>("team");
 
   useEffect(() => {
-    setMode(modeFromUrl());
+    const timer = window.setTimeout(() => setMode(modeFromUrl()), 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   function openLegacy(ownerId: string) {
@@ -41,7 +42,7 @@ export function SdrCommandCenterRoot() {
   if (mode === "legacy") {
     return <div className={styles.legacyWrap}>
       <div className={styles.previewNotice}>
-        <div><LayoutDashboard size={17}/><span><strong>Preview mode</strong> · Existing dashboard is still available for comparison. Nothing on this branch is in production.</span></div>
+        <div><LayoutDashboard size={17}/><span><strong>Preview mode</strong> · Existing production-style dashboard is available only for side-by-side comparison. This branch is not in production.</span></div>
         <button type="button" onClick={openTeam}><ArrowLeft size={14}/>Back to new team dashboard</button>
       </div>
       <AcquisitionDashboard/>
