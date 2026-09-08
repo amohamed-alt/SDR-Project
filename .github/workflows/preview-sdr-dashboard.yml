@@ -1,0 +1,71 @@
+name: SDR Dashboard Preview Screenshots
+
+on:
+  push:
+    branches: [feat/sdr-team-command-center-preview]
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'next.config.ts'
+      - '.github/workflows/preview-sdr-dashboard.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdr-dashboard-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  screenshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit
+
+      - name: Build preview
+        run: npm run build
+
+      - name: Start demo dashboard
+        run: |
+          DEMO_MODE=true DISABLE_AUTH=true PORT=3111 HOSTNAME=127.0.0.1 node .next/standalone/server.js >/tmp/sdr-preview.log 2>&1 &
+          echo $! >/tmp/sdr-preview.pid
+          for I in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3111/api/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/sdr-preview.log
+          exit 1
+
+      - name: Capture desktop and mobile previews
+        run: |
+          CHROME=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser)
+          if [ -z "$CHROME" ]; then
+            echo "Chrome/Chromium is not available on the runner" >&2
+            exit 1
+          fi
+          "$CHROME" --headless=new --no-sandbox --disable-gpu --hide-scrollbars --virtual-time-budget=7000 --window-size=1600,1200 --screenshot=preview-management-desktop.png http://127.0.0.1:3111/
+          "$CHROME" --headless=new --no-sandbox --disable-gpu --hide-scrollbars --virtual-time-budget=7000 --window-size=430,1100 --screenshot=preview-management-mobile.png http://127.0.0.1:3111/
+          test -s preview-management-desktop.png
+          test -s preview-management-mobile.png
+
+      - name: Upload preview screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdr-dashboard-preview
+          path: |
+            preview-management-desktop.png
+            preview-management-mobile.png
+          if-no-files-found: error
+          retention-days: 3
