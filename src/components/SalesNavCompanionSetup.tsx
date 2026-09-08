@@ -29,7 +29,11 @@ export function SalesNavCompanionSetup() {
     setStatus(await readStatus());
   }
 
-  useEffect(() => { void refresh(); }, []);
+  useEffect(() => {
+    let active = true;
+    void readStatus().then((payload) => { if (active) setStatus(payload); });
+    return () => { active = false; };
+  }, []);
 
   async function unlock() {
     if (!setupKey.trim()) return;
