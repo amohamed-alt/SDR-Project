@@ -457,3 +457,85 @@ textarea:focus-visible {
 .kpi-card strong,.mini-metric strong{font-variant-numeric:tabular-nums}
 button:focus-visible,a:focus-visible{outline:3px solid #8f80c9;outline-offset:3px}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+/* Evalufy uses the same light falloff and depth as Talentera, in violet. */
+[data-brand="evalufy"] {
+  --sidebar: #2c146d;
+  --sidebar-soft: #432086;
+  --brand-bright: #8b5cf6;
+  --brand-hover: #391098;
+  --on-brand-muted: #e1d5f1;
+  --blue: #6d46ca;
+  --purple: #8d68ce;
+  --teal: #6141a3;
+  --chart-whatsapp: #b294df;
+  --chart-light: #a78bda;
+  --chart-pale: #d4c2ed;
+  --border-strong: #cfc2e4;
+  --focus-ring: rgba(113, 72, 205, .25);
+  --shadow: 0 1px 2px rgba(43, 24, 77, .035), 0 12px 32px rgba(43, 24, 77, .07);
+  --shadow-hover: 0 2px 5px rgba(43, 24, 77, .05), 0 18px 42px rgba(43, 24, 77, .11);
+  background: radial-gradient(circle at 88% -8%, rgba(117, 77, 207, .075), transparent 28rem), var(--bg);
+}
+[data-brand="evalufy"] .sidebar {
+  background: radial-gradient(circle at 12% 4%, rgba(185, 143, 255, .25), transparent 18rem), linear-gradient(180deg, #30176e 0%, #261358 55%, #1e1046 100%);
+  box-shadow: 14px 0 38px rgba(35, 16, 72, .12);
+}
+[data-brand="evalufy"] .sidebar nav button.active {
+  color: #3d206f;
+  background: linear-gradient(135deg, #faf7ff 0%, #e9dff8 100%);
+  box-shadow: 0 8px 22px rgba(21, 9, 46, .18), inset 0 0 0 1px rgba(113, 72, 205, .08);
+}
+[data-brand="evalufy"] .avatar { background: #bda1ed; color: #2e165d; }
+[data-brand="evalufy"] .sync-card { color: #d4c5ee; }
+[data-brand="evalufy"] .sync-card span { color: #bca8da; }
+[data-brand="evalufy"] .workspace-hero {
+  border-color: #7450ab;
+  background: radial-gradient(ellipse at 88% 0%, rgba(189, 145, 255, .3), transparent 60%), linear-gradient(125deg, #321765 0%, #6033a8 65%, #8053c3 100%);
+  box-shadow: 0 16px 38px rgba(61, 31, 106, .16);
+}
+[data-brand="evalufy"] .workspace-eyebrow { color: #e2d3f7; }
+[data-brand="evalufy"] .workspace-hero p { color: #e1d5f1; }
+[data-brand="evalufy"] .queue-tabs,
+[data-brand="evalufy"] .queue-status:not(.high):not(.score-pill),
+[data-brand="evalufy"] .queue-item,
+[data-brand="evalufy"] .section-intro { background: var(--surface-2); }
+[data-brand="evalufy"] .queue-tabs button,
+[data-brand="evalufy"] .workspace-stat > small,
+[data-brand="evalufy"] .queue-status:not(.high):not(.score-pill),
+[data-brand="evalufy"] .workspace-empty,
+[data-brand="evalufy"] .workspace-empty strong { color: var(--muted); }
+[data-brand="evalufy"] .queue-tabs button b,
+[data-brand="evalufy"] .queue-icon:not(.urgent),
+[data-brand="evalufy"] .priority-lead-tags i { background: var(--green-soft); color: var(--green); }
+[data-brand="evalufy"] .queue-item:hover,
+[data-brand="evalufy"] .workspace-stat:hover,
+[data-brand="evalufy"] .priority-lead-actions a:hover { border-color: var(--border-strong); background: var(--surface-2); }
+[data-brand="evalufy"] .queue-view-all,
+[data-brand="evalufy"] .load-more { border-color: var(--border-strong); background: var(--green-soft); }
+[data-brand="evalufy"] .queue-view-all:hover,
+[data-brand="evalufy"] .page-mode-tabs button:hover { background: var(--green-soft); }
+[data-brand="evalufy"] .page-mode-tabs button.active { background: var(--green); color: white; box-shadow: 0 7px 18px rgba(92, 48, 167, .2); }
+[data-brand="evalufy"] .primary-button:hover,
+[data-brand="evalufy"] .refresh-button:hover { background: #391098; }
+[data-brand="evalufy"] .progress { background: var(--green-soft); }
+[data-brand="evalufy"] .progress i { background: linear-gradient(90deg, var(--green), var(--brand-bright)); }
+[data-brand="evalufy"] .loader { border-color: var(--green-soft); border-top-color: var(--green); }
+[data-brand="evalufy"] .status-pill.live { color: var(--green); border-color: var(--border-strong); background: var(--green-soft); }
+[data-brand="evalufy"] .status-pill.live i { background: var(--brand-bright); box-shadow: 0 0 0 4px rgba(139,92,246,.12); }
+/* Present the unmodified original PNG as a white wordmark, without its white
+   canvas. Screen blending removes black after inversion; no generated logo is used. */
+.evalufy-brand-mark { display: block; position: relative; width: 176px; height: 46px; overflow: hidden; }
+.evalufy-brand-mark .evalufy-logo { position: absolute; width: 300px; max-width: none; height: 157px; left: -62px; top: -56px; border-radius: 0; background: transparent; filter: grayscale(1) invert(1) brightness(2); mix-blend-mode: screen; }
+@media (min-width: 641px) and (max-width: 900px) { .evalufy-brand-mark { width: 38px; } }
+
+[data-brand="evalufy"] .section-intro,
+[data-brand="evalufy"] .kpi-card,
+[data-brand="evalufy"] .workspace-card,
+[data-brand="evalufy"] .workspace-stat,
+[data-brand="evalufy"] .page-mode-tabs { border-color: var(--border); }
+[data-brand="evalufy"] .priority-lead-avatar,
+[data-brand="evalufy"] .priority-lead-company,
+[data-brand="evalufy"] .priority-lead-meta,
+[data-brand="evalufy"] .priority-lead-meta svg,
+[data-brand="evalufy"] .workspace-card-heading > svg { color: var(--muted); }

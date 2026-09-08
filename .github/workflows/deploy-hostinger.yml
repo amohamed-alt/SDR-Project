@@ -364,7 +364,7 @@ jobs:
     needs: [preflight, deploy]
     if: needs.preflight.outputs.should_deploy == 'true' && needs.deploy.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 4
     env:
       DEPLOY_SHA: ${{ needs.preflight.outputs.deploy_sha }}
       HOST: sdr.dashboardtalentera.tech

@@ -14,7 +14,7 @@
   padding: 0 17px;
   border: 1px solid rgba(255, 255, 255, 0.28);
   border-radius: 999px;
-  background: #0e4b3e;
+  background: var(--sidebar);
   color: #fff;
   box-shadow: 0 14px 34px rgba(14, 75, 62, 0.28);
   font-size: 11px;
@@ -25,14 +25,14 @@
 
 .motionLauncher:hover {
   transform: translateY(-2px);
-  background: #087a50;
+  background: var(--green);
 }
 
 .page {
   min-height: 100vh;
   padding-bottom: 64px;
-  background: #f2f6f4;
-  color: #10291f;
+  background: var(--bg);
+  color: var(--text);
   font-family: "DM Sans", Arial, sans-serif;
 }
 
@@ -46,7 +46,7 @@
   position: sticky;
   top: 0;
   z-index: 40;
-  border-bottom: 1px solid #dbe5e0;
+  border-bottom: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(16px);
 }
@@ -65,10 +65,10 @@
   justify-content: center;
   gap: 7px;
   padding: 0 12px;
-  border: 1px solid #dbe5e0;
+  border: 1px solid var(--border);
   border-radius: 9px;
   background: #fff;
-  color: #42584e;
+  color: var(--muted);
   font-size: 9px;
   font-weight: 800;
   cursor: pointer;
@@ -76,18 +76,18 @@
 
 .backButton:hover,
 .refreshButton:hover {
-  border-color: #9ebcaf;
-  color: #087a50;
+  border-color: var(--muted);
+  color: var(--green);
 }
 
 .refreshButton {
-  border-color: #087a50;
-  background: #087a50;
+  border-color: var(--green);
+  background: var(--green);
   color: #fff;
 }
 
 .refreshButton:hover {
-  background: #066541;
+  background: var(--brand-hover, #066541);
   color: #fff;
 }
 
@@ -115,7 +115,7 @@
 
 .titleText span {
   margin-top: 3px;
-  color: #6e8178;
+  color: var(--muted);
   font-size: 9px;
 }
 
@@ -132,7 +132,7 @@
 }
 
 .dateField span {
-  color: #6e8178;
+  color: var(--muted);
   font-size: 7px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -142,16 +142,16 @@
 .dateField input {
   height: 36px;
   padding: 0 9px;
-  border: 1px solid #dbe5e0;
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fbfcfb;
-  color: #10291f;
+  background: var(--surface-2);
+  color: var(--text);
   font-size: 9px;
   outline: none;
 }
 
 .dateField input:focus {
-  border-color: #087a50;
+  border-color: var(--green);
   box-shadow: 0 0 0 3px rgba(8, 122, 80, 0.1);
 }
 
@@ -174,9 +174,9 @@
   padding: 25px 27px;
   overflow: hidden;
   position: relative;
-  border: 1px solid #bcdacb;
+  border: 1px solid var(--border-strong);
   border-radius: 17px;
-  background: linear-gradient(125deg, #0e4b3e 0%, #087a50 58%, #14956a 100%);
+  background: linear-gradient(125deg, var(--sidebar) 0%, var(--green) 58%, var(--brand-bright, #14956a) 100%);
   color: #fff;
   box-shadow: 0 18px 42px rgba(14, 75, 62, 0.16);
 }
@@ -196,7 +196,7 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  color: #bbecd6;
+  color: var(--on-brand-muted, #bbecd6);
   font-size: 8px;
   font-weight: 800;
   letter-spacing: 0.13em;
@@ -212,21 +212,21 @@
 .heroMain p {
   max-width: 760px;
   margin: 0;
-  color: #c8ded5;
+  color: var(--on-brand-muted, #c8ded5);
   font-size: 10px;
   line-height: 1.55;
 }
 
 .ruleCard {
   padding: 20px;
-  border: 1px solid #dbe5e0;
+  border: 1px solid var(--border);
   border-radius: 17px;
   background: #fff;
   box-shadow: 0 12px 34px rgba(23, 67, 50, 0.07);
 }
 
 .ruleCard > span {
-  color: #087a50;
+  color: var(--green);
   font-size: 7px;
   font-weight: 800;
   letter-spacing: 0.12em;
@@ -250,8 +250,8 @@
   align-items: start;
   padding: 8px;
   border-radius: 9px;
-  background: #f7faf8;
-  color: #60766b;
+  background: var(--surface-2);
+  color: var(--muted);
   font-size: 8px;
   line-height: 1.45;
 }
@@ -262,8 +262,8 @@
   display: grid;
   place-items: center;
   border-radius: 6px;
-  background: #e2f2e9;
-  color: #087a50;
+  background: var(--green-soft);
+  color: var(--green);
   font-size: 7px;
 }
 
@@ -296,14 +296,14 @@
 
 .motionPanel {
   padding: 18px;
-  border: 1px solid #dbe5e0;
+  border: 1px solid var(--border);
   border-radius: 15px;
   background: #fff;
   box-shadow: 0 12px 34px rgba(23, 67, 50, 0.07);
 }
 
 .motionPanel[data-motion="Inbound"] {
-  border-top: 4px solid #087a50;
+  border-top: 4px solid var(--green);
 }
 
 .motionPanel[data-motion="Outbound"] {
@@ -330,8 +330,8 @@
   display: grid;
   place-items: center;
   border-radius: 10px;
-  background: #edf8f2;
-  color: #087a50;
+  background: var(--green-soft);
+  color: var(--green);
 }
 
 .motionPanel[data-motion="Outbound"] .motionIcon {
@@ -350,7 +350,7 @@
 
 .motionIdentity span {
   margin-top: 3px;
-  color: #71847a;
+  color: var(--muted);
   font-size: 8px;
 }
 
@@ -358,7 +358,7 @@
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  color: #087a50;
+  color: var(--green);
 }
 
 .motionPanel[data-motion="Outbound"] .rateBadge {
@@ -371,7 +371,7 @@
 
 .rateBadge span {
   margin-top: 3px;
-  color: #71847a;
+  color: var(--muted);
   font-size: 7px;
 }
 
@@ -384,9 +384,9 @@
 .metricButton {
   min-height: 78px;
   padding: 10px;
-  border: 1px solid #e4ece8;
+  border: 1px solid var(--border-soft);
   border-radius: 10px;
-  background: #fbfcfb;
+  background: var(--surface-2);
   text-align: left;
   cursor: pointer;
   transition: transform 0.16s ease, border-color 0.16s ease;
@@ -394,13 +394,13 @@
 
 .metricButton:hover {
   transform: translateY(-2px);
-  border-color: #afd0c0;
+  border-color: var(--border-strong);
 }
 
 .metricButton span {
   display: block;
   overflow: hidden;
-  color: #71847a;
+  color: var(--muted);
   font-size: 7px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -409,7 +409,7 @@
 .metricButton strong {
   display: block;
   margin: 10px 0 5px;
-  color: #10291f;
+  color: var(--text);
   font: 800 18px/1 "Manrope", sans-serif;
 }
 
@@ -417,7 +417,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  color: #087a50;
+  color: var(--green);
   font-size: 6px;
   font-weight: 800;
 }
@@ -436,7 +436,7 @@
 .panel {
   min-width: 0;
   padding: 18px;
-  border: 1px solid #dbe5e0;
+  border: 1px solid var(--border);
   border-radius: 15px;
   background: #fff;
   box-shadow: 0 12px 34px rgba(23, 67, 50, 0.07);
@@ -457,7 +457,7 @@
 
 .panelHeading p {
   margin: 4px 0 0;
-  color: #6e8178;
+  color: var(--muted);
   font-size: 8px;
 }
 
@@ -467,10 +467,10 @@
   gap: 5px;
   flex: 0 0 auto;
   padding: 5px 8px;
-  border: 1px solid #cfe4d9;
+  border: 1px solid var(--border);
   border-radius: 999px;
-  background: #f2faf6;
-  color: #087a50;
+  background: var(--surface-2);
+  color: var(--green);
   font-size: 7px;
   font-weight: 800;
 }
@@ -516,8 +516,8 @@
   margin-top: 11px;
   padding: 10px;
   border-radius: 9px;
-  background: #f7faf8;
-  color: #60766b;
+  background: var(--surface-2);
+  color: var(--muted);
   font-size: 8px;
   line-height: 1.5;
 }
@@ -531,14 +531,14 @@
 
 .funnelPanel {
   padding: 18px;
-  border: 1px solid #dbe5e0;
+  border: 1px solid var(--border);
   border-radius: 15px;
   background: #fff;
   box-shadow: 0 12px 34px rgba(23, 67, 50, 0.07);
 }
 
 .funnelPanel[data-motion="Inbound"] {
-  border-top: 4px solid #087a50;
+  border-top: 4px solid var(--green);
 }
 
 .funnelPanel[data-motion="Outbound"] {
@@ -552,7 +552,7 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  color: #8fa098;
+  color: var(--muted);
   font-size: 9px;
 }
 
@@ -571,8 +571,8 @@
 
 .summaryTable th {
   padding: 9px 10px;
-  background: #f4f8f6;
-  color: #6e8178;
+  background: var(--surface-2);
+  color: var(--muted);
   text-align: left;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -581,8 +581,8 @@
 
 .summaryTable td {
   padding: 10px;
-  border-top: 1px solid #e6ede9;
-  color: #52665c;
+  border-top: 1px solid var(--border-soft);
+  color: var(--muted);
 }
 
 .summaryTable td:nth-child(n + 2),
@@ -591,7 +591,7 @@
 }
 
 .summaryTable strong {
-  color: #10291f;
+  color: var(--text);
 }
 
 .loadingOverlay {
@@ -601,14 +601,14 @@
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: #60766b;
+  color: var(--muted);
 }
 
 .loader {
   width: 34px;
   height: 34px;
-  border: 3px solid #dce9e3;
-  border-top-color: #087a50;
+  border: 3px solid var(--border-soft);
+  border-top-color: var(--green);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }

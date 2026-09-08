@@ -10,10 +10,10 @@
   align-items: end;
   gap: 14px;
   padding: 15px 17px;
-  border: 1px solid #cfe4d9;
+  border: 1px solid var(--border);
   border-radius: 14px;
-  background: linear-gradient(135deg, #f3faf6, #ffffff);
-  box-shadow: 0 12px 34px rgba(23, 67, 50, 0.07);
+  background: linear-gradient(135deg, var(--surface-2), #ffffff);
+  box-shadow: var(--shadow);
 }
 
 .filterIntro {
@@ -30,8 +30,8 @@
   place-items: center;
   flex: 0 0 auto;
   border-radius: 10px;
-  background: #e2f2e9;
-  color: #087a50;
+  background: var(--green-soft);
+  color: var(--green);
 }
 
 .filterIntro > div {
@@ -41,13 +41,13 @@
 }
 
 .filterIntro strong {
-  color: #10291f;
+  color: var(--text);
   font-size: 11px;
 }
 
 .filterIntro span {
   margin-top: 4px;
-  color: #6e8178;
+  color: var(--muted);
   font-size: 8px;
   line-height: 1.45;
 }
@@ -59,7 +59,7 @@
 }
 
 .filterField > span {
-  color: #6e8178;
+  color: var(--muted);
   font-size: 7px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -70,22 +70,22 @@
   width: 100%;
   height: 37px;
   padding: 0 10px;
-  border: 1px solid #dbe5e0;
+  border: 1px solid var(--border);
   border-radius: 8px;
   background: #ffffff;
-  color: #10291f;
+  color: var(--text);
   font-size: 9px;
   outline: none;
 }
 
 .filterField select:focus {
-  border-color: #087a50;
-  box-shadow: 0 0 0 3px rgba(8, 122, 80, 0.1);
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .filterField select:disabled {
-  background: #f2f6f4;
-  color: #8fa098;
+  background: var(--bg);
+  color: var(--muted);
   cursor: wait;
 }
 
@@ -103,10 +103,10 @@
   align-items: center;
   justify-content: center;
   padding: 0 10px;
-  border: 1px solid #cfe4d9;
+  border: 1px solid var(--border);
   border-radius: 9px;
-  background: #edf8f2;
-  color: #087a50;
+  background: var(--green-soft);
+  color: var(--green);
 }
 
 .resultBadge strong {
@@ -125,16 +125,16 @@
   height: 37px;
   display: grid;
   place-items: center;
-  border: 1px solid #dbe5e0;
+  border: 1px solid var(--border);
   border-radius: 9px;
   background: #ffffff;
-  color: #60766b;
+  color: var(--muted);
   cursor: pointer;
 }
 
 .clearButton:hover:not(:disabled) {
-  border-color: #087a50;
-  color: #087a50;
+  border-color: var(--green);
+  color: var(--green);
 }
 
 .clearButton:disabled {
@@ -149,7 +149,7 @@
   flex-wrap: wrap;
   gap: 7px;
   margin-top: -3px;
-  color: #71847a;
+  color: var(--muted);
   font-size: 7px;
 }
 
@@ -157,7 +157,7 @@
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: #9db2a8;
+  background: var(--muted);
 }
 
 .error {
@@ -172,7 +172,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: #087a50;
+  color: var(--green);
   font-weight: 700;
 }
 
