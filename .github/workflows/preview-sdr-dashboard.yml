@@ -1,0 +1,164 @@
+name: SDR Dashboard Preview Screenshots
+
+on:
+  push:
+    branches: [feat/sdr-team-command-center-preview]
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'next.config.ts'
+      - '.github/workflows/preview-sdr-dashboard.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdr-dashboard-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  screenshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit
+
+      - name: Build preview
+        run: npm run build
+
+      - name: Prepare standalone static assets
+        run: |
+          mkdir -p .next/standalone/.next
+          rm -rf .next/standalone/.next/static
+          cp -a .next/static .next/standalone/.next/static
+          if [ -d public ]; then
+            rm -rf .next/standalone/public
+            cp -a public .next/standalone/public
+          fi
+
+      - name: Start demo dashboard
+        run: |
+          DEMO_MODE=true DISABLE_AUTH=true PORT=3111 HOSTNAME=127.0.0.1 node .next/standalone/server.js >/tmp/sdr-preview.log 2>&1 &
+          echo $! >/tmp/sdr-preview.pid
+          for I in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3111/api/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/sdr-preview.log
+          exit 1
+
+      - name: Capture Marita Daniel and management previews
+        run: |
+          CHROME=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser)
+          if [ -z "$CHROME" ]; then
+            echo "Chrome/Chromium is not available on the runner" >&2
+            exit 1
+          fi
+
+          "$CHROME" --headless=new --no-sandbox --disable-gpu --hide-scrollbars --remote-debugging-port=9222 --user-data-dir=/tmp/sdr-preview-chrome about:blank >/tmp/chrome.log 2>&1 &
+          for I in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:9222/json/version >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          cat >/tmp/capture-preview.mjs <<'EOF'
+          import { writeFileSync } from "node:fs";
+
+          const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+          const targets = await fetch("http://127.0.0.1:9222/json").then((response) => response.json());
+          const target = targets.find((item) => item.type === "page");
+          if (!target?.webSocketDebuggerUrl) throw new Error("No Chrome page target found");
+
+          const socket = new WebSocket(target.webSocketDebuggerUrl);
+          await new Promise((resolve, reject) => {
+            socket.addEventListener("open", resolve, { once: true });
+            socket.addEventListener("error", reject, { once: true });
+          });
+
+          let sequence = 0;
+          const pending = new Map();
+          socket.addEventListener("message", (event) => {
+            const message = JSON.parse(String(event.data));
+            if (!message.id || !pending.has(message.id)) return;
+            const { resolve, reject } = pending.get(message.id);
+            pending.delete(message.id);
+            if (message.error) reject(new Error(message.error.message));
+            else resolve(message.result || {});
+          });
+
+          function command(method, params = {}) {
+            const id = ++sequence;
+            socket.send(JSON.stringify({ id, method, params }));
+            return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+          }
+
+          async function navigate(url) {
+            await command("Page.navigate", { url });
+            await sleep(1700);
+            await command("Runtime.evaluate", {
+              expression: `localStorage.setItem("sdr_v2_visitor_name", "Preview Reviewer"); localStorage.setItem("sdr_v2_visitor_id", "preview_reviewer"); sessionStorage.setItem("sdr_v2_session_id", "preview_session");`,
+            });
+            await command("Page.reload", { ignoreCache: true });
+            await sleep(7600);
+          }
+
+          async function capture(path, width, height, url) {
+            await command("Emulation.setDeviceMetricsOverride", {
+              width,
+              height,
+              deviceScaleFactor: 1,
+              mobile: width < 600,
+            });
+            await navigate(url);
+            const result = await command("Page.captureScreenshot", {
+              format: "png",
+              fromSurface: true,
+              captureBeyondViewport: false,
+            });
+            writeFileSync(path, Buffer.from(result.data, "base64"));
+          }
+
+          await command("Page.enable");
+          await command("Runtime.enable");
+
+          const base = "http://127.0.0.1:3111/";
+          await capture("preview-marita-desktop.png", 1600, 1200, base);
+          await capture("preview-daniel-desktop.png", 1600, 1200, `${base}?sdr=daniel`);
+          await capture("preview-management-desktop.png", 1600, 1200, `${base}?sdr=management`);
+          await capture("preview-daniel-mobile.png", 430, 1100, `${base}?sdr=daniel`);
+          await capture("preview-management-mobile.png", 430, 1100, `${base}?sdr=management`);
+          socket.close();
+          EOF
+
+          node /tmp/capture-preview.mjs
+          test -s preview-marita-desktop.png
+          test -s preview-daniel-desktop.png
+          test -s preview-management-desktop.png
+          test -s preview-daniel-mobile.png
+          test -s preview-management-mobile.png
+
+      - name: Upload preview screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdr-dashboard-preview
+          path: |
+            preview-marita-desktop.png
+            preview-daniel-desktop.png
+            preview-management-desktop.png
+            preview-daniel-mobile.png
+            preview-management-mobile.png
+          if-no-files-found: error
+          retention-days: 3

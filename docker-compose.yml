@@ -188,6 +188,29 @@ services:
       retries: 3
     logging: *default-logging
 
+  dashboard-warmer:
+    image: sdr-dashboard:${SDR_BUILD_REF:?SDR_BUILD_REF is required}
+    pull_policy: never
+    restart: unless-stopped
+    init: true
+    depends_on:
+      sdr-dashboard:
+        condition: service_healthy
+    command: ["node", "scripts/dashboard-warmer.mjs"]
+    mem_limit: "128m"
+    cpus: 0.10
+    pids_limit: 64
+    environment:
+      NODE_ENV: production
+      SDR_WORKER: dashboard-warmer
+      SDR_DASHBOARD_INTERNAL_URL: http://sdr-dashboard:3000
+      DASHBOARD_WARM_INTERVAL_MS: ${DASHBOARD_WARM_INTERVAL_MS:-300000}
+      DASHBOARD_WARM_START_DELAY_MS: ${DASHBOARD_WARM_START_DELAY_MS:-4000}
+      DASHBOARD_WARM_TIMEOUT_MS: ${DASHBOARD_WARM_TIMEOUT_MS:-90000}
+    networks:
+      - default
+    logging: *default-logging
+
   maqsam-sync:
     image: sdr-dashboard:${SDR_BUILD_REF:?SDR_BUILD_REF is required}
     pull_policy: never
