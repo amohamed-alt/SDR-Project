@@ -35,9 +35,20 @@ export type DashboardSnapshotResult = {
   cacheStatus: "memory" | "fastapi-disk" | "next-cache";
 };
 
-const snapshots = new Map<string, SnapshotEntry>();
-const activeFilters = new Map<string, ActiveFilterEntry>();
-const inflightRefreshes = new Map<string, Promise<DashboardData>>();
+// Instrumentation and route bundles must share the same warm snapshots and locks.
+type DashboardStore = {
+  snapshots: Map<string, SnapshotEntry>;
+  activeFilters: Map<string, ActiveFilterEntry>;
+  inflightRefreshes: Map<string, Promise<DashboardData>>;
+  coldLoads: Map<string, Promise<DashboardData>>;
+  buildTail: Promise<unknown>;
+};
+const processState = globalThis as typeof globalThis & { __sdrDashboardStoreV8?: DashboardStore };
+const dashboardStore: DashboardStore = processState.__sdrDashboardStoreV8 ??= {
+  snapshots: new Map(), activeFilters: new Map(), inflightRefreshes: new Map(),
+  coldLoads: new Map(), buildTail: Promise.resolve(),
+};
+const { snapshots, activeFilters, inflightRefreshes, coldLoads } = dashboardStore;
 
 function snapshotKey(filters: DashboardFilters) {
   return JSON.stringify({
@@ -176,13 +187,11 @@ export async function getDashboardSnapshot(
 }
 
 // One CRM build at a time avoids parallel full-portfolio scans on the VPS.
-let buildTail: Promise<unknown> = Promise.resolve();
 function queuedBuild(filters: DashboardFilters): Promise<DashboardData> {
-  const next = buildTail.then(() => buildDashboard(filters));
-  buildTail = next.catch(() => undefined);
+  const next = dashboardStore.buildTail.then(() => buildDashboard(filters));
+  dashboardStore.buildTail = next.catch(() => undefined);
   return next;
 }
-const coldLoads = new Map<string, Promise<DashboardData>>();
 function coldSnapshot(key: string, filters: DashboardFilters) {
   const existing = coldLoads.get(key) ?? inflightRefreshes.get(key);
   if (existing) return existing;
