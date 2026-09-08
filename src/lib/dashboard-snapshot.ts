@@ -217,10 +217,14 @@ export function startDashboardWarmup() {
     running = true;
     try {
       const to = new Date().toISOString().slice(0, 10);
-      const from = process.env.NEXT_PUBLIC_DEFAULT_START_DATE || `${to.slice(0, 7)}-01`;
-      for (const owner of Object.values(SDR_OWNERS)) {
-        try { await getDashboardSnapshot({ from, to, ownerId: owner.ownerId }); }
-        catch { console.warn(`Dashboard warmup unavailable for ${owner.key}`); }
+      // Client bundles and management default to this month. A historical
+      // runtime override can differ, so warm the visible period first.
+      const starts = new Set([`${to.slice(0, 7)}-01`, process.env.NEXT_PUBLIC_DEFAULT_START_DATE || `${to.slice(0, 7)}-01`]);
+      for (const from of starts) {
+        for (const owner of Object.values(SDR_OWNERS)) {
+          try { await getDashboardSnapshot({ from, to, ownerId: owner.ownerId }); }
+          catch { console.warn(`Dashboard warmup unavailable for ${owner.key}`); }
+        }
       }
     } finally { running = false; }
   };
