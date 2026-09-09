@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Activity,
   BarChart3,
   BrainCircuit,
   Building2,
@@ -34,6 +35,7 @@ const COMMANDS: Command[] = [
   { label: "Company Enrichment", description: "Open company enrichment and data-quality tooling", href: "/company-enrichment", keywords: "company enrichment ats data quality", icon: DatabaseZap },
   { label: "Lead Import", description: "Open lead import and CRM ingestion", href: "/lead-import", keywords: "lead import upload hubspot crm", icon: Import },
   { label: "Sales Navigator Prospecting", description: "Open the Sales Navigator prospecting workflow", href: "/salesnav-prospecting", keywords: "sales navigator linkedin prospecting", icon: Search },
+  { label: "System Health", description: "Inspect app, cache, Postgres and integration readiness", href: "/system-health", keywords: "system health status operations cache postgres integrations", icon: Activity },
 ];
 
 export function GtmCommandPalette() {
