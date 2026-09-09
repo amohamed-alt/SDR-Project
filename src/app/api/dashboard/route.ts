@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
       filters,
       generatedAt: payload.meta.generatedAt,
       warnings: payload.meta.warnings,
-      payloadProfile: "instant-v2",
+      payloadProfile: "instant-v2.1",
     });
     const etag = `W/"${createHash("sha256").update(etagSeed).digest("hex").slice(0, 32)}"`;
     const headers = {
@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
       "X-Dashboard-Cache": snapshot.cacheStatus,
       "X-Dashboard-Snapshot-Age": String(snapshot.ageSeconds),
       "X-Dashboard-Refreshing": snapshot.refreshing ? "1" : "0",
-      "X-Dashboard-Payload": "instant-v2",
+      "X-Dashboard-Payload": "instant-v2.1",
       "X-Dashboard-Contacts-Sent": String(payload.priorityContacts.length),
       "X-Dashboard-Activities-Sent": String(payload.recentActivities.length),
       "X-Dashboard-Companies-Sent": String(payload.companies.length),
