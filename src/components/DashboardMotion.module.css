@@ -33,7 +33,7 @@
   padding-bottom: 64px;
   background: var(--bg);
   color: var(--text);
-  font-family: "DM Sans", Arial, sans-serif;
+  font-family: var(--font-dm-sans), Arial, sans-serif;
 }
 
 .topbar {
@@ -110,7 +110,7 @@
 }
 
 .titleText strong {
-  font: 800 15px/1.2 "Manrope", sans-serif;
+  font: 800 15px/1.2 var(--font-manrope), sans-serif;
 }
 
 .titleText span {
@@ -205,7 +205,7 @@
 .heroMain h1 {
   max-width: 720px;
   margin: 14px 0 8px;
-  font: 800 clamp(27px, 3vw, 40px)/1.08 "Manrope", sans-serif;
+  font: 800 clamp(27px, 3vw, 40px)/1.08 var(--font-manrope), sans-serif;
   letter-spacing: -0.045em;
 }
 
@@ -234,7 +234,7 @@
 
 .ruleCard h2 {
   margin: 8px 0 11px;
-  font: 800 14px/1.25 "Manrope", sans-serif;
+  font: 800 14px/1.25 var(--font-manrope), sans-serif;
 }
 
 .ruleList {
@@ -345,7 +345,7 @@
 }
 
 .motionIdentity strong {
-  font: 800 14px/1.2 "Manrope", sans-serif;
+  font: 800 14px/1.2 var(--font-manrope), sans-serif;
 }
 
 .motionIdentity span {
@@ -366,7 +366,7 @@
 }
 
 .rateBadge strong {
-  font: 800 19px/1 "Manrope", sans-serif;
+  font: 800 19px/1 var(--font-manrope), sans-serif;
 }
 
 .rateBadge span {
@@ -410,7 +410,7 @@
   display: block;
   margin: 10px 0 5px;
   color: var(--text);
-  font: 800 18px/1 "Manrope", sans-serif;
+  font: 800 18px/1 var(--font-manrope), sans-serif;
 }
 
 .metricButton small {
@@ -452,7 +452,7 @@
 
 .panelHeading h2 {
   margin: 0;
-  font: 800 13px/1.2 "Manrope", sans-serif;
+  font: 800 13px/1.2 var(--font-manrope), sans-serif;
 }
 
 .panelHeading p {
@@ -504,7 +504,7 @@
   display: block;
   margin: 13px 0 6px;
   color: #5f4c19;
-  font: 800 22px/1 "Manrope", sans-serif;
+  font: 800 22px/1 var(--font-manrope), sans-serif;
 }
 
 .unknownCard small {

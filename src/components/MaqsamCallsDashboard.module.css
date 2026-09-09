@@ -3,7 +3,7 @@
   padding-bottom: 64px;
   background: #f2f6f4;
   color: #10291f;
-  font-family: "DM Sans", Arial, sans-serif;
+  font-family: var(--font-dm-sans), Arial, sans-serif;
 }
 
 .topbar {
@@ -35,7 +35,7 @@
 }
 
 .titleGroup strong {
-  font: 800 15px/1.2 "Manrope", sans-serif;
+  font: 800 15px/1.2 var(--font-manrope), sans-serif;
 }
 
 .titleGroup span {
@@ -164,7 +164,7 @@
 .hero h1 {
   max-width: 850px;
   margin: 14px 0 8px;
-  font: 800 clamp(27px, 3vw, 40px)/1.08 "Manrope", sans-serif;
+  font: 800 clamp(27px, 3vw, 40px)/1.08 var(--font-manrope), sans-serif;
   letter-spacing: -0.045em;
 }
 
@@ -189,7 +189,7 @@
 
 .hero aside strong {
   color: #087a50;
-  font: 800 38px/1 "Manrope", sans-serif;
+  font: 800 38px/1 var(--font-manrope), sans-serif;
 }
 
 .hero aside span {
@@ -282,7 +282,7 @@
 
 .metricCard strong {
   margin-top: 7px;
-  font: 800 22px/1 "Manrope", sans-serif;
+  font: 800 22px/1 var(--font-manrope), sans-serif;
 }
 
 .metricCard p {
@@ -329,7 +329,7 @@
 .tableHeader h2,
 .detailHeading h3 {
   margin: 0;
-  font: 800 14px/1.2 "Manrope", sans-serif;
+  font: 800 14px/1.2 var(--font-manrope), sans-serif;
 }
 
 .panelHeading p,
@@ -553,7 +553,7 @@
   padding: 12px;
   border-radius: 9px;
   background: #f7faf8;
-  font-family: "DM Sans", Arial, sans-serif;
+  font-family: var(--font-dm-sans), Arial, sans-serif;
 }
 
 .metaLine,

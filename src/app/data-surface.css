@@ -63,7 +63,7 @@
   align-items: flex-end;
   line-height: 1.05;
 }
-.gtm-data-count strong { font: 800 14px/1 "Manrope", sans-serif; color: var(--text); font-variant-numeric: tabular-nums; }
+.gtm-data-count strong { font: 800 14px/1 var(--font-manrope), sans-serif; color: var(--text); font-variant-numeric: tabular-nums; }
 .gtm-data-count span { margin-top: 4px; color: var(--muted); font-size: 8px; white-space: nowrap; }
 
 .gtm-data-export {
@@ -101,7 +101,7 @@
   text-align: center;
 }
 .gtm-data-empty svg { color: #8eaa9e; }
-.gtm-data-empty strong { color: var(--text); font: 800 11px/1.2 "Manrope", sans-serif; }
+.gtm-data-empty strong { color: var(--text); font: 800 11px/1.2 var(--font-manrope), sans-serif; }
 .gtm-data-empty span { max-width: 310px; font-size: 9px; }
 
 @media (max-width: 760px) {
