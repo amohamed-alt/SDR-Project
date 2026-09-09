@@ -1,0 +1,94 @@
+name: Daniel Transfer Now
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/app/api/daniel-transfer-plan/route.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daniel-transfer-now
+  cancel-in-progress: false
+
+jobs:
+  transfer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BASE_URL: https://sdr.dashboardtalentera.tech
+      OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN || secrets.DASHBOARD_PASSWORD }}
+    steps:
+      - name: Validate admin token
+        run: |
+          set -euo pipefail
+          test -n "$OWNER_TOKEN" || { echo "::error::Admin automation token is required"; exit 1; }
+
+      - name: Wait for this exact build in production
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 120); do
+            body=$(curl -4 -sS --connect-timeout 5 --max-time 20 \
+              -H 'Cache-Control: no-cache' \
+              "$BASE_URL/api/health?daniel-transfer=$GITHUB_SHA" || true)
+            build=$(printf '%s' "$body" | jq -r '.buildRef // ""' 2>/dev/null || true)
+            echo "Production build: ${build:-unknown}; expected: $GITHUB_SHA; attempt $attempt/120"
+            if [ "$build" = "$GITHUB_SHA" ]; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Production did not reach $GITHUB_SHA"
+          exit 1
+
+      - name: Dry run exact transfer plan
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --connect-timeout 10 --max-time 300 \
+            -o /tmp/dry-run.json -w '%{http_code}' \
+            -X POST "$BASE_URL/api/daniel-transfer-plan" \
+            -H 'Content-Type: application/json' \
+            -H "x-acquisition-owner-token: $OWNER_TOKEN" \
+            -d '{"dryRun":true}')
+          cat /tmp/dry-run.json | jq .
+          [ "$code" = 200 ] || { echo "::error::Dry run returned HTTP $code"; exit 1; }
+          jq -e '.success == true and (.plan | all(.final >= .target))' /tmp/dry-run.json >/dev/null
+
+      - name: Transfer Marita tasks to Daniel
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --connect-timeout 10 --max-time 300 \
+            -o /tmp/transfer.json -w '%{http_code}' \
+            -X POST "$BASE_URL/api/daniel-transfer-plan" \
+            -H 'Content-Type: application/json' \
+            -H "x-acquisition-owner-token: $OWNER_TOKEN" \
+            -d '{"dryRun":false}')
+          cat /tmp/transfer.json | jq .
+          [ "$code" = 200 ] || { echo "::error::Transfer returned HTTP $code"; exit 1; }
+          jq -e '.success == true and (.plan | all(.final >= .target))' /tmp/transfer.json >/dev/null
+
+      - name: Verify final Daniel plan
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --connect-timeout 10 --max-time 300 \
+            -o /tmp/verify.json -w '%{http_code}' \
+            -X POST "$BASE_URL/api/daniel-transfer-plan" \
+            -H 'Content-Type: application/json' \
+            -H "x-acquisition-owner-token: $OWNER_TOKEN" \
+            -d '{"dryRun":true}')
+          cat /tmp/verify.json | jq .
+          [ "$code" = 200 ] || exit 1
+          jq -e '.success == true and .totalNeeded == 0 and (.plan | all(.final >= .target))' /tmp/verify.json >/dev/null
+
+          {
+            echo '### Daniel transfer completed'
+            echo
+            echo '| Date | Target | Existing | Transferred | Final |'
+            echo '|---|---:|---:|---:|---:|'
+            jq -r '.plan[] | "| \(.date) | \(.target) | \(.existing) | \(.transferred) | \(.final) |"' /tmp/transfer.json
+            echo
+            echo "Transferred now: $(jq -r '.transferred' /tmp/transfer.json)"
+          } >> "$GITHUB_STEP_SUMMARY"
