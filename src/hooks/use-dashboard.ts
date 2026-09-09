@@ -29,9 +29,18 @@ async function readDashboard(key: string, force: boolean): Promise<Result> {
       cache.set(key, result);
       return result;
     }
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Unable to load HubSpot data");
-    const result = { etag: response.headers.get("etag") || undefined, data: data as DashboardData, refreshing: response.headers.get("X-Dashboard-Refreshing") === "1" };
+    const raw = await response.text();
+    let data: Record<string, unknown>;
+    try {
+      data = raw ? JSON.parse(raw) as Record<string, unknown> : {};
+    } catch {
+      const detail = raw.trim().slice(0, 180);
+      throw new Error(response.status >= 500
+        ? `Dashboard server unavailable (${response.status})${detail ? `: ${detail}` : ""}`
+        : `Dashboard returned an invalid response (${response.status})`);
+    }
+    if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : "Unable to load HubSpot data");
+    const result = { etag: response.headers.get("etag") || undefined, data: data as unknown as DashboardData, refreshing: response.headers.get("X-Dashboard-Refreshing") === "1" };
     cache.delete(key);
     cache.set(key, result);
     while (cache.size > 12) cache.delete(cache.keys().next().value!);
