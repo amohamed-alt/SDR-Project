@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   BarChart3,
@@ -49,11 +49,21 @@ export function GtmCommandPalette() {
     return COMMANDS.filter((command) => `${command.label} ${command.description} ${command.keywords}`.toLowerCase().includes(term));
   }, [query]);
 
+  function openPalette() {
+    setQuery("");
+    setActiveIndex(0);
+    setOpen(true);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        setOpen((value) => !value);
+        setOpen((value) => {
+          if (!value) requestAnimationFrame(() => inputRef.current?.focus());
+          return !value;
+        });
         return;
       }
       if (event.key === "Escape") setOpen(false);
@@ -62,23 +72,12 @@ export function GtmCommandPalette() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  useEffect(() => {
-    if (!open) return;
-    setQuery("");
-    setActiveIndex(0);
-    requestAnimationFrame(() => inputRef.current?.focus());
-  }, [open]);
-
-  useEffect(() => {
-    if (activeIndex >= filtered.length) setActiveIndex(Math.max(0, filtered.length - 1));
-  }, [activeIndex, filtered.length]);
-
   function run(command: Command) {
     setOpen(false);
     router.push(command.href);
   }
 
-  function onInputKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+  function onInputKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (!filtered.length) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
@@ -88,17 +87,19 @@ export function GtmCommandPalette() {
       setActiveIndex((index) => (index - 1 + filtered.length) % filtered.length);
     } else if (event.key === "Enter") {
       event.preventDefault();
-      run(filtered[activeIndex]);
+      run(filtered[Math.min(activeIndex, filtered.length - 1)]);
     }
   }
 
   if (!open) {
     return (
-      <button className="gtm-command-trigger" type="button" onClick={() => setOpen(true)} aria-label="Open GTM command palette">
+      <button className="gtm-command-trigger" type="button" onClick={openPalette} aria-label="Open GTM command palette">
         <Search size={15}/><span>Search GTM</span><kbd>⌘K</kbd>
       </button>
     );
   }
+
+  const safeActiveIndex = Math.min(activeIndex, Math.max(0, filtered.length - 1));
 
   return (
     <div className="gtm-command-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
@@ -122,11 +123,11 @@ export function GtmCommandPalette() {
               <button
                 key={command.href + command.label}
                 type="button"
-                className={index === activeIndex ? "active" : ""}
+                className={index === safeActiveIndex ? "active" : ""}
                 onMouseEnter={() => setActiveIndex(index)}
                 onClick={() => run(command)}
                 role="option"
-                aria-selected={index === activeIndex}
+                aria-selected={index === safeActiveIndex}
               >
                 <span className="gtm-command-icon"><Icon size={17}/></span>
                 <span className="gtm-command-copy"><strong>{command.label}</strong><small>{command.description}</small></span>
