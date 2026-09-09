@@ -365,6 +365,14 @@ textarea:focus-visible {
   }
 }
 
+/* Crossfade when switching between SDR reps: the host div goes display:none -> block
+   via the `hidden` attribute, which naturally restarts a CSS animation on reveal. */
+@media (prefers-reduced-motion: no-preference) {
+  .sdr-tab-panel:not([hidden]) {
+    animation: sdr-rise-in 320ms var(--ease-out-smooth) both;
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .page-title,
   .page-mode-tabs,
