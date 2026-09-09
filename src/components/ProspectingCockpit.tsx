@@ -13,7 +13,6 @@ import {
   Link2,
   LoaderCircle,
   PhoneCall,
-  Send,
   ShieldCheck,
   Sparkles,
   Upload,
@@ -78,7 +77,7 @@ type Prospect = {
 
 type AnalyzeResponse = {
   prospect?: Prospect;
-  meta?: { creditsLeft?: number | null; smartleadConfigured?: boolean };
+  meta?: { creditsLeft?: number | null };
   error?: string;
 };
 type IntelligenceResponse = {
@@ -87,7 +86,6 @@ type IntelligenceResponse = {
 };
 type RuntimeStatus = {
   signalHireConfigured: boolean;
-  smartleadConfigured: boolean;
   companyIntelligenceConfigured?: boolean;
   defaultSource: string;
 };
@@ -160,7 +158,6 @@ export function ProspectingCockpit() {
       })
       .catch(() => setRuntime({
         signalHireConfigured: false,
-        smartleadConfigured: false,
         defaultSource: "Sales Navigator",
       }));
   }, []);
@@ -402,7 +399,6 @@ export function ProspectingCockpit() {
                 SignalHire {runtime?.signalHireConfigured ? "ready" : "needs key"}
               </span>
               <span className={runtime?.companyIntelligenceConfigured ? styles.ok : styles.muted}><Building2 size={15} /> Career + ATS</span>
-              <span className={runtime?.smartleadConfigured ? styles.ok : styles.muted}><Send size={15} /> Smartlead {runtime?.smartleadConfigured ? "ready" : "later"}</span>
             </div>
           </div>
         </header>
@@ -598,13 +594,6 @@ export function ProspectingCockpit() {
                   </button>
                   <button className={isWatched ? styles.actionActive : styles.action} onClick={() => toggleWatch(prospect)}>
                     <Watch size={15} /> {isWatched ? "Watching" : "Watch"}
-                  </button>
-                  <button
-                    className={styles.action}
-                    disabled={!runtime?.smartleadConfigured}
-                    title={runtime?.smartleadConfigured ? "Smartlead campaign selection will be wired next." : "Smartlead is intentionally postponed."}
-                  >
-                    <Send size={15} /> Smartlead
                   </button>
                   {prospect.companyWebsite && (
                     <a className={styles.action} href={prospect.companyWebsite} target="_blank" rel="noreferrer"><Globe2 size={15} /> Company</a>
