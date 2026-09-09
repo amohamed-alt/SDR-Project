@@ -5,6 +5,12 @@ import {
   readPersistedDashboardSnapshot,
   writePersistedDashboardSnapshot,
 } from "@/lib/dashboard-cache-api";
+import {
+  createLastKnownGoodDashboard,
+  criticalDashboardFailureMessage,
+  criticalDashboardWarnings,
+  dashboardSnapshotIsTrustworthy,
+} from "@/lib/dashboard-source-health";
 import type { DashboardData, DashboardFilters } from "@/lib/types";
 
 const SNAPSHOT_FRESH_MS = 2 * 60 * 1000;
@@ -12,8 +18,14 @@ const BACKGROUND_REFRESH_INTERVAL_MS = 60 * 1000;
 const ACTIVE_FILTER_TTL_MS = 60 * 60 * 1000;
 
 const cachedDashboard = unstable_cache(
-  async (filters: DashboardFilters) => queuedBuild(filters),
-  ["sdr-dashboard-live-v8-owner-attribution"],
+  async (filters: DashboardFilters) => {
+    const data = await queuedBuild(filters);
+    if (!dashboardSnapshotIsTrustworthy(data)) {
+      throw new Error(criticalDashboardFailureMessage(data));
+    }
+    return data;
+  },
+  ["sdr-dashboard-live-v9-last-known-good"],
   { revalidate: 120, tags: ["sdr-dashboard"] },
 );
 
@@ -43,8 +55,8 @@ type DashboardStore = {
   coldLoads: Map<string, Promise<DashboardData>>;
   buildTail: Promise<unknown>;
 };
-const processState = globalThis as typeof globalThis & { __sdrDashboardStoreV8?: DashboardStore };
-const dashboardStore: DashboardStore = processState.__sdrDashboardStoreV8 ??= {
+const processState = globalThis as typeof globalThis & { __sdrDashboardStoreV9?: DashboardStore };
+const dashboardStore: DashboardStore = processState.__sdrDashboardStoreV9 ??= {
   snapshots: new Map(), activeFilters: new Map(), inflightRefreshes: new Map(),
   coldLoads: new Map(), buildTail: Promise.resolve(),
 };
@@ -80,6 +92,21 @@ function startRefresh(key: string, filters: DashboardFilters) {
 
   const refresh = queuedBuild(filters)
     .then((data) => {
+      if (!dashboardSnapshotIsTrustworthy(data)) {
+        const previous = snapshots.get(key);
+        const warnings = criticalDashboardWarnings(data);
+        console.warn("Dashboard refresh degraded; retaining last known good values", warnings);
+        if (!previous) throw new Error(criticalDashboardFailureMessage(data));
+
+        const fallback = createLastKnownGoodDashboard(previous.data, data);
+        snapshots.set(key, {
+          data: fallback,
+          refreshedAt: previous.refreshedAt,
+          lastAccessedAt: Date.now(),
+        });
+        return fallback;
+      }
+
       const refreshedAt = generatedAtMs(data);
       trimSnapshots(key);
       snapshots.set(key, {
@@ -144,7 +171,7 @@ export async function getDashboardSnapshot(
 
   if (!snapshot) {
     const persisted = await readPersistedDashboardSnapshot(filters);
-    if (persisted) {
+    if (persisted && dashboardSnapshotIsTrustworthy(persisted.data)) {
       snapshot = {
         data: persisted.data,
         refreshedAt: persisted.refreshedAt,
@@ -152,6 +179,11 @@ export async function getDashboardSnapshot(
       };
       snapshots.set(key, snapshot);
       cacheStatus = "fastapi-disk";
+    } else if (persisted) {
+      console.warn(
+        "Ignoring degraded persisted dashboard snapshot",
+        criticalDashboardWarnings(persisted.data),
+      );
     }
   }
 
