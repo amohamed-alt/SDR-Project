@@ -24,6 +24,7 @@ export default defineConfig({
     },
   ],
   webServer: {
+    // Browser tests run only against this isolated demo server, never the production Hostinger instance.
     command: `npm run start -- -H 127.0.0.1 -p ${port}`,
     url: `${baseURL}/api/health`,
     reuseExistingServer: !process.env.CI,
