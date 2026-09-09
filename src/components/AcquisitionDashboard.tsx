@@ -178,6 +178,20 @@ function MetricButton({ label, value, helper, icon: Icon, tone, onClick }: Metri
   </button>;
 }
 
+// Matches the real kpi-grid shape (see globals.css .kpi-grid) so there is no
+// layout shift when live cards replace these placeholders.
+function KpiSkeleton({ count = 6 }: { count?: number }) {
+  return <div className="kpi-grid" aria-hidden="true">
+    {Array.from({ length: count }).map((_, index) => (
+      <div key={index} className="kpi-card kpi-card-skeleton">
+        <div className="kpi-top"><span className="skeleton-bar skeleton-bar-label"/><span className="skeleton-dot"/></div>
+        <strong className="skeleton-bar skeleton-bar-value"/>
+        <small className="skeleton-bar skeleton-bar-helper"/>
+      </div>
+    ))}
+  </div>;
+}
+
 function RepKpiDashboard({
   ownerKey,
   onSelectOwner,
@@ -360,10 +374,10 @@ function RepKpiDashboard({
         {data?.meta.warnings.length ? <div className="warning-banner"><AlertTriangle size={17}/><div><strong>{data.meta.isDemo ? "Demo mode" : "Some HubSpot data sources were unavailable"}</strong><span>{data.meta.warnings.join(" · ")}</span></div></div> : null}
         {error ? <div className="error-banner"><AlertTriangle size={20}/><div><strong>{data ? "Refresh failed — showing the last loaded data" : "KPI dashboard failed to load"}</strong><span>{error}</span></div><button type="button" onClick={() => void loadData(false)}>Try again</button></div> : null}
 
-        {data ? <div className="kpi-grid">{cards.map((card) => <MetricButton key={card.label} {...card}/>)}</div> : null}
+        {data
+          ? <div className="kpi-grid">{cards.map((card) => <MetricButton key={card.label} {...card}/>)}</div>
+          : (loading ? <KpiSkeleton/> : null)}
         {data ? <AcquisitionDailyPulse data={data} ownerName={owner.name} onOpen={setDrilldown}/> : null}
-
-        {loading && !data ? <div className="loading-overlay"><div className="loader"/><strong>Loading {owner.name.split(" ")[0]} KPIs…</strong><span>Calls, meetings, WhatsApp, and task execution</span></div> : null}
       </div>
     </div>
 

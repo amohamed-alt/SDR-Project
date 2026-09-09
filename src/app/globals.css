@@ -113,6 +113,17 @@ a { color: inherit; text-decoration: none; }
 .kpi-card small { display: flex; align-items: center; gap: 5px; color: #71847a; font-size: 8px; }
 .tone-green { color: var(--green); }.tone-blue { color: var(--blue); }.tone-teal { color: var(--teal); }.tone-amber { color: var(--amber); }.tone-red { color: var(--red); }.tone-purple { color: var(--purple); }
 
+/* KPI skeleton: mirrors .kpi-card exactly so real cards drop in with zero layout shift. */
+.kpi-card-skeleton { cursor: default; }
+.kpi-card-skeleton:hover { transform: none; border-color: var(--border); box-shadow: var(--shadow); }
+.skeleton-bar { display: block; border-radius: 6px; background: linear-gradient(90deg, #eef2f0 25%, #e4ebe7 37%, #eef2f0 63%); background-size: 400% 100%; animation: sdr-shimmer 1.6s ease infinite; }
+.skeleton-bar-label { width: 70px; height: 9px; }
+.skeleton-dot { width: 18px; height: 18px; border-radius: 50%; background: linear-gradient(90deg, #eef2f0 25%, #e4ebe7 37%, #eef2f0 63%); background-size: 400% 100%; animation: sdr-shimmer 1.6s ease infinite; }
+.skeleton-bar-value { width: 84px; height: 26px; margin: 16px 0 12px; }
+.skeleton-bar-helper { width: 110px; height: 8px; }
+@keyframes sdr-shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton-bar, .skeleton-dot { animation: none; background: #eef2f0; } }
+
 .panel { min-width: 0; padding: 17px; background: #fff; border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
 .panel-heading { justify-content: space-between; gap: 14px; min-height: 35px; margin-bottom: 14px; }
 .panel-heading h2 { margin: 0; font: 800 12px/1.2 "Manrope", sans-serif; }
