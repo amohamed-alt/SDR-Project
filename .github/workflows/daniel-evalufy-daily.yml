@@ -10,9 +10,9 @@ on:
         required: false
         default: ''
       target_tasks:
-        description: Evalufy tasks to schedule for the day
+        description: Daniel tasks to schedule for the day
         required: false
-        default: '150'
+        default: '100'
       max_enrichments:
         description: Maximum SignalHire paid enrichments for this run
         required: false
@@ -33,9 +33,10 @@ jobs:
       BASE_URL: https://sdr.dashboardtalentera.tech
       OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN || secrets.DASHBOARD_PASSWORD }}
       DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
-      TARGET_TASKS: ${{ inputs.target_tasks || '150' }}
+      TARGET_TASKS: ${{ inputs.target_tasks || '100' }}
       MAX_ENRICHMENTS: ${{ inputs.max_enrichments || '200' }}
       DUE_DATE_OVERRIDE: ${{ inputs.due_date || '' }}
+
     steps:
       - name: Validate required secrets
         run: |
@@ -43,7 +44,7 @@ jobs:
           test -n "$OWNER_TOKEN" || { echo "::error::ACQUISITION_OWNER_TOKEN or DASHBOARD_PASSWORD is required"; exit 1; }
           test -n "$DASHBOARD_PASSWORD" || { echo "::error::DASHBOARD_PASSWORD is required"; exit 1; }
 
-      - name: Fill Daniel Evalufy queue
+      - name: Fill Daniel queue without touching Marita tasks
         uses: actions/github-script@v7
         env:
           DASHBOARD_USERNAME: talentera
@@ -53,7 +54,7 @@ jobs:
             const ownerToken = process.env.OWNER_TOKEN;
             const username = process.env.DASHBOARD_USERNAME || 'talentera';
             const password = process.env.DASHBOARD_PASSWORD;
-            const target = Math.max(1, Math.min(150, Number(process.env.TARGET_TASKS || 150)));
+            const target = Math.max(1, Math.min(100, Number(process.env.TARGET_TASKS || 100)));
             const maxEnrichments = Math.max(0, Math.min(300, Number(process.env.MAX_ENRICHMENTS || 200)));
             const auth = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
             const headers = {
@@ -97,7 +98,11 @@ jobs:
                   });
                   const text = await response.text();
                   let body = {};
-                  try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text.slice(0, 1200) }; }
+                  try {
+                    body = text ? JSON.parse(text) : {};
+                  } catch {
+                    body = { raw: text.slice(0, 1200) };
+                  }
 
                   if (!response.ok) {
                     const error = new Error(`${path} failed ${response.status}: ${JSON.stringify(body).slice(0, 1400)}`);
@@ -124,7 +129,6 @@ jobs:
             const result = {
               dueDate,
               target,
-              transferred: 0,
               scheduledBeforeNetNew: 0,
               pushedNetNew: 0,
               finalScheduled: 0,
@@ -139,7 +143,7 @@ jobs:
             };
 
             if (!isWorkDate(dueDate)) {
-              core.notice(`Daniel Evalufy skipped for ${dueDate}; outside Sunday-Thursday Sep 13-30 window.`);
+              core.notice(`Daniel queue skipped for ${dueDate}; outside Sunday-Thursday Sep 13-30 window.`);
               core.summary
                 .addHeading('Daniel Evalufy Daily')
                 .addTable([
@@ -151,13 +155,12 @@ jobs:
               return;
             }
 
-            const transfer = await request('/api/daniel-evalufy', {
+            // Important: do not call transfer_existing. Marita tasks and ownership are left untouched.
+            const initialStatus = await request('/api/daniel-evalufy', {
               method: 'POST',
-              body: JSON.stringify({ action: 'transfer_existing', dueDate, limit: target }),
+              body: JSON.stringify({ action: 'status', dueDate }),
             });
-
-            result.transferred = Number(transfer.transferred || 0);
-            result.scheduledBeforeNetNew = Number(transfer.scheduledCount || 0);
+            result.scheduledBeforeNetNew = Number(initialStatus.scheduledCount || 0);
             let remaining = Math.max(0, target - result.scheduledBeforeNetNew);
 
             const marketRank = new Map([
@@ -236,6 +239,7 @@ jobs:
 
               for (const account of accounts) {
                 if (remaining <= 0 || result.signalHireEnrichments >= maxEnrichments) break;
+
                 const domain = String(account.domain || '').trim();
                 if (!domain) continue;
                 result.companiesChecked += 1;
@@ -260,7 +264,10 @@ jobs:
                       continue;
                     }
 
-                    let candidate = chooseCandidate(storedPeople.filter((candidate) => candidate.enrichmentStatus === 'search_only'));
+                    let candidate = chooseCandidate(
+                      storedPeople.filter((candidate) => candidate.enrichmentStatus === 'search_only'),
+                    );
+
                     if (!candidate && storedPeople.length === 0) {
                       const found = await request('/api/acquisition', {
                         method: 'POST',
@@ -366,7 +373,12 @@ jobs:
                   }
                 } catch (error) {
                   const status = Number(error?.status || 0);
-                  if (status === 409 || /not Daniel-Evalufy eligible|has call or meeting activity/i.test(String(error?.message || error))) {
+                  if (
+                    status === 409
+                    || /not Daniel-Evalufy eligible|has call or meeting activity|company_owned|contact_owned|retention|existing_account|csm_owned/i.test(
+                      String(error?.message || error),
+                    )
+                  ) {
                     result.ineligibleExisting += 1;
                     continue;
                   }
@@ -390,13 +402,13 @@ jobs:
                 [{ data: 'Metric', header: true }, { data: 'Result', header: true }],
                 ['Due date', dueDate],
                 ['Daily target', String(target)],
-                ['Transferred from Marita', String(result.transferred)],
+                ['Marita tasks changed', '0 — protected'],
                 ['Scheduled before net-new', String(result.scheduledBeforeNetNew)],
                 ['Net-new tasks pushed', String(result.pushedNetNew)],
-                ['Final Daniel Evalufy tasks', String(result.finalScheduled)],
+                ['Final Daniel tasks', String(result.finalScheduled)],
                 ['SignalHire paid enrichments', String(result.signalHireEnrichments)],
                 ['Companies checked', String(result.companiesChecked)],
-                ['Rejected due existing ownership/activity', String(result.ineligibleExisting)],
+                ['Rejected due ownership/activity/retention', String(result.ineligibleExisting)],
                 ['No safe persona', String(result.noCandidate)],
                 ['No phone', String(result.noPhone)],
                 ['Duplicates reused', String(result.duplicates)],
@@ -428,5 +440,7 @@ jobs:
             console.log(JSON.stringify(result, null, 2));
 
             if (result.finalScheduled < target) {
-              core.warning(`Daniel Evalufy ended at ${result.finalScheduled}/${target} tasks for ${dueDate}. The strict safety filters were not relaxed.`);
+              core.warning(
+                `Daniel Evalufy ended at ${result.finalScheduled}/${target} tasks for ${dueDate}. Strict safety filters were not relaxed.`,
+              );
             }
