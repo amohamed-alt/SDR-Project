@@ -6,6 +6,7 @@ import {
   ArrowLeft, Building2, CheckCircle2, CircleAlert, ExternalLink, Filter, LoaderCircle,
   Mail, Phone, RefreshCw, Send, ShieldCheck, Sparkles, UserCheck, UserPlus, UsersRound,
 } from "lucide-react";
+import { GtmTable, type GtmColumn } from "@/components/GtmTable";
 import styles from "./SignalHireQueue.module.css";
 
 type SignalHireLead = {
@@ -414,6 +415,16 @@ export function SignalHireQueue() {
     });
   }
 
+  const queueColumns: GtmColumn<Row>[] = [
+    { id: "select", header: "Select", accessor: () => "", sortable: false, width: 64, render: (row) => <input type="checkbox" aria-label={`Select ${row.prospect?.fullName || row.lead.name}`} disabled={!isEligible(row)} checked={selected.has(row.key)} onChange={() => setSelected((current) => { const next = new Set(current); if (next.has(row.key)) next.delete(row.key); else next.add(row.key); return next; })}/> },
+    { id: "lead", header: "Lead", accessor: (row) => row.prospect?.fullName || row.lead.name, width: 220, render: (row) => <><strong>{row.prospect?.fullName || row.lead.name}</strong><span>{row.prospect?.title || row.lead.title || "—"}</span><small>{row.prospect?.location || row.lead.location || "—"}</small><div className={styles.links}>{row.lead.signalHireProfileUrl && <a href={row.lead.signalHireProfileUrl} target="_blank" rel="noreferrer">SignalHire <ExternalLink size={10}/></a>}{row.prospect?.linkedinUrl && <a href={row.prospect.linkedinUrl} target="_blank" rel="noreferrer">LinkedIn <ExternalLink size={10}/></a>}</div></> },
+    { id: "contact", header: "Contact", accessor: (row) => `${row.prospect?.phone || row.lead.phone || ""} ${row.prospect?.email || row.lead.email || ""}`, width: 210, render: (row) => { const contactExists = row.precheck?.contact.inHubSpot; return <>{(row.prospect?.phone || row.lead.phone) ? <strong className={styles.phone}><Phone size={12}/>{row.prospect?.phone || row.lead.phone}</strong> : <span className={styles.muted}>No phone yet</span>}{(row.prospect?.email || row.lead.email) ? <span><Mail size={11}/>{row.prospect?.email || row.lead.email}</span> : <small>No email yet</small>}<small className={contactExists ? styles.badText : styles.goodText}>{contactExists ? `Existing contact · ${row.precheck?.contact.matchedBy}` : row.precheck ? "New contact" : "Checking…"}</small></> } },
+    { id: "company", header: "Company / HubSpot", accessor: (row) => `${row.prospect?.company || row.precheck?.company?.name || row.lead.company} ${row.prospect?.companyDomain || row.precheck?.company?.domain || ""}`, width: 225, render: (row) => { const company = row.precheck?.company; return <><strong>{row.prospect?.company || company?.name || row.lead.company || "—"}</strong><span>{row.prospect?.companyDomain || company?.domain || ""}</span><small className={company?.protected ? styles.badText : company?.inHubSpot ? styles.warnText : styles.goodText}>{companyState(company)}</small>{company?.searchStatus && <small>Search: {company.searchStatus}</small>}</> } },
+    { id: "ats", header: "ATS / Hiring", accessor: (row) => `${row.prospect?.detectedAts || row.precheck?.company?.detectedAts || ""} ${row.prospect?.hiring?.status || ""}`, width: 185, render: (row) => { const company = row.precheck?.company; const prospect = row.prospect; return <><strong>{prospect?.detectedAts || company?.detectedAts || "No ATS detected"}</strong><span>{prospect?.hiring?.status || (company?.inHubSpot ? "HubSpot data" : row.stage === "ready" ? "Unknown" : "Pending")}{prospect?.hiring?.activeJobs ? ` · ${prospect.hiring.activeJobs} jobs` : ""}</span>{company?.careerPageUrl && <a href={company.careerPageUrl} target="_blank" rel="noreferrer">Career page <ExternalLink size={10}/></a>}</> } },
+    { id: "status", header: "Status", accessor: (row) => row.stage, width: 180, render: (row) => { const company = row.precheck?.company; const rowPush = pushState[row.key]; return <>{row.stage === "checking" && <span className={styles.badge}><LoaderCircle className={styles.spin} size={11}/>HubSpot check</span>}{row.stage === "enriching" && <span className={styles.badge}><LoaderCircle className={styles.spin} size={11}/>Enriching</span>}{row.stage === "ready" && <span className={styles.goodBadge}><CheckCircle2 size={11}/>Ready to push</span>}{row.stage === "existing" && <span className={styles.existingBadge}><UserCheck size={11}/>Already in HubSpot</span>}{row.stage === "protected" && <span className={styles.protectedBadge}><ShieldCheck size={11}/>{company?.protectedReason || "Protected"}</span>}{row.stage === "error" && <span className={styles.errorBadge}><CircleAlert size={11}/>Needs review</span>}{row.error && <small className={styles.rowError}>{row.error}</small>}{rowPush?.success && <small className={styles.goodText}>{rowPush.success}</small>}{rowPush?.error && <small className={styles.badText}>{rowPush.error}</small>}</> } },
+    { id: "action", header: "Action", accessor: () => "", sortable: false, width: 135, render: (row) => { const rowPush = pushState[row.key]; return <button className={styles.pushButton} type="button" disabled={!isEligible(row) || Boolean(rowPush?.loading || rowPush?.success)} onClick={() => void pushRow(row)}>{rowPush?.loading ? <LoaderCircle className={styles.spin} size={13}/> : <Send size={13}/>}{rowPush?.success ? "Pushed" : "Push + Task"}</button> } },
+  ];
+
   return <main className={styles.page}>
     <div className={styles.shell}>
       <header className={styles.header}>
@@ -476,65 +487,7 @@ export function SignalHireQueue() {
           <div><h2>{status?.latestBatch?.listName || "Abdullah"} queue</h2><p>HubSpot contact + company status, then SignalHire enrichment, ATS/hiring intelligence and reviewed push.</p></div>
           <span>{visible.length} visible</span>
         </div>
-        <div className={styles.tableWrap}>
-          <table>
-            <thead><tr><th/><th>Lead</th><th>Contact</th><th>Company / HubSpot</th><th>ATS / Hiring</th><th>Status</th><th>Action</th></tr></thead>
-            <tbody>
-              {visible.map((row) => {
-                const prospect = row.prospect;
-                const company = row.precheck?.company;
-                const contactExists = row.precheck?.contact.inHubSpot;
-                const rowPush = pushState[row.key];
-                return <tr key={row.key} data-protected={row.stage === "protected"}>
-                  <td><input type="checkbox" disabled={!isEligible(row)} checked={selected.has(row.key)} onChange={() => setSelected((current) => { const next = new Set(current); if (next.has(row.key)) next.delete(row.key); else next.add(row.key); return next; })}/></td>
-                  <td>
-                    <strong>{prospect?.fullName || row.lead.name}</strong>
-                    <span>{prospect?.title || row.lead.title || "—"}</span>
-                    <small>{prospect?.location || row.lead.location || "—"}</small>
-                    <div className={styles.links}>
-                      {row.lead.signalHireProfileUrl && <a href={row.lead.signalHireProfileUrl} target="_blank" rel="noreferrer">SignalHire <ExternalLink size={10}/></a>}
-                      {prospect?.linkedinUrl && <a href={prospect.linkedinUrl} target="_blank" rel="noreferrer">LinkedIn <ExternalLink size={10}/></a>}
-                    </div>
-                  </td>
-                  <td>
-                    {(prospect?.phone || row.lead.phone) ? <strong className={styles.phone}><Phone size={12}/>{prospect?.phone || row.lead.phone}</strong> : <span className={styles.muted}>No phone yet</span>}
-                    {(prospect?.email || row.lead.email) ? <span><Mail size={11}/>{prospect?.email || row.lead.email}</span> : <small>No email yet</small>}
-                    <small className={contactExists ? styles.badText : styles.goodText}>{contactExists ? `Existing contact · ${row.precheck?.contact.matchedBy}` : row.precheck ? "New contact" : "Checking…"}</small>
-                  </td>
-                  <td>
-                    <strong>{prospect?.company || company?.name || row.lead.company || "—"}</strong>
-                    <span>{prospect?.companyDomain || company?.domain || ""}</span>
-                    <small className={company?.protected ? styles.badText : company?.inHubSpot ? styles.warnText : styles.goodText}>{companyState(company)}</small>
-                    {company?.searchStatus && <small>Search: {company.searchStatus}</small>}
-                  </td>
-                  <td>
-                    <strong>{prospect?.detectedAts || company?.detectedAts || "No ATS detected"}</strong>
-                    <span>{prospect?.hiring?.status || (company?.inHubSpot ? "HubSpot data" : row.stage === "ready" ? "Unknown" : "Pending")}{prospect?.hiring?.activeJobs ? ` · ${prospect.hiring.activeJobs} jobs` : ""}</span>
-                    {company?.careerPageUrl && <a href={company.careerPageUrl} target="_blank" rel="noreferrer">Career page <ExternalLink size={10}/></a>}
-                  </td>
-                  <td>
-                    {row.stage === "checking" && <span className={styles.badge}><LoaderCircle className={styles.spin} size={11}/>HubSpot check</span>}
-                    {row.stage === "enriching" && <span className={styles.badge}><LoaderCircle className={styles.spin} size={11}/>Enriching</span>}
-                    {row.stage === "ready" && <span className={styles.goodBadge}><CheckCircle2 size={11}/>Ready to push</span>}
-                    {row.stage === "existing" && <span className={styles.existingBadge}><UserCheck size={11}/>Already in HubSpot</span>}
-                    {row.stage === "protected" && <span className={styles.protectedBadge}><ShieldCheck size={11}/>{company?.protectedReason || "Protected"}</span>}
-                    {row.stage === "error" && <span className={styles.errorBadge}><CircleAlert size={11}/>Needs review</span>}
-                    {row.error && <small className={styles.rowError}>{row.error}</small>}
-                    {rowPush?.success && <small className={styles.goodText}>{rowPush.success}</small>}
-                    {rowPush?.error && <small className={styles.badText}>{rowPush.error}</small>}
-                  </td>
-                  <td>
-                    <button className={styles.pushButton} type="button" disabled={!isEligible(row) || Boolean(rowPush?.loading || rowPush?.success)} onClick={() => void pushRow(row)}>
-                      {rowPush?.loading ? <LoaderCircle className={styles.spin} size={13}/> : <Send size={13}/>}
-                      {rowPush?.success ? "Pushed" : "Push + Task"}
-                    </button>
-                  </td>
-                </tr>;
-              })}
-              {!visible.length && <tr><td colSpan={7} className={styles.empty}>{rows.length ? "No leads match this view." : "Sync the SignalHire list from the Talentera Companion to start."}</td></tr>}
-            </tbody>
-          </table>
-        </div>
+        <GtmTable rows={visible} columns={queueColumns} getRowId={(row) => row.key} getSearchText={(row) => [row.lead.name, row.lead.title, row.lead.company, row.lead.email, row.lead.phone, row.prospect?.fullName, row.prospect?.companyDomain, row.prospect?.detectedAts, row.precheck?.company.accountType, row.precheck?.company.accountStatus, row.precheck?.company.detectedAts, row.stage].join(" ")} pageSize={25} emptyTitle={rows.length ? "No leads match this view" : "No SignalHire leads synced"} emptyDescription={rows.length ? "Adjust the queue view or search to see another lead." : "Sync the SignalHire list from the Talentera Companion to start."} exportFileName="signalhire-queue.csv" exportRow={(row) => ({ Lead: row.prospect?.fullName || row.lead.name, Title: row.prospect?.title || row.lead.title, Company: row.prospect?.company || row.precheck?.company?.name || row.lead.company, Phone: row.prospect?.phone || row.lead.phone, Email: row.prospect?.email || row.lead.email, ATS: row.prospect?.detectedAts || row.precheck?.company?.detectedAts, Status: row.stage, LinkedIn: row.prospect?.linkedinUrl || row.lead.linkedinUrl, "SignalHire profile": row.lead.signalHireProfileUrl })}/>
       </section>
     </div>
   </main>;
