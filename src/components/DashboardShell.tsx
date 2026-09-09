@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Activity,
   BrainCircuit,
+  BriefcaseBusiness,
   Building2,
   ChevronDown,
   ChevronUp,
@@ -24,7 +25,7 @@ import {
 import { Dashboard as ExistingDashboard } from "@/components/DashboardMotion";
 import styles from "@/components/DashboardShell.module.css";
 
-type ShellView = "core" | "maqsam" | "marita-priority" | "team-activity" | "net-new" | "gtm-brain";
+type ShellView = "core" | "maqsam" | "marita-priority" | "team-activity" | "net-new" | "gtm-brain" | "sales-handoff";
 
 function ViewLoading() {
   return <main className={styles.viewLoading}><LoaderCircle size={24}/><strong>Loading workspace…</strong></main>;
@@ -50,6 +51,10 @@ const TalenteraIntelligenceWorkspace = dynamic(
   () => import("@/components/TalenteraIntelligenceWorkspace").then((module) => module.TalenteraIntelligenceWorkspace),
   { ssr: false, loading: ViewLoading },
 );
+const SalesHandoffDashboard = dynamic(
+  () => import("@/components/SalesHandoffDashboard").then((module) => module.SalesHandoffDashboard),
+  { ssr: false, loading: ViewLoading },
+);
 
 function viewFromUrl(): ShellView {
   const view = new URLSearchParams(window.location.search).get("view");
@@ -58,6 +63,7 @@ function viewFromUrl(): ShellView {
   if (view === "team-activity") return "team-activity";
   if (view === "net-new") return "net-new";
   if (view === "gtm-brain") return "gtm-brain";
+  if (view === "sales-handoff") return "sales-handoff";
   return "core";
 }
 
@@ -181,6 +187,7 @@ export function Dashboard({ sdr = "marita", active = true }: SdrDashboardProps) 
   if (view === "team-activity") return <TeamActivity onBack={() => changeView("core")}/>;
   if (view === "net-new") return <ProspectingCoverage onBack={() => changeView("core")}/>;
   if (view === "gtm-brain") return <TalenteraIntelligenceWorkspace onBack={() => changeView("core")}/>;
+  if (view === "sales-handoff") return <SalesHandoffDashboard onBack={() => changeView("core")}/>;
 
   return <div className={styles.shell}>
     <ExistingDashboard sdr={sdr} active={active}/>
@@ -199,6 +206,10 @@ export function Dashboard({ sdr = "marita", active = true }: SdrDashboardProps) 
               <span className={`${styles.toolIcon} ${styles.brainIcon}`}><BrainCircuit size={17}/></span>
               <span className={styles.toolCopy}><strong>Talentera Intelligence</strong><small>Account priority · target pool · call strategy</small></span>
             </button>
+            {sdr === "marita" ? <button className={styles.toolItem} type="button" onClick={() => changeView("sales-handoff")}>
+              <span className={`${styles.toolIcon} ${styles.gtmIcon}`}><BriefcaseBusiness size={17}/></span>
+              <span className={styles.toolCopy}><strong>Sales Handoff</strong><small>Marita → Orsla 1 · follow-up · deals · pipeline risk</small></span>
+            </button> : null}
             <button className={styles.toolItem} type="button" onClick={() => changeView("net-new")}>
               <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Target size={17}/></span>
               <span className={styles.toolCopy}><strong>Prospecting</strong><small>Persistent market coverage · Apollo universe · HubSpot dedupe</small></span>
@@ -254,7 +265,7 @@ export function Dashboard({ sdr = "marita", active = true }: SdrDashboardProps) 
         aria-expanded={toolsOpen}
         aria-controls="sdr-tools-menu"
       >
-        {toolsOpen ? <X size={18}/> : <Menu size={18}/>}<span>{toolsOpen ? "Close" : "SDR Tools"}</span><small>3</small>
+        {toolsOpen ? <X size={18}/> : <Menu size={18}/>}<span>{toolsOpen ? "Close" : "SDR Tools"}</span><small>{sdr === "marita" ? "4" : "3"}</small>
       </button>
     </div>
   </div>;
