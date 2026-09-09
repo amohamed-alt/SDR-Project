@@ -19,16 +19,16 @@ function pages(value: unknown) {
 
 async function writeProgress(next: AcquisitionCoverageProgress) {
   const target = progressPath();
-  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.mkdir(/* turbopackIgnore: true */ path.dirname(target), { recursive: true });
   const temporary = `${target}.${process.pid}.tmp`;
-  await fs.writeFile(temporary, JSON.stringify(next), "utf8");
-  await fs.rename(temporary, target);
+  await fs.writeFile(/* turbopackIgnore: true */ temporary, JSON.stringify(next), "utf8");
+  await fs.rename(/* turbopackIgnore: true */ temporary, /* turbopackIgnore: true */ target);
   return next;
 }
 
 export async function readAcquisitionCoverageProgress(): Promise<AcquisitionCoverageProgress> {
   try {
-    const raw = await fs.readFile(progressPath(), "utf8");
+    const raw = await fs.readFile(/* turbopackIgnore: true */ progressPath(), "utf8");
     const parsed = JSON.parse(raw) as Partial<AcquisitionCoverageProgress>;
     return {
       completedPages: pages(parsed.completedPages),

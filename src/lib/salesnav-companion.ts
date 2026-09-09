@@ -179,7 +179,7 @@ export async function listCompanionFullRuns(limit = 50): Promise<CompanionFullRu
     const files = (await readdir(/* turbopackIgnore: true */ FULL_RUN_HISTORY_DIR))
       .filter((name) => name.endsWith(".json"));
     for (const file of files) {
-      const run = await readFullRun(join(FULL_RUN_HISTORY_DIR, file));
+      const run = await readFullRun(join(/* turbopackIgnore: true */ FULL_RUN_HISTORY_DIR, file));
       if (!run || seen.has(run.id)) continue;
       seen.add(run.id);
       const { leads, ...rest } = run;
