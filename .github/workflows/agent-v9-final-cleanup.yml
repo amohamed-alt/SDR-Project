@@ -1,0 +1,47 @@
+name: Agent V9 Final Cleanup
+
+on:
+  push:
+    branches: [upgrade/gtm-command-center-v9-final-cleanup]
+    paths:
+      - '.github/workflows/agent-v9-final-cleanup.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: upgrade/gtm-command-center-v9-final-cleanup
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit
+      - name: Apply bounded cleanup
+        run: node scripts/agent-v9-final-cleanup.mjs
+      - name: Verify cleanup
+        run: |
+          set -euo pipefail
+          npm run typecheck
+          npm run lint
+          npm run build 2>&1 | tee /tmp/v9-build.log
+          if grep -q "Dynamic filesystem access causes tracing of the whole project" /tmp/v9-build.log; then
+            echo "Turbopack dynamic filesystem tracing warning remains" >&2
+            exit 1
+          fi
+      - name: Remove one-shot tooling and commit
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/agent-v9-final-cleanup.yml scripts/agent-v9-final-cleanup.mjs
+          git config user.name "GTM Upgrade Bot"
+          git config user.email "gtm-upgrade@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && { echo "No cleanup changes produced"; exit 1; }
+          git commit -m "chore: finish GTM command center cleanup"
+          git push origin HEAD:upgrade/gtm-command-center-v9-final-cleanup
