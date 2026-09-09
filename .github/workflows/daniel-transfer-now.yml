@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'src/app/api/daniel-transfer-plan/route.ts'
+      - 'src/lib/daniel-transfer-trigger.ts'
   workflow_dispatch:
 
 permissions:
