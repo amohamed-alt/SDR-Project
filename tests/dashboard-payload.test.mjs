@@ -63,6 +63,23 @@ function activity(id, overrides = {}) {
   };
 }
 
+function company(id, associatedContacts = 0, ats = "") {
+  return {
+    id: String(id),
+    name: `Company ${id}`,
+    domain: "",
+    country: "Saudi Arabia",
+    industry: "",
+    employees: "",
+    tier: "",
+    ats,
+    atsCategory: "",
+    atsConfidence: "",
+    associatedContacts,
+    url: "",
+  };
+}
+
 function dashboard() {
   const contacts = Array.from({ length: 500 }, (_, index) => contact(
     index + 1,
@@ -70,34 +87,35 @@ function dashboard() {
     new Date(Date.UTC(2026, 8, 1, 0, index)).toISOString(),
   ));
   const activities = Array.from({ length: 600 }, (_, index) => activity(index + 1));
-  activities[450] = activity(451, { type: "Task", isOpen: true, dueBucket: "Due today" });
-  activities[500] = activity(501, { type: "Task", isOpen: true, isHighPriority: true });
-  activities[550] = activity(551, { type: "Meeting", isOpen: true });
+  activities[450] = activity(451, { type: "Task", isOpen: true, dueBucket: "Due today", dueAt: "2026-09-09T08:00:00.000Z" });
+  activities[500] = activity(501, { type: "Task", isOpen: true, isHighPriority: true, dueAt: "2026-09-09T09:00:00.000Z" });
+  activities[550] = activity(551, { type: "Meeting", isOpen: true, occurredAt: "2026-09-09T10:00:00.000Z" });
+  const companies = Array.from({ length: 250 }, (_, index) => company(index + 1, index, index % 7 === 0 ? "Workday" : ""));
 
   return {
     meta: { generatedAt: "2026-09-09T00:00:00.000Z", warnings: [] },
-    kpis: { portfolioContacts: 500, calls: 600 },
+    kpis: { portfolioContacts: 500, calls: 600, companies: 250 },
     priorityContacts: contacts,
     recentActivities: activities,
-    companies: [{ id: "company-1" }],
+    companies,
     deals: [{ id: "deal-1" }],
     dailyActivities: [{ date: "2026-09-09", calls: 600 }],
   };
 }
 
-test("compact dashboard keeps summaries and trims heavy detail arrays", () => {
+test("instant dashboard keeps summaries while aggressively trimming detail arrays", () => {
   const source = dashboard();
   const projected = projectDashboardPayload(source);
 
   assert.equal(projected.kpis, source.kpis);
   assert.equal(projected.dailyActivities, source.dailyActivities);
-  assert.equal(projected.companies, source.companies);
   assert.equal(projected.deals, source.deals);
-  assert.ok(projected.priorityContacts.length <= 300);
-  assert.ok(projected.recentActivities.length <= 203);
+  assert.ok(projected.priorityContacts.length <= 120);
+  assert.ok(projected.recentActivities.length <= 200);
+  assert.ok(projected.companies.length <= 80);
 });
 
-test("compact dashboard preserves newest online leads and operationally important activities", () => {
+test("instant dashboard preserves newest online leads and operationally important activities", () => {
   const source = dashboard();
   const projected = projectDashboardPayload(source);
   const contactIds = new Set(projected.priorityContacts.map((item) => item.id));
@@ -107,4 +125,14 @@ test("compact dashboard preserves newest online leads and operationally importan
   assert.ok(activityIds.has("451"), "today task should be retained outside recent window");
   assert.ok(activityIds.has("501"), "high-priority task should be retained outside recent window");
   assert.ok(activityIds.has("551"), "open meeting should be retained outside recent window");
+});
+
+test("instant dashboard keeps the highest-signal companies for ATS/account intelligence", () => {
+  const source = dashboard();
+  const projected = projectDashboardPayload(source);
+  const companyIds = new Set(projected.companies.map((item) => item.id));
+
+  assert.equal(projected.companies.length, 80);
+  assert.ok(companyIds.has("250"), "company with the largest associated-contact count should be retained");
+  assert.ok(!companyIds.has("1"), "low-signal company should be omitted from the initial browser payload");
 });
