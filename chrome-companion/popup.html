@@ -42,6 +42,21 @@
       <div id="runStatus" class="status muted">Quick extract ready</div>
     </section>
 
+    <section class="card" id="liveProfileCard" hidden>
+      <h2>This LinkedIn Profile</h2>
+      <p class="small">Live check for the profile you're viewing right now — HubSpot status and hiring signal, no full extract needed.</p>
+      <button id="enrichProfile" class="primary">Enrich this profile</button>
+      <div id="liveProfileStatus" class="status muted">Checking page…</div>
+      <div id="liveProfileResult" class="liveProfileResult" hidden>
+        <div class="liveProfileName" id="liveProfileName"></div>
+        <div class="liveProfileBadges">
+          <span id="liveProfileHubspot" class="badge muted"></span>
+          <span id="liveProfileHiring" class="badge muted"></span>
+        </div>
+        <button id="pushProfile" class="primary">Push to Marita</button>
+      </div>
+    </section>
+
     <section class="card">
       <h2>SignalHire Lead List</h2>
       <p class="small">Use this only for an existing SignalHire list. Sales Nav remains the primary discovery source; contact reveal in the SDR queue is manual.</p>
@@ -54,5 +69,6 @@
   <script src="popup.js"></script>
   <script src="popup-v154.js"></script>
   <script src="popup-signalhire.js"></script>
+  <script src="popup-live-profile.js"></script>
 </body>
 </html>
