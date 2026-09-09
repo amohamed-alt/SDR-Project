@@ -1,446 +1,47 @@
-name: Daniel Evalufy Daily
+name: Daniel Queue Manual Audit
 
 on:
-  schedule:
-    - cron: '45 5 * * 0-4'
   workflow_dispatch:
     inputs:
-      due_date:
-        description: Optional Cairo due date (YYYY-MM-DD)
+      dry_run:
+        description: Preview the transfer plan without changing HubSpot
         required: false
-        default: ''
-      target_tasks:
-        description: Daniel tasks to schedule for the day
-        required: false
-        default: '100'
-      max_enrichments:
-        description: Maximum SignalHire paid enrichments for this run
-        required: false
-        default: '200'
+        default: 'true'
 
 permissions:
   contents: read
 
 concurrency:
-  group: daniel-evalufy-daily
+  group: daniel-queue-manual-audit
   cancel-in-progress: false
 
 jobs:
-  fill-daniel-evalufy:
+  audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 15
     env:
       BASE_URL: https://sdr.dashboardtalentera.tech
       OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN || secrets.DASHBOARD_PASSWORD }}
-      DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
-      TARGET_TASKS: ${{ inputs.target_tasks || '100' }}
-      MAX_ENRICHMENTS: ${{ inputs.max_enrichments || '200' }}
-      DUE_DATE_OVERRIDE: ${{ inputs.due_date || '' }}
-
+      DRY_RUN: ${{ inputs.dry_run || 'true' }}
     steps:
-      - name: Validate required secrets
+      - name: Validate admin token
         run: |
           set -euo pipefail
-          test -n "$OWNER_TOKEN" || { echo "::error::ACQUISITION_OWNER_TOKEN or DASHBOARD_PASSWORD is required"; exit 1; }
-          test -n "$DASHBOARD_PASSWORD" || { echo "::error::DASHBOARD_PASSWORD is required"; exit 1; }
+          test -n "$OWNER_TOKEN" || { echo "::error::Admin automation token is required"; exit 1; }
 
-      - name: Fill Daniel queue without touching Marita tasks
-        uses: actions/github-script@v7
-        env:
-          DASHBOARD_USERNAME: talentera
-        with:
-          script: |
-            const base = process.env.BASE_URL;
-            const ownerToken = process.env.OWNER_TOKEN;
-            const username = process.env.DASHBOARD_USERNAME || 'talentera';
-            const password = process.env.DASHBOARD_PASSWORD;
-            const target = Math.max(1, Math.min(100, Number(process.env.TARGET_TASKS || 100)));
-            const maxEnrichments = Math.max(0, Math.min(300, Number(process.env.MAX_ENRICHMENTS || 200)));
-            const auth = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
-            const headers = {
-              Authorization: auth,
-              'x-acquisition-owner-token': ownerToken,
-              'Content-Type': 'application/json',
-            };
-
-            function cairoDate() {
-              const parts = new Intl.DateTimeFormat('en-CA', {
-                timeZone: 'Africa/Cairo',
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-              }).formatToParts(new Date());
-              const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-              return `${map.year}-${map.month}-${map.day}`;
-            }
-
-            function isWorkDate(date) {
-              if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
-              if (date < '2026-09-13' || date > '2026-09-30') return false;
-              const day = new Date(`${date}T12:00:00Z`).getUTCDay();
-              return day !== 5 && day !== 6;
-            }
-
-            async function request(path, init = {}) {
-              const maxAttempts = Number(init.maxAttempts || 4);
-              const requestInit = { ...init };
-              delete requestInit.maxAttempts;
-              let lastError;
-
-              for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-                const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 45_000);
-                try {
-                  const response = await fetch(`${base}${path}`, {
-                    ...requestInit,
-                    signal: controller.signal,
-                    headers: { ...headers, ...(requestInit.headers || {}) },
-                  });
-                  const text = await response.text();
-                  let body = {};
-                  try {
-                    body = text ? JSON.parse(text) : {};
-                  } catch {
-                    body = { raw: text.slice(0, 1200) };
-                  }
-
-                  if (!response.ok) {
-                    const error = new Error(`${path} failed ${response.status}: ${JSON.stringify(body).slice(0, 1400)}`);
-                    error.status = response.status;
-                    error.body = body;
-                    throw error;
-                  }
-                  return body;
-                } catch (error) {
-                  lastError = error;
-                  const transient = /timeout|abort|fetch failed|ECONNRESET|ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT/i.test(String(error?.message || error));
-                  const retryableStatus = [429, 500, 502, 503, 504].includes(Number(error?.status || 0));
-                  if ((!transient && !retryableStatus) || attempt === maxAttempts) break;
-                  await new Promise((resolve) => setTimeout(resolve, attempt * 5000));
-                } finally {
-                  clearTimeout(timeout);
-                }
-              }
-
-              throw lastError;
-            }
-
-            const dueDate = String(process.env.DUE_DATE_OVERRIDE || '').trim() || cairoDate();
-            const result = {
-              dueDate,
-              target,
-              scheduledBeforeNetNew: 0,
-              pushedNetNew: 0,
-              finalScheduled: 0,
-              signalHireEnrichments: 0,
-              companiesChecked: 0,
-              noCandidate: 0,
-              noPhone: 0,
-              ineligibleExisting: 0,
-              duplicates: 0,
-              errors: [],
-              prospects: [],
-            };
-
-            if (!isWorkDate(dueDate)) {
-              core.notice(`Daniel queue skipped for ${dueDate}; outside Sunday-Thursday Sep 13-30 window.`);
-              core.summary
-                .addHeading('Daniel Evalufy Daily')
-                .addTable([
-                  [{ data: 'Metric', header: true }, { data: 'Result', header: true }],
-                  ['Due date', dueDate],
-                  ['Status', 'Skipped — outside configured work window'],
-                ]);
-              await core.summary.write();
-              return;
-            }
-
-            // Important: do not call transfer_existing. Marita tasks and ownership are left untouched.
-            const initialStatus = await request('/api/daniel-evalufy', {
-              method: 'POST',
-              body: JSON.stringify({ action: 'status', dueDate }),
-            });
-            result.scheduledBeforeNetNew = Number(initialStatus.scheduledCount || 0);
-            let remaining = Math.max(0, target - result.scheduledBeforeNetNew);
-
-            const marketRank = new Map([
-              ['Saudi Arabia', 100],
-              ['United Arab Emirates', 96],
-              ['Qatar', 88],
-              ['Kuwait', 86],
-              ['Oman', 82],
-              ['Bahrain', 80],
-            ]);
-
-            function accountScore(account) {
-              const market = marketRank.get(String(account.country || '')) || 0;
-              const explicit = Number(account.priorityScore || account.gtmScore || account.fitScore || 0);
-              const confidence = account.researchConfidence === 'high' ? 8 : account.researchConfidence === 'medium' ? 4 : 0;
-              const hiring = Number(account.hiringScore || account.evidence?.hiringScore || 0);
-              return explicit * 10 + market + confidence + hiring;
-            }
-
-            function personaStrength(title = '') {
-              const value = String(title).toLowerCase();
-              if (/talent acquisition/.test(value) && /head|director|vp|vice president/.test(value)) return 110;
-              if (/recruit/.test(value) && /head|director|vp|vice president/.test(value)) return 105;
-              if (/chief human resources|\bchro\b|chief people/.test(value)) return 100;
-              if (/hris|hr systems|people systems/.test(value) && /head|director|manager|lead/.test(value)) return 96;
-              if (/human resources|\bhr\b|people/.test(value) && /head|director|vp|vice president/.test(value)) return 90;
-              if (/talent acquisition|recruit/.test(value) && /manager|lead/.test(value)) return 84;
-              return 40;
-            }
-
-            function normalizedScore(person = {}) {
-              return Number(person.score || person.rankScore || 0);
-            }
-
-            function reason(person = {}) {
-              return String(person.reason || person.fitReason || '');
-            }
-
-            function chooseCandidate(people = []) {
-              return [...people]
-                .filter((person) => normalizedScore(person) >= 55)
-                .filter((person) => /current company confirmed/i.test(reason(person)) || person.meta?.verifiedCurrentCompany === true)
-                .filter((person) => !/assistant|coordinator|intern|trainee/i.test(String(person.title || '')))
-                .sort((a, b) => {
-                  const left = normalizedScore(a) * 10 + personaStrength(a.title);
-                  const right = normalizedScore(b) * 10 + personaStrength(b.title);
-                  return right - left;
-                })[0] || null;
-            }
-
-            function phoneList(person) {
-              return [...new Set((Array.isArray(person?.phones) ? person.phones : [])
-                .map(String)
-                .map((value) => value.trim())
-                .filter(Boolean))];
-            }
-
-            function emailList(person) {
-              return [...new Set((Array.isArray(person?.emails) ? person.emails : [])
-                .map(String)
-                .map((value) => value.trim())
-                .filter(Boolean))];
-            }
-
-            if (remaining > 0) {
-              const queue = await request('/api/acquisition?limit=1000');
-              const accounts = (Array.isArray(queue.accounts) ? queue.accounts : [])
-                .filter((account) => account && account.exclusionStatus === 'eligible')
-                .filter((account) => account.status !== 'pushed')
-                .filter((account) => marketRank.has(String(account.country || '')))
-                .filter((account) => {
-                  const ats = String(account.detectedAts || '').trim();
-                  return ats && !/direct application form/i.test(ats);
-                })
-                .sort((a, b) => accountScore(b) - accountScore(a));
-
-              for (const account of accounts) {
-                if (remaining <= 0 || result.signalHireEnrichments >= maxEnrichments) break;
-
-                const domain = String(account.domain || '').trim();
-                if (!domain) continue;
-                result.companiesChecked += 1;
-
-                try {
-                  const peoplePayload = await request(`/api/acquisition?domain=${encodeURIComponent(domain)}`);
-                  const storedPeople = Array.isArray(peoplePayload.people) ? peoplePayload.people : [];
-
-                  let person = storedPeople
-                    .filter((candidate) => candidate.enrichmentStatus === 'enriched' && candidate.meta?.verifiedCurrentCompany === true)
-                    .filter((candidate) => phoneList(candidate).length > 0)
-                    .sort((a, b) => {
-                      const left = normalizedScore(a) * 10 + personaStrength(a.title);
-                      const right = normalizedScore(b) * 10 + personaStrength(b.title);
-                      return right - left;
-                    })[0] || null;
-
-                  if (!person) {
-                    const paidAttempts = storedPeople.filter((candidate) => candidate.enrichmentStatus === 'enriched').length;
-                    if (paidAttempts >= 2) {
-                      result.noPhone += 1;
-                      continue;
-                    }
-
-                    let candidate = chooseCandidate(
-                      storedPeople.filter((candidate) => candidate.enrichmentStatus === 'search_only'),
-                    );
-
-                    if (!candidate && storedPeople.length === 0) {
-                      const found = await request('/api/acquisition', {
-                        method: 'POST',
-                        body: JSON.stringify({ action: 'find_people', domain }),
-                      });
-                      candidate = chooseCandidate(found.people || []);
-                    }
-
-                    if (!candidate) {
-                      result.noCandidate += 1;
-                      continue;
-                    }
-
-                    result.signalHireEnrichments += 1;
-                    const enriched = await request('/api/acquisition', {
-                      method: 'POST',
-                      body: JSON.stringify({ action: 'enrich_person', domain, uid: candidate.uid }),
-                    });
-                    person = enriched.person || null;
-                  }
-
-                  const phones = phoneList(person);
-                  if (!person || !phones.length || person.meta?.verifiedCurrentCompany !== true) {
-                    result.noPhone += 1;
-                    continue;
-                  }
-
-                  const emails = emailList(person);
-                  const score = Math.max(0, Math.min(100, Number(
-                    account.priorityScore || account.gtmScore || normalizedScore(person) || 60,
-                  )));
-
-                  const prospect = {
-                    source: 'Daniel Evalufy Daily → Target Account Pool → SignalHire',
-                    signalHireUid: String(person.uid || ''),
-                    fullName: String(person.fullName || '').trim(),
-                    title: String(person.title || '').trim(),
-                    company: String(account.name || '').trim(),
-                    companyDomain: domain,
-                    companyWebsite: String(account.evidence?.officialWebsite || `https://${domain}`).trim(),
-                    careerPageUrl: String(account.careerPageUrl || '').trim(),
-                    detectedAts: String(account.detectedAts || '').trim(),
-                    atsConfidence: String(account.evidence?.atsConfidence || account.atsConfidence || '').trim(),
-                    companyEvidenceUrl: String(account.evidence?.careerEvidenceUrl || account.careerPageUrl || '').trim(),
-                    companyVerificationReason: String(account.evidence?.verificationReason || account.strongestSignal || '').trim(),
-                    hiring: {
-                      status: Number(account.activeJobs || 0) > 0 ? 'Hiring Now' : 'Unknown',
-                      activeJobs: Math.max(0, Number(account.activeJobs || 0)),
-                      hiringScore: Math.max(0, Math.min(100, Number(account.hiringScore || 0))),
-                      hiringLabel: Number(account.activeJobs || 0) > 0 ? 'Verified active jobs' : 'Hiring check required',
-                      hasHrJobs: false,
-                      source: 'Target Account Pool',
-                      sourceUrl: String(account.careerPageUrl || '').trim(),
-                      checkedAt: new Date().toISOString(),
-                      jobsSample: [],
-                    },
-                    location: String(person.location || account.country || '').trim(),
-                    linkedinUrl: String(person.linkedinUrl || '').trim(),
-                    email: emails[0] || '',
-                    emails,
-                    phone: phones[0],
-                    phones,
-                    score,
-                    priority: score >= 75 ? 'high' : 'medium',
-                  };
-
-                  const pushed = await request('/api/daniel-evalufy', {
-                    method: 'POST',
-                    body: JSON.stringify({ action: 'push_net_new', dueDate, prospect }),
-                    maxAttempts: 2,
-                  });
-
-                  if (pushed.capacityFull) {
-                    remaining = 0;
-                    break;
-                  }
-
-                  if (pushed.scheduled) {
-                    result.pushedNetNew += 1;
-                    remaining -= 1;
-                    if (pushed.duplicate) result.duplicates += 1;
-                    result.prospects.push({
-                      company: prospect.company,
-                      market: account.country || '',
-                      person: prospect.fullName,
-                      title: prospect.title,
-                      taskId: pushed.taskId || '',
-                      source: pushed.duplicate ? 'existing clean task' : 'net-new',
-                    });
-
-                    try {
-                      await request('/api/target-account-pool', {
-                        method: 'POST',
-                        body: JSON.stringify({
-                          action: 'complete_feed',
-                          domain,
-                          taskId: String(pushed.taskId || ''),
-                        }),
-                      });
-                    } catch (error) {
-                      core.warning(`Could not mark ${domain} complete_feed: ${String(error?.message || error)}`);
-                    }
-                  }
-                } catch (error) {
-                  const status = Number(error?.status || 0);
-                  if (
-                    status === 409
-                    || /not Daniel-Evalufy eligible|has call or meeting activity|company_owned|contact_owned|retention|existing_account|csm_owned/i.test(
-                      String(error?.message || error),
-                    )
-                  ) {
-                    result.ineligibleExisting += 1;
-                    continue;
-                  }
-                  result.errors.push({
-                    domain,
-                    error: String(error?.message || error).slice(0, 600),
-                  });
-                }
-              }
-            }
-
-            const status = await request('/api/daniel-evalufy', {
-              method: 'POST',
-              body: JSON.stringify({ action: 'status', dueDate }),
-            });
-            result.finalScheduled = Number(status.scheduledCount || 0);
-
-            core.summary
-              .addHeading('Daniel Evalufy Daily')
-              .addTable([
-                [{ data: 'Metric', header: true }, { data: 'Result', header: true }],
-                ['Due date', dueDate],
-                ['Daily target', String(target)],
-                ['Marita tasks changed', '0 — protected'],
-                ['Scheduled before net-new', String(result.scheduledBeforeNetNew)],
-                ['Net-new tasks pushed', String(result.pushedNetNew)],
-                ['Final Daniel tasks', String(result.finalScheduled)],
-                ['SignalHire paid enrichments', String(result.signalHireEnrichments)],
-                ['Companies checked', String(result.companiesChecked)],
-                ['Rejected due ownership/activity/retention', String(result.ineligibleExisting)],
-                ['No safe persona', String(result.noCandidate)],
-                ['No phone', String(result.noPhone)],
-                ['Duplicates reused', String(result.duplicates)],
-                ['Errors', String(result.errors.length)],
-              ]);
-
-            if (result.prospects.length) {
-              core.summary.addHeading('Scheduled prospects', 3).addTable([
-                [
-                  { data: 'Company', header: true },
-                  { data: 'Market', header: true },
-                  { data: 'Persona', header: true },
-                  { data: 'Title', header: true },
-                  { data: 'Source', header: true },
-                  { data: 'Task', header: true },
-                ],
-                ...result.prospects.slice(0, 30).map((item) => [
-                  item.company,
-                  item.market,
-                  item.person,
-                  item.title,
-                  item.source,
-                  item.taskId,
-                ]),
-              ]);
-            }
-
-            await core.summary.write();
-            console.log(JSON.stringify(result, null, 2));
-
-            if (result.finalScheduled < target) {
-              core.warning(
-                `Daniel Evalufy ended at ${result.finalScheduled}/${target} tasks for ${dueDate}. Strict safety filters were not relaxed.`,
-              );
-            }
+      - name: Run Daniel transfer plan audit
+        run: |
+          set -euo pipefail
+          payload=$(jq -n --arg dry "$DRY_RUN" '{dryRun: ($dry == "true")}')
+          code=$(curl -sS --connect-timeout 10 --max-time 300 \
+            -o /tmp/result.json -w '%{http_code}' \
+            -X POST "$BASE_URL/api/daniel-transfer-plan" \
+            -H 'Content-Type: application/json' \
+            -H "x-acquisition-owner-token: $OWNER_TOKEN" \
+            -d "$payload")
+          cat /tmp/result.json | jq .
+          if [ "$DRY_RUN" = "true" ]; then
+            [ "$code" = 200 ] || [ "$code" = 409 ] || exit 1
+          else
+            [ "$code" = 200 ] || exit 1
+          fi
