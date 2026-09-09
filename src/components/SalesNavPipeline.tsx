@@ -354,7 +354,10 @@ export function SalesNavPipeline() {
   function toggleVisible() {
     setSelected((current) => {
       const next = new Set(current);
-      for (const row of selectable) allSelected ? next.delete(row.key) : next.add(row.key);
+      for (const row of selectable) {
+        if (allSelected) next.delete(row.key);
+        else next.add(row.key);
+      }
       return next;
     });
   }
@@ -421,7 +424,7 @@ export function SalesNavPipeline() {
             const ats = String(row.prospect?.detectedAts || company?.detectedAts || "");
             const career = String(row.prospect?.careerPageUrl || company?.careerPageUrl || "");
             return <tr key={row.key} data-blocked={row.stage === "blocked"}>
-              <td><input type="checkbox" disabled={!canSelect} checked={selected.has(row.key)} onChange={() => setSelected((current) => { const next = new Set(current); next.has(row.key) ? next.delete(row.key) : next.add(row.key); return next; })}/></td>
+              <td><input type="checkbox" disabled={!canSelect} checked={selected.has(row.key)} onChange={() => setSelected((current) => { const next = new Set(current); if (next.has(row.key)) next.delete(row.key); else next.add(row.key); return next; })}/></td>
               <td><strong>{String(row.prospect?.fullName || row.lead.name)}</strong><span>{String(row.prospect?.title || row.lead.title || "—")}</span><small>{String(row.prospect?.location || row.lead.location || "—")}</small><div className={styles.links}>{row.lead.salesLeadUrl && <a href={row.lead.salesLeadUrl} target="_blank" rel="noreferrer">Sales Nav <ExternalLink size={10}/></a>}{row.prospect?.linkedinUrl && <a href={String(row.prospect.linkedinUrl)} target="_blank" rel="noreferrer">LinkedIn <ExternalLink size={10}/></a>}</div></td>
               <td><strong>{String(row.prospect?.company || company?.name || row.lead.company || "—")}</strong><span>{String(row.prospect?.companyDomain || company?.domain || "")}</span><small>{company?.inHubSpot ? `${company.accountType || "Existing"}${company.accountStatus ? ` · ${company.accountStatus}` : ""}` : row.precheck ? "Net-new company" : "Not checked"}</small></td>
               <td>{row.stage === "checking" ? <span className={styles.badge}><LoaderCircle className={styles.spin} size={11}/>Checking</span> : company?.protected ? <><span className={styles.blockedBadge}><ShieldCheck size={11}/>Blocked</span><small>{company.protectedReason}</small></> : row.precheck ? <><span className={styles.goodBadge}><CheckCircle2 size={11}/>Eligible</span><small>{company?.gateReason || "No blocker found"}</small></> : <span>Pending</span>} {row.precheck?.contact.inHubSpot && <small>Person matched · {row.precheck.contact.matchedBy}</small>}</td>

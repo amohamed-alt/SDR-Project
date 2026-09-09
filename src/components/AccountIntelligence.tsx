@@ -229,7 +229,8 @@ export function AccountIntelligence({ onBack }: { onBack?: () => void } = {}) {
   const [aiBriefs, setAiBriefs] = useState<Record<string, AiPayload>>({});
 
   const load = useCallback(async (force = false) => {
-    force ? setRefreshing(true) : setLoading(true);
+    if (force) setRefreshing(true);
+    else setLoading(true);
     setError("");
     try {
       const response = await fetch(`/api/account-intelligence?limit=2000${force ? "&refresh=1" : ""}`, { cache: "no-store" });
@@ -250,7 +251,7 @@ export function AccountIntelligence({ onBack }: { onBack?: () => void } = {}) {
     return () => window.clearTimeout(timer);
   }, [load]);
 
-  const accounts = payload?.accounts || [];
+  const accounts = useMemo(() => payload?.accounts ?? [], [payload?.accounts]);
   const countries = useMemo(() => {
     const present = new Set(accounts.map((account) => account.country).filter(Boolean));
     return COUNTRY_ORDER.filter((item) => present.has(item));

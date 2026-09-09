@@ -137,10 +137,6 @@ export function getTalenteraMarket(rawCountry: string): TalenteraMarket {
   return { canonicalCountry: text(rawCountry) || "Unknown", tier: "Excluded", score: country ? 20 : 10, eligible: false };
 }
 
-function marketScore(country: string) {
-  return getTalenteraMarket(country).score;
-}
-
 function employeeFitScore(employeeCount: number) {
   if (!employeeCount) return null;
   if (employeeCount >= 1_000 && employeeCount <= 20_000) return 100;
