@@ -1,0 +1,44 @@
+name: Agent V9 Zero Lint
+
+on:
+  push:
+    branches: [upgrade/gtm-command-center-v9-final-cleanup]
+    paths:
+      - '.github/workflows/agent-v9-zero-lint.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: upgrade/gtm-command-center-v9-final-cleanup
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit
+      - name: Apply zero-warning cleanup
+        run: node scripts/agent-v9-zero-lint.mjs
+      - name: Verify zero warnings and behavior contracts
+        run: |
+          set -euo pipefail
+          npm run typecheck
+          npm run lint -- --max-warnings=0
+          npm test
+          npm run build
+      - name: Remove one-shot tooling and commit
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/agent-v9-zero-lint.yml scripts/agent-v9-zero-lint.mjs
+          git config user.name "GTM Upgrade Bot"
+          git config user.email "gtm-upgrade@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && { echo "No lint cleanup changes produced"; exit 1; }
+          git commit -m "chore: clear remaining lint warnings"
+          git push origin HEAD:upgrade/gtm-command-center-v9-final-cleanup
