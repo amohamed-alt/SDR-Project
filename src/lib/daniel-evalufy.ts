@@ -4,7 +4,7 @@ export const MARITA_OWNER_ID = "31644369";
 
 export const DANIEL_EVALUFY_START_DATE = "2026-09-13";
 export const DANIEL_EVALUFY_END_DATE = "2026-09-30";
-export const DANIEL_EVALUFY_DAILY_TARGET = 150;
+export const DANIEL_EVALUFY_DAILY_TARGET = 100;
 
 export type PropertyBag = Record<string, unknown>;
 
@@ -28,6 +28,16 @@ function numberValue(value: unknown) {
 
 function hasValue(value: unknown) {
   return clean(value).length > 0;
+}
+
+function hasAnyPhone(properties: PropertyBag) {
+  return [
+    properties.mobilephone,
+    properties.phone,
+    properties.hs_whatsapp_phone_number,
+    properties.whatsapp_phone_number,
+    properties.contact_number,
+  ].some(hasValue);
 }
 
 export function sourceOwnerIsAllowed(ownerId: unknown) {
@@ -63,8 +73,11 @@ export function evaluateDanielCompany(properties: PropertyBag): EligibilityResul
   const detectedAts = clean(properties.detected_ats);
   const accountType = normalized(properties.account_type);
   const companyType = normalized(properties.company_type);
+  const customerType = normalized(properties.customer_type);
   const leadStatus = normalized(properties.hs_lead_status);
   const accountStatus = normalized(properties.account_status);
+  const csm = normalized(properties.csm);
+  const csmTeam = normalized(properties.csm_team);
 
   if (!sourceOwnerIsAllowed(properties.hubspot_owner_id)) reasons.push("company_owned");
   if (!detectedAts || atsStatus !== "detected") reasons.push("ats_not_detected");
@@ -78,7 +91,8 @@ export function evaluateDanielCompany(properties: PropertyBag): EligibilityResul
     reasons.push("company_has_deal");
   }
 
-  if (accountType === "retention") reasons.push("retention");
+  if (accountType === "retention" || customerType.includes("retention")) reasons.push("retention");
+  if (csm || csmTeam) reasons.push("csm_owned");
   if (/job\s*seeker/.test(companyType)) reasons.push("job_seeker");
   if (/unqualified/.test(leadStatus)) reasons.push("unqualified");
   if (accountStatus === "active" || accountStatus === "churned") reasons.push("existing_account");
@@ -91,12 +105,13 @@ export function evaluateDanielContact(
   options: { requireMobile?: boolean } = {},
 ): EligibilityResult {
   const reasons: string[] = [];
-  const requireMobile = options.requireMobile !== false;
+  const requirePhone = options.requireMobile !== false;
   const leadStatus = normalized(properties.hs_lead_status);
   const lifecycle = normalized(properties.lifecyclestage);
 
   if (!sourceOwnerIsAllowed(properties.hubspot_owner_id)) reasons.push("contact_owned");
-  if (requireMobile && !hasValue(properties.mobilephone)) reasons.push("mobile_missing");
+  if (requirePhone && !hasAnyPhone(properties)) reasons.push("phone_missing");
+  if (hasValue(properties.csm_owner)) reasons.push("csm_owned");
   if (hasValue(properties.notes_last_contacted) || hasValue(properties.hs_last_sales_activity_timestamp)) {
     reasons.push("contact_has_activity");
   }
@@ -119,8 +134,11 @@ export const DANIEL_COMPANY_PROPERTIES = [
   "hs_num_open_deals",
   "account_type",
   "account_status",
+  "customer_type",
   "company_type",
   "hs_lead_status",
+  "csm",
+  "csm_team",
   "detected_ats",
   "ats_status",
   "ats_confidence",
@@ -133,7 +151,11 @@ export const DANIEL_CONTACT_PROPERTIES = [
   "email",
   "phone",
   "mobilephone",
+  "hs_whatsapp_phone_number",
+  "whatsapp_phone_number",
+  "contact_number",
   "hubspot_owner_id",
+  "csm_owner",
   "notes_last_contacted",
   "hs_last_sales_activity_timestamp",
   "hs_lead_status",
