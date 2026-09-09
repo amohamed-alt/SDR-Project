@@ -19,6 +19,7 @@ import { DrilldownDrawer, type Drilldown } from "@/components/DrilldownDrawer";
 import { MaritaWorkspace } from "@/components/MaritaWorkspace";
 import {
   ChartTooltip,
+  EmptyChart,
   DonutChart,
   DrilldownHint,
   FilterSelect,
