@@ -248,7 +248,6 @@ export async function GET() {
   return NextResponse.json({
     status: "ok",
     signalHireConfigured: Boolean(process.env.SIGNALHIRE_API_KEY),
-    smartleadConfigured: Boolean(process.env.SMARTLEAD_API_KEY),
     companyIntelligenceConfigured: Boolean(process.env.CAREER_ENGINE_URL),
     tavilyCareerFallbackConfigured: Boolean(process.env.TAVILY_API_KEY),
     defaultSource: "Sales Navigator",
@@ -402,7 +401,6 @@ export async function POST(request: NextRequest) {
         provider: "SignalHire + Career ATS V3 + Tavily fallback + Hiring Intelligence + HubSpot company status",
         creditsLeft: creditsLeft ? Number(creditsLeft) : null,
         tavilyCareerFallbackConfigured: Boolean(process.env.TAVILY_API_KEY),
-        smartleadConfigured: Boolean(process.env.SMARTLEAD_API_KEY),
       },
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

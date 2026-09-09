@@ -302,7 +302,6 @@ export async function POST(request: NextRequest) {
         provider: "SignalHire fast resolve",
         creditsLeft: creditsLeft ? Number(creditsLeft) : null,
         intelligencePending: true,
-        smartleadConfigured: Boolean(process.env.SMARTLEAD_API_KEY),
       },
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

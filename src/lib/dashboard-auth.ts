@@ -59,15 +59,7 @@ function trustedMachineRoute(request: NextRequest) {
   const authorization = request.headers.get("authorization") || "";
 
   if (/^Bearer\s+\S+/i.test(authorization)) {
-    return [
-      "/api/smartlead/autopilot",
-      "/api/smartlead/campaign-parity",
-      "/api/smartlead/orchestrator",
-      "/api/smartlead/orchestrator-compat",
-      "/api/smartlead/orchestrator-v3",
-      "/api/smartlead/sender-reconcile",
-    ].includes(path)
-      || path === "/api/maqsam/calls"
+    return path === "/api/maqsam/calls"
       || path === "/api/prospecting/salesnav/companion";
   }
 
