@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "./ui-polish.css";
 import "./gtm-premium.css";
+import "./command-palette.css";
+import { GtmCommandPalette } from "@/components/GtmCommandPalette";
 import { UsageTracker } from "@/components/UsageTracker";
 
 export const metadata: Metadata = {
@@ -14,6 +16,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en">
       <body>
         {children}
+        <GtmCommandPalette/>
         <UsageTracker/>
       </body>
     </html>
