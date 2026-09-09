@@ -1,0 +1,33 @@
+name: Agent V7 Fix EmptyChart Import
+
+on:
+  push:
+    branches: [upgrade/gtm-command-center-v7]
+    paths:
+      - '.github/workflows/agent-v7-fix-empty-chart.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: upgrade/gtm-command-center-v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Fix primitive import
+        run: node scripts/agent-v7-fix-empty-chart.mjs
+      - name: Commit fix
+        run: |
+          set -euo pipefail
+          git config user.name "GTM Upgrade Bot"
+          git config user.email "gtm-upgrade@users.noreply.github.com"
+          git add src/components/Dashboard.tsx
+          git diff --cached --quiet && { echo "No fix changes produced"; exit 1; }
+          git commit -m "fix(dashboard): restore extracted EmptyChart import"
+          git push origin HEAD:upgrade/gtm-command-center-v7
