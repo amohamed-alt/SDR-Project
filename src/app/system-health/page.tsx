@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Activity, ArrowLeft, Info, RefreshCw, ShieldCheck } from "lucide-react";
 import { getSystemHealth } from "@/lib/system-health";
 import styles from "./system-health.module.css";
@@ -33,7 +34,7 @@ export default async function SystemHealthPage() {
     <div className={styles.shell}>
       <header className={styles.header}>
         <div><span className={styles.eyebrow}>GTM COMMAND CENTER · OPERATIONS</span><h1>System Health</h1><p>Safe operational visibility across the dashboard runtime, cache layer, Postgres-backed services and configured integrations. No credentials are exposed here.</p></div>
-        <div className={styles.actions}><a href="/"><ArrowLeft size={14}/>Dashboard</a><a href="/system-health"><RefreshCw size={14}/>Run check</a></div>
+        <div className={styles.actions}><Link href="/"><ArrowLeft size={14}/>Dashboard</Link><Link href={`/system-health?check=${Date.now()}`} prefetch={false}><RefreshCw size={14}/>Run check</Link></div>
       </header>
 
       <section className={styles.hero}>
