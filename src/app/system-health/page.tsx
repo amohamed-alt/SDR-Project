@@ -29,12 +29,13 @@ export default async function SystemHealthPage() {
     ["OpenRouter", health.integrations.openRouter.status, "AI routing"],
     ["Maqsam", health.integrations.maqsam.status, "Call synchronization"],
   ] as const;
+  const refreshHref = `/system-health?check=${encodeURIComponent(health.timestamp)}`;
 
   return <main className={styles.page}>
     <div className={styles.shell}>
       <header className={styles.header}>
         <div><span className={styles.eyebrow}>GTM COMMAND CENTER · OPERATIONS</span><h1>System Health</h1><p>Safe operational visibility across the dashboard runtime, cache layer, Postgres-backed services and configured integrations. No credentials are exposed here.</p></div>
-        <div className={styles.actions}><Link href="/"><ArrowLeft size={14}/>Dashboard</Link><Link href={`/system-health?check=${Date.now()}`} prefetch={false}><RefreshCw size={14}/>Run check</Link></div>
+        <div className={styles.actions}><Link href="/"><ArrowLeft size={14}/>Dashboard</Link><Link href={refreshHref} prefetch={false}><RefreshCw size={14}/>Run check</Link></div>
       </header>
 
       <section className={styles.hero}>
