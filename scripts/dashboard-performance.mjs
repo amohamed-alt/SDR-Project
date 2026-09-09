@@ -3,7 +3,11 @@ const base = process.env.DASHBOARD_PROBE_URL || 'https://sdr.dashboardtalentera.
 const expectedBuild = process.env.DEPLOY_SHA;
 const health = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(10_000) }).then(response => response.json());
 if (expectedBuild && health.buildRef !== expectedBuild) throw new Error('Production buildRef does not match the deployed revision');
-for (const ownerId of ['31644369', '37624223']) {
+// 31644369 Marita, 37624223 Daniel, 76369997 Ursula, 31558980 Zein — every
+// SDR/acquisition owner tab in AcquisitionDashboard.tsx must be warmed here,
+// otherwise the first visit to that owner's tab after a deploy hits a cold
+// cache and shows the full "Building live SDR intelligence…" loading state.
+for (const ownerId of ['31644369', '37624223', '76369997', '31558980']) {
   let etag;
   for (let sample = 0; sample < 3; sample++) {
     const start = performance.now();
