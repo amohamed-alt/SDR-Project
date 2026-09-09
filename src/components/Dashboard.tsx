@@ -16,6 +16,7 @@ import {
   Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { DrilldownDrawer, type Drilldown } from "@/components/DrilldownDrawer";
+import { GtmTable, type GtmColumn } from "@/components/GtmTable";
 import { MaritaWorkspace } from "@/components/MaritaWorkspace";
 import {
   ChartTooltip,
@@ -260,7 +261,7 @@ export function Dashboard({ sdr = "marita", active = true }: SdrDashboardProps) 
               <Section title="Operational alerts" description="Click an alert to inspect the affected records."><div className="alert-list">{data.alerts.slice(0, 7).map((alert) => <button key={alert.id} className={"alert-item " + alert.severity} onClick={() => openAlert(alert)}><span className="alert-icon">{alert.severity === "critical" ? <AlertTriangle size={17}/> : <Activity size={17}/>}</span><div><strong>{alert.title}</strong><p>{alert.detail}</p><small>{alert.action}<ListFilter size={12}/></small></div><b>{alert.count}</b></button>)}</div></Section>
               <Section title="Lead Status" description="HubSpot display labels across the SDR portfolio." action={<DrilldownHint/>}><HorizontalBars data={data.leadStatuses} onSelect={(item) => showContacts("Lead Status · " + item.name, "Contacts with the selected HubSpot Lead Status.", data.priorityContacts.filter((row) => row.leadStatus === item.name))}/></Section>
             </div>
-            <Section title="Priority leads" description="The table links open exact HubSpot records; KPI and chart clicks open internal lists first." action={<HubSpotLink href={data.meta.hubspotUrls.contacts} label={"View all " + data.kpis.portfolioContacts}/>}><ContactTable rows={data.priorityContacts.slice(0, 20)}/></Section>
+            <Section title="Priority leads" description="The table links open exact HubSpot records; KPI and chart clicks open internal lists first." action={<HubSpotLink href={data.meta.hubspotUrls.contacts} label={"View all " + data.kpis.portfolioContacts}/>}><PriorityLeadsTable rows={data.priorityContacts}/></Section>
           </>}
 
           {activeTab === "attribution" && <>
@@ -353,6 +354,23 @@ function MiniMetric({ label, value, rate, icon: Icon, currency = false, onClick 
 
 function ContactTable({ rows, attribution = false }: { rows: DashboardData["priorityContacts"]; attribution?: boolean }) {
   return <div className="table-wrap"><table><thead><tr><th>Priority</th><th>Contact</th><th>Company</th><th>Country</th>{attribution ? <><th>Original Traffic Source</th><th>Original Source Detail</th><th>Latest Traffic Source</th><th>Record Source</th><th>Record Source Detail 1</th><th>Lead Source</th></> : <><th>ICP Tier</th><th>Contact Priority</th><th>Lead Status</th><th>Phone Status</th><th>Next Activity Date</th></>}<th/></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td><span className={"score " + (row.priorityScore >= 85 ? "high" : row.priorityScore >= 65 ? "medium" : "low")}>{row.priorityScore}</span></td><td><a className="record-link" href={row.url} target="_blank" rel="noreferrer"><strong>{row.name}</strong><small>{row.title || "No job title"}</small></a></td><td>{row.companyUrl ? <a className="text-link" href={row.companyUrl} target="_blank" rel="noreferrer">{row.company || "—"}</a> : row.company || "—"}</td><td>{row.country || "—"}</td>{attribution ? <><td>{row.originalSource}</td><td>{row.originalSourceDetail}</td><td>{row.latestSource}</td><td><span className="tag">{row.recordSource}</span></td><td><strong>{row.recordSourceDetail}</strong></td><td>{row.leadSource}</td></> : <><td><span className="tag">{row.tier}</span></td><td><span className="tag priority-tag">{row.contactPriority}</span></td><td>{row.leadStatus}</td><td>{row.phoneStatus}</td><td>{shortDate(row.nextActivity)}</td></>}<td><HubSpotLink href={row.url} label=""/></td></tr>)}</tbody></table></div>;
+}
+
+const priorityLeadColumns: GtmColumn<ContactRow>[] = [
+  { id: "priorityScore", header: "Priority", accessor: (row) => row.priorityScore, width: 80, render: (row) => <span className={"score " + (row.priorityScore >= 85 ? "high" : row.priorityScore >= 65 ? "medium" : "low")}>{row.priorityScore}</span> },
+  { id: "contact", header: "Contact", accessor: (row) => row.name, width: 230, render: (row) => <a className="record-link" href={row.url} target="_blank" rel="noreferrer"><strong>{row.name}</strong><small>{row.title || "No job title"}</small></a> },
+  { id: "company", header: "Company", accessor: (row) => row.company, width: 180, render: (row) => row.companyUrl ? <a className="text-link" href={row.companyUrl} target="_blank" rel="noreferrer">{row.company || "—"}</a> : row.company || "—" },
+  { id: "country", header: "Country", accessor: (row) => row.country, width: 120 },
+  { id: "tier", header: "ICP tier", accessor: (row) => row.tier, width: 90, render: (row) => <span className="tag">{row.tier || "—"}</span> },
+  { id: "contactPriority", header: "Contact priority", accessor: (row) => row.contactPriority, width: 120, render: (row) => <span className="tag priority-tag">{row.contactPriority || "—"}</span> },
+  { id: "leadStatus", header: "Lead status", accessor: (row) => row.leadStatus, width: 120 },
+  { id: "phoneStatus", header: "Phone status", accessor: (row) => row.phoneStatus, width: 110 },
+  { id: "nextActivity", header: "Next activity", accessor: (row) => row.nextActivity, width: 130, render: (row) => shortDate(row.nextActivity) },
+  { id: "hubspot", header: "HubSpot", accessor: () => "", width: 92, sortable: false, render: (row) => <HubSpotLink href={row.url}/> },
+];
+
+function PriorityLeadsTable({ rows }: { rows: ContactRow[] }) {
+  return <GtmTable rows={rows} columns={priorityLeadColumns} getRowId={(row) => row.id} getSearchText={(row) => [row.name, row.title, row.company, row.country, row.tier, row.contactPriority, row.leadStatus, row.phoneStatus].join(" ")} pageSize={25} emptyTitle="No priority leads match these filters" emptyDescription="Refresh the dashboard or adjust the active dashboard filters." exportFileName="priority-leads.csv" exportRow={(row) => ({ Priority: row.priorityScore, Contact: row.name, Title: row.title, Company: row.company, Country: row.country, "ICP Tier": row.tier, "Contact Priority": row.contactPriority, "Lead Status": row.leadStatus, "Phone Status": row.phoneStatus, "Next Activity": row.nextActivity, "HubSpot URL": row.url })}/>;
 }
 
 function ActivityTable({ rows }: { rows: ActivityRow[] }) {
