@@ -1,12 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Talentera Prospecting Companion",
-  "version": "1.5.3",
-  "description": "User-triggered Sales Navigator and SignalHire sync for the Talentera SDR dashboard, with one persistent prospecting queue and resilient resumable full-search capture. No cookie access or hidden profile fetches.",
+  "version": "1.5.4",
+  "description": "User-triggered Sales Navigator and SignalHire sync for the Talentera SDR dashboard, with one persistent queue and a single resilient background full-search capture engine. No cookie access or hidden profile fetches.",
   "permissions": ["activeTab", "scripting", "storage", "alarms"],
   "host_permissions": ["https://sdr.dashboardtalentera.tech/*"],
   "background": {
-    "service_worker": "background-v152.js"
+    "service_worker": "background-v154.js"
   },
   "action": {
     "default_title": "Talentera Prospecting Companion",
