@@ -22,7 +22,11 @@ async function readDashboard(key: string, force: boolean): Promise<Result> {
   const promise = (async () => {
     const response = await fetch(`/api/dashboard?${key}${force ? "&refresh=1" : ""}`, {
       headers: cache.get(key)?.etag ? { "If-None-Match": cache.get(key)!.etag! } : {},
-      cache: "no-store", signal: AbortSignal.timeout(60_000),
+      // Normal reads may use the browser's short private cache so a reload or
+      // revisit can paint from an already-downloaded compact snapshot. Manual
+      // refresh still bypasses every cache and asks the server to refresh.
+      cache: force ? "no-store" : "default",
+      signal: AbortSignal.timeout(60_000),
     });
     if (response.status === 304 && cache.has(key)) {
       const result = { ...cache.get(key)!, refreshing: response.headers.get("X-Dashboard-Refreshing") === "1" };
