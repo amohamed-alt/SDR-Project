@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect } from "react";
 import {
-  Activity, Building2, ExternalLink, Search, UsersRound, WalletCards, X,
+  Activity, Building2, ExternalLink, UsersRound, WalletCards, X,
 } from "lucide-react";
+import { GtmDataSurface, type GtmSortOption } from "@/components/GtmDataSurface";
 import { WhatsAppQuickAction } from "@/components/WhatsAppQuickAction";
 import type { ActivityRow, CompanyRow, ContactRow, DealRow } from "@/lib/types";
 
@@ -12,6 +13,8 @@ export type Drilldown =
   | { kind: "activities"; title: string; description: string; rows: ActivityRow[]; hubspotUrl: string }
   | { kind: "companies"; title: string; description: string; rows: CompanyRow[]; hubspotUrl: string }
   | { kind: "deals"; title: string; description: string; rows: DealRow[]; hubspotUrl: string };
+
+type DrawerRow = ContactRow | ActivityRow | CompanyRow | DealRow;
 
 function shortDate(value: string) {
   if (!value) return "—";
@@ -66,15 +69,46 @@ function DealCard({ row }: { row: DealRow }) {
   </article>;
 }
 
-export function DrilldownDrawer({ drilldown, onClose }: { drilldown: Drilldown; onClose: () => void }) {
-  const [query, setQuery] = useState("");
-  const [limit, setLimit] = useState(50);
-  const filtered = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    if (!term) return drilldown.rows;
-    return drilldown.rows.filter((row) => JSON.stringify(row).toLowerCase().includes(term));
-  }, [drilldown.rows, query]);
+function rowLabel(row: DrawerRow) {
+  return "subject" in row ? row.subject : row.name;
+}
 
+function rowTimestamp(row: DrawerRow) {
+  const value = "metricAt" in row ? row.metricAt : "createdAt" in row ? row.createdAt : "";
+  const timestamp = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+const SORT_OPTIONS: GtmSortOption<DrawerRow>[] = [
+  { id: "newest", label: "Newest first", compare: (left, right) => rowTimestamp(right) - rowTimestamp(left) },
+  { id: "oldest", label: "Oldest first", compare: (left, right) => rowTimestamp(left) - rowTimestamp(right) },
+  { id: "az", label: "Name A–Z", compare: (left, right) => rowLabel(left).localeCompare(rowLabel(right)) },
+  { id: "za", label: "Name Z–A", compare: (left, right) => rowLabel(right).localeCompare(rowLabel(left)) },
+];
+
+function exportDrawerRow(row: DrawerRow, kind: Drilldown["kind"]) {
+  if (kind === "contacts") {
+    const contact = row as ContactRow;
+    return { Name: contact.name, Title: contact.title, Company: contact.company, Country: contact.country, Tier: contact.tier, Priority: contact.contactPriority, "Lead Status": contact.leadStatus, "Original Source": contact.originalSource, "Record Source": contact.recordSource, "Record Source Detail": contact.recordSourceDetail, Created: contact.createdAt, "Next Activity": contact.nextActivity, "Priority Score": contact.priorityScore, "HubSpot URL": contact.url };
+  }
+  if (kind === "activities") {
+    const activity = row as ActivityRow;
+    return { Type: activity.type, Subject: activity.subject, Status: activity.status, Detail: activity.detail, "Associated Contact": activity.relatedContactName, "Assigned To": activity.assignedTo, "Activity Date": activity.occurredAt, "Due Date": activity.dueAt, "Due Bucket": activity.dueBucket, Open: activity.isOpen, "HubSpot URL": activity.url };
+  }
+  if (kind === "companies") {
+    const company = row as CompanyRow;
+    return { Company: company.name, Domain: company.domain, Country: company.country, Industry: company.industry, Employees: company.employees, Tier: company.tier, ATS: company.ats, "ATS Confidence": company.atsConfidence, "SDR Contacts": company.associatedContacts, "HubSpot URL": company.url };
+  }
+  const deal = row as DealRow;
+  return { Deal: deal.name, Stage: deal.stage, Owner: deal.owner, Amount: deal.amount, Created: deal.createdAt, "Close Date": deal.closeDate, Open: deal.isOpen, "HubSpot URL": deal.url };
+}
+
+function exportFileName(title: string, kind: Drilldown["kind"]) {
+  const clean = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
+  return `${clean || kind}-${kind}.csv`;
+}
+
+export function DrilldownDrawer({ drilldown, onClose }: { drilldown: Drilldown; onClose: () => void }) {
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
     document.addEventListener("keydown", closeOnEscape);
@@ -82,20 +116,28 @@ export function DrilldownDrawer({ drilldown, onClose }: { drilldown: Drilldown; 
     return () => { document.removeEventListener("keydown", closeOnEscape); document.body.classList.remove("drawer-open"); };
   }, [onClose]);
 
+  const rows = drilldown.rows as DrawerRow[];
+
   return <div className="drilldown-layer" role="dialog" aria-modal="true" aria-label={drilldown.title}>
     <button className="drilldown-backdrop" onClick={onClose} aria-label="Close details" />
     <aside className="drilldown-drawer">
       <header className="drilldown-header"><div><span>DRILL-DOWN · LIVE HUBSPOT DATA</span><h2>{drilldown.title}</h2><p>{drilldown.description}</p></div><button className="drawer-close" onClick={onClose} aria-label="Close"><X size={20}/></button></header>
-      <div className="drilldown-toolbar"><label><Search size={15}/><input value={query} onChange={(event) => { setQuery(event.target.value); setLimit(50); }} placeholder="Search these records…" /></label><div><strong>{filtered.length}</strong><span>{query ? `matching of ${drilldown.rows.length}` : "records"}</span></div></div>
       <div className="drilldown-list">
-        {!filtered.length && <div className="drawer-empty"><Search size={26}/><strong>No matching records</strong><span>Try a different search inside this result set.</span></div>}
-        {filtered.slice(0, limit).map((row) => {
-          if (drilldown.kind === "contacts") return <ContactCard key={row.id} row={row as ContactRow}/>;
-          if (drilldown.kind === "activities") return <ActivityCard key={`${(row as ActivityRow).type}-${row.id}`} row={row as ActivityRow}/>;
-          if (drilldown.kind === "companies") return <CompanyCard key={row.id} row={row as CompanyRow}/>;
-          return <DealCard key={row.id} row={row as DealRow}/>;
-        })}
-        {filtered.length > limit && <button className="load-more" onClick={() => setLimit((current) => current + 50)}>Show 50 more · {filtered.length - limit} remaining</button>}
+        <GtmDataSurface<DrawerRow>
+          rows={rows}
+          getKey={(row) => "type" in row ? `${row.type}-${row.id}` : row.id}
+          getSearchText={(row) => JSON.stringify(row)}
+          sortOptions={SORT_OPTIONS}
+          defaultSortId="newest"
+          renderRow={(row) => {
+            if (drilldown.kind === "contacts") return <ContactCard row={row as ContactRow}/>;
+            if (drilldown.kind === "activities") return <ActivityCard row={row as ActivityRow}/>;
+            if (drilldown.kind === "companies") return <CompanyCard row={row as CompanyRow}/>;
+            return <DealCard row={row as DealRow}/>;
+          }}
+          exportFileName={exportFileName(drilldown.title, drilldown.kind)}
+          exportRow={(row) => exportDrawerRow(row, drilldown.kind)}
+        />
       </div>
       <footer className="drilldown-footer"><span>Showing records behind the selected metric.</span>{externalLink(drilldown.hubspotUrl, "Open full object list in HubSpot")}</footer>
     </aside>

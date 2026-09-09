@@ -3,6 +3,7 @@ import "./globals.css";
 import "./ui-polish.css";
 import "./gtm-premium.css";
 import "./command-palette.css";
+import "./data-surface.css";
 import { GtmCommandPalette } from "@/components/GtmCommandPalette";
 import { UsageTracker } from "@/components/UsageTracker";
 
