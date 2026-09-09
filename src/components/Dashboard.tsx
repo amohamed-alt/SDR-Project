@@ -377,8 +377,20 @@ function ActivityTable({ rows }: { rows: ActivityRow[] }) {
   return <div className="table-wrap"><table><thead><tr><th>Activity</th><th>Subject</th><th>Associated contact</th><th>Status / Outcome</th><th>Source / Detail</th><th>Assigned to</th><th>Date</th><th/></tr></thead><tbody>{rows.map((row) => <tr key={row.type + "-" + row.id}><td><span className={"activity-type type-" + row.type.toLowerCase()}>{row.type}</span></td><td><strong>{row.subject}</strong></td><td>{row.relatedContactUrl ? <a className="text-link" href={row.relatedContactUrl} target="_blank" rel="noreferrer">{row.relatedContactName}</a> : "Not associated"}</td><td>{row.status}</td><td>{row.detail}</td><td>{row.assignedTo}</td><td>{dateTime(row.occurredAt)}</td><td><HubSpotLink href={row.url} label={row.relatedContactUrl ? "Contact timeline" : "Activity list"}/></td></tr>)}</tbody></table></div>;
 }
 
+const accountColumns: GtmColumn<CompanyRow>[] = [
+  { id: "company", header: "Company", accessor: (row) => row.name, width: 230, render: (row) => <a className="record-link" href={row.url} target="_blank" rel="noreferrer"><strong>{row.name}</strong><small>{row.domain || "No domain"}</small></a> },
+  { id: "country", header: "Country", accessor: (row) => row.country, width: 120 },
+  { id: "industry", header: "Industry", accessor: (row) => row.industry, width: 160, render: (row) => pretty(row.industry || "Unknown") },
+  { id: "employees", header: "Employees", accessor: (row) => row.employees, width: 100 },
+  { id: "tier", header: "Tier", accessor: (row) => row.tier, width: 90, render: (row) => <span className="tag">{row.tier || "—"}</span> },
+  { id: "ats", header: "ATS", accessor: (row) => row.ats, width: 150, render: (row) => <span>{row.ats || "Unknown"}<small>{pretty(row.atsCategory)}</small></span> },
+  { id: "confidence", header: "Confidence", accessor: (row) => row.atsConfidence, width: 110, render: (row) => pretty(row.atsConfidence || "Unknown") },
+  { id: "contacts", header: "SDR contacts", accessor: (row) => row.associatedContacts, width: 110 },
+  { id: "hubspot", header: "HubSpot", accessor: () => "", width: 92, sortable: false, render: (row) => <HubSpotLink href={row.url}/> },
+];
+
 function CompanyTable({ rows }: { rows: CompanyRow[] }) {
-  return <div className="table-wrap"><table><thead><tr><th>Company</th><th>Country</th><th>Industry</th><th>Employees</th><th>Tier</th><th>ATS</th><th>Confidence</th><th>SDR Contacts</th><th/></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td><a className="record-link" href={row.url} target="_blank" rel="noreferrer"><strong>{row.name}</strong><small>{row.domain || "No domain"}</small></a></td><td>{row.country || "—"}</td><td>{pretty(row.industry || "Unknown")}</td><td>{row.employees || "—"}</td><td><span className="tag">{row.tier || "—"}</span></td><td>{row.ats || "Unknown"}<small>{pretty(row.atsCategory)}</small></td><td>{pretty(row.atsConfidence || "Unknown")}</td><td>{row.associatedContacts}</td><td><HubSpotLink href={row.url} label=""/></td></tr>)}</tbody></table></div>;
+  return <GtmTable rows={rows} columns={accountColumns} getRowId={(row) => row.id} getSearchText={(row) => [row.name, row.domain, row.country, row.industry, row.tier, row.ats, row.atsConfidence].join(" ")} pageSize={25} emptyTitle="No accounts match these filters" emptyDescription="Refresh the dashboard or adjust the active dashboard filters." exportFileName="account-intelligence.csv" exportRow={(row) => ({ Company: row.name, Domain: row.domain, Country: row.country, Industry: row.industry, Employees: row.employees, Tier: row.tier, ATS: row.ats, "ATS Confidence": row.atsConfidence, "SDR Contacts": row.associatedContacts, "HubSpot URL": row.url })}/>;
 }
 
 function DealTable({ rows }: { rows: DealRow[] }) {
