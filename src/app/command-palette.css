@@ -28,7 +28,7 @@
   border-radius: 6px;
   background: rgba(247,250,248,.95);
   color: var(--muted);
-  font: 700 9px/1 "DM Sans", sans-serif;
+  font: 700 9px/1 var(--font-dm-sans), sans-serif;
   box-shadow: inset 0 -1px 0 rgba(28,67,51,.05);
 }
 .gtm-command-trigger kbd { padding: 5px 6px; margin-left: 2px; }
@@ -134,7 +134,7 @@
   box-shadow: 0 4px 12px rgba(11,56,40,.05);
 }
 .gtm-command-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.gtm-command-copy strong { font: 800 11px/1.25 "Manrope", sans-serif; }
+.gtm-command-copy strong { font: 800 11px/1.25 var(--font-manrope), sans-serif; }
 .gtm-command-copy small { color: var(--muted); font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gtm-command-enter { color: #94a59d; font-size: 13px; opacity: 0; transform: translateX(-3px); transition: opacity 140ms ease, transform 140ms ease; }
 .gtm-command-results > button.active .gtm-command-enter { opacity: 1; transform: translateX(0); }
