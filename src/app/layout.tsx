@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./ui-polish.css";
+import "./gtm-premium.css";
 import { UsageTracker } from "@/components/UsageTracker";
 
 export const metadata: Metadata = {
