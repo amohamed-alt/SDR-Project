@@ -6,14 +6,14 @@ import { useDashboard } from "@/hooks/use-dashboard";
 
 import { useEffect, useState } from "react";
 import {
-  Activity, AlertTriangle, ArrowUpRight, BadgeCheck, BarChart3, BriefcaseBusiness,
+  Activity, AlertTriangle, ArrowUpRight, BadgeCheck, BriefcaseBusiness,
   Building2, CalendarDays, CheckCircle2, ChevronRight, CircleDollarSign, Clock3, Database,
-  ExternalLink, Filter, Gauge, ListFilter, ListTodo, Mail, MousePointerClick, Phone,
+  Filter, Gauge, ListFilter, ListTodo, Mail, Phone,
   RefreshCw, Search, ShieldCheck, Target, UsersRound, type LucideIcon,
 } from "lucide-react";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Funnel, FunnelChart, LabelList,
-  Legend, Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { DrilldownDrawer, type Drilldown } from "@/components/DrilldownDrawer";
 import { MaritaWorkspace } from "@/components/MaritaWorkspace";
@@ -44,8 +44,7 @@ import {
   type CalendarOrganizerId,
 } from "@/lib/calendar-organizers";
 import type {
-  ActivityRow, ChartDatum, CompanyRow, ContactRow, DailyActivityDatum, DashboardData,
-  DashboardFilters, DealRow, LabelOption,
+  ActivityRow, CompanyRow, ContactRow, DashboardData, DashboardFilters, DealRow,
 } from "@/lib/types";
 
 type Tab = "overview" | "attribution" | "activities" | "quality" | "companies" | "pipeline";

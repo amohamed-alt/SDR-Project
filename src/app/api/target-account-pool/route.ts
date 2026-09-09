@@ -105,15 +105,6 @@ function configuration() {
   };
 }
 
-function organizationDomain(org: ApolloOrganization) {
-  return normalizeCompanyDomain(clean(org.primary_domain || org.domain || org.website_url, 1000));
-}
-
-function organizationCountry(org: ApolloOrganization) {
-  const location = org.location && typeof org.location === "object" ? org.location as Record<string, unknown> : {};
-  return clean(org.organization_country || org.country || location.country || org.organization_location, 160);
-}
-
 function accountText(org: ApolloOrganization) {
   const location = org.location && typeof org.location === "object" ? JSON.stringify(org.location) : "";
   const parent = [org.owned_by_organization, org.ultimate_parent_organization]
@@ -135,63 +126,6 @@ function classifyExclusion(org: ApolloOrganization, domain: string) {
     return { status: "review" as const, reason: "Recruitment/staffing service: manual review required" };
   }
   return { status: "eligible" as const, reason: "" };
-}
-
-function inferredIndustry(org: ApolloOrganization) {
-  const codes = (org.naics_codes || []).map(String);
-  const code = codes[0] || "";
-  if (/^(31|32|33)/.test(code)) return "Manufacturing";
-  if (/^(44|45)/.test(code)) return "Retail";
-  if (/^(48|49)/.test(code)) return /^481/.test(code) ? "Aviation" : "Logistics & Transportation";
-  if (/^62/.test(code)) return "Healthcare";
-  if (/^72/.test(code)) return "Hospitality";
-  if (/^23/.test(code)) return "Construction";
-  if (/^531/.test(code)) return "Real Estate";
-  if (/^52/.test(code)) return "Financial Services";
-  if (/^61/.test(code)) return "Education";
-  if (/^517/.test(code)) return "Telecommunications";
-  if (/^5415/.test(code)) return "Technology";
-  if (/^5614/.test(code)) return "BPO / Contact Center";
-  return clean(org.industry, 300) || "Target industry";
-}
-
-function industryBucket(value: string) {
-  const text = value.toLowerCase();
-  if (/manufactur|industrial|fmcg|consumer goods|food production/.test(text)) return "manufacturing";
-  if (/retail|supermarket|consumer retail|e-?commerce/.test(text)) return "retail";
-  if (/logistic|transport|supply chain|freight|shipping/.test(text)) return "logistics";
-  if (/aviation|airline|airport|air transport/.test(text)) return "aviation";
-  if (/health|hospital|medical|pharma|clinic/.test(text)) return "healthcare";
-  if (/hotel|hospitality|restaurant|food & beverages|leisure|travel/.test(text)) return "hospitality";
-  if (/construction|civil engineering|building materials|engineering & construction/.test(text)) return "construction";
-  if (/real estate|property|facilities services/.test(text)) return "real estate";
-  if (/bank|financial|fintech|insurance|investment|capital markets/.test(text)) return "financial services";
-  if (/education|university|college|school|higher education/.test(text)) return "education";
-  if (/telecom|wireless|communications/.test(text)) return "telecommunications";
-  if (/software|information technology|internet|technology|computer/.test(text)) return "technology";
-  if (/bpo|outsourcing|contact center|call center/.test(text)) return "bpo";
-  return text.replace(/[^a-z0-9]+/g, " ").trim();
-}
-
-function matchesTargetIndustry(org: ApolloOrganization, country: TargetAccountCountry) {
-  const market = targetMarket(country);
-  if (!market) return false;
-  const targetCodes = market.naics.map(String);
-  const codes = (org.naics_codes || []).map(String);
-  if (codes.some((code) => targetCodes.some((target) => code.startsWith(target) || target.startsWith(code)))) return true;
-
-  const observed = industryBucket([
-    inferredIndustry(org),
-    clean(org.industry, 300),
-    ...(org.keywords || []).map((value) => clean(value, 160)),
-    clean(org.short_description, 700),
-    clean(org.seo_description, 700),
-  ].join(" "));
-  const targets = new Set(market.industries.map((value) => industryBucket(value)));
-  if (targets.has(observed)) return true;
-
-  const text = accountText(org).toLowerCase();
-  return [...targets].some((target) => target.length >= 4 && text.includes(target));
 }
 
 async function existingHubSpotDomains(domains: string[]) {
