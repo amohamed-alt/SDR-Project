@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import type { DashboardData, DashboardFilters } from "@/lib/types";
 
 const CACHE_API_URL = (process.env.DASHBOARD_CACHE_API_URL || "").replace(/\/$/, "");
-const READ_TIMEOUT_MS = Number(process.env.DASHBOARD_CACHE_READ_TIMEOUT_MS || 700);
-const WRITE_TIMEOUT_MS = Number(process.env.DASHBOARD_CACHE_WRITE_TIMEOUT_MS || 2_000);
+const READ_TIMEOUT_MS = Number(process.env.DASHBOARD_CACHE_READ_TIMEOUT_MS || 2_500);
+const WRITE_TIMEOUT_MS = Number(process.env.DASHBOARD_CACHE_WRITE_TIMEOUT_MS || 5_000);
 
 export type PersistedDashboardSnapshot = {
   data: DashboardData;
