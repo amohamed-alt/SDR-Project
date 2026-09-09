@@ -99,6 +99,7 @@ jobs:
           SDR_BUILD_REF: ${{ env.DEPLOY_SHA }}
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
           SDR_ADMIN_PASSWORD: ${{ secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
+          HUBSPOT_PRIVATE_APP_TOKEN: ${{ secrets.HUBSPOT_PRIVATE_APP_TOKEN }}
         run: |
           set -euo pipefail
           docker compose -f docker-compose.yml config >/tmp/sdr-compose.txt

@@ -65,6 +65,7 @@ jobs:
       - name: Validate production compose
         env:
           SDR_BUILD_REF: ${{ github.sha }}
+          HUBSPOT_PRIVATE_APP_TOKEN: ci-compose-validation-placeholder
         run: docker compose -f docker-compose.yml config >/tmp/sdr-compose.yml
 
       # Slower quality/integration checks run on PRs only. Main receives the
