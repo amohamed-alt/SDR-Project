@@ -1,3 +1,4 @@
+// Daniel queue policy: 100 safe phone-qualified tasks/day, with Marita's existing task queue protected.
 export const DANIEL_OWNER_ID = "37624223";
 export const DANIEL_OWNER_NAME = "Daniel Beaini";
 export const MARITA_OWNER_ID = "31644369";
