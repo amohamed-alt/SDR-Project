@@ -111,7 +111,7 @@ export function SalesNavPipelineV2() {
     if (!rows.length || processing) return;
     setProcessing(true); setError(""); setSelected(new Set()); setProgress({ done: 0, total: rows.length, label: "HubSpot check" });
     setRows((current) => current.map((row) => ({ ...row, stage: "pending", precheck: undefined, prospect: undefined, error: undefined, message: undefined })));
-    const pending = [...rows]; const autoReady = new Set<string>();
+    const pending = [...rows];
     const workers = Array.from({ length: Math.min(4, pending.length) }, async () => {
       while (pending.length) {
         const source = pending.shift(); if (!source) return;
@@ -121,13 +121,12 @@ export function SalesNavPipelineV2() {
           const blocked = checked.company.protected || checked.contact.inHubSpot;
           const stage: Stage = blocked ? "blocked" : "needs-reveal";
           setRows((current) => current.map((row) => row.key === source.key ? { ...row, precheck: checked, stage } : row));
-          if (stage === "ready") autoReady.add(source.key);
         } catch (requestError) {
           setRows((current) => current.map((row) => row.key === source.key ? { ...row, stage: "error", error: requestError instanceof Error ? requestError.message : "HubSpot check failed." } : row));
         } finally { setProgress((current) => ({ ...current, done: current.done + 1 })); }
       }
     });
-    await Promise.all(workers); setSelected(autoReady); setProcessing(false); setView("needs-reveal");
+    await Promise.all(workers); setSelected(new Set()); setProcessing(false); setView("needs-reveal");
     setMessage("HubSpot gate complete: existing people, Retention and any company with a meeting are blocked. Connected calls without a meeting remain eligible, even if recent.");
   }
 
