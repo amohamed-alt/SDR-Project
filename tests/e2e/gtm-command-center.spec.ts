@@ -4,7 +4,7 @@ test("dashboard loads and global command palette opens", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.getByText("SDR Command Center").first()).toBeVisible();
-  await expect(page.getByText("HUBSPOT SNAPSHOT").first()).toBeVisible();
+  await expect(page.getByText("Demo data").first()).toBeVisible();
 
   await page.keyboard.press("Control+K");
   const palette = page.getByRole("dialog", { name: "GTM command palette" });
@@ -24,7 +24,7 @@ test("shareable analytics URL restores the Pipeline view", async ({ page }) => {
 test("KPI drilldown exposes the operational table surface", async ({ page }) => {
   await page.goto("/");
 
-  const companiesKpi = page.getByRole("button", { name: /Companies Distinct associated accounts/i }).first();
+  const companiesKpi = page.getByRole("button", { name: /Companies.*Distinct associated accounts/i }).first();
   await expect(companiesKpi).toBeVisible();
   await companiesKpi.click();
 
