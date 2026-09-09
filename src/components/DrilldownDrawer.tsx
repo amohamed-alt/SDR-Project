@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { ExternalLink, X } from "lucide-react";
 import { GtmTable, type GtmColumn } from "@/components/GtmTable";
 import { WhatsAppQuickAction } from "@/components/WhatsAppQuickAction";
@@ -37,49 +37,49 @@ function exportFileName(title: string, kind: Drilldown["kind"]) {
 }
 
 const contactColumns: GtmColumn<ContactRow>[] = [
-  { accessorKey: "priorityScore", header: "Score", size: 70, cell: ({ getValue }) => <span className="cell-score">{String(getValue())}</span> },
-  { accessorKey: "name", header: "Contact", size: 220, cell: ({ row }) => <div className="cell-main"><a href={row.original.url} target="_blank" rel="noreferrer"><strong>{row.original.name}</strong></a><span>{row.original.title || "No job title"}</span></div> },
-  { accessorKey: "company", header: "Company", size: 180, cell: ({ row }) => <div className="cell-main"><strong>{row.original.company || "—"}</strong><span>{row.original.country || "—"}</span></div> },
-  { accessorKey: "tier", header: "ICP", size: 90 },
-  { accessorKey: "contactPriority", header: "Priority", size: 90 },
-  { accessorKey: "leadStatus", header: "Lead status", size: 120 },
-  { accessorKey: "originalSource", header: "Original source", size: 150 },
-  { accessorKey: "nextActivity", header: "Next activity", size: 120, cell: ({ row }) => shortDate(row.original.nextActivity) },
-  { id: "actions", header: "Actions", size: 120, enableSorting: false, cell: ({ row }) => <div className="cell-actions">{row.original.companyUrl && externalLink(row.original.companyUrl, "Company")}{externalLink(row.original.url)}</div> },
+  { id: "priorityScore", header: "Score", accessor: (row) => row.priorityScore, width: 70, render: (row) => <span className="cell-score">{row.priorityScore}</span> },
+  { id: "name", header: "Contact", accessor: (row) => row.name, width: 220, render: (row) => <div className="cell-main"><a href={row.url} target="_blank" rel="noreferrer"><strong>{row.name}</strong></a><span>{row.title || "No job title"}</span></div> },
+  { id: "company", header: "Company", accessor: (row) => row.company, width: 180, render: (row) => <div className="cell-main"><strong>{row.company || "—"}</strong><span>{row.country || "—"}</span></div> },
+  { id: "tier", header: "ICP", accessor: (row) => row.tier, width: 90 },
+  { id: "contactPriority", header: "Priority", accessor: (row) => row.contactPriority, width: 90 },
+  { id: "leadStatus", header: "Lead status", accessor: (row) => row.leadStatus, width: 120 },
+  { id: "originalSource", header: "Original source", accessor: (row) => row.originalSource, width: 150 },
+  { id: "nextActivity", header: "Next activity", accessor: (row) => row.nextActivity, width: 120, render: (row) => shortDate(row.nextActivity) },
+  { id: "actions", header: "Actions", accessor: () => "", width: 120, sortable: false, render: (row) => <div className="cell-actions">{row.companyUrl && externalLink(row.companyUrl, "Company")}{externalLink(row.url)}</div> },
 ];
 
 const activityColumns: GtmColumn<ActivityRow>[] = [
-  { accessorKey: "type", header: "Type", size: 90 },
-  { accessorKey: "subject", header: "Activity", size: 260, cell: ({ row }) => <div className="cell-main"><strong>{row.original.subject}</strong><span>{row.original.detail || "—"}</span></div> },
-  { accessorKey: "relatedContactName", header: "Contact", size: 170, cell: ({ row }) => row.original.relatedContactName || "Not associated" },
-  { accessorKey: "assignedTo", header: "Assigned to", size: 150, cell: ({ row }) => row.original.assignedTo || "Unassigned" },
-  { accessorKey: "status", header: "Status", size: 120 },
-  { accessorKey: "metricAt", header: "Activity date", size: 150, cell: ({ row }) => dateTime(row.original.dueAt || row.original.occurredAt || row.original.metricAt) },
-  { accessorKey: "dueBucket", header: "Due bucket", size: 120, cell: ({ row }) => row.original.type === "Task" ? row.original.dueBucket || "—" : "—" },
-  { id: "actions", header: "Actions", size: 170, enableSorting: false, cell: ({ row }) => <div className="cell-actions">{row.original.type === "Task" && row.original.relatedContactId && row.original.relatedContactHasPhone ? <WhatsAppQuickAction contactId={row.original.relatedContactId}/> : null}{externalLink(row.original.url)}</div> },
+  { id: "type", header: "Type", accessor: (row) => row.type, width: 90 },
+  { id: "subject", header: "Activity", accessor: (row) => row.subject, width: 260, render: (row) => <div className="cell-main"><strong>{row.subject}</strong><span>{row.detail || "—"}</span></div> },
+  { id: "relatedContactName", header: "Contact", accessor: (row) => row.relatedContactName, width: 170, render: (row) => row.relatedContactName || "Not associated" },
+  { id: "assignedTo", header: "Assigned to", accessor: (row) => row.assignedTo, width: 150, render: (row) => row.assignedTo || "Unassigned" },
+  { id: "status", header: "Status", accessor: (row) => row.status, width: 120 },
+  { id: "metricAt", header: "Activity date", accessor: (row) => row.metricAt, width: 150, render: (row) => dateTime(row.dueAt || row.occurredAt || row.metricAt) },
+  { id: "dueBucket", header: "Due bucket", accessor: (row) => row.dueBucket, width: 120, render: (row) => row.type === "Task" ? row.dueBucket || "—" : "—" },
+  { id: "actions", header: "Actions", accessor: () => "", width: 170, sortable: false, render: (row) => <div className="cell-actions">{row.type === "Task" && row.relatedContactId && row.relatedContactHasPhone ? <WhatsAppQuickAction contactId={row.relatedContactId}/> : null}{externalLink(row.url)}</div> },
 ];
 
 const companyColumns: GtmColumn<CompanyRow>[] = [
-  { accessorKey: "name", header: "Company", size: 220, cell: ({ row }) => <div className="cell-main"><a href={row.original.url} target="_blank" rel="noreferrer"><strong>{row.original.name}</strong></a><span>{row.original.domain || "No domain"}</span></div> },
-  { accessorKey: "country", header: "Country", size: 120 },
-  { accessorKey: "industry", header: "Industry", size: 170 },
-  { accessorKey: "employees", header: "Employees", size: 100 },
-  { accessorKey: "tier", header: "Tier", size: 90 },
-  { accessorKey: "ats", header: "Detected ATS", size: 140 },
-  { accessorKey: "atsConfidence", header: "Confidence", size: 110 },
-  { accessorKey: "associatedContacts", header: "SDR contacts", size: 100 },
-  { id: "actions", header: "Actions", size: 90, enableSorting: false, cell: ({ row }) => externalLink(row.original.url) },
+  { id: "name", header: "Company", accessor: (row) => row.name, width: 220, render: (row) => <div className="cell-main"><a href={row.url} target="_blank" rel="noreferrer"><strong>{row.name}</strong></a><span>{row.domain || "No domain"}</span></div> },
+  { id: "country", header: "Country", accessor: (row) => row.country, width: 120 },
+  { id: "industry", header: "Industry", accessor: (row) => row.industry, width: 170 },
+  { id: "employees", header: "Employees", accessor: (row) => row.employees, width: 100 },
+  { id: "tier", header: "Tier", accessor: (row) => row.tier, width: 90 },
+  { id: "ats", header: "Detected ATS", accessor: (row) => row.ats, width: 140 },
+  { id: "atsConfidence", header: "Confidence", accessor: (row) => row.atsConfidence, width: 110 },
+  { id: "associatedContacts", header: "SDR contacts", accessor: (row) => row.associatedContacts, width: 100 },
+  { id: "actions", header: "Actions", accessor: () => "", width: 90, sortable: false, render: (row) => externalLink(row.url) },
 ];
 
 const dealColumns: GtmColumn<DealRow>[] = [
-  { accessorKey: "name", header: "Deal", size: 230, cell: ({ row }) => <div className="cell-main"><a href={row.original.url} target="_blank" rel="noreferrer"><strong>{row.original.name}</strong></a><span>{row.original.stage}</span></div> },
-  { accessorKey: "stage", header: "Stage", size: 160 },
-  { accessorKey: "owner", header: "Owner", size: 150, cell: ({ row }) => row.original.owner || "Unassigned" },
-  { accessorKey: "amount", header: "Amount", size: 120, cell: ({ row }) => money(row.original.amount) },
-  { accessorKey: "createdAt", header: "Created", size: 120, cell: ({ row }) => shortDate(row.original.createdAt) },
-  { accessorKey: "closeDate", header: "Close date", size: 120, cell: ({ row }) => shortDate(row.original.closeDate) },
-  { accessorKey: "isOpen", header: "State", size: 90, cell: ({ row }) => row.original.isOpen ? "Open" : "Closed" },
-  { id: "actions", header: "Actions", size: 90, enableSorting: false, cell: ({ row }) => externalLink(row.original.url) },
+  { id: "name", header: "Deal", accessor: (row) => row.name, width: 230, render: (row) => <div className="cell-main"><a href={row.url} target="_blank" rel="noreferrer"><strong>{row.name}</strong></a><span>{row.stage}</span></div> },
+  { id: "stage", header: "Stage", accessor: (row) => row.stage, width: 160 },
+  { id: "owner", header: "Owner", accessor: (row) => row.owner, width: 150, render: (row) => row.owner || "Unassigned" },
+  { id: "amount", header: "Amount", accessor: (row) => row.amount, width: 120, render: (row) => money(row.amount) },
+  { id: "createdAt", header: "Created", accessor: (row) => row.createdAt, width: 120, render: (row) => shortDate(row.createdAt) },
+  { id: "closeDate", header: "Close date", accessor: (row) => row.closeDate, width: 120, render: (row) => shortDate(row.closeDate) },
+  { id: "isOpen", header: "State", accessor: (row) => row.isOpen, width: 90, render: (row) => row.isOpen ? "Open" : "Closed" },
+  { id: "actions", header: "Actions", accessor: () => "", width: 90, sortable: false, render: (row) => externalLink(row.url) },
 ];
 
 function ContactsTable({ drilldown }: { drilldown: Extract<Drilldown, { kind: "contacts" }> }) {
@@ -106,12 +106,10 @@ export function DrilldownDrawer({ drilldown, onClose }: { drilldown: Drilldown; 
     return () => { document.removeEventListener("keydown", closeOnEscape); document.body.classList.remove("drawer-open"); };
   }, [onClose]);
 
-  const table = useMemo(() => {
-    if (drilldown.kind === "contacts") return <ContactsTable drilldown={drilldown}/>;
-    if (drilldown.kind === "activities") return <ActivitiesTable drilldown={drilldown}/>;
-    if (drilldown.kind === "companies") return <CompaniesTable drilldown={drilldown}/>;
-    return <DealsTable drilldown={drilldown}/>;
-  }, [drilldown]);
+  const table = drilldown.kind === "contacts" ? <ContactsTable drilldown={drilldown}/>
+    : drilldown.kind === "activities" ? <ActivitiesTable drilldown={drilldown}/>
+      : drilldown.kind === "companies" ? <CompaniesTable drilldown={drilldown}/>
+        : <DealsTable drilldown={drilldown}/>;
 
   return <div className="drilldown-layer" role="dialog" aria-modal="true" aria-label={drilldown.title}>
     <button className="drilldown-backdrop" onClick={onClose} aria-label="Close details" />
