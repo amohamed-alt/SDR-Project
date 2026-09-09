@@ -1,0 +1,34 @@
+name: Agent V6 Install TanStack Table
+
+on:
+  push:
+    branches: [upgrade/gtm-command-center-v6]
+    paths:
+      - '.github/workflows/agent-v6-install-tanstack.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: upgrade/gtm-command-center-v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install TanStack Table
+        run: npm install @tanstack/react-table@latest --save-exact --no-audit
+      - name: Commit dependency graph
+        run: |
+          set -euo pipefail
+          git config user.name "GTM Upgrade Bot"
+          git config user.email "gtm-upgrade@users.noreply.github.com"
+          git add package.json package-lock.json
+          git diff --cached --quiet && { echo "No dependency changes produced"; exit 1; }
+          git commit -m "feat(table): add TanStack React Table"
+          git push origin HEAD:upgrade/gtm-command-center-v6
