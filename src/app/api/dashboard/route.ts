@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
     const etag = `W/"${createHash("sha256").update(JSON.stringify(filters) + snapshot.data.meta.generatedAt).digest("hex").slice(0, 32)}"`;
     const headers = {
       "Cache-Control": "private, max-age=0, must-revalidate",
-      "X-Dashboard-Cache-Version": "v8-dual-sdr",
+      "X-Dashboard-Cache-Version": "v9-last-known-good",
       "X-Dashboard-Cache": snapshot.cacheStatus,
       "X-Dashboard-Snapshot-Age": String(snapshot.ageSeconds),
       "X-Dashboard-Refreshing": snapshot.refreshing ? "1" : "0",
