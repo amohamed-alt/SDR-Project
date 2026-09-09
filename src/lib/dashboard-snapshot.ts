@@ -1,6 +1,7 @@
 import { unstable_cache } from "next/cache";
 import { SDR_OWNERS } from "@/lib/sdr-owners";
 import { buildDashboard } from "@/lib/analytics";
+import { projectDashboardPayload } from "@/lib/dashboard-payload";
 import {
   readPersistedDashboardSnapshot,
   writePersistedDashboardSnapshot,
@@ -81,7 +82,11 @@ function generatedAtMs(data: DashboardData) {
 }
 
 function persistSnapshot(filters: DashboardFilters, data: DashboardData, refreshedAt: number) {
-  void writePersistedDashboardSnapshot(filters, data, refreshedAt).catch((error) => {
+  // Persist the browser-ready projection rather than the multi-megabyte full
+  // in-memory snapshot. After a restart this gives the dashboard an immediate
+  // first paint while the full HubSpot model refreshes in the background.
+  const persistedData = projectDashboardPayload(data);
+  void writePersistedDashboardSnapshot(filters, persistedData, refreshedAt).catch((error) => {
     console.warn("Unable to persist dashboard snapshot", error);
   });
 }
@@ -256,7 +261,7 @@ export function startDashboardWarmup() {
       }
     } finally { running = false; }
   };
-  const start = setTimeout(() => void warm(), 5_000);
+  const start = setTimeout(() => void warm(), 250);
   start.unref?.();
   state.__sdrWarmup = setInterval(() => void warm(), 60_000);
   state.__sdrWarmup.unref?.();
