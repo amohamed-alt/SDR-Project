@@ -101,3 +101,17 @@ HubSpot currently contains calendar-sync meeting records plus separate CRM UI ou
 - Pipeline value uses `amount_in_home_currency`, then falls back to `amount`.
 - Deal stages are resolved from HubSpot pipeline metadata.
 - Meeting-to-deal conversion = deals created in period / deduplicated meetings created in period.
+
+## GTM intelligence signals
+
+- Stale deal: open deal whose latest known sales activity on an associated dashboard contact is at least 21 days old. If no activity is known, the deal is only stale after it has existed for 21 days.
+- No future activity: open deal with no populated deal-level `notes_next_activity_date` at or after the current time.
+- Overdue close date: open deal with a populated close date in the past.
+- Meeting without follow-up: completed or no-show meeting that ended more than 24 hours ago with no later logged call, email, WhatsApp, meeting, or associated contact `hs_last_sales_activity_timestamp`.
+- Completed meeting without progression: completed meeting older than seven days with neither an associated deal created after the meeting nor a contact-level next activity scheduled after it.
+- No-show meeting: meeting explicitly marked `NO_SHOW` whose start time is in the past.
+- Account engagement score: explicit tracked engagement only — 30 points per connected call (maximum 60), 30 per email reply (maximum 30), 15 per email click (maximum 30), and 10 points after three email opens; cap 100. High engagement means 60+ with no meeting.
+- Connected call without meeting: a distinct dashboard contact with a connected call and no associated deduplicated meeting.
+- Connected-call-to-meeting conversion: deduplicated meetings created in period / connected calls logged in period.
+- Lead response SLA: reporting-period contacts with populated `hs_time_to_first_engagement` of 24 hours or less / all reporting-period contacts. Missing timing is not treated as compliant.
+- Missing contact information: blank normalized phone, email, and LinkedIn values are reported separately, plus their union.

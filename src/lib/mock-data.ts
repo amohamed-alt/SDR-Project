@@ -1,9 +1,11 @@
 import type { DashboardData } from "@/lib/types";
+import { calculateGtmIntelligenceSignals } from "@/lib/gtm-intelligence-signals";
 
 const daily = [36, 59, 0, 0, 0, 31, 37, 46, 37, 0, 0, 33, 20, 34, 35, 17, 0, 0, 39];
 
 export function createMockDashboard(from: string, to: string, ownerId: string): DashboardData {
   const ownerName = ownerId === "37624223" ? "Daniel Beaini" : "Marita Chedid";
+  const intelligence = calculateGtmIntelligenceSignals({ contacts: [], deals: [], meetings: [], activities: [], from, to });
   return {
     meta: {
       generatedAt: new Date().toISOString(), from, to, timezone: "Asia/Riyadh", ownerId,
@@ -60,6 +62,7 @@ export function createMockDashboard(from: string, to: string, ownerId: string): 
     industries: [{ name: "Technology", value: 74 }, { name: "Healthcare", value: 62 }, { name: "Education", value: 54 }, { name: "Government", value: 41 }, { name: "Retail", value: 36 }],
     atsPlatforms: [{ name: "Oracle HCM", value: 51 }, { name: "SAP SuccessFactors", value: 43 }, { name: "Workday", value: 37 }, { name: "No ATS Detected", value: 118 }, { name: "Unknown", value: 138 }],
     dealStages: [{ name: "Demo Booked", value: 5, amount: 46000 }, { name: "Demo Done", value: 3, amount: 72500 }, { name: "Proposal Shared", value: 2, amount: 68000 }, { name: "Cashing", value: 2, amount: 0 }],
+    intelligence,
     quality: [
       ["email", "Email coverage", 488, 529], ["gtm_email_status", "Verified email", 421, 529], ["phone", "Phone coverage", 502, 529],
       ["phone_number_status", "Tested phone", 311, 529], ["gtm_linkedin_url", "LinkedIn coverage", 510, 529], ["company_id", "Company association", 507, 529],

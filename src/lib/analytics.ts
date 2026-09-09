@@ -41,6 +41,7 @@ import type {
   LabelOption,
   QualityMetric,
 } from "@/lib/types";
+import { calculateGtmIntelligenceSignals } from "@/lib/gtm-intelligence-signals";
 
 const OPEN_TASK_STATUSES = ["NOT_STARTED", "IN_PROGRESS", "WAITING", "DEFERRED"];
 const OUTCOME_PRIORITY = ["COMPLETED", "NO_SHOW", "CANCELED", "RESCHEDULED", "SCHEDULED"];
@@ -454,6 +455,79 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
 
   const connectedContactIds = new Set(connectedCalls.flatMap((call) => callContacts.get(call.id) ?? []).filter((id) => selectedIds.has(id)));
   const meetingContactIds = new Set(meetingGroups.flatMap((meeting) => meeting.contactIds).filter((id) => selectedIds.has(id)));
+  const dealContactIds = new Map<string, string[]>();
+  for (const [contactId, associatedDealIds] of contactDeals) {
+    for (const dealId of associatedDealIds) {
+      const items = dealContactIds.get(dealId) ?? [];
+      items.push(contactId);
+      dealContactIds.set(dealId, items);
+    }
+  }
+  const intelligence = calculateGtmIntelligenceSignals({
+    contacts: selectedContacts.map((contact) => {
+      const response = Number(value(contact, "hs_time_to_first_engagement"));
+      return {
+        id: contact.id,
+        companyId: value(contact, "company_id"),
+        createdAt: value(contact, "createdate"),
+        lastSalesActivityAt: value(contact, "hs_last_sales_activity_timestamp"),
+        nextActivityAt: value(contact, "notes_next_activity_date"),
+        firstEngagementMs: Number.isFinite(response) && response >= 0 ? response : null,
+        hasPhone: Boolean(contactPhone(contact)),
+        hasEmail: Boolean(value(contact, "email")),
+        hasLinkedIn: Boolean(value(contact, "gtm_linkedin_url")),
+      };
+    }),
+    deals: dealsRaw.map((deal) => ({
+      id: deal.id,
+      contactIds: dealContactIds.get(deal.id) ?? [],
+      createdAt: value(deal, "createdate"),
+      closeDate: value(deal, "closedate"),
+      nextActivityAt: value(deal, "notes_next_activity_date"),
+      isOpen: value(deal, "hs_is_closed") !== "true",
+    })),
+    meetings: meetingGroups.map((meeting) => ({
+      id: meeting.booking.id,
+      contactIds: meeting.contactIds.filter((contactId) => selectedIds.has(contactId)),
+      createdAt: meeting.createdAt,
+      startAt: meeting.startAt,
+      endAt: value(meeting.booking, "hs_meeting_end_time") || meeting.startAt,
+      outcome: meeting.outcome,
+    })),
+    activities: [
+      ...calls.map((call) => ({
+        id: call.id,
+        contactIds: (callContacts.get(call.id) ?? []).filter((contactId) => selectedIds.has(contactId)),
+        occurredAt: value(call, "hs_timestamp"),
+        kind: "call" as const,
+        connected: value(call, "hs_call_disposition") === CONNECTED_CALL_DISPOSITION,
+      })),
+      ...outgoingEmails.map((email) => ({
+        id: email.id,
+        contactIds: (emailContacts.get(email.id) ?? []).filter((contactId) => selectedIds.has(contactId)),
+        occurredAt: value(email, "hs_timestamp"),
+        kind: "email" as const,
+        emailOpenCount: number(value(email, "hs_email_open_count")),
+        emailClickCount: number(value(email, "hs_email_click_count")),
+        emailReplyCount: number(value(email, "hs_email_reply_count")),
+      })),
+      ...whatsAppMessages.map((message) => ({
+        id: message.id,
+        contactIds: (communicationContacts.get(message.id) ?? []).filter((contactId) => selectedIds.has(contactId)),
+        occurredAt: value(message, "hs_timestamp"),
+        kind: "whatsapp" as const,
+      })),
+      ...meetingGroups.map((meeting) => ({
+        id: meeting.booking.id,
+        contactIds: meeting.contactIds.filter((contactId) => selectedIds.has(contactId)),
+        occurredAt: meeting.startAt,
+        kind: "meeting" as const,
+      })),
+    ],
+    from: filters.from,
+    to: filters.to,
+    now,
+  });
   const priorityContacts: ContactRow[] = selectedContacts.map((contact) => {
     const tier = value(contact, "gtm_icp_tier");
     const icpScore = number(value(contact, "gtm_icp_score"));
@@ -691,7 +765,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       if (existing) { existing.value += 1; existing.amount = (existing.amount ?? 0) + deal.amount; } else acc.push({ name: deal.stage, value: 1, amount: deal.amount });
       return acc;
     }, []).sort((a, b) => b.value - a.value),
-    quality, alerts, priorityContacts, recentActivities, companies: companyRows, deals: dealRows,
+    quality, intelligence, alerts, priorityContacts, recentActivities, companies: companyRows, deals: dealRows,
     filterOptions: {
       countries: uniqueOptions(allContacts, "country"), originalSources: uniqueOptions(allContacts, "hs_analytics_source", originalSourceLabels),
       latestSources: uniqueOptions(allContacts, "hs_latest_source", latestSourceLabels), tiers: uniqueOptions(allContacts, "gtm_icp_tier", tierLabels),

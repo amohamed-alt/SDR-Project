@@ -82,6 +82,41 @@ export interface QualityMetric {
   rate: number;
 }
 
+export interface GtmIntelligenceSignals {
+  staleDeals: { count: number; ids: string[] };
+  dealsWithoutFutureActivity: { count: number; ids: string[] };
+  dealsWithOverdueCloseDate: { count: number; ids: string[] };
+  meetingsWithoutFollowUp: { count: number; ids: string[] };
+  completedMeetingsWithoutProgression: { count: number; ids: string[] };
+  noShowMeetings: { count: number; ids: string[] };
+  highEngagementAccountsWithoutMeeting: { count: number; ids: string[] };
+  contactsWithConnectedCallsWithoutMeeting: { count: number; ids: string[] };
+  meetingToDealConversion: { numerator: number; denominator: number; rate: number };
+  connectedCallToMeetingConversion: { numerator: number; denominator: number; rate: number };
+  accountEngagement: Array<{
+    companyId: string;
+    score: number;
+    connectedCalls: number;
+    emailReplies: number;
+    emailClicks: number;
+    emailOpens: number;
+    hasMeeting: boolean;
+  }>;
+  leadResponseSla: {
+    eligible: number;
+    met: number;
+    missing: number;
+    rate: number;
+    overdueIds: string[];
+  };
+  missingContactInfo: {
+    missingPhone: { count: number; ids: string[] };
+    missingEmail: { count: number; ids: string[] };
+    missingLinkedIn: { count: number; ids: string[] };
+    missingAny: { count: number; ids: string[] };
+  };
+}
+
 export interface AlertItem {
   id: string;
   severity: "critical" | "warning" | "info";
@@ -237,6 +272,7 @@ export interface DashboardData {
   atsPlatforms: ChartDatum[];
   dealStages: ChartDatum[];
   quality: QualityMetric[];
+  intelligence: GtmIntelligenceSignals;
   alerts: AlertItem[];
   priorityContacts: ContactRow[];
   recentActivities: ActivityRow[];
