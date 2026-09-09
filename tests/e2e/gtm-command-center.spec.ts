@@ -1,5 +1,13 @@
 import { expect, test } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("sdr_v2_visitor_id", "visitor_playwright_ci");
+    localStorage.setItem("sdr_v2_visitor_name", "Playwright CI");
+    sessionStorage.setItem("sdr_v2_session_id", "session_playwright_ci");
+  });
+});
+
 test("dashboard loads and global command palette opens", async ({ page }) => {
   await page.goto("/");
 
