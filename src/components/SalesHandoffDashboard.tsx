@@ -9,7 +9,6 @@ import {
   CalendarDays,
   CheckCircle2,
   CircleDollarSign,
-  Clock3,
   RefreshCw,
   Search,
   Target,
@@ -210,7 +209,8 @@ export function SalesHandoffDashboard({ onBack }: { onBack: () => void }) {
   }, [applied]);
 
   useEffect(() => {
-    void load(false);
+    const initialLoad = window.setTimeout(() => void load(false), 0);
+    return () => window.clearTimeout(initialLoad);
   }, [load]);
 
   const options = useMemo(() => {
