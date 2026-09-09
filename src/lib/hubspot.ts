@@ -3,7 +3,9 @@ import type { HubSpotOwner, HubSpotRecord } from "@/lib/types";
 const API_BASE = "https://api.hubapi.com";
 const MAX_RETRIES = 3;
 const SEARCH_PAGE_SIZE = 200;
-const SEARCH_INTERVAL_MS = 275;
+// HubSpot Search allows 5 requests/second. Stay below that ceiling so other
+// requests on the same portal still have headroom while reducing cold-build time.
+const SEARCH_INTERVAL_MS = 250;
 const BATCH_SIZE = 100;
 const BATCH_CONCURRENCY = 6;
 const REFERENCE_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
@@ -157,6 +159,18 @@ async function cachedReference<T>(key: string, loader: () => Promise<T>, ttlMs =
   return inflight;
 }
 
+function logHubSpotFailure(path: string, response: Response) {
+  console.warn("HubSpot API request failed", {
+    path,
+    status: response.status,
+    correlationId: response.headers.get("x-hubspot-correlation-id") || undefined,
+    rateLimitRemaining: response.headers.get("x-hubspot-ratelimit-remaining") || undefined,
+    rateLimitMax: response.headers.get("x-hubspot-ratelimit-max") || undefined,
+    rateLimitIntervalMs: response.headers.get("x-hubspot-ratelimit-interval-milliseconds") || undefined,
+    retryAfter: response.headers.get("retry-after") || undefined,
+  });
+}
+
 async function hubspotRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   let lastError: unknown;
 
@@ -199,6 +213,7 @@ async function hubspotRequest<T>(path: string, init: RequestInit = {}): Promise<
         continue;
       }
 
+      logHubSpotFailure(path, response);
       throw new HubSpotApiError(`HubSpot request failed: ${path}`, response.status, body.slice(0, 1_000));
     } catch (error) {
       lastError = error;

@@ -59,7 +59,12 @@ export async function GET(request: NextRequest) {
         }
       : await getDashboardSnapshot(filters, params.get("refresh") === "1");
 
-    const etag = `W/"${createHash("sha256").update(JSON.stringify(filters) + snapshot.data.meta.generatedAt).digest("hex").slice(0, 32)}"`;
+    const etagSeed = JSON.stringify({
+      filters,
+      generatedAt: snapshot.data.meta.generatedAt,
+      warnings: snapshot.data.meta.warnings,
+    });
+    const etag = `W/"${createHash("sha256").update(etagSeed).digest("hex").slice(0, 32)}"`;
     const headers = {
       "Cache-Control": "private, max-age=0, must-revalidate",
       "X-Dashboard-Cache-Version": "v8-dual-sdr",
