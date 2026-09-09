@@ -1,0 +1,23 @@
+.share-view-button {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 11px;
+  border: 1px solid rgba(34,78,59,.14);
+  border-radius: 9px;
+  background: rgba(255,255,255,.88);
+  color: #36574a;
+  box-shadow: 0 5px 14px rgba(12,57,41,.05), inset 0 1px 0 rgba(255,255,255,.9);
+  font-size: 9px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 170ms cubic-bezier(.22,1,.36,1), border-color 170ms ease, background 170ms ease, color 170ms ease;
+}
+.share-view-button svg { color: var(--green); }
+@media (hover:hover) {
+  .share-view-button:hover { transform: translateY(-1px); border-color: rgba(8,122,80,.28); background: #f7fbf9; color: var(--green); }
+}
+@media (max-width:640px) { .share-view-button span { display: none; } }
+@media (prefers-reduced-motion:reduce) { .share-view-button { transition:none!important; } }
