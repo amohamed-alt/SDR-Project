@@ -5,6 +5,7 @@ import { DEFAULT_SDR_OWNER_ID } from "@/lib/config";
 import { getDashboardSnapshot } from "@/lib/dashboard-snapshot";
 import { createMockDashboard } from "@/lib/mock-data";
 import { compressedJsonResponse } from "@/lib/compressed-json";
+import { projectDashboardPayload } from "@/lib/dashboard-payload";
 import type { DashboardFilters } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -59,10 +60,12 @@ export async function GET(request: NextRequest) {
         }
       : await getDashboardSnapshot(filters, params.get("refresh") === "1");
 
+    const payload = projectDashboardPayload(snapshot.data);
     const etagSeed = JSON.stringify({
       filters,
-      generatedAt: snapshot.data.meta.generatedAt,
-      warnings: snapshot.data.meta.warnings,
+      generatedAt: payload.meta.generatedAt,
+      warnings: payload.meta.warnings,
+      payloadProfile: "compact-v1",
     });
     const etag = `W/"${createHash("sha256").update(etagSeed).digest("hex").slice(0, 32)}"`;
     const headers = {
@@ -71,11 +74,14 @@ export async function GET(request: NextRequest) {
       "X-Dashboard-Cache": snapshot.cacheStatus,
       "X-Dashboard-Snapshot-Age": String(snapshot.ageSeconds),
       "X-Dashboard-Refreshing": snapshot.refreshing ? "1" : "0",
+      "X-Dashboard-Payload": "compact-v1",
+      "X-Dashboard-Contacts-Sent": String(payload.priorityContacts.length),
+      "X-Dashboard-Activities-Sent": String(payload.recentActivities.length),
       "ETag": etag,
       "Vary": "Accept-Encoding",
     };
     if (request.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
-    return compressedJsonResponse(request, snapshot.data, headers);
+    return compressedJsonResponse(request, payload, headers);
   } catch (error) {
     console.error("Dashboard load failed", error);
     return NextResponse.json({
