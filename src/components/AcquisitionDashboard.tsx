@@ -2,7 +2,7 @@
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertTriangle,
@@ -170,12 +170,64 @@ function SidebarAcquisitionPortal({ onSelect, ownerKey = "marita" }: { onSelect:
   return createPortal(<AcquisitionNav activeOwner={ownerKey} onSelect={onSelect}/>, target);
 }
 
+// Animates a formatted-number string from its previous value to the new one.
+// Falls back to an instant swap for non-numeric values or reduced-motion users.
+function useCountUp(target: string, durationMs = 650) {
+  const [display, setDisplay] = useState(target);
+  const previousRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const numericTarget = Number(target.replace(/,/g, ""));
+    if (Number.isNaN(numericTarget)) { setDisplay(target); return; }
+
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const from = previousRef.current ?? numericTarget;
+    if (reduceMotion || from === numericTarget) {
+      previousRef.current = numericTarget;
+      setDisplay(target);
+      return;
+    }
+
+    const start = performance.now();
+    let frame: number;
+    const tick = (now: number) => {
+      const progress = Math.min((now - start) / durationMs, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplay(formatNumber(Math.round(from + (numericTarget - from) * eased)));
+      if (progress < 1) {
+        frame = requestAnimationFrame(tick);
+      } else {
+        previousRef.current = numericTarget;
+      }
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [target, durationMs]);
+
+  return display;
+}
+
 function MetricButton({ label, value, helper, icon: Icon, tone, onClick }: MetricCard) {
+  const display = useCountUp(value);
   return <button type="button" className={`kpi-card tone-${tone}`} onClick={onClick}>
     <div className="kpi-top"><span>{label}</span><Icon size={18}/></div>
-    <strong>{value}</strong>
+    <strong>{display}</strong>
     <small>{helper}<ListFilter size={13}/></small>
   </button>;
+}
+
+// Matches the real kpi-grid shape (see globals.css .kpi-grid) so there is no
+// layout shift when live cards replace these placeholders.
+function KpiSkeleton({ count = 6 }: { count?: number }) {
+  return <div className="kpi-grid" aria-hidden="true">
+    {Array.from({ length: count }).map((_, index) => (
+      <div key={index} className="kpi-card kpi-card-skeleton">
+        <div className="kpi-top"><span className="skeleton-bar skeleton-bar-label"/><span className="skeleton-dot"/></div>
+        <strong className="skeleton-bar skeleton-bar-value"/>
+        <small className="skeleton-bar skeleton-bar-helper"/>
+      </div>
+    ))}
+  </div>;
 }
 
 function RepKpiDashboard({
@@ -360,10 +412,10 @@ function RepKpiDashboard({
         {data?.meta.warnings.length ? <div className="warning-banner"><AlertTriangle size={17}/><div><strong>{data.meta.isDemo ? "Demo mode" : "Some HubSpot data sources were unavailable"}</strong><span>{data.meta.warnings.join(" · ")}</span></div></div> : null}
         {error ? <div className="error-banner"><AlertTriangle size={20}/><div><strong>{data ? "Refresh failed — showing the last loaded data" : "KPI dashboard failed to load"}</strong><span>{error}</span></div><button type="button" onClick={() => void loadData(false)}>Try again</button></div> : null}
 
-        {data ? <div className="kpi-grid">{cards.map((card) => <MetricButton key={card.label} {...card}/>)}</div> : null}
+        {data
+          ? <div className="kpi-grid">{cards.map((card) => <MetricButton key={card.label} {...card}/>)}</div>
+          : (loading ? <KpiSkeleton/> : null)}
         {data ? <AcquisitionDailyPulse data={data} ownerName={owner.name} onOpen={setDrilldown}/> : null}
-
-        {loading && !data ? <div className="loading-overlay"><div className="loader"/><strong>Loading {owner.name.split(" ")[0]} KPIs…</strong><span>Calls, meetings, WhatsApp, and task execution</span></div> : null}
       </div>
     </div>
 
@@ -405,22 +457,22 @@ export function AcquisitionDashboard() {
   }
 
   return <>
-    <div data-sdr-host="marita" hidden={activeOwner !== "marita"}>
+    <div className="sdr-tab-panel" data-sdr-host="marita" hidden={activeOwner !== "marita"}>
       <ExistingDashboard active={activeOwner === "marita"}/>
       <SidebarAcquisitionPortal onSelect={selectOwner}/>
     </div>
 
-    {visitedOwners.has("daniel") && <div data-sdr-host="daniel" data-brand="evalufy" hidden={activeOwner !== "daniel"}>
+    {visitedOwners.has("daniel") && <div className="sdr-tab-panel" data-sdr-host="daniel" data-brand="evalufy" hidden={activeOwner !== "daniel"}>
       <SdrDashboard sdr="daniel" active={activeOwner === "daniel"}/>
       <SidebarAcquisitionPortal ownerKey="daniel" onSelect={selectOwner}/>
     </div>}
-    {activeOwner === "comparison" && <SdrComparison onSelect={selectOwner}/>}
+    {activeOwner === "comparison" && <div className="sdr-tab-panel"><SdrComparison onSelect={selectOwner}/></div>}
 
-    {visitedOwners.has("ursula") ? <div hidden={activeOwner !== "ursula"}>
+    {visitedOwners.has("ursula") ? <div className="sdr-tab-panel" hidden={activeOwner !== "ursula"}>
       <RepKpiDashboard ownerKey="ursula" onSelectOwner={selectOwner}/>
     </div> : null}
 
-    {visitedOwners.has("zein") ? <div hidden={activeOwner !== "zein"}>
+    {visitedOwners.has("zein") ? <div className="sdr-tab-panel" hidden={activeOwner !== "zein"}>
       <RepKpiDashboard ownerKey="zein" onSelectOwner={selectOwner}/>
     </div> : null}
   </>;
