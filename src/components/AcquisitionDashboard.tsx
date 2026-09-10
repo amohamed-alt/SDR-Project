@@ -2,7 +2,7 @@
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertTriangle,
@@ -455,6 +455,13 @@ function RepKpiDashboard({
 export function AcquisitionDashboard({ initialOwner, initialSearch }: { initialOwner: AcquisitionOwnerKey; initialSearch: string }) {
   const [activeOwner, setActiveOwner] = useState<AcquisitionOwnerKey>(initialOwner);
   const [activeSearch, setActiveSearch] = useState(initialSearch);
+
+  useLayoutEffect(() => {
+    const resetScroll = () => window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    resetScroll();
+    const frame = window.requestAnimationFrame(resetScroll);
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeOwner]);
 
   useEffect(() => {
     const syncFromUrl = () => {
