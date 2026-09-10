@@ -14,7 +14,6 @@ import {
   ChevronUp,
   ListTodo,
   LoaderCircle,
-  Menu,
   PhoneCall,
   Radar,
   Target,
@@ -56,8 +55,8 @@ const SalesHandoffDashboard = dynamic(
   { ssr: false, loading: ViewLoading },
 );
 
-function viewFromUrl(): ShellView {
-  const view = new URLSearchParams(window.location.search).get("view");
+function viewFromSearch(search: string): ShellView {
+  const view = new URLSearchParams(search).get("view");
   if (view === "maqsam") return "maqsam";
   if (view === "marita-priority") return "marita-priority";
   if (view === "team-activity") return "team-activity";
@@ -73,8 +72,8 @@ function trackFeature(feature: string) {
   }));
 }
 
-export function Dashboard({ sdr = "marita", active = true }: SdrDashboardProps) {
-  const [view, setView] = useState<ShellView>("core");
+export function Dashboard({ sdr = "marita", active = true, initialSearch = "" }: SdrDashboardProps & { initialSearch?: string }) {
+  const [view, setView] = useState<ShellView>(() => viewFromSearch(initialSearch));
   const [toolsOpen, setToolsOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [adminUnlocked, setAdminUnlocked] = useState(false);
@@ -86,7 +85,7 @@ export function Dashboard({ sdr = "marita", active = true }: SdrDashboardProps) 
   const toolsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const syncFromUrl = () => setView(viewFromUrl());
+    const syncFromUrl = () => setView(viewFromSearch(window.location.search));
     syncFromUrl();
     window.addEventListener("popstate", syncFromUrl);
     return () => window.removeEventListener("popstate", syncFromUrl);
@@ -190,9 +189,9 @@ export function Dashboard({ sdr = "marita", active = true }: SdrDashboardProps) 
   if (view === "sales-handoff") return <SalesHandoffDashboard onBack={() => changeView("core")}/>;
 
   return <div className={styles.shell}>
-    <ExistingDashboard sdr={sdr} active={active}/>
+    <ExistingDashboard sdr={sdr} active={active} initialSearch={initialSearch} onToggleTools={() => setToolsOpen((current) => !current)} toolsOpen={toolsOpen} toolsCount={sdr === "marita" ? 4 : 3}/>
 
-    <div className={styles.toolsDock} ref={toolsRef}>
+    {toolsOpen ? <div className={styles.toolsDock} ref={toolsRef}>
       {toolsOpen ? (
         <div className={styles.toolsMenu} id="sdr-tools-menu">
           <div className={styles.toolsHeader}>
@@ -262,15 +261,6 @@ export function Dashboard({ sdr = "marita", active = true }: SdrDashboardProps) 
         </div>
       ) : null}
 
-      <button
-        className={`${styles.toolsToggle} ${toolsOpen ? styles.toolsToggleOpen : ""}`}
-        type="button"
-        onClick={() => setToolsOpen((current) => !current)}
-        aria-expanded={toolsOpen}
-        aria-controls="sdr-tools-menu"
-      >
-        {toolsOpen ? <X size={18}/> : <Menu size={18}/>}<span>{toolsOpen ? "Close" : "SDR Tools"}</span><small>{sdr === "marita" ? "4" : "3"}</small>
-      </button>
-    </div>
+    </div> : null}
   </div>;
 }

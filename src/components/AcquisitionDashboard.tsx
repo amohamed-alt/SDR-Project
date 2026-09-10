@@ -23,7 +23,6 @@ import dynamic from "next/dynamic";
 const SdrComparison = dynamic(() => import("@/components/SdrComparison").then(module => module.SdrComparison));
 import { SDR_OWNERS } from "@/lib/sdr-owners";
 import { AcquisitionDailyPulse } from "@/components/AcquisitionDailyPulse";
-import { Dashboard as SdrDashboard } from "@/components/DashboardMotion";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardShell";
 import { DrilldownDrawer, type Drilldown } from "@/components/DrilldownDrawer";
 import type { ActivityRow, DashboardData } from "@/lib/types";
@@ -170,6 +169,21 @@ function SidebarAcquisitionPortal({ onSelect, ownerKey = "marita" }: { onSelect:
   return createPortal(<AcquisitionNav activeOwner={ownerKey} onSelect={onSelect}/>, target);
 }
 
+function ComparisonWorkspace({ onSelect }: { onSelect: (owner: AcquisitionOwnerKey) => void }) {
+  return <main className="app-shell">
+    <header className="topbar">
+      <div className="top-title"><strong>SDR Command Center</strong><span>Team performance comparison</span></div>
+    </header>
+    <div className="workspace">
+      <aside className="sidebar">
+        <div className="brand"><div className="brand-logo" role="img" aria-label="Talentera ATS"/><span className="brand-subtitle">SDR Intelligence</span></div>
+        <AcquisitionNav activeOwner="comparison" onSelect={onSelect}/>
+      </aside>
+      <div className="content"><SdrComparison onSelect={onSelect}/></div>
+    </div>
+  </main>;
+}
+
 // Animates a formatted-number string from its previous value to the new one.
 // Falls back to an instant swap for non-numeric values or reduced-motion users.
 function useCountUp(target: string, durationMs = 650) {
@@ -241,21 +255,25 @@ function RepKpiDashboard({
   const initialCache = cachedRepData(owner.ownerId);
   const [data, setData] = useState<DashboardData | null>(() => initialCache?.data ?? null);
   const [loading, setLoading] = useState(() => !initialCache);
+  const [refreshing, setRefreshing] = useState(false);
+  const [requesting, setRequesting] = useState(false);
   const [error, setError] = useState("");
   const [drilldown, setDrilldown] = useState<Drilldown | null>(null);
 
-  const loadData = useCallback(async (forceRefresh = false) => {
+  const loadData = useCallback(async (forceRefresh = false, pollRefresh = false) => {
     const cacheKey = repClientCacheKey(owner.ownerId);
     const cached = repClientCache.get(cacheKey);
     const cacheIsFresh = cached && Date.now() - cached.loadedAt < REP_CLIENT_CACHE_TTL_MS;
 
-    if (!forceRefresh && cacheIsFresh) {
+    if (!forceRefresh && !pollRefresh && cacheIsFresh) {
       setData(cached.data);
       setLoading(false);
       return;
     }
 
-    setLoading(true);
+    if (!data) setLoading(true);
+    setRequesting(true);
+    if (forceRefresh) setRefreshing(true);
     setError("");
 
     const query = new URLSearchParams({
@@ -266,22 +284,33 @@ function RepKpiDashboard({
     if (forceRefresh) query.set("refresh", "1");
 
     try {
-      const response = await fetch(`/api/dashboard?${query.toString()}`, { cache: "no-store" });
+      const response = await fetch(`/api/dashboard?${query.toString()}`, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(60_000),
+      });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.details || payload.error || "Dashboard request failed");
       const nextData = payload as DashboardData;
       repClientCache.set(cacheKey, { data: nextData, loadedAt: Date.now() });
       setData(nextData);
+      setRefreshing(response.headers.get("X-Dashboard-Refreshing") === "1");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to load KPI data");
     } finally {
       setLoading(false);
+      setRequesting(false);
     }
-  }, [owner.ownerId]);
+  }, [data, owner.ownerId]);
 
   useEffect(() => {
     void loadData(false);
   }, [loadData]);
+
+  useEffect(() => {
+    if (!refreshing || requesting) return;
+    const timer = window.setTimeout(() => void loadData(false, true), 3_000);
+    return () => window.clearTimeout(timer);
+  }, [loadData, refreshing, requesting]);
 
   const activities = useCallback((type: ActivityRow["type"]) => {
     return data?.recentActivities.filter((row) => row.type === type) ?? [];
@@ -380,9 +409,9 @@ function RepKpiDashboard({
     <header className="topbar">
       <div className="top-title"><strong>Acquisition KPIs</strong><span>Live HubSpot performance</span></div>
       <div className="top-actions">
-        <span className={`status-pill ${data?.meta.isDemo ? "demo" : "live"}`}><i/>{data?.meta.isDemo ? "Demo data" : "LIVE · HUBSPOT"}</span>
-        <button className="refresh-button" type="button" onClick={() => void loadData(true)} disabled={loading}>
-          <RefreshCw size={16} className={loading ? "spin" : ""}/>{loading && data ? "Refreshing…" : "Refresh data"}
+        <span className={`status-pill ${data?.meta.isDemo ? "demo" : "live"}`}><i/>{data?.meta.isDemo ? "Demo data" : refreshing || requesting ? "UPDATING · HUBSPOT" : "HUBSPOT SNAPSHOT"}</span>
+        <button className="refresh-button" type="button" onClick={() => void loadData(true)} disabled={loading || refreshing || requesting}>
+          <RefreshCw size={16} className={refreshing || requesting ? "spin" : ""}/>{refreshing || requesting ? "Refreshing…" : "Refresh data"}
         </button>
       </div>
     </header>
@@ -423,57 +452,51 @@ function RepKpiDashboard({
   </main>;
 }
 
-export function AcquisitionDashboard() {
-  const [activeOwner, setActiveOwner] = useState<AcquisitionOwnerKey>("marita");
-  const [visitedOwners, setVisitedOwners] = useState<Set<AcquisitionOwnerKey>>(() => new Set(["marita"]));
-
-  const markVisited = useCallback((owner: AcquisitionOwnerKey) => {
-    setVisitedOwners((current) => {
-      if (current.has(owner)) return current;
-      const next = new Set(current);
-      next.add(owner);
-      return next;
-    });
-  }, []);
+export function AcquisitionDashboard({ initialOwner, initialSearch }: { initialOwner: AcquisitionOwnerKey; initialSearch: string }) {
+  const [activeOwner, setActiveOwner] = useState<AcquisitionOwnerKey>(initialOwner);
+  const [activeSearch, setActiveSearch] = useState(initialSearch);
 
   useEffect(() => {
     const syncFromUrl = () => {
       const owner = acquisitionOwnerFromUrl();
       setActiveOwner(owner);
-      markVisited(owner);
+      setActiveSearch(window.location.search);
     };
     syncFromUrl();
     window.addEventListener("popstate", syncFromUrl);
     return () => window.removeEventListener("popstate", syncFromUrl);
-  }, [markVisited]);
+  }, []);
 
   function selectOwner(owner: AcquisitionOwnerKey) {
     const url = new URL(window.location.href);
     if (owner === "marita") url.searchParams.delete("acq");
     else url.searchParams.set("acq", owner);
+    for (const parameter of ["tab", "workspace", "view", "country", "originalSource", "latestSource", "tier", "persona"]) {
+      url.searchParams.delete(parameter);
+    }
     window.history.pushState({}, "", url);
-    markVisited(owner);
     setActiveOwner(owner);
+    setActiveSearch(url.search);
+    window.scrollTo({ top: 0, behavior: "auto" });
   }
 
-  return <>
-    <div className="sdr-tab-panel" data-sdr-host="marita" hidden={activeOwner !== "marita"}>
-      <ExistingDashboard active={activeOwner === "marita"}/>
+  if (activeOwner === "marita") return <div className="sdr-tab-panel" data-sdr-host="marita">
+      <ExistingDashboard active={activeOwner === "marita"} initialSearch={activeSearch}/>
       <SidebarAcquisitionPortal onSelect={selectOwner}/>
-    </div>
+    </div>;
 
-    {visitedOwners.has("daniel") && <div className="sdr-tab-panel" data-sdr-host="daniel" data-brand="evalufy" hidden={activeOwner !== "daniel"}>
-      <SdrDashboard sdr="daniel" active={activeOwner === "daniel"}/>
+  if (activeOwner === "daniel") return <div className="sdr-tab-panel" data-sdr-host="daniel" data-brand="evalufy">
+      <ExistingDashboard sdr="daniel" active initialSearch={activeSearch}/>
       <SidebarAcquisitionPortal ownerKey="daniel" onSelect={selectOwner}/>
-    </div>}
-    {activeOwner === "comparison" && <div className="sdr-tab-panel"><SdrComparison onSelect={selectOwner}/></div>}
+    </div>;
 
-    {visitedOwners.has("ursula") ? <div className="sdr-tab-panel" hidden={activeOwner !== "ursula"}>
+  if (activeOwner === "comparison") return <div className="sdr-tab-panel"><ComparisonWorkspace onSelect={selectOwner}/></div>;
+
+  if (activeOwner === "ursula") return <div className="sdr-tab-panel">
       <RepKpiDashboard ownerKey="ursula" onSelectOwner={selectOwner}/>
-    </div> : null}
+    </div>;
 
-    {visitedOwners.has("zein") ? <div className="sdr-tab-panel" hidden={activeOwner !== "zein"}>
+  return <div className="sdr-tab-panel">
       <RepKpiDashboard ownerKey="zein" onSelectOwner={selectOwner}/>
-    </div> : null}
-  </>;
+    </div>;
 }

@@ -227,8 +227,15 @@ function FunnelPanel({
   </section>;
 }
 
-export function Dashboard({ sdr = "marita", active = true }: SdrDashboardProps) {
-  const [view, setView] = useState<ViewMode>("core");
+export function Dashboard({
+  sdr = "marita",
+  active = true,
+  initialSearch = "",
+  onToggleTools,
+  toolsOpen,
+  toolsCount,
+}: SdrDashboardProps & { initialSearch?: string; onToggleTools?: () => void; toolsOpen?: boolean; toolsCount?: number }) {
+  const [view, setView] = useState<ViewMode>(() => new URLSearchParams(initialSearch).get("view") === "motion" ? "motion" : "core");
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
@@ -246,10 +253,7 @@ export function Dashboard({ sdr = "marita", active = true }: SdrDashboardProps) 
   if (view === "motion") return <MotionDashboard sdr={sdr} onBack={() => changeView("core")}/>;
 
   return <div className={styles.coreWrapper}>
-    <OriginalDashboard sdr={sdr} active={active}/>
-    <button type="button" className={styles.motionLauncher} onClick={() => changeView("motion")}>
-      <PhoneIncoming size={17}/>Inbound vs Outbound
-    </button>
+    <OriginalDashboard sdr={sdr} active={active} initialSearch={initialSearch} onOpenMotion={() => changeView("motion")} onToggleTools={onToggleTools} toolsOpen={toolsOpen} toolsCount={toolsCount}/>
   </div>;
 }
 

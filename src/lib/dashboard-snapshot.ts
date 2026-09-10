@@ -139,6 +139,7 @@ function ensureRefreshScheduler() {
 
   const timer = setInterval(() => {
     const now = Date.now();
+    const staleBaseSnapshots: Array<[string, ActiveFilterEntry]> = [];
     for (const [key, active] of activeFilters) {
       if (now - active.lastAccessedAt > ACTIVE_FILTER_TTL_MS) {
         activeFilters.delete(key);
@@ -147,11 +148,26 @@ function ensureRefreshScheduler() {
       }
 
       const snapshot = snapshots.get(key);
-      if (!snapshot || now - snapshot.refreshedAt >= SNAPSHOT_FRESH_MS) {
-        void startRefresh(key, active.filters).catch((error) => {
-          console.error("Background dashboard refresh failed", error);
-        });
+      const isBaseSnapshot = !active.filters.country
+        && !active.filters.originalSource
+        && !active.filters.latestSource
+        && !active.filters.tier
+        && !active.filters.persona;
+      if (isBaseSnapshot && (!snapshot || now - snapshot.refreshedAt >= SNAPSHOT_FRESH_MS)) {
+        staleBaseSnapshots.push([key, active]);
       }
+    }
+
+    // Start at most one proactive CRM scan per scheduler tick. Filtered views
+    // refresh when they are actually requested, so an abandoned filter cannot
+    // hold manual refreshes behind a long queue of full HubSpot scans.
+    const next = staleBaseSnapshots
+      .filter(([key]) => !inflightRefreshes.has(key) && !coldLoads.has(key))
+      .sort(([leftKey], [rightKey]) => (snapshots.get(leftKey)?.refreshedAt ?? 0) - (snapshots.get(rightKey)?.refreshedAt ?? 0))[0];
+    if (next) {
+      void startRefresh(next[0], next[1].filters).catch((error) => {
+        console.error("Background dashboard refresh failed", error);
+      });
     }
   }, BACKGROUND_REFRESH_INTERVAL_MS);
 
