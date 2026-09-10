@@ -1,8 +1,8 @@
 "use client";
 
-import { SDR_OWNERS, type SdrDashboardProps, type SdrKey } from "@/lib/sdr-owners";
+import { SDR_OWNERS, type SdrKey } from "@/lib/sdr-owners";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -32,12 +32,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Dashboard as OriginalDashboard } from "./Dashboard";
 import { DrilldownDrawer, type Drilldown } from "@/components/DrilldownDrawer";
 import styles from "@/components/DashboardMotion.module.css";
 import type { ActivityRow, ChartDatum, ContactRow, DashboardData } from "@/lib/types";
 
-type ViewMode = "core" | "motion";
 type Motion = "Inbound" | "Outbound" | "Unknown";
 type MotionMetrics = {
   contacts: number;
@@ -70,6 +68,7 @@ type MetricButtonProps = {
 
 const defaultStart = process.env.NEXT_PUBLIC_DEFAULT_START_DATE ?? new Date().toISOString().slice(0, 7) + "-01";
 const today = new Date().toISOString().slice(0, 10);
+const MAX_REFRESH_WAIT_MS = 90_000;
 
 const GRID = "#dce7e2";
 const TICK = "#667a71";
@@ -227,47 +226,22 @@ function FunnelPanel({
   </section>;
 }
 
-export function Dashboard({
-  sdr = "marita",
-  active = true,
-  initialSearch = "",
-  onToggleTools,
-  toolsOpen,
-  toolsCount,
-}: SdrDashboardProps & { initialSearch?: string; onToggleTools?: () => void; toolsOpen?: boolean; toolsCount?: number }) {
-  const [view, setView] = useState<ViewMode>(() => new URLSearchParams(initialSearch).get("view") === "motion" ? "motion" : "core");
-
-  useEffect(() => {
-    const query = new URLSearchParams(window.location.search);
-    if (query.get("view") === "motion") setView("motion");
-  }, []);
-
-  function changeView(nextView: ViewMode) {
-    setView(nextView);
-    const url = new URL(window.location.href);
-    if (nextView === "motion") url.searchParams.set("view", "motion");
-    else url.searchParams.delete("view");
-    window.history.replaceState({}, "", url);
-  }
-
-  if (view === "motion") return <MotionDashboard sdr={sdr} onBack={() => changeView("core")}/>;
-
-  return <div className={styles.coreWrapper}>
-    <OriginalDashboard sdr={sdr} active={active} initialSearch={initialSearch} onOpenMotion={() => changeView("motion")} onToggleTools={onToggleTools} toolsOpen={toolsOpen} toolsCount={toolsCount}/>
-  </div>;
-}
-
-function MotionDashboard({ onBack, sdr }: { onBack: () => void; sdr: SdrKey }) {
+export function MotionDashboard({ onBack, sdr }: { onBack: () => void; sdr: SdrKey }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [from, setFrom] = useState(defaultStart);
   const [to, setTo] = useState(today);
   const [appliedRange, setAppliedRange] = useState({ from: defaultStart, to: today });
-  const [refreshKey, setRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [drilldown, setDrilldown] = useState<Drilldown | null>(null);
+  const refreshStartedAtRef = useRef(0);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (forceRefresh = false) => {
+    if (forceRefresh) {
+      refreshStartedAtRef.current = Date.now();
+      setRefreshing(true);
+    }
     setLoading(true);
     setError("");
     try {
@@ -276,19 +250,36 @@ function MotionDashboard({ onBack, sdr }: { onBack: () => void; sdr: SdrKey }) {
         to: appliedRange.to,
         ownerId: SDR_OWNERS[sdr].ownerId,
       });
-      if (refreshKey) query.set("refresh", "1");
-      const response = await fetch(`/api/dashboard?${query.toString()}`, { cache: "no-store" });
+      if (forceRefresh) query.set("refresh", "1");
+      const response = await fetch(`/api/dashboard?${query.toString()}`, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(60_000),
+      });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.details || payload.error || "Dashboard request failed");
-      setData(payload as DashboardData);
+      const nextData = payload as DashboardData;
+      if (nextData.meta.ownerId !== SDR_OWNERS[sdr].ownerId) throw new Error("Dashboard returned data for a different SDR owner");
+      setData(nextData);
+      const serverRefreshing = response.headers.get("X-Dashboard-Refreshing") === "1";
+      if (serverRefreshing && !refreshStartedAtRef.current) refreshStartedAtRef.current = Date.now();
+      const timedOut = serverRefreshing && Date.now() - refreshStartedAtRef.current >= MAX_REFRESH_WAIT_MS;
+      setRefreshing(serverRefreshing && !timedOut);
+      if (timedOut) setError("The live refresh is taking longer than expected. The last complete snapshot remains visible; you can retry.");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to load inbound and outbound analytics");
+      setRefreshing(false);
     } finally {
       setLoading(false);
     }
-  }, [appliedRange, refreshKey, sdr]);
+  }, [appliedRange, sdr]);
 
-  useEffect(() => { void loadData(); }, [loadData]);
+  useEffect(() => { void loadData(false); }, [loadData]);
+
+  useEffect(() => {
+    if (!refreshing || loading) return;
+    const timer = window.setTimeout(() => void loadData(false), 3_000);
+    return () => window.clearTimeout(timer);
+  }, [loadData, loading, refreshing]);
 
   const model = useMemo(() => {
     if (!data) return null;
@@ -474,7 +465,7 @@ function MotionDashboard({ onBack, sdr }: { onBack: () => void; sdr: SdrKey }) {
         <label className={styles.dateField}><span>From</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)}/></label>
         <label className={styles.dateField}><span>To</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)}/></label>
         <button type="button" className={styles.backButton} onClick={() => setAppliedRange({ from, to })}>Apply range</button>
-        <button type="button" className={styles.refreshButton} disabled={loading} onClick={() => setRefreshKey((value) => value + 1)}><RefreshCw size={14} className={loading ? styles.spin : ""}/>Refresh data</button>
+        <button type="button" className={styles.refreshButton} disabled={loading || refreshing} onClick={() => void loadData(true)}><RefreshCw size={14} className={loading || refreshing ? styles.spin : ""}/>{loading || refreshing ? "Refreshing…" : "Refresh data"}</button>
       </div>
     </header>
 

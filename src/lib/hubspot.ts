@@ -2,6 +2,7 @@ import type { HubSpotOwner, HubSpotRecord } from "@/lib/types";
 
 const API_BASE = "https://api.hubapi.com";
 const MAX_RETRIES = 3;
+const REQUEST_TIMEOUT_MS = 12_000;
 const SEARCH_PAGE_SIZE = 200;
 // HubSpot Search allows 5 requests/second. Stay below that ceiling so other
 // requests on the same portal still have headroom while reducing cold-build time.
@@ -184,6 +185,9 @@ async function hubspotRequest<T>(path: string, init: RequestInit = {}): Promise<
           ...init.headers,
         },
         cache: "no-store",
+        signal: init.signal
+          ? AbortSignal.any([init.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+          : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
 
       if (response.ok) {

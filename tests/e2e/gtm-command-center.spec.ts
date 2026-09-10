@@ -52,8 +52,53 @@ test("Daniel deep links render the Evalufy workspace on the server", async ({ pa
 
   await page.goto("/?acq=daniel");
   await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  await expect(page.locator(".evalufy-logo")).toHaveAttribute("src", /evalufy-logo\.png/);
   await expect(page.locator(".sidebar").getByRole("button", { name: /Inbound vs Outbound/i })).toBeVisible();
   await expect(page.locator(".sidebar").getByRole("button", { name: /SDR Tools/i })).toBeVisible();
+});
+
+test("sidebar and owner workspaces remain mounted across tool navigation and reload", async ({ page }) => {
+  await page.goto("/");
+  const sidebar = page.locator(".sidebar");
+  await expect(sidebar.getByText("TEAM WORKSPACES")).toBeVisible();
+
+  await sidebar.getByRole("button", { name: /SDR Tools/i }).click();
+  await page.getByRole("button", { name: /Talentera Intelligence/i }).click();
+  await expect(page.getByText("Priority Accounts")).toBeVisible();
+  await expect(sidebar).toHaveCount(1);
+  await expect(sidebar.getByText("TEAM WORKSPACES")).toBeVisible();
+  await expect(sidebar.getByRole("button", { name: /Zein/i })).toBeVisible();
+
+  await sidebar.getByRole("button", { name: "Analytics Dashboard", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  await expect(sidebar.getByText("TEAM WORKSPACES")).toBeVisible();
+
+  await page.reload();
+  await expect(sidebar.getByText("TEAM WORKSPACES")).toBeVisible();
+  await expect(sidebar.getByRole("button", { name: /Ursula/i })).toBeVisible();
+});
+
+test("Team Activity is discoverable and locked admin tools remain visible", async ({ page }) => {
+  await page.goto("/");
+  await page.locator(".sidebar").getByRole("button", { name: /SDR Tools/i }).click();
+  await expect(page.getByRole("button", { name: /Team Activity/i })).toBeVisible();
+
+  await page.getByRole("button", { name: /Admin Tools · 5/i }).click();
+  await expect(page.getByText("Admin password", { exact: true })).toBeVisible();
+  for (const label of ["Sales Nav Source", "Sales Nav Full Run", "SignalHire Source", "Call Queue Ops", "Company Repair"]) {
+    await expect(page.getByRole("button", { name: new RegExp(label) })).toBeVisible();
+  }
+});
+
+test("Ursula and Zein never reuse another owner's dashboard payload", async ({ page }) => {
+  await page.goto("/?acq=ursula");
+  await expect(page.getByRole("heading", { name: "Ursula KPIs", exact: true })).toBeVisible();
+  await expect(page.getByText("Ursula Waked", { exact: true })).toBeVisible();
+
+  await page.locator(".sidebar").getByRole("button", { name: /Zein/i }).click();
+  await expect(page.getByRole("heading", { name: "Zein KPIs", exact: true })).toBeVisible();
+  await expect(page.getByText("Zein Fares", { exact: true })).toBeVisible();
+  await expect(page.getByText("Ursula Waked", { exact: true })).toHaveCount(0);
 });
 
 test("switching owners mounts one clean workspace and clears stale tab state", async ({ page }) => {
@@ -77,4 +122,7 @@ test("comparison remains inside the shared dashboard shell", async ({ page }) =>
   await expect(page.locator(".sidebar")).toBeVisible();
   await expect(page.getByRole("heading", { name: "SDR performance", exact: true })).toBeVisible();
   await expect(page.locator("main.app-shell")).toHaveCount(1);
+  for (const owner of ["Marita", "Daniel", "Ursula", "Zein"]) {
+    await expect(page.getByRole("columnheader", { name: owner, exact: true })).toBeVisible();
+  }
 });

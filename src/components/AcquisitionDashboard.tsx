@@ -3,7 +3,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -26,13 +25,13 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 const SdrComparison = dynamic(() => import("@/components/SdrComparison").then(module => module.SdrComparison));
-import { SDR_OWNERS } from "@/lib/sdr-owners";
+import { SDR_OWNERS, type SdrKey } from "@/lib/sdr-owners";
 import { AcquisitionDailyPulse } from "@/components/AcquisitionDailyPulse";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardShell";
 import { DrilldownDrawer, type Drilldown } from "@/components/DrilldownDrawer";
 import type { ActivityRow, CompanyRow, ContactRow, DealRow, DashboardData } from "@/lib/types";
 
-type AcquisitionOwnerKey = "marita" | "daniel" | "comparison" | "ursula" | "zein";
+type AcquisitionOwnerKey = SdrKey | "comparison";
 type RepOwnerKey = "ursula" | "zein";
 
 type AcquisitionOwner = {
@@ -59,29 +58,15 @@ type RepClientCacheEntry = {
 const DEFAULT_START = process.env.NEXT_PUBLIC_DEFAULT_START_DATE ?? new Date().toISOString().slice(0, 7) + "-01";
 const TODAY = new Date().toISOString().slice(0, 10);
 const REP_CLIENT_CACHE_TTL_MS = 5 * 60 * 1000;
+const REP_MAX_REFRESH_WAIT_MS = 90_000;
 const repClientCache = new Map<string, RepClientCacheEntry>();
 
 const ACQUISITION_OWNERS: Record<AcquisitionOwnerKey, AcquisitionOwner> = {
-  marita: {
-    key: "marita",
-    name: "Marita Chedid",
-    ownerId: "31644369",
-    initials: "MC",
-  },
+  marita: { ...SDR_OWNERS.marita },
   daniel: { ...SDR_OWNERS.daniel },
   comparison: { key: "comparison", name: "SDR Comparison", ownerId: "", initials: "SDR" },
-  ursula: {
-    key: "ursula",
-    name: "Ursula Waked",
-    ownerId: "76369997",
-    initials: "UW",
-  },
-  zein: {
-    key: "zein",
-    name: "Zein Fares",
-    ownerId: "31558980",
-    initials: "ZF",
-  },
+  ursula: { ...SDR_OWNERS.ursula },
+  zein: { ...SDR_OWNERS.zein },
 };
 
 function acquisitionOwnerFromUrl(): AcquisitionOwnerKey {
@@ -125,53 +110,12 @@ function AcquisitionNav({
           onClick={() => onSelect(owner.key)}
         >
           <UsersRound size={17}/>
-          <span>{owner.key === "comparison" ? "SDR Comparison" : owner.name.split(" ")[0]}{(owner.key === "marita" || owner.key === "daniel") && <small className="sdr-nav-brand">{SDR_OWNERS[owner.key].brand}</small>}</span>
+          <span>{owner.key === "comparison" ? "SDR Comparison" : owner.name.split(" ")[0]}{owner.key !== "comparison" ? <small className="sdr-nav-brand">{SDR_OWNERS[owner.key].brand}</small> : null}</span>
           {activeOwner === owner.key && <ChevronRight size={15}/>} 
         </button>
       ))}
     </nav>
   </>;
-}
-
-function SidebarAcquisitionPortal({ onSelect, ownerKey = "marita" }: { onSelect: (owner: AcquisitionOwnerKey) => void; ownerKey?: "marita" | "daniel" }) {
-  const [target, setTarget] = useState<HTMLElement | null>(null);
-
-  useEffect(() => {
-    let frame = 0;
-    let attempts = 0;
-    let host: HTMLDivElement | null = null;
-
-    const attach = () => {
-      const sidebar = document.querySelector<HTMLElement>(`[data-sdr-host="${ownerKey}"] .sidebar`);
-      if (!sidebar) {
-        attempts += 1;
-        if (attempts < 120) frame = window.requestAnimationFrame(attach);
-        return;
-      }
-
-      const existing = sidebar.querySelector<HTMLDivElement>("[data-acquisition-tabs-host]");
-      if (existing) {
-        setTarget(existing);
-        return;
-      }
-
-      host = document.createElement("div");
-      host.dataset.acquisitionTabsHost = "true";
-      const ownerLabel = sidebar.querySelector(".owner-label");
-      if (ownerLabel) sidebar.insertBefore(host, ownerLabel);
-      else sidebar.appendChild(host);
-      setTarget(host);
-    };
-
-    attach();
-    return () => {
-      if (frame) window.cancelAnimationFrame(frame);
-      if (host?.isConnected) host.remove();
-    };
-  }, [ownerKey]);
-
-  if (!target) return null;
-  return createPortal(<AcquisitionNav activeOwner={ownerKey} onSelect={onSelect}/>, target);
 }
 
 function ComparisonWorkspace({ onSelect }: { onSelect: (owner: AcquisitionOwnerKey) => void }) {
@@ -259,11 +203,13 @@ function RepKpiDashboard({
   const owner = ACQUISITION_OWNERS[ownerKey];
   const initialCache = cachedRepData(owner.ownerId);
   const [data, setData] = useState<DashboardData | null>(() => initialCache?.data ?? null);
+  const hasDataRef = useRef(Boolean(initialCache));
   const [loading, setLoading] = useState(() => !initialCache);
   const [refreshing, setRefreshing] = useState(false);
   const [requesting, setRequesting] = useState(false);
   const [error, setError] = useState("");
   const [drilldown, setDrilldown] = useState<Drilldown | null>(null);
+  const refreshStartedAtRef = useRef(0);
 
   const loadData = useCallback(async (forceRefresh = false, pollRefresh = false) => {
     const cacheKey = repClientCacheKey(owner.ownerId);
@@ -276,9 +222,12 @@ function RepKpiDashboard({
       return;
     }
 
-    if (!data) setLoading(true);
+    if (!hasDataRef.current) setLoading(true);
     setRequesting(true);
-    if (forceRefresh) setRefreshing(true);
+    if (forceRefresh) {
+      refreshStartedAtRef.current = Date.now();
+      setRefreshing(true);
+    }
     setError("");
 
     const query = new URLSearchParams({
@@ -296,16 +245,25 @@ function RepKpiDashboard({
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.details || payload.error || "Dashboard request failed");
       const nextData = payload as DashboardData;
+      if (nextData.meta.ownerId !== owner.ownerId) {
+        throw new Error(`Owner data mismatch: expected ${owner.ownerId}, received ${nextData.meta.ownerId || "unknown"}`);
+      }
       repClientCache.set(cacheKey, { data: nextData, loadedAt: Date.now() });
+      hasDataRef.current = true;
       setData(nextData);
-      setRefreshing(response.headers.get("X-Dashboard-Refreshing") === "1");
+      const serverRefreshing = response.headers.get("X-Dashboard-Refreshing") === "1";
+      if (serverRefreshing && !refreshStartedAtRef.current) refreshStartedAtRef.current = Date.now();
+      const timedOut = serverRefreshing && Date.now() - refreshStartedAtRef.current >= REP_MAX_REFRESH_WAIT_MS;
+      setRefreshing(serverRefreshing && !timedOut);
+      if (timedOut) setError("The live refresh is taking longer than expected. The last complete snapshot remains visible; you can retry.");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to load KPI data");
+      setRefreshing(false);
     } finally {
       setLoading(false);
       setRequesting(false);
     }
-  }, [data, owner.ownerId]);
+  }, [owner.ownerId]);
 
   useEffect(() => {
     void loadData(false);
@@ -590,22 +548,20 @@ export function AcquisitionDashboard({ initialOwner, initialSearch }: { initialO
   }
 
   if (activeOwner === "marita") return <div className="sdr-tab-panel" data-sdr-host="marita">
-      <ExistingDashboard active={activeOwner === "marita"} initialSearch={activeSearch}/>
-      <SidebarAcquisitionPortal onSelect={selectOwner}/>
+      <ExistingDashboard key="marita" active={activeOwner === "marita"} initialSearch={activeSearch} workspaceNavigation={<AcquisitionNav activeOwner="marita" onSelect={selectOwner}/>}/>
     </div>;
 
   if (activeOwner === "daniel") return <div className="sdr-tab-panel" data-sdr-host="daniel" data-brand="evalufy">
-      <ExistingDashboard sdr="daniel" active initialSearch={activeSearch}/>
-      <SidebarAcquisitionPortal ownerKey="daniel" onSelect={selectOwner}/>
+      <ExistingDashboard key="daniel" sdr="daniel" active initialSearch={activeSearch} workspaceNavigation={<AcquisitionNav activeOwner="daniel" onSelect={selectOwner}/>}/>
     </div>;
 
   if (activeOwner === "comparison") return <div className="sdr-tab-panel"><ComparisonWorkspace onSelect={selectOwner}/></div>;
 
   if (activeOwner === "ursula") return <div className="sdr-tab-panel">
-      <RepKpiDashboard ownerKey="ursula" onSelectOwner={selectOwner}/>
+      <RepKpiDashboard key="ursula" ownerKey="ursula" onSelectOwner={selectOwner}/>
     </div>;
 
   return <div className="sdr-tab-panel">
-      <RepKpiDashboard ownerKey="zein" onSelectOwner={selectOwner}/>
+      <RepKpiDashboard key="zein" ownerKey="zein" onSelectOwner={selectOwner}/>
     </div>;
 }
