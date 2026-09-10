@@ -1,6 +1,8 @@
 // Read-only post-deployment probe. Never logs CRM records or credentials.
 const base = process.env.DASHBOARD_PROBE_URL || 'https://sdr.dashboardtalentera.tech';
 const expectedBuild = process.env.DEPLOY_SHA;
+const to = new Date().toISOString().slice(0, 10);
+const period = new URLSearchParams({ from: to.slice(0, 7) + '-01', to });
 const health = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(10_000) }).then(response => response.json());
 if (expectedBuild && health.buildRef !== expectedBuild) throw new Error('Production buildRef does not match the deployed revision');
 // 31644369 Marita, 37624223 Daniel, 76369997 Ursula, 31558980 Zein — every
@@ -11,7 +13,7 @@ for (const ownerId of ['31644369', '37624223', '76369997', '31558980']) {
   let etag;
   for (let sample = 0; sample < 3; sample++) {
     const start = performance.now();
-    const response = await fetch(`${base}/api/dashboard?ownerId=${ownerId}`, {
+    const response = await fetch(`${base}/api/dashboard?ownerId=${ownerId}&${period}`, {
       signal: AbortSignal.timeout(sample === 0 ? 60_000 : 10_000), headers: etag ? { 'If-None-Match': etag } : {},
     });
     const body = response.status === 304 ? '' : await response.text();
@@ -22,7 +24,7 @@ for (const ownerId of ['31644369', '37624223', '76369997', '31558980']) {
   }
 }
 const start = performance.now();
-const response = await fetch(`${base}/api/dashboard/team`, { signal: AbortSignal.timeout(10_000) });
+const response = await fetch(`${base}/api/dashboard/team?${period}`, { signal: AbortSignal.timeout(10_000) });
 const body = await response.text();
 if (!response.ok) throw new Error(`Team endpoint: HTTP ${response.status}`);
 const team = JSON.parse(body);
