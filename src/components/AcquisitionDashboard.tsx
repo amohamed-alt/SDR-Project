@@ -6,16 +6,21 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import {
   AlertTriangle,
+  ArrowUpRight,
   BadgeCheck,
+  BriefcaseBusiness,
   CalendarDays,
   CheckCircle2,
   ChevronRight,
+  Clock3,
   Database,
+  Gauge,
   ListFilter,
   ListTodo,
   MessageCircle,
   Phone,
   RefreshCw,
+  ShieldCheck,
   UsersRound,
   type LucideIcon,
 } from "lucide-react";
@@ -25,7 +30,7 @@ import { SDR_OWNERS } from "@/lib/sdr-owners";
 import { AcquisitionDailyPulse } from "@/components/AcquisitionDailyPulse";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardShell";
 import { DrilldownDrawer, type Drilldown } from "@/components/DrilldownDrawer";
-import type { ActivityRow, DashboardData } from "@/lib/types";
+import type { ActivityRow, CompanyRow, ContactRow, DealRow, DashboardData } from "@/lib/types";
 
 type AcquisitionOwnerKey = "marita" | "daniel" | "comparison" | "ursula" | "zein";
 type RepOwnerKey = "ursula" | "zein";
@@ -232,7 +237,7 @@ function MetricButton({ label, value, helper, icon: Icon, tone, onClick }: Metri
 
 // Matches the real kpi-grid shape (see globals.css .kpi-grid) so there is no
 // layout shift when live cards replace these placeholders.
-function KpiSkeleton({ count = 6 }: { count?: number }) {
+function KpiSkeleton({ count = 17 }: { count?: number }) {
   return <div className="kpi-grid" aria-hidden="true">
     {Array.from({ length: count }).map((_, index) => (
       <div key={index} className="kpi-card kpi-card-skeleton">
@@ -324,6 +329,21 @@ function RepKpiDashboard({
     setDrilldown({ kind: "activities", title, description, rows, hubspotUrl });
   }
 
+  function showDeals(title: string, description: string, rows: DealRow[]) {
+    if (!data) return;
+    setDrilldown({ kind: "deals", title, description, rows, hubspotUrl: data.meta.hubspotUrls.deals });
+  }
+
+  function showCompanies(title: string, description: string, rows: CompanyRow[]) {
+    if (!data) return;
+    setDrilldown({ kind: "companies", title, description, rows, hubspotUrl: data.meta.hubspotUrls.companies });
+  }
+
+  function showContacts(title: string, description: string, rows: ContactRow[]) {
+    if (!data) return;
+    setDrilldown({ kind: "contacts", title, description, rows, hubspotUrl: data.meta.hubspotUrls.contacts });
+  }
+
   const cards: MetricCard[] = data ? [
     {
       label: "Calls",
@@ -402,6 +422,78 @@ function RepKpiDashboard({
         activities("Task").filter((row) => row.isOpen && row.dueAt && new Date(row.dueAt).getTime() < Date.now()),
         data.meta.hubspotUrls.tasks,
       ),
+    },
+    {
+      label: "Stale deals",
+      value: formatNumber(data.intelligence.staleDeals.count),
+      helper: "Open deals inactive 21+ days",
+      icon: BriefcaseBusiness,
+      tone: "red",
+      onClick: () => showDeals(`${owner.name} · Stale deals`, "Open deals whose latest known contact activity is at least 21 days old.", data.deals.filter((row) => data.intelligence.staleDeals.ids.includes(row.id))),
+    },
+    {
+      label: "No future deal activity",
+      value: formatNumber(data.intelligence.dealsWithoutFutureActivity.count),
+      helper: "Open deals without a next date",
+      icon: CalendarDays,
+      tone: "amber",
+      onClick: () => showDeals(`${owner.name} · No future activity`, "Open deals with no deal-level next activity scheduled.", data.deals.filter((row) => data.intelligence.dealsWithoutFutureActivity.ids.includes(row.id))),
+    },
+    {
+      label: "Overdue close dates",
+      value: formatNumber(data.intelligence.dealsWithOverdueCloseDate.count),
+      helper: "Open deals past close date",
+      icon: AlertTriangle,
+      tone: "red",
+      onClick: () => showDeals(`${owner.name} · Overdue close date`, "Open deals with a close date in the past.", data.deals.filter((row) => data.intelligence.dealsWithOverdueCloseDate.ids.includes(row.id))),
+    },
+    {
+      label: "Meetings without follow-up",
+      value: formatNumber(data.intelligence.meetingsWithoutFollowUp.count),
+      helper: "Completed / no-show past 24h",
+      icon: Clock3,
+      tone: "amber",
+      onClick: () => showActivities(`${owner.name} · No follow-up`, "Meetings past the follow-up SLA with no later logged contact activity.", activities("Meeting").filter((row) => data.intelligence.meetingsWithoutFollowUp.ids.includes(row.id)), data.meta.hubspotUrls.meetings),
+    },
+    {
+      label: "High engagement, no meeting",
+      value: formatNumber(data.intelligence.highEngagementAccountsWithoutMeeting.count),
+      helper: "Account score 60+",
+      icon: Gauge,
+      tone: "teal",
+      onClick: () => showCompanies(`${owner.name} · High engagement, no meeting`, "Accounts with an explicit engagement score of 60 or above and no associated meeting.", data.companies.filter((row) => data.intelligence.highEngagementAccountsWithoutMeeting.ids.includes(row.id))),
+    },
+    {
+      label: "Connected, no meeting",
+      value: formatNumber(data.intelligence.contactsWithConnectedCallsWithoutMeeting.count),
+      helper: "Contacts ready for a next step",
+      icon: Phone,
+      tone: "green",
+      onClick: () => showContacts(`${owner.name} · Connected, no meeting`, "Contacts with a connected call and no associated deduplicated meeting.", data.priorityContacts.filter((row) => data.intelligence.contactsWithConnectedCallsWithoutMeeting.ids.includes(row.id))),
+    },
+    {
+      label: "Response SLA met",
+      value: data.intelligence.leadResponseSla.rate + "%",
+      helper: `${data.intelligence.leadResponseSla.met} of ${data.intelligence.leadResponseSla.eligible} within 24h`,
+      icon: ShieldCheck,
+      tone: "blue",
+      onClick: () => showContacts(`${owner.name} · SLA not met`, "Reporting-period contacts missing first-response timing or above the 24-hour SLA.", data.priorityContacts.filter((row) => data.intelligence.leadResponseSla.overdueIds.includes(row.id))),
+    },
+    {
+      label: "Missing contact info",
+      value: formatNumber(data.intelligence.missingContactInfo.missingAny.count),
+      helper: `${data.intelligence.missingContactInfo.missingPhone.count} phone · ${data.intelligence.missingContactInfo.missingEmail.count} email`,
+      icon: ShieldCheck,
+      tone: "purple",
+      onClick: () => showContacts(`${owner.name} · Missing info`, "Contacts missing phone, email, or LinkedIn information.", data.priorityContacts.filter((row) => data.intelligence.missingContactInfo.missingAny.ids.includes(row.id))),
+    },
+    {
+      label: "Meeting → deal",
+      value: data.intelligence.meetingToDealConversion.rate + "%",
+      helper: `${data.intelligence.meetingToDealConversion.numerator} deals / ${data.intelligence.meetingToDealConversion.denominator} meetings`,
+      icon: ArrowUpRight,
+      tone: "green",
+      onClick: () => showDeals(`${owner.name} · Meeting to deal`, "Deals created in the selected reporting period.", data.deals),
     },
   ] : [];
 
