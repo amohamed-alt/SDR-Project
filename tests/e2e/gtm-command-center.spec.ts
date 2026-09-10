@@ -65,6 +65,11 @@ test("switching owners mounts one clean workspace and clears stale tab state", a
   await expect(page).not.toHaveURL(/tab=/);
   await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
   await expect(page.locator("main.app-shell")).toHaveCount(1);
+
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.locator(".sidebar").getByRole("button", { name: "SDR Comparison", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "SDR performance", exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
 });
 
 test("comparison remains inside the shared dashboard shell", async ({ page }) => {
