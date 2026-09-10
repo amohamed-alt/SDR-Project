@@ -459,8 +459,17 @@ export function AcquisitionDashboard({ initialOwner, initialSearch }: { initialO
   useLayoutEffect(() => {
     const resetScroll = () => window.scrollTo({ top: 0, left: 0, behavior: "auto" });
     resetScroll();
-    const frame = window.requestAnimationFrame(resetScroll);
-    return () => window.cancelAnimationFrame(frame);
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      resetScroll();
+      secondFrame = window.requestAnimationFrame(resetScroll);
+    });
+    const settledLayoutTimer = window.setTimeout(resetScroll, 100);
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+      window.clearTimeout(settledLayoutTimer);
+    };
   }, [activeOwner]);
 
   useEffect(() => {
@@ -475,6 +484,7 @@ export function AcquisitionDashboard({ initialOwner, initialSearch }: { initialO
   }, []);
 
   function selectOwner(owner: AcquisitionOwnerKey) {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     const url = new URL(window.location.href);
     if (owner === "marita") url.searchParams.delete("acq");
     else url.searchParams.set("acq", owner);
