@@ -1,34 +1,43 @@
 "use client";
 
-import type { SdrDashboardProps } from "@/lib/sdr-owners";
+import { SDR_OWNERS, type SdrDashboardProps } from "@/lib/sdr-owners";
 
 import dynamic from "next/dynamic";
+import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity,
+  BadgeCheck,
   BrainCircuit,
   BriefcaseBusiness,
   Building2,
   ChevronDown,
   ChevronUp,
   ListTodo,
+  LockKeyhole,
   LoaderCircle,
   PhoneCall,
+  PhoneIncoming,
   Radar,
   Target,
   UserPlus,
   Wrench,
   X,
 } from "lucide-react";
-import { Dashboard as ExistingDashboard } from "@/components/DashboardMotion";
+import { Dashboard as ExistingDashboard } from "./Dashboard";
 import styles from "@/components/DashboardShell.module.css";
 
-type ShellView = "core" | "maqsam" | "marita-priority" | "team-activity" | "net-new" | "gtm-brain" | "sales-handoff";
+type ShellView = "core" | "motion" | "maqsam" | "marita-priority" | "team-activity" | "net-new" | "gtm-brain" | "sales-handoff";
 
 function ViewLoading() {
   return <main className={styles.viewLoading}><LoaderCircle size={24}/><strong>Loading workspace…</strong></main>;
 }
+
+const MotionDashboard = dynamic(
+  () => import("@/components/DashboardMotion").then((module) => module.MotionDashboard),
+  { ssr: false, loading: ViewLoading },
+);
 
 const MaqsamCallsDashboard = dynamic(
   () => import("@/components/MaqsamCallsDashboard").then((module) => module.MaqsamCallsDashboard),
@@ -57,6 +66,7 @@ const SalesHandoffDashboard = dynamic(
 
 function viewFromSearch(search: string): ShellView {
   const view = new URLSearchParams(search).get("view");
+  if (view === "motion") return "motion";
   if (view === "maqsam") return "maqsam";
   if (view === "marita-priority") return "marita-priority";
   if (view === "team-activity") return "team-activity";
@@ -72,7 +82,12 @@ function trackFeature(feature: string) {
   }));
 }
 
-export function Dashboard({ sdr = "marita", active = true, initialSearch = "" }: SdrDashboardProps & { initialSearch?: string }) {
+export function Dashboard({
+  sdr = "marita",
+  active = true,
+  initialSearch = "",
+  workspaceNavigation,
+}: SdrDashboardProps & { initialSearch?: string; workspaceNavigation?: ReactNode }) {
   const [view, setView] = useState<ShellView>(() => viewFromSearch(initialSearch));
   const [toolsOpen, setToolsOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -106,7 +121,7 @@ export function Dashboard({ sdr = "marita", active = true, initialSearch = "" }:
 
   useEffect(() => {
     if (!adminChecked || adminUnlocked) return;
-    const adminViews: ShellView[] = ["marita-priority", "team-activity"];
+    const adminViews: ShellView[] = ["marita-priority"];
     if (!adminViews.includes(view)) return;
     const url = new URL(window.location.href);
     url.searchParams.delete("view");
@@ -119,7 +134,9 @@ export function Dashboard({ sdr = "marita", active = true, initialSearch = "" }:
   useEffect(() => {
     if (!toolsOpen) return;
     const closeOnOutside = (event: PointerEvent) => {
-      if (toolsRef.current && !toolsRef.current.contains(event.target as Node)) setToolsOpen(false);
+      const target = event.target;
+      if (target instanceof Element && target.closest('[aria-controls="sdr-tools-menu"]')) return;
+      if (toolsRef.current && !toolsRef.current.contains(target as Node)) setToolsOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setToolsOpen(false);
@@ -161,11 +178,11 @@ export function Dashboard({ sdr = "marita", active = true, initialSearch = "" }:
     if (advancedOpen) { setAdvancedOpen(false); return; }
     if (adminUnlocked) { setAdvancedOpen(true); setAdminPrompt(false); return; }
     setAdminPrompt(true);
-    setAdvancedOpen(false);
+    setAdvancedOpen(true);
   }
 
   function changeView(next: ShellView) {
-    const adminViews: ShellView[] = ["marita-priority", "team-activity"];
+    const adminViews: ShellView[] = ["marita-priority"];
     if (adminViews.includes(next) && !adminUnlocked) {
       setView("core");
       setToolsOpen(true);
@@ -181,18 +198,17 @@ export function Dashboard({ sdr = "marita", active = true, initialSearch = "" }:
     trackFeature(next === "core" ? "dashboard" : next);
   }
 
-  if (view === "maqsam") return <MaqsamCallsDashboard onBack={() => changeView("core")}/>;
-  if (view === "marita-priority") return <MaritaPriorityQueue onBack={() => changeView("core")}/>;
-  if (view === "team-activity") return <TeamActivity onBack={() => changeView("core")}/>;
-  if (view === "net-new") return <ProspectingCoverage onBack={() => changeView("core")}/>;
-  if (view === "gtm-brain") return <TalenteraIntelligenceWorkspace onBack={() => changeView("core")}/>;
-  if (view === "sales-handoff") return <SalesHandoffDashboard onBack={() => changeView("core")}/>;
+  const owner = SDR_OWNERS[sdr];
+  const toolsCount = sdr === "marita" ? 10 : 9;
+  const adminToolLabels = [
+    ["Sales Nav Source", "Chrome companion · net-new people"],
+    ["Sales Nav Full Run", "Live capture pipeline · resumable full search"],
+    ["SignalHire Source", "List → HubSpot precheck → controlled enrich"],
+    ["Call Queue Ops", "Marita Extensive-Lighter scheduling"],
+    ["Company Repair", "Evidence-backed HubSpot property fixes"],
+  ] as const;
 
-  return <div className={styles.shell}>
-    <ExistingDashboard sdr={sdr} active={active} initialSearch={initialSearch} onToggleTools={() => setToolsOpen((current) => !current)} toolsOpen={toolsOpen} toolsCount={sdr === "marita" ? 4 : 3}/>
-
-    {toolsOpen ? <div className={styles.toolsDock} ref={toolsRef}>
-      {toolsOpen ? (
+  const toolsMenu = toolsOpen ? <div className={styles.toolsDock} ref={toolsRef}>
         <div className={styles.toolsMenu} id="sdr-tools-menu">
           <div className={styles.toolsHeader}>
             <div><span>SDR WORKSPACE</span><strong>Daily workflow</strong></div>
@@ -217,16 +233,20 @@ export function Dashboard({ sdr = "marita", active = true, initialSearch = "" }:
               <span className={`${styles.toolIcon} ${styles.callsIcon}`}><PhoneCall size={17}/></span>
               <span className={styles.toolCopy}><strong>Calls</strong><small>Maqsam call intelligence · transcripts · sync</small></span>
             </button>
+            <button className={styles.toolItem} type="button" onClick={() => changeView("team-activity")}>
+              <span className={`${styles.toolIcon} ${styles.gtmIcon}`}><Activity size={17}/></span>
+              <span className={styles.toolCopy}><strong>Team Activity</strong><small>Usage · adoption · workspace health</small></span>
+            </button>
 
             <button className={styles.advancedToggle} type="button" onClick={toggleAdvanced} aria-expanded={advancedOpen}>
-              <span><Wrench size={14}/><strong>Advanced & Data Ops</strong><small>{adminUnlocked ? "Admin unlocked · sources and controlled ops" : "Password protected admin tools"}</small></span>
+              <span><Wrench size={14}/><strong>Admin Tools · 5</strong><small>{adminUnlocked ? "Admin unlocked · sources and controlled ops" : "Password protected · expand to preview"}</small></span>
               {advancedOpen ? <ChevronUp size={16}/> : <ChevronDown size={16}/>} 
             </button>
 
             {adminPrompt && !adminUnlocked ? <form className={styles.adminGate} onSubmit={(event) => void unlockAdmin(event)}>
               <strong>Admin password</strong>
               <small>Enter it once to unlock administrative SDR tools. No Owner key is needed.</small>
-              <input autoFocus type="password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} placeholder="Admin password" autoComplete="current-password"/>
+              <input autoFocus type="password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} placeholder="Admin password" autoComplete="one-time-code"/>
               {adminError ? <span className={styles.adminError}>{adminError}</span> : null}
               <button type="submit" disabled={adminBusy || !adminPassword.trim()}>{adminBusy ? "Unlocking…" : "Unlock admin tools"}</button>
             </form> : null}
@@ -252,15 +272,63 @@ export function Dashboard({ sdr = "marita", active = true, initialSearch = "" }:
                 <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Building2 size={17}/></span>
                 <span className={styles.toolCopy}><strong>Company Repair</strong><small>Evidence-backed HubSpot property fixes</small></span>
               </Link>
-              <button className={styles.toolItem} type="button" onClick={() => changeView("team-activity")}>
-                <span className={`${styles.toolIcon} ${styles.gtmIcon}`}><Activity size={17}/></span>
-                <span className={styles.toolCopy}><strong>Team Activity</strong><small>Usage · adoption · workspace health</small></span>
-              </button>
+            </div> : null}
+
+            {advancedOpen && !adminUnlocked ? <div className={styles.advancedList}>
+              {adminToolLabels.map(([label, description]) => <button className={`${styles.toolItem} ${styles.lockedTool}`} type="button" key={label} onClick={() => setAdminPrompt(true)}>
+                <span className={`${styles.toolIcon} ${styles.salesIcon}`}><LockKeyhole size={16}/></span>
+                <span className={styles.toolCopy}><strong>{label}</strong><small>{description}</small></span>
+              </button>)}
             </div> : null}
           </div>
         </div>
-      ) : null}
+    </div> : null;
 
-    </div> : null}
+  if (view === "core") return <div className={styles.shell}>
+    <ExistingDashboard
+      sdr={sdr}
+      active={active}
+      initialSearch={initialSearch}
+      workspaceNavigation={workspaceNavigation}
+      onOpenMotion={() => changeView("motion")}
+      onToggleTools={() => setToolsOpen((current) => !current)}
+      toolsOpen={toolsOpen}
+      toolsCount={toolsCount}
+    />
+    {toolsMenu}
+  </div>;
+
+  let toolContent: ReactNode;
+  switch (view) {
+    case "motion": toolContent = <MotionDashboard sdr={sdr} onBack={() => changeView("core")}/>; break;
+    case "maqsam": toolContent = <MaqsamCallsDashboard onBack={() => changeView("core")}/>; break;
+    case "marita-priority": toolContent = <MaritaPriorityQueue onBack={() => changeView("core")}/>; break;
+    case "team-activity": toolContent = <TeamActivity onBack={() => changeView("core")}/>; break;
+    case "net-new": toolContent = <ProspectingCoverage onBack={() => changeView("core")}/>; break;
+    case "gtm-brain": toolContent = <TalenteraIntelligenceWorkspace onBack={() => changeView("core")}/>; break;
+    case "sales-handoff": toolContent = <SalesHandoffDashboard onBack={() => changeView("core")}/>; break;
+  }
+
+  return <div className={styles.shell}>
+    <div className={styles.toolFrame}>
+      <div className="workspace">
+        <aside className="sidebar">
+          <div className="brand">
+            {sdr === "daniel" ? <><span className="evalufy-brand-mark"><Image src="/evalufy-logo.png" alt="Evalufy" width={1200} height={628} className="evalufy-logo" priority/></span><span className="brand-subtitle">SDR Intelligence</span></> : <><div className="brand-logo" role="img" aria-label="Talentera ATS"/><span className="brand-subtitle">SDR Intelligence</span></>}
+          </div>
+          <div className="nav-label">MAIN</div>
+          <nav><button type="button" onClick={() => changeView("core")}><BadgeCheck size={18}/><span>Analytics Dashboard</span></button></nav>
+          <div className="nav-label">ANALYSIS</div>
+          <nav><button className={view === "motion" ? "active" : ""} type="button" onClick={() => changeView("motion")}><Activity size={18}/><span>Inbound vs Outbound</span></button></nav>
+          <div className="nav-label">WORKSPACE</div>
+          <nav><button type="button" onClick={() => setToolsOpen((current) => !current)} aria-expanded={toolsOpen} aria-controls="sdr-tools-menu"><PhoneIncoming size={18}/><span>SDR Tools</span><small className="sdr-tools-count">{toolsCount}</small></button></nav>
+          {workspaceNavigation}
+          <div className="nav-label owner-label">SDR OWNER</div>
+          <div className="owner-card"><div className="avatar">{owner.initials}</div><div><span>Reporting for</span><strong>{owner.name}</strong></div><BadgeCheck size={17}/></div>
+        </aside>
+        <div className={`content ${styles.toolContent}`}>{toolContent}</div>
+      </div>
+    </div>
+    {toolsMenu}
   </div>;
 }

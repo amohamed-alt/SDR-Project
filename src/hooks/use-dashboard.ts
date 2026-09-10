@@ -6,6 +6,7 @@ import type { DashboardData, DashboardFilters } from "@/lib/types";
 type Result = { data: DashboardData; refreshing: boolean; etag?: string };
 const cache = new Map<string, Result>();
 const pending = new Map<string, Promise<Result>>();
+const MAX_REFRESH_WAIT_MS = 90_000;
 
 export function dashboardQuery(filters: DashboardFilters) {
   const query = new URLSearchParams();
@@ -64,6 +65,7 @@ export function useDashboard(filters: DashboardFilters, refreshKey: number, acti
     let alive = true;
     let timer: ReturnType<typeof setTimeout>;
     let running = false;
+    let refreshStartedAt = 0;
     async function update(force = false) {
       if (running || !alive) return;
       clearTimeout(timer);
@@ -73,8 +75,18 @@ export function useDashboard(filters: DashboardFilters, refreshKey: number, acti
       let delay = 30_000;
       try {
         const result = await readDashboard(key, force);
-        if (alive) setState({ key, result, error: "", requesting: false });
-        if (result.refreshing) delay = 3_000;
+        if (result.refreshing && !refreshStartedAt) refreshStartedAt = Date.now();
+        const timedOut = result.refreshing && Date.now() - refreshStartedAt >= MAX_REFRESH_WAIT_MS;
+        const visibleResult = timedOut ? { ...result, refreshing: false } : result;
+        if (timedOut) cache.set(key, visibleResult);
+        if (alive) setState({
+          key,
+          result: visibleResult,
+          error: timedOut ? "The live refresh is taking longer than expected. The last complete snapshot remains visible; you can retry." : "",
+          requesting: false,
+        });
+        if (result.refreshing && !timedOut) delay = 3_000;
+        if (!result.refreshing) refreshStartedAt = 0;
       } catch (error) {
         if (alive) setState(current => ({ ...current, requesting: false, error: error instanceof Error ? error.message : "Unable to refresh" }));
       } finally {

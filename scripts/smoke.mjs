@@ -83,8 +83,9 @@ try {
   if (!healthResponse.ok || !dashboardResponse.ok || !cacheHealthResponse.ok || !maqsamCallsResponse.ok || !calendarStatusResponse.ok || !abdullahCalendarStatusResponse.ok || !emptyCountryBatchResponse.ok || !usageResponse.ok || !pageResponse.ok || !maritaCallsPageResponse.ok) throw new Error("One or more smoke-test routes returned an error");
   const teamResponse = await fetch(`http://127.0.0.1:${port}/api/dashboard/team?from=2026-09-01&to=2026-09-08`);
   const team = await teamResponse.json();
-  if (!teamResponse.ok || team.results?.length !== 2) throw new Error("Team comparison failed");
-  if (team.results[0].data?.meta.ownerId !== "31644369" || team.results[1].data?.meta.ownerId !== "37624223") throw new Error("SDR owner isolation failed");
+  if (!teamResponse.ok || team.results?.length !== 4) throw new Error("Team comparison failed");
+  const expectedOwnerIds = ["31644369", "37624223", "76369997", "31558980"];
+  if (!expectedOwnerIds.every((ownerId, index) => team.results[index]?.data?.meta.ownerId === ownerId)) throw new Error("SDR owner isolation failed");
   if (team.results.some(entry => entry.data.priorityContacts || entry.data.recentActivities)) throw new Error("Team response leaks full detail payloads");
   const invalidRange = await fetch(`http://127.0.0.1:${port}/api/dashboard/team?from=2026-02-31&to=2026-09-08`);
   if (invalidRange.status !== 400) throw new Error("Team range validation failed");

@@ -4,6 +4,25 @@
   isolation: isolate;
 }
 
+.toolFrame {
+  min-height: 100vh;
+}
+
+.toolFrame :global(.workspace) {
+  min-height: 100vh;
+}
+
+.toolContent {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.toolContent > main,
+.toolContent > div {
+  min-height: calc(100vh - 68px);
+}
+
 .viewLoading {
   min-height: 100vh;
   display: flex;
@@ -234,6 +253,14 @@
   background: linear-gradient(100deg, #f3f7fa, #f7fafb);
   transform: translateX(2px);
   box-shadow: 0 5px 14px rgba(31, 62, 84, 0.04);
+}
+
+.lockedTool {
+  opacity: 0.68;
+}
+
+.lockedTool:hover {
+  transform: none;
 }
 
 .toolIcon {

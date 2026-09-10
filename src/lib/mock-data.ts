@@ -4,7 +4,12 @@ import { calculateGtmIntelligenceSignals } from "@/lib/gtm-intelligence-signals"
 const daily = [36, 59, 0, 0, 0, 31, 37, 46, 37, 0, 0, 33, 20, 34, 35, 17, 0, 0, 39];
 
 export function createMockDashboard(from: string, to: string, ownerId: string): DashboardData {
-  const ownerName = ownerId === "37624223" ? "Daniel Beaini" : "Marita Chedid";
+  const ownerName = ({
+    "31644369": "Marita Chedid",
+    "37624223": "Daniel Beaini",
+    "76369997": "Ursula Waked",
+    "31558980": "Zein Fares",
+  } as Record<string, string>)[ownerId] ?? "SDR Owner";
   const intelligence = calculateGtmIntelligenceSignals({ contacts: [], deals: [], meetings: [], activities: [], from, to });
   return {
     meta: {
