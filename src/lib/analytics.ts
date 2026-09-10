@@ -41,6 +41,7 @@ import type {
   LabelOption,
   QualityMetric,
 } from "@/lib/types";
+import { normalizeCountry } from "@/lib/country-normalization";
 import { calculateGtmIntelligenceSignals } from "@/lib/gtm-intelligence-signals";
 
 const OPEN_TASK_STATUSES = ["NOT_STARTED", "IN_PROGRESS", "WAITING", "DEFERRED"];
@@ -181,6 +182,12 @@ function uniqueOptions(records: HubSpotRecord[], key: string, labels: Record<str
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
+function uniqueCountryOptions(records: HubSpotRecord[]): LabelOption[] {
+  return [...new Set(records.map((record) => normalizeCountry(value(record, "country"))).filter(Boolean))]
+    .map((country) => ({ value: country, label: country }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
 function completeness(key: string, label: string, records: HubSpotRecord[], predicate?: (record: HubSpotRecord) => boolean): QualityMetric {
   const complete = records.filter((record) => (predicate ? predicate(record) : Boolean(value(record, key)))).length;
   return { key, label, complete, total: records.length, rate: records.length ? Math.round((complete / records.length) * 1000) / 10 : 0 };
@@ -303,7 +310,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   const taskPriorityLabels = propertyOptions(taskDefinitions, "hs_task_priority");
 
   const selectedContacts = allContacts.filter((contact) => {
-    if (filters.country && value(contact, "country") !== filters.country) return false;
+    if (filters.country && normalizeCountry(value(contact, "country")) !== normalizeCountry(filters.country)) return false;
     if (filters.originalSource && value(contact, "hs_analytics_source") !== filters.originalSource) return false;
     if (filters.latestSource && value(contact, "hs_latest_source") !== filters.latestSource) return false;
     if (filters.tier && value(contact, "gtm_icp_tier") !== filters.tier) return false;
@@ -553,7 +560,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       name: [value(contact, "firstname"), value(contact, "lastname")].filter(Boolean).join(" ") || "Unnamed contact",
       email: value(contact, "email"), phone: contactPhone(contact),
       linkedinUrl: value(contact, "gtm_linkedin_url"),
-      title: value(contact, "jobtitle"), company: value(contact, "company"), country: value(contact, "country"),
+      title: value(contact, "jobtitle"), company: value(contact, "company"), country: normalizeCountry(value(contact, "country")),
       originalSource: displayValue(value(contact, "hs_analytics_source"), originalSourceLabels),
       originalSourceDetail: value(contact, "hs_analytics_source_data_1") || "—",
       latestSource: displayValue(value(contact, "hs_latest_source"), latestSourceLabels),
@@ -593,7 +600,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
 
   const companyRows: CompanyRow[] = companiesRaw.map((company) => ({
     id: company.id, name: value(company, "name") || "Unnamed company", domain: value(company, "domain"),
-    country: value(company, "gtm_country") || value(company, "country"), industry: value(company, "gtm_industry") || value(company, "industry"),
+    country: normalizeCountry(value(company, "gtm_country") || value(company, "country")), industry: value(company, "gtm_industry") || value(company, "industry"),
     employees: value(company, "gtm_employee_count") || value(company, "numberofemployees"), tier: value(company, "company_tier"),
     ats: value(company, "detected_ats") || value(company, "ats_status"), atsCategory: value(company, "ats_category"),
     atsConfidence: value(company, "ats_confidence"), associatedContacts: companyContactCounts.get(company.id) ?? 0,
@@ -757,7 +764,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       { name: "Sent", value: outgoingEmails.length }, { name: "Opened", value: outgoingEmails.filter((email) => number(value(email, "hs_email_open_count")) > 0).length },
       { name: "Clicked", value: outgoingEmails.filter((email) => number(value(email, "hs_email_click_count")) > 0).length }, { name: "Replied", value: emailReplies },
     ],
-    countries: countBy(companiesRaw, (record) => value(record, "gtm_country") || value(record, "country")),
+    countries: countBy(companiesRaw, (record) => normalizeCountry(value(record, "gtm_country") || value(record, "country"))),
     industries: countBy(companiesRaw, (record) => value(record, "gtm_industry") || value(record, "industry")).slice(0, 15),
     atsPlatforms: countBy(companiesRaw, (record) => value(record, "detected_ats") || value(record, "ats_status")).slice(0, 15),
     dealStages: dealRows.reduce<ChartDatum[]>((acc, deal) => {
@@ -767,7 +774,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     }, []).sort((a, b) => b.value - a.value),
     quality, intelligence, alerts, priorityContacts, recentActivities, companies: companyRows, deals: dealRows,
     filterOptions: {
-      countries: uniqueOptions(allContacts, "country"), originalSources: uniqueOptions(allContacts, "hs_analytics_source", originalSourceLabels),
+      countries: uniqueCountryOptions(allContacts), originalSources: uniqueOptions(allContacts, "hs_analytics_source", originalSourceLabels),
       latestSources: uniqueOptions(allContacts, "hs_latest_source", latestSourceLabels), tiers: uniqueOptions(allContacts, "gtm_icp_tier", tierLabels),
       personas: uniqueOptions(allContacts, "gtm_persona", personaLabels), owners,
     },

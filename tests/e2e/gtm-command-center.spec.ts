@@ -42,3 +42,34 @@ test("KPI drilldown exposes the operational table surface", async ({ page }) => 
   await expect(drawer.getByRole("columnheader", { name: /Company/i })).toBeVisible();
   await expect(drawer.getByRole("button", { name: "CSV" })).toBeVisible();
 });
+
+test("Daniel deep links render the Evalufy workspace on the server", async ({ page }) => {
+  const response = await page.request.get("/?acq=daniel");
+  expect(response.ok()).toBeTruthy();
+  const html = await response.text();
+  expect(html).toContain("Evalufy");
+  expect(html).not.toContain('aria-label="Talentera ATS"');
+
+  await page.goto("/?acq=daniel");
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  await expect(page.locator(".sidebar").getByRole("button", { name: /Inbound vs Outbound/i })).toBeVisible();
+  await expect(page.locator(".sidebar").getByRole("button", { name: /SDR Tools/i })).toBeVisible();
+});
+
+test("switching owners mounts one clean workspace and clears stale tab state", async ({ page }) => {
+  await page.goto("/?from=2026-09-01&to=2026-09-09&tab=pipeline");
+  await expect(page.getByRole("heading", { name: "Pipeline", exact: true })).toBeVisible();
+
+  await page.locator(".sidebar").getByRole("button", { name: /Daniel/i }).click();
+  await expect(page).toHaveURL(/acq=daniel/);
+  await expect(page).not.toHaveURL(/tab=/);
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  await expect(page.locator("main.app-shell")).toHaveCount(1);
+});
+
+test("comparison remains inside the shared dashboard shell", async ({ page }) => {
+  await page.goto("/?acq=comparison");
+  await expect(page.locator(".sidebar")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "SDR performance", exact: true })).toBeVisible();
+  await expect(page.locator("main.app-shell")).toHaveCount(1);
+});

@@ -56,8 +56,8 @@ async function readDashboard(key: string, force: boolean): Promise<Result> {
 
 export function useDashboard(filters: DashboardFilters, refreshKey: number, active = true) {
   const key = dashboardQuery(filters);
-  const [state, setState] = useState<{ key: string; result?: Result; error: string; loading: boolean }>(() => ({
-    key, result: cache.get(key), error: "", loading: !cache.has(key),
+  const [state, setState] = useState<{ key: string; result?: Result; error: string; requesting: boolean }>(() => ({
+    key, result: cache.get(key), error: "", requesting: !cache.has(key),
   }));
   useEffect(() => {
     if (!active) return;
@@ -69,14 +69,14 @@ export function useDashboard(filters: DashboardFilters, refreshKey: number, acti
       clearTimeout(timer);
       if (document.hidden) { timer = setTimeout(() => void update(), 30_000); return; }
       running = true;
-      setState(current => ({ key, result: current.key === key ? current.result : cache.get(key), error: "", loading: true }));
+      setState(current => ({ key, result: current.key === key ? current.result : cache.get(key), error: "", requesting: true }));
       let delay = 30_000;
       try {
         const result = await readDashboard(key, force);
-        if (alive) setState({ key, result, error: "", loading: false });
+        if (alive) setState({ key, result, error: "", requesting: false });
         if (result.refreshing) delay = 3_000;
       } catch (error) {
-        if (alive) setState(current => ({ ...current, loading: false, error: error instanceof Error ? error.message : "Unable to refresh" }));
+        if (alive) setState(current => ({ ...current, requesting: false, error: error instanceof Error ? error.message : "Unable to refresh" }));
       } finally {
         running = false;
         if (alive) timer = setTimeout(() => void update(), delay);
@@ -88,5 +88,12 @@ export function useDashboard(filters: DashboardFilters, refreshKey: number, acti
     return () => { alive = false; clearTimeout(timer); document.removeEventListener("visibilitychange", onVisible); };
   }, [key, refreshKey, active]);
   const result = state.key === key ? state.result : cache.get(key);
-  return { data: result?.data ?? null, error: state.key === key ? state.error : "", loading: state.key === key ? state.loading : !result, refreshing: result?.refreshing ?? false };
+  const requesting = state.key === key ? state.requesting : false;
+  return {
+    data: result?.data ?? null,
+    error: state.key === key ? state.error : "",
+    loading: !result && (requesting || state.key !== key),
+    requesting,
+    refreshing: result?.refreshing ?? false,
+  };
 }
