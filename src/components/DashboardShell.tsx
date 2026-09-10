@@ -237,6 +237,10 @@ export function Dashboard({ sdr = "marita", active = true }: SdrDashboardProps) 
                 <span className={`${styles.toolIcon} ${styles.salesIcon}`}><Radar size={17}/></span>
                 <span className={styles.toolCopy}><strong>Sales Nav Source</strong><small>Chrome companion · net-new people</small></span>
               </Link>
+              <Link className={styles.toolItem} href="/salesnav-full-run" onClick={() => trackFeature("sales-nav-full-run")}>
+                <span className={`${styles.toolIcon} ${styles.salesIcon}`}><Radar size={17}/></span>
+                <span className={styles.toolCopy}><strong>Sales Nav Full Run</strong><small>Live capture pipeline · resumable full search</small></span>
+              </Link>
               <Link className={styles.toolItem} href="/signalhire-queue" onClick={() => trackFeature("signalhire-queue")}>
                 <span className={`${styles.toolIcon} ${styles.salesIcon}`}><UserPlus size={17}/></span>
                 <span className={styles.toolCopy}><strong>SignalHire Source</strong><small>List → HubSpot precheck → controlled enrich</small></span>
