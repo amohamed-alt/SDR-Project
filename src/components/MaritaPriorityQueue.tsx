@@ -185,10 +185,17 @@ export function MaritaPriorityQueue({ onBack }: { onBack: () => void }) {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.details || payload.error || "Unable to transfer selected tasks");
-      const skippedCompanyCount = Array.isArray(payload.skippedCompanies) ? payload.skippedCompanies.length : 0;
+      const skippedCompanyList = Array.isArray(payload.skippedCompanies) ? payload.skippedCompanies : [];
+      const skippedCompanyCount = skippedCompanyList.length;
+      const reasonCounts = new Map<string, number>();
+      for (const item of skippedCompanyList) {
+        for (const reason of item.reasons ?? []) reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1);
+      }
+      const topReasons = [...reasonCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4)
+        .map(([reason, count]) => `${reason} ×${count}`).join(", ");
       setMessage(
         `Transferred ${payload.transferred} task(s) to Daniel across ${payload.companiesConsidered - skippedCompanyCount} company(ies). `
-        + (skippedCompanyCount ? `${skippedCompanyCount} company(ies) skipped entirely (failed the eligibility re-check).` : ""),
+        + (skippedCompanyCount ? `${skippedCompanyCount} company(ies) skipped${topReasons ? ` — ${topReasons}` : ""}.` : ""),
       );
       setSelected(new Set());
       await load(true);
