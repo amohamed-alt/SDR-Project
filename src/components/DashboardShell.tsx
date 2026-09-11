@@ -22,6 +22,7 @@ import {
   Radar,
   Target,
   UserPlus,
+  FileUp,
   Wrench,
   X,
 } from "lucide-react";
@@ -200,11 +201,12 @@ export function Dashboard({
   }
 
   const owner = SDR_OWNERS[sdr];
-  const toolsCount = sdr === "marita" ? 10 : 9;
+  const toolsCount = sdr === "marita" ? 11 : 10;
   const adminToolLabels = [
     ["Sales Nav Source", "Chrome companion · net-new people"],
     ["Sales Nav Full Run", "Live capture pipeline · resumable full search"],
     ["SignalHire Source", "List → HubSpot precheck → controlled enrich"],
+    ["SignalHire CSV Queue", "CSV upload · dry-run · HubSpot push"],
     ["Call Queue Ops", "Marita Extensive-Lighter scheduling"],
     ["Company Repair", "Evidence-backed HubSpot property fixes"],
   ] as const;
@@ -224,7 +226,7 @@ export function Dashboard({
             </button>
             {sdr === "marita" ? <button className={styles.toolItem} type="button" onClick={() => changeView("sales-handoff")}>
               <span className={`${styles.toolIcon} ${styles.gtmIcon}`}><BriefcaseBusiness size={17}/></span>
-              <span className={styles.toolCopy}><strong>Sales Handoff</strong><small>Marita → Orsla 1 · follow-up · deals · pipeline risk</small></span>
+              <span className={styles.toolCopy}><strong>Sales Handoff</strong><small>Marita → Ursula · follow-up · deals · pipeline risk</small></span>
             </button> : null}
             <button className={styles.toolItem} type="button" onClick={() => changeView("net-new")}>
               <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Target size={17}/></span>
@@ -240,7 +242,7 @@ export function Dashboard({
             </button>
 
             <button className={styles.advancedToggle} type="button" onClick={toggleAdvanced} aria-expanded={advancedOpen}>
-              <span><Wrench size={14}/><strong>Admin Tools · 5</strong><small>{adminUnlocked ? "Admin unlocked · sources and controlled ops" : "Password protected · expand to preview"}</small></span>
+              <span><Wrench size={14}/><strong>Admin Tools · 6</strong><small>{adminUnlocked ? "Admin unlocked · sources and controlled ops" : "Password protected · expand to preview"}</small></span>
               {advancedOpen ? <ChevronUp size={16}/> : <ChevronDown size={16}/>} 
             </button>
 
@@ -264,6 +266,10 @@ export function Dashboard({
               <Link className={styles.toolItem} href="/signalhire-queue" onClick={() => trackFeature("signalhire-queue")}>
                 <span className={`${styles.toolIcon} ${styles.salesIcon}`}><UserPlus size={17}/></span>
                 <span className={styles.toolCopy}><strong>SignalHire Source</strong><small>List → HubSpot precheck → controlled enrich</small></span>
+              </Link>
+              <Link className={styles.toolItem} href="/signalhire-companion" onClick={() => trackFeature("signalhire-csv")}>
+                <span className={`${styles.toolIcon} ${styles.salesIcon}`}><FileUp size={17}/></span>
+                <span className={styles.toolCopy}><strong>SignalHire CSV Queue</strong><small>CSV upload · dry-run · HubSpot push</small></span>
               </Link>
               <button className={styles.toolItem} type="button" onClick={() => changeView("marita-priority")}>
                 <span className={`${styles.toolIcon} ${styles.priorityIcon}`}><ListTodo size={17}/></span>

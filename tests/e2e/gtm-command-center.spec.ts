@@ -83,9 +83,9 @@ test("Team Activity is discoverable and locked admin tools remain visible", asyn
   await page.locator(".sidebar").getByRole("button", { name: /SDR Tools/i }).click();
   await expect(page.getByRole("button", { name: /Team Activity/i })).toBeVisible();
 
-  await page.getByRole("button", { name: /Admin Tools · 5/i }).click();
+  await page.getByRole("button", { name: /Admin Tools · 6/i }).click();
   await expect(page.getByText("Admin password", { exact: true })).toBeVisible();
-  for (const label of ["Sales Nav Source", "Sales Nav Full Run", "SignalHire Source", "Call Queue Ops", "Company Repair"]) {
+  for (const label of ["Sales Nav Source", "Sales Nav Full Run", "SignalHire Source", "SignalHire CSV Queue", "Call Queue Ops", "Company Repair"]) {
     await expect(page.getByRole("button", { name: new RegExp(label) })).toBeVisible();
   }
 });
