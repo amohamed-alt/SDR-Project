@@ -10,7 +10,7 @@ import type { MaritaPriorityCompany, MaritaPriorityPayload, MaritaPriorityTier }
 
 const today = new Date().toISOString().slice(0, 10);
 type PriorityFilter = "all" | MaritaPriorityTier;
-type QuickView = "best" | "all" | "noats" | "never" | "noanswer" | "tiera" | "ksa" | "uae" | "needsphone";
+type QuickView = "best" | "all" | "noats" | "never" | "noanswer" | "tiera" | "ksa" | "uae" | "needsphone" | "danieleligible";
 
 function formatDate(value: string) {
   if (!value) return "No due date";
@@ -46,6 +46,7 @@ function quickViewMatches(company: MaritaPriorityCompany, view: QuickView) {
   if (view === "tiera") return company.companyTier === "A";
   if (view === "ksa") return countryMatches(company.country, "ksa");
   if (view === "uae") return countryMatches(company.country, "uae");
+  if (view === "danieleligible") return !company.noAts && company.neverAttempted;
   return company.callableTaskCount === 0;
 }
 
@@ -53,6 +54,7 @@ export function MaritaPriorityQueue({ onBack }: { onBack: () => void }) {
   const [data, setData] = useState<MaritaPriorityPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [transferring, setTransferring] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
@@ -166,6 +168,33 @@ export function MaritaPriorityQueue({ onBack }: { onBack: () => void }) {
     }
   }
 
+  async function transferToDaniel() {
+    if (!selectedTaskIds.length) return;
+    const confirmed = window.confirm(
+      `Transfer ${selectedTaskIds.length} task(s) across ${selectedCompanies.length} companies to Daniel, due ${dueDate} at ${dueTime} Riyadh time? Only companies that still have a detected ATS, no prior contact activity, no CSM, and no open deal will actually move — everything else is skipped.`,
+    );
+    if (!confirmed) return;
+    setTransferring(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/marita-priority/transfer-to-daniel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskIds: selectedTaskIds, dueDate, dueTime }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.details || payload.error || "Unable to transfer selected tasks");
+      setMessage(`Transferred ${payload.transferred} task(s) to Daniel. ${payload.skipped ? `${payload.skipped} skipped by the eligibility re-check.` : ""}`);
+      setSelected(new Set());
+      await load(true);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to transfer selected tasks");
+    } finally {
+      setTransferring(false);
+    }
+  }
+
   const allVisibleSelected = selectableVisible.length > 0 && selectableVisible.every((company) => selected.has(company.companyId));
   const connectedPercent = data?.summary.portfolioCompanies
     ? Math.round((data.summary.connectedCompanies / data.summary.portfolioCompanies) * 100)
@@ -217,6 +246,7 @@ export function MaritaPriorityQueue({ onBack }: { onBack: () => void }) {
       <button type="button" data-active={quickView === "ksa"} onClick={() => switchView("ksa")}>🇸🇦 KSA</button>
       <button type="button" data-active={quickView === "uae"} onClick={() => switchView("uae")}>🇦🇪 UAE</button>
       <button type="button" data-active={quickView === "needsphone"} onClick={() => switchView("needsphone")}>⚠️ Needs phone</button>
+      <button type="button" data-active={quickView === "danieleligible"} onClick={() => switchView("danieleligible")}>🎯 Has ATS · never attempted</button>
       <button type="button" data-active={quickView === "all"} onClick={() => switchView("all")}>All eligible</button>
     </section>
 
@@ -234,9 +264,13 @@ export function MaritaPriorityQueue({ onBack }: { onBack: () => void }) {
       </button>
       <div className={styles.selectionCount}><strong>{selectedCompanies.length}</strong><span>companies</span><small>{selectedTaskIds.length} callable tasks</small></div>
       <label><span>New due date</span><input type="date" value={dueDate} min={today} onChange={(event) => setDueDate(event.target.value)}/></label>
+      <button type="button" className={styles.selectButton} onClick={() => setDueDate(today)} disabled={dueDate === today}>Today</button>
       <label><span>Time · Riyadh</span><input type="time" value={dueTime} onChange={(event) => setDueTime(event.target.value)}/></label>
       <button type="button" className={styles.moveButton} disabled={!selectedTaskIds.length || saving} onClick={() => void reschedule()}>
         <CalendarClock size={15}/>{saving ? "Safety checking…" : "Move selected tasks"}
+      </button>
+      <button type="button" className={styles.moveButton} disabled={!selectedTaskIds.length || transferring} onClick={() => void transferToDaniel()}>
+        <Target size={15}/>{transferring ? "Safety checking…" : "Transfer to Daniel"}
       </button>
     </section>
 
