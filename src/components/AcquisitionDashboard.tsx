@@ -3,6 +3,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence } from "motion/react";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -498,7 +499,9 @@ function RepKpiDashboard({
       </div>
     </div>
 
-    {drilldown ? <DrilldownDrawer drilldown={drilldown} onClose={() => setDrilldown(null)}/> : null}
+    <AnimatePresence>
+      {drilldown ? <DrilldownDrawer drilldown={drilldown} onClose={() => setDrilldown(null)}/> : null}
+    </AnimatePresence>
   </main>;
 }
 

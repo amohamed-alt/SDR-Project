@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { AnimatePresence } from "motion/react";
 import { SDR_OWNERS, type SdrDashboardProps } from "@/lib/sdr-owners";
 import { useDashboard } from "@/hooks/use-dashboard";
 
@@ -359,7 +360,9 @@ export function Dashboard({
         {loading && !data && <div className="loading-overlay"><div className="loader"/><strong>Building live SDR intelligence…</strong><span>Loading HubSpot labels, contacts, activities, companies, and deals</span></div>}
       </div>
     </div>
-    {drilldown && <DrilldownDrawer drilldown={drilldown} onClose={() => setDrilldown(null)}/>} 
+    <AnimatePresence>
+      {drilldown && <DrilldownDrawer drilldown={drilldown} onClose={() => setDrilldown(null)}/>}
+    </AnimatePresence>
   </main>;
 }
 

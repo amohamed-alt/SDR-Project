@@ -153,13 +153,9 @@
 .gtm-command-footer span { display: inline-flex; align-items: center; gap: 4px; }
 .gtm-command-footer kbd { padding: 3px 5px; }
 
-@media (prefers-reduced-motion: no-preference) {
-  .gtm-command-palette { animation: gtm-command-in 190ms cubic-bezier(.22,1,.36,1) both; }
-  @keyframes gtm-command-in {
-    from { opacity: 0; transform: translateY(-8px) scale(.985); }
-    to { opacity: 1; transform: translateY(0) scale(1); }
-  }
-}
+/* Enter/exit animation now handled by MotionConfig(reducedMotion="user") +
+   AnimatePresence in GtmCommandPalette.tsx, which already respects the OS
+   reduced-motion setting — no separate CSS animation needed here. */
 
 @media (max-width: 640px) {
   .gtm-command-trigger { right: 10px; bottom: calc(70px + env(safe-area-inset-bottom)); }
