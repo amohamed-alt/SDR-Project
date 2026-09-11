@@ -10,7 +10,6 @@ import {
   evaluateDanielCompany,
   evaluateDanielContact,
 } from "@/lib/daniel-evalufy";
-import type { HubSpotRecord } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,6 +39,12 @@ function token() {
   return value;
 }
 
+function isOpenMaritaCallTask(properties: Record<string, unknown>) {
+  return String(properties.hubspot_owner_id ?? "") === MARITA_OWNER_ID
+    && properties.hs_task_status !== "COMPLETED"
+    && properties.hs_task_type === "CALL";
+}
+
 async function batchUpdateTaskOwners(taskIds: string[], dueAt: string) {
   const HUBSPOT_API = "https://api.hubapi.com";
   for (const batch of chunks(taskIds, 100)) {
@@ -66,76 +71,97 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const taskIds = unique(parsed.data.taskIds);
+    const seedTaskIds = unique(parsed.data.taskIds);
     const dueAt = `${parsed.data.dueDate}T${parsed.data.dueTime}:00+03:00`;
 
-    // Re-validate against live HubSpot data — never trust the client's filtered
-    // list for a mutation this consequential. A task only transfers if it is
-    // still an open Marita call task AND its contact/company still pass the
-    // same eligibility rules used by the original Daniel transfer plan.
-    const tasks = await batchRead("tasks", taskIds, TASK_PROPS);
-    const openMaritaTasks = tasks.filter((task) =>
-      String(task.properties.hubspot_owner_id ?? "") === MARITA_OWNER_ID
-      && task.properties.hs_task_status !== "COMPLETED"
-      && task.properties.hs_task_type === "CALL",
-    );
-    const openTaskIds = openMaritaTasks.map((task) => String(task.id));
+    // Step 1 - resolve which COMPANIES the selection points at. The company,
+    // not the task, is the unit of transfer: if one of its tasks qualifies
+    // for Daniel, every other open Marita call task at that same company
+    // must move with it, or the company ends up split between two owners
+    // (exactly the mix-up this route used to allow).
+    const seedTasks = await batchRead("tasks", seedTaskIds, TASK_PROPS);
+    const seedOpenTaskIds = seedTasks.filter((task) => isOpenMaritaCallTask(task.properties)).map((task) => String(task.id));
 
-    const [taskContacts, taskCompanies] = await Promise.all([
-      readAssociations("tasks", "contacts", openTaskIds),
-      readAssociations("tasks", "companies", openTaskIds),
+    const [seedTaskContacts, seedTaskCompanies] = await Promise.all([
+      readAssociations("tasks", "contacts", seedOpenTaskIds),
+      readAssociations("tasks", "companies", seedOpenTaskIds),
     ]);
-    const contactIds = unique([...taskContacts.values()].flat());
-    const contactCompanies = await readAssociations("contacts", "companies", contactIds);
+    const seedContactIds = unique([...seedTaskContacts.values()].flat());
+    const seedContactCompanies = await readAssociations("contacts", "companies", seedContactIds);
 
     const companyIds = new Set<string>();
-    for (const taskId of openTaskIds) {
-      for (const id of taskCompanies.get(taskId) || []) companyIds.add(id);
-      for (const contactId of taskContacts.get(taskId) || []) {
-        for (const id of contactCompanies.get(contactId) || []) companyIds.add(id);
+    for (const taskId of seedOpenTaskIds) {
+      for (const id of seedTaskCompanies.get(taskId) || []) companyIds.add(id);
+      for (const contactId of seedTaskContacts.get(taskId) || []) {
+        for (const id of seedContactCompanies.get(contactId) || []) companyIds.add(id);
       }
     }
+    const targetCompanyIds = [...companyIds];
 
-    const [contacts, companies] = await Promise.all([
-      batchRead("contacts", contactIds, DANIEL_CONTACT_PROPERTIES),
-      batchRead("companies", [...companyIds], DANIEL_COMPANY_PROPERTIES),
+    // Step 2 - for every one of those companies, pull its FULL set of open
+    // tasks and contacts, not just whichever one the user happened to select.
+    const [companyContacts, companyTasks, companies] = await Promise.all([
+      readAssociations("companies", "contacts", targetCompanyIds),
+      readAssociations("companies", "tasks", targetCompanyIds),
+      batchRead("companies", targetCompanyIds, DANIEL_COMPANY_PROPERTIES),
     ]);
-    const contactById = new Map(contacts.map((contact) => [String(contact.id), contact]));
     const companyById = new Map(companies.map((company) => [String(company.id), company]));
 
-    const usedCompanies = new Set<string>();
+    const allTaskIds = unique([...companyTasks.values()].flat());
+    const allContactIds = unique([...companyContacts.values()].flat());
+    const [allTasks, allContacts] = await Promise.all([
+      batchRead("tasks", allTaskIds, TASK_PROPS),
+      batchRead("contacts", allContactIds, DANIEL_CONTACT_PROPERTIES),
+    ]);
+    const taskById = new Map(allTasks.map((task) => [String(task.id), task]));
+    const contactById = new Map(allContacts.map((contact) => [String(contact.id), contact]));
+    const openTaskIdsByCompany = new Map(
+      targetCompanyIds.map((companyId) => [
+        companyId,
+        (companyTasks.get(companyId) || []).filter((taskId) => {
+          const task = taskById.get(taskId);
+          return task && isOpenMaritaCallTask(task.properties);
+        }),
+      ]),
+    );
+    const taskContactAssoc = await readAssociations("tasks", "contacts", [...openTaskIdsByCompany.values()].flat());
+
+    // Step 3 - apply eligibility once per company (gate) and once per
+    // contact (which of that company's tasks actually move).
     const eligible: string[] = [];
-    const skipped: { taskId: string; reasons: string[] }[] = [];
+    const skippedCompanies: { companyId: string; companyName: string; reasons: string[] }[] = [];
+    const skippedTasks: { taskId: string; companyId: string; reasons: string[] }[] = [];
 
-    for (const taskId of openTaskIds) {
-      const reasons: string[] = [];
-      const contactCandidates = (taskContacts.get(taskId) || [])
-        .map((id) => contactById.get(id))
-        .filter((contact): contact is HubSpotRecord => Boolean(contact));
+    for (const companyId of targetCompanyIds) {
+      const company = companyById.get(companyId);
+      const companyName = String(company?.properties.name ?? companyId);
+      const companyTaskIds = openTaskIdsByCompany.get(companyId) || [];
+      if (!company) { skippedCompanies.push({ companyId, companyName, reasons: ["company_not_found"] }); continue; }
 
-      let matchedCompany: string | undefined;
-      for (const contact of contactCandidates) {
-        const contactCheck = evaluateDanielContact(contact.properties);
-        if (!contactCheck.eligible) { reasons.push(...contactCheck.reasons); continue; }
-
-        const associatedCompanyIds = unique([
-          ...(contactCompanies.get(String(contact.id)) || []),
-          ...(taskCompanies.get(taskId) || []),
-        ]);
-        const company = associatedCompanyIds
-          .map((id) => companyById.get(id))
-          .find((candidate): candidate is HubSpotRecord => {
-            if (!candidate || usedCompanies.has(String(candidate.id))) return false;
-            return evaluateDanielCompany(candidate.properties).eligible;
-          });
-        if (company) { matchedCompany = String(company.id); break; }
+      const companyCheck = evaluateDanielCompany(company.properties);
+      if (!companyCheck.eligible) {
+        skippedCompanies.push({ companyId, companyName, reasons: companyCheck.reasons });
+        continue;
       }
 
-      if (matchedCompany) {
-        usedCompanies.add(matchedCompany);
-        eligible.push(taskId);
-      } else {
-        skipped.push({ taskId, reasons: unique(reasons.length ? reasons : ["no_eligible_contact_company"]) });
+      let anyEligible = false;
+      for (const taskId of companyTaskIds) {
+        const contactIds = taskContactAssoc.get(taskId) || [];
+        const contactCheck = contactIds.length
+          ? contactIds.map((id) => contactById.get(id)).find((contact) => contact && evaluateDanielContact(contact.properties).eligible)
+          : undefined;
+        if (contactCheck) {
+          eligible.push(taskId);
+          anyEligible = true;
+        } else {
+          const reasons = contactIds.length
+            ? unique(contactIds.flatMap((id) => { const c = contactById.get(id); return c ? evaluateDanielContact(c.properties).reasons : ["contact_not_found"]; }))
+            : ["no_associated_contact"];
+          skippedTasks.push({ taskId, companyId, reasons });
+        }
+      }
+      if (!anyEligible && companyTaskIds.length) {
+        skippedCompanies.push({ companyId, companyName, reasons: ["no_eligible_contact_in_company"] });
       }
     }
 
@@ -143,10 +169,11 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      requested: taskIds.length,
+      requestedTasks: seedTaskIds.length,
+      companiesConsidered: targetCompanyIds.length,
       transferred: eligible.length,
-      skipped: skipped.length + (taskIds.length - openTaskIds.length),
-      skippedTasks: skipped,
+      skippedCompanies,
+      skippedTasks,
       dueAt,
     });
   } catch (error) {

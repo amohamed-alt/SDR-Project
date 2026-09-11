@@ -171,7 +171,7 @@ export function MaritaPriorityQueue({ onBack }: { onBack: () => void }) {
   async function transferToDaniel() {
     if (!selectedTaskIds.length) return;
     const confirmed = window.confirm(
-      `Transfer ${selectedTaskIds.length} task(s) across ${selectedCompanies.length} companies to Daniel, due ${dueDate} at ${dueTime} Riyadh time? Only companies that still have a detected ATS, no prior contact activity, no CSM, and no open deal will actually move — everything else is skipped.`,
+      `Transfer ${selectedCompanies.length} compan${selectedCompanies.length === 1 ? "y" : "ies"} to Daniel, due ${dueDate} at ${dueTime} Riyadh time? Every open Marita call task at each selected company moves together — the server re-checks ATS, prior activity, deals, and each contact fresh before moving anything, so a company only transfers if it (and at least one contact) still qualifies. No partial company transfers.`,
     );
     if (!confirmed) return;
     setTransferring(true);
@@ -185,7 +185,11 @@ export function MaritaPriorityQueue({ onBack }: { onBack: () => void }) {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.details || payload.error || "Unable to transfer selected tasks");
-      setMessage(`Transferred ${payload.transferred} task(s) to Daniel. ${payload.skipped ? `${payload.skipped} skipped by the eligibility re-check.` : ""}`);
+      const skippedCompanyCount = Array.isArray(payload.skippedCompanies) ? payload.skippedCompanies.length : 0;
+      setMessage(
+        `Transferred ${payload.transferred} task(s) to Daniel across ${payload.companiesConsidered - skippedCompanyCount} company(ies). `
+        + (skippedCompanyCount ? `${skippedCompanyCount} company(ies) skipped entirely (failed the eligibility re-check).` : ""),
+      );
       setSelected(new Set());
       await load(true);
     } catch (requestError) {
