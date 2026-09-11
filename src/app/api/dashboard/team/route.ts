@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { SDR_OWNERS } from "@/lib/sdr-owners";
+import { SDR_OWNERS, SDR_COMPARISON_KEYS } from "@/lib/sdr-owners";
 import { summarizeSdr } from "@/lib/sdr-comparison";
 import { getDashboardSnapshot } from "@/lib/dashboard-snapshot";
 import { createMockDashboard } from "@/lib/mock-data";
@@ -16,7 +16,8 @@ export async function GET(request: NextRequest) {
   const today = new Date().toISOString().slice(0, 10);
   const parsed = z.object({ from: date, to: date }).safeParse({ from: params.get("from") || today.slice(0, 7) + "-01", to: params.get("to") || today });
   if (!parsed.success || parsed.data.from > parsed.data.to) return NextResponse.json({ error: "Choose a valid reporting period" }, { status: 400 });
-  const results = await Promise.all(Object.values(SDR_OWNERS).map(async owner => {
+  const results = await Promise.all(SDR_COMPARISON_KEYS.map(async key => {
+    const owner = SDR_OWNERS[key];
     try {
       const filters = { ...parsed.data, ownerId: owner.ownerId };
       const result = process.env.DEMO_MODE === "true"
