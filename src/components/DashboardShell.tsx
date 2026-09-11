@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { Dashboard as ExistingDashboard } from "./Dashboard";
+import { WorkspaceErrorBoundary } from "./WorkspaceErrorBoundary";
 import styles from "@/components/DashboardShell.module.css";
 
 type ShellView = "core" | "motion" | "maqsam" | "marita-priority" | "team-activity" | "net-new" | "gtm-brain" | "sales-handoff";
@@ -326,7 +327,11 @@ export function Dashboard({
           <div className="nav-label owner-label">SDR OWNER</div>
           <div className="owner-card"><div className="avatar">{owner.initials}</div><div><span>Reporting for</span><strong>{owner.name}</strong></div><BadgeCheck size={17}/></div>
         </aside>
-        <div className={`content ${styles.toolContent}`}>{toolContent}</div>
+        <div className={`content ${styles.toolContent}`}>
+          <WorkspaceErrorBoundary key={view} onBack={() => changeView("core")}>
+            {toolContent}
+          </WorkspaceErrorBoundary>
+        </div>
       </div>
     </div>
     {toolsMenu}
