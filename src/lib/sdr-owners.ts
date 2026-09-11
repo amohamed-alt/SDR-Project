@@ -6,3 +6,11 @@ export const SDR_OWNERS = {
 } as const;
 export type SdrKey = keyof typeof SDR_OWNERS;
 export type SdrDashboardProps = { sdr?: SdrKey; active?: boolean };
+
+// SDR Comparison (the /api/dashboard/team view) intentionally covers Marita
+// and Daniel only — Ursula and Zein have their own acquisition-focused KPI
+// view (RepKpiDashboard) that isn't reported on this activity-comparison
+// surface. Keep this list explicit rather than deriving it from SDR_OWNERS,
+// so adding a new owner to SDR_OWNERS later doesn't silently pull them into
+// this comparison too.
+export const SDR_COMPARISON_KEYS: SdrKey[] = ["marita", "daniel"];

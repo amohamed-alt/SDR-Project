@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowUpRight, CalendarDays, RefreshCw, UsersRound } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { SDR_OWNERS, type SdrKey } from "@/lib/sdr-owners";
+import { SDR_OWNERS, SDR_COMPARISON_KEYS, type SdrKey } from "@/lib/sdr-owners";
 import type { SdrSummary } from "@/lib/sdr-comparison";
 import type { DashboardKpis } from "@/lib/types";
 import styles from "./SdrComparison.module.css";
@@ -17,7 +17,7 @@ const metrics: { label: string; key: keyof DashboardKpis; percent?: boolean }[] 
   { label: "Tasks completed", key: "completedTasks" }, { label: "Open tasks · current", key: "openTasks" },
   { label: "Overdue tasks · current", key: "overdueTasks" }, { label: "Contacts · current", key: "portfolioContacts" },
 ];
-const owners = Object.values(SDR_OWNERS);
+const owners = SDR_COMPARISON_KEYS.map(key => SDR_OWNERS[key]);
 
 export function SdrComparison({ onSelect }: { onSelect: (key: SdrKey) => void }) {
   const today = new Date().toISOString().slice(0, 10);
@@ -68,7 +68,7 @@ export function SdrComparison({ onSelect }: { onSelect: (key: SdrKey) => void })
     <header className={styles.header}><button onClick={() => onSelect("marita")}><ArrowLeft size={16}/>Workspaces</button><span><UsersRound size={16}/>SDR TEAM</span><button disabled={busy} onClick={() => setRefresh(value => value + 1)}><RefreshCw size={16} className={busy ? "spin" : ""}/>{busy ? "Updating" : "Refresh"}</button></header>
     <section className={styles.title}><div><p>MANAGEMENT OVERVIEW</p><h1>SDR performance</h1><span>{owners.map(owner => `${owner.shortName} · ${owner.brand}`).join("  /  ")}</span></div><form onSubmit={event => { event.preventDefault(); setRange({ ...draft }); }}><CalendarDays size={18}/><label>From<input aria-label="Reporting start" type="date" required value={draft.from} max={draft.to} onChange={event => setDraft({ ...draft, from: event.target.value })}/></label><label>To<input aria-label="Reporting end" type="date" required min={draft.from} value={draft.to} onChange={event => setDraft({ ...draft, to: event.target.value })}/></label><button>Apply</button></form></section>
     {error && <p className={styles.error} role="alert">{error}</p>}
-    <div className={styles.owners}>{Object.values(SDR_OWNERS).map(owner => {
+    <div className={styles.owners}>{owners.map(owner => {
       const entry = dataFor(owner.key);
       return <section className={styles.owner} key={owner.key} style={{ borderTopColor: owner.color }}><div className={styles.identity}><span style={{ background: owner.color }}>{owner.initials}</span><div><h2>{owner.name}</h2><p>{owner.brand}</p></div><button aria-label={`Open ${owner.shortName} workspace`} onClick={() => onSelect(owner.key)}><ArrowUpRight size={20}/></button></div>
         <div className={styles.numbers}><div><span>Meetings booked</span><strong>{entry?.data ? format(entry.data.kpis.bookedMeetings) : "—"}</strong></div><div><span>Connection rate</span><strong>{entry?.data ? `${format(entry.data.kpis.connectionRate)}%` : "—"}</strong></div><div><span>Tasks completed</span><strong>{entry?.data ? format(entry.data.kpis.completedTasks) : "—"}</strong></div></div>
