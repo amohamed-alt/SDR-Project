@@ -97,13 +97,31 @@
 
 .toolsDock {
   position: fixed;
-  left: 24px;
+  left: 264px;
   bottom: 24px;
   z-index: 122;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 10px;
+}
+
+/* Sidebar collapses to a 76px icon rail between 640px and 900px
+   (see .sidebar in globals.css) — follow it so the dock never sits
+   underneath the sidebar's own background. */
+@media (max-width: 900px) {
+  .toolsDock {
+    left: 96px;
+  }
+}
+
+/* Below 640px the sidebar becomes a 60px-tall bottom bar spanning the
+   full width, so the dock has to sit above it instead of beside it. */
+@media (max-width: 640px) {
+  .toolsDock {
+    left: 14px;
+    bottom: 72px;
+  }
 }
 
 .toolsToggle {
@@ -416,11 +434,6 @@
 .intentIcon { background: #f8e9f2; color: #8a2a67; }
 
 @media (max-width: 720px) {
-  .toolsDock {
-    left: 14px;
-    bottom: 12px;
-  }
-
   .toolsMenu {
     width: min(350px, calc(100vw - 28px));
     max-height: calc(100vh - 144px);
