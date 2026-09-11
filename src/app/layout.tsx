@@ -9,6 +9,7 @@ import "./gtm-table.css";
 import "./share-view.css";
 import { GtmCommandPalette } from "@/components/GtmCommandPalette";
 import { UsageTracker } from "@/components/UsageTracker";
+import { MotionConfig } from "motion/react";
 
 const dmSans = DM_Sans({
   subsets: ["latin"],
@@ -33,8 +34,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en" className={`${dmSans.variable} ${manrope.variable}`}>
       <body>
-        {children}
-        <GtmCommandPalette/>
+        <MotionConfig reducedMotion="user">
+          {children}
+          <GtmCommandPalette/>
+        </MotionConfig>
         <UsageTracker/>
       </body>
     </html>

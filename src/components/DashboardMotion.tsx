@@ -3,6 +3,7 @@
 import { SDR_OWNERS, type SdrKey } from "@/lib/sdr-owners";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AnimatePresence } from "motion/react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -556,6 +557,8 @@ export function MotionDashboard({ onBack, sdr }: { onBack: () => void; sdr: SdrK
       </>}
     </div>
 
-    {drilldown && <DrilldownDrawer drilldown={drilldown} onClose={() => setDrilldown(null)}/>} 
+    <AnimatePresence>
+      {drilldown && <DrilldownDrawer drilldown={drilldown} onClose={() => setDrilldown(null)}/>}
+    </AnimatePresence>
   </main>;
 }

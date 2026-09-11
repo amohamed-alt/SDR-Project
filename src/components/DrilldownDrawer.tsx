@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { motion } from "motion/react";
 import { ExternalLink, X } from "lucide-react";
 import { GtmTable, type GtmColumn } from "@/components/GtmTable";
 import { WhatsAppQuickAction } from "@/components/WhatsAppQuickAction";
@@ -112,11 +113,25 @@ export function DrilldownDrawer({ drilldown, onClose }: { drilldown: Drilldown; 
         : <DealsTable drilldown={drilldown}/>;
 
   return <div className="drilldown-layer" role="dialog" aria-modal="true" aria-label={drilldown.title}>
-    <button className="drilldown-backdrop" onClick={onClose} aria-label="Close details" />
-    <aside className="drilldown-drawer">
+    <motion.button
+      className="drilldown-backdrop"
+      onClick={onClose}
+      aria-label="Close details"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.18 }}
+    />
+    <motion.aside
+      className="drilldown-drawer"
+      initial={{ x: "100%" }}
+      animate={{ x: 0 }}
+      exit={{ x: "100%" }}
+      transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+    >
       <header className="drilldown-header"><div><span>DRILL-DOWN · LIVE HUBSPOT DATA</span><h2>{drilldown.title}</h2><p>{drilldown.description}</p></div><button className="drawer-close" onClick={onClose} aria-label="Close"><X size={20}/></button></header>
       <div className="drilldown-list">{table}</div>
       <footer className="drilldown-footer"><span>Sortable operational records behind the selected metric.</span>{externalLink(drilldown.hubspotUrl, "Open full object list")}</footer>
-    </aside>
+    </motion.aside>
   </div>;
 }

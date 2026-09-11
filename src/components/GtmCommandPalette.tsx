@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
+import { AnimatePresence, motion } from "motion/react";
 import {
   Activity,
   BarChart3,
@@ -93,53 +94,73 @@ export function GtmCommandPalette() {
     }
   }
 
-  if (!open) {
-    return (
-      <button className="gtm-command-trigger" type="button" onClick={openPalette} aria-label="Open GTM command palette">
-        <Search size={15}/><span>Search GTM</span><kbd>⌘K</kbd>
-      </button>
-    );
-  }
-
   const safeActiveIndex = Math.min(activeIndex, Math.max(0, filtered.length - 1));
 
   return (
-    <div className="gtm-command-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
-      <section className="gtm-command-palette" role="dialog" aria-modal="true" aria-label="GTM command palette">
-        <div className="gtm-command-search">
-          <Search size={18}/>
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
-            onKeyDown={onInputKeyDown}
-            placeholder="Search dashboard, accounts, prospecting…"
-            aria-label="Search GTM commands"
-          />
-          <button type="button" onClick={() => setOpen(false)} aria-label="Close command palette"><X size={16}/></button>
-        </div>
-        <div className="gtm-command-results" role="listbox" aria-label="Commands">
-          {filtered.length ? filtered.map((command, index) => {
-            const Icon = command.icon;
-            return (
-              <button
-                key={command.href + command.label}
-                type="button"
-                className={index === safeActiveIndex ? "active" : ""}
-                onMouseEnter={() => setActiveIndex(index)}
-                onClick={() => run(command)}
-                role="option"
-                aria-selected={index === safeActiveIndex}
-              >
-                <span className="gtm-command-icon"><Icon size={17}/></span>
-                <span className="gtm-command-copy"><strong>{command.label}</strong><small>{command.description}</small></span>
-                <span className="gtm-command-enter">↵</span>
-              </button>
-            );
-          }) : <div className="gtm-command-empty">No matching GTM command</div>}
-        </div>
-        <footer className="gtm-command-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Open</span><span><kbd>Esc</kbd> Close</span></footer>
-      </section>
-    </div>
+    <>
+      {!open && (
+        <button className="gtm-command-trigger" type="button" onClick={openPalette} aria-label="Open GTM command palette">
+          <Search size={15}/><span>Search GTM</span><kbd>⌘K</kbd>
+        </button>
+      )}
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            className="gtm-command-backdrop"
+            role="presentation"
+            onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.14 }}
+          >
+            <motion.section
+              className="gtm-command-palette"
+              role="dialog"
+              aria-modal="true"
+              aria-label="GTM command palette"
+              initial={{ opacity: 0, y: -8, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -8, scale: 0.98 }}
+              transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <div className="gtm-command-search">
+                <Search size={18}/>
+                <input
+                  ref={inputRef}
+                  value={query}
+                  onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
+                  onKeyDown={onInputKeyDown}
+                  placeholder="Search dashboard, accounts, prospecting…"
+                  aria-label="Search GTM commands"
+                />
+                <button type="button" onClick={() => setOpen(false)} aria-label="Close command palette"><X size={16}/></button>
+              </div>
+              <div className="gtm-command-results" role="listbox" aria-label="Commands">
+                {filtered.length ? filtered.map((command, index) => {
+                  const Icon = command.icon;
+                  return (
+                    <button
+                      key={command.href + command.label}
+                      type="button"
+                      className={index === safeActiveIndex ? "active" : ""}
+                      onMouseEnter={() => setActiveIndex(index)}
+                      onClick={() => run(command)}
+                      role="option"
+                      aria-selected={index === safeActiveIndex}
+                    >
+                      <span className="gtm-command-icon"><Icon size={17}/></span>
+                      <span className="gtm-command-copy"><strong>{command.label}</strong><small>{command.description}</small></span>
+                      <span className="gtm-command-enter">↵</span>
+                    </button>
+                  );
+                }) : <div className="gtm-command-empty">No matching GTM command</div>}
+              </div>
+              <footer className="gtm-command-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Open</span><span><kbd>Esc</kbd> Close</span></footer>
+            </motion.section>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }

@@ -232,8 +232,7 @@ td strong { display: block; color: var(--text); font-size: 9px; }.table-wrap td 
 body.drawer-open { overflow: hidden; }
 .drilldown-layer { position: fixed; inset: 0; z-index: 100; }
 .drilldown-backdrop { position: absolute; inset: 0; width: 100%; border: 0; background: rgba(7,34,26,.42); backdrop-filter: blur(2px); cursor: pointer; }
-.drilldown-drawer { position: absolute; inset: 0 0 0 auto; width: min(760px,92vw); display: grid; grid-template-rows: auto auto minmax(0,1fr) auto; background: #f4f7f5; box-shadow: -20px 0 60px rgba(9,45,34,.22); animation: drawer-in .24s ease-out; }
-@keyframes drawer-in { from { transform: translateX(35px); opacity: .6; } to { transform: translateX(0); opacity: 1; } }
+.drilldown-drawer { position: absolute; inset: 0 0 0 auto; width: min(760px,92vw); display: grid; grid-template-rows: auto auto minmax(0,1fr) auto; background: #f4f7f5; box-shadow: -20px 0 60px rgba(9,45,34,.22); }
 .drilldown-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 24px 25px 20px; border-bottom: 1px solid var(--border); background: #fff; }
 .drilldown-header > div > span { color: var(--green); font-size: 7px; font-weight: 800; letter-spacing: .14em; }
 .drilldown-header h2 { margin: 7px 0 5px; font: 800 23px/1.15 var(--font-manrope),sans-serif; letter-spacing: -.035em; }
