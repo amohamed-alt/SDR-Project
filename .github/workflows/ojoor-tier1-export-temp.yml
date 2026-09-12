@@ -1,0 +1,201 @@
+name: TEMP Ojoor Tier 1 Apollo Export
+
+on:
+  push:
+    branches:
+      - temp/ojoor-tier1-export
+    paths:
+      - .github/workflows/ojoor-tier1-export-temp.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APOLLO_API_KEY: ${{ secrets.APOLLO_API_KEY }}
+    steps:
+      - name: Validate Apollo secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${APOLLO_API_KEY:-}" ]; then
+            echo "::error::APOLLO_API_KEY is not configured as a GitHub Actions secret."
+            exit 1
+          fi
+
+      - name: Export Tier 1 companies from Apollo only
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/export-ojoor.mjs <<'NODE'
+          import fs from 'node:fs';
+
+          const apiKey = process.env.APOLLO_API_KEY || '';
+          if (!apiKey) throw new Error('Missing APOLLO_API_KEY');
+
+          const employeeRange = '51,200';
+          const locations = ['Saudi Arabia'];
+          const includeNaics = ['23','31','32','33','44','45','48','49','72'];
+          const excludeNaics = ['92'];
+          const maxPages = 22;
+          const perPage = 100;
+
+          function clean(v) {
+            return String(v ?? '').replace(/\s+/g, ' ').trim();
+          }
+
+          function orgId(org) {
+            return clean(org.organization_id || org.id);
+          }
+
+          function naicsList(org) {
+            return Array.isArray(org.naics_codes) ? org.naics_codes.map(clean).filter(Boolean) : [];
+          }
+
+          function starts(code, prefix) {
+            const c = clean(code);
+            if (prefix === '31' || prefix === '32' || prefix === '33') return c.startsWith(prefix) || c === '31-33';
+            if (prefix === '44' || prefix === '45') return c.startsWith(prefix) || c === '44-45';
+            return c.startsWith(prefix);
+          }
+
+          function industryFor(org) {
+            const codes = naicsList(org);
+            const labels = [];
+            if (codes.some(c => starts(c, '44') || starts(c, '45'))) labels.push('Retail');
+            if (codes.some(c => c.startsWith('722'))) labels.push('Restaurants / Food & Beverage');
+            if (codes.some(c => c.startsWith('721'))) labels.push('Hospitality');
+            if (codes.some(c => starts(c, '48') || starts(c, '49'))) labels.push('Transportation / Logistics');
+            if (codes.some(c => starts(c, '31') || starts(c, '32') || starts(c, '33'))) labels.push('Manufacturing');
+            if (codes.some(c => starts(c, '23'))) labels.push('Construction');
+            if (!labels.length && clean(org.industry)) labels.push(clean(org.industry));
+            return [...new Set(labels)].join(' / ') || 'Tier 1 Operational Industry';
+          }
+
+          const competitorPhrases = [
+            'hr software','hrms','hcm software','payroll software','human resources software',
+            'hr technology','workforce management software','attendance management software',
+            'applicant tracking system','recruitment software','employee management software',
+            'performance management software'
+          ];
+
+          function competitorText(org) {
+            const keywords = Array.isArray(org.keywords) ? org.keywords.join(' ') : '';
+            return [org.name, org.industry, org.short_description, org.seo_description, keywords]
+              .map(clean).join(' ').toLowerCase();
+          }
+
+          function isCompetitor(org) {
+            const text = competitorText(org);
+            return competitorPhrases.some(p => text.includes(p));
+          }
+
+          function csvCell(value) {
+            const s = clean(value);
+            return `"${s.replaceAll('"', '""')}"`;
+          }
+
+          async function fetchPage(page) {
+            const q = new URLSearchParams();
+            for (const location of locations) q.append('organization_locations[]', location);
+            q.append('organization_num_employees_ranges[]', employeeRange);
+            for (const code of includeNaics) q.append('organization_naics_codes[]', code);
+            for (const code of excludeNaics) q.append('not_organization_naics_codes[]', code);
+            q.set('page', String(page));
+            q.set('per_page', String(perPage));
+
+            const url = `https://api.apollo.io/api/v1/mixed_companies/search?${q.toString()}`;
+            const res = await fetch(url, {
+              method: 'POST',
+              headers: {
+                'x-api-key': apiKey,
+                'accept': 'application/json',
+                'content-type': 'application/json'
+              }
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(`Apollo page ${page} failed HTTP ${res.status}: ${clean(body?.message || body?.error?.message || '')}`);
+            const combined = [
+              ...(Array.isArray(body.accounts) ? body.accounts : []),
+              ...(Array.isArray(body.organizations) ? body.organizations : [])
+            ];
+            const pageMap = new Map();
+            for (const org of combined) {
+              const id = orgId(org);
+              if (id && !pageMap.has(id)) pageMap.set(id, org);
+            }
+            const total = Number(body?.pagination?.total_entries || body?.pagination?.total || 0);
+            const totalPages = Number(body?.pagination?.total_pages || (total ? Math.ceil(total / perPage) : 0));
+            return { organizations: [...pageMap.values()], total, totalPages };
+          }
+
+          const all = new Map();
+          let reportedTotal = 0;
+          let reportedPages = maxPages;
+
+          for (let page = 1; page <= Math.min(maxPages, reportedPages || maxPages); page++) {
+            const result = await fetchPage(page);
+            reportedTotal = Math.max(reportedTotal, result.total || 0);
+            if (result.totalPages) reportedPages = Math.min(maxPages, result.totalPages);
+            for (const org of result.organizations) {
+              const id = orgId(org);
+              if (id && !all.has(id)) all.set(id, org);
+            }
+            console.log(`Fetched page ${page}/${reportedPages}: ${result.organizations.length} unique rows; cumulative ${all.size}`);
+            if (!result.organizations.length) break;
+          }
+
+          const raw = [...all.values()];
+          const competitors = raw.filter(isCompetitor);
+          const finalRows = raw.filter(org => !isCompetitor(org));
+
+          const headers = ['Company Name','Industry','NAICS Codes','Domain','Website','LinkedIn','HQ City','HQ Region','Tier','Apollo Organization ID'];
+          const lines = [headers.map(csvCell).join(',')];
+          for (const org of finalRows) {
+            const row = [
+              org.name,
+              industryFor(org),
+              naicsList(org).join(' | '),
+              org.primary_domain || org.domain,
+              org.website_url,
+              org.linkedin_url,
+              org.organization_city || org.city,
+              org.organization_state || org.state,
+              'Tier 1',
+              orgId(org)
+            ];
+            lines.push(row.map(csvCell).join(','));
+          }
+          fs.writeFileSync('ojoor-tier1-companies.csv', lines.join('\n') + '\n', 'utf8');
+          fs.writeFileSync('ojoor-tier1-summary.json', JSON.stringify({
+            generatedAt: new Date().toISOString(),
+            filters: {
+              headquarters: 'Saudi Arabia',
+              headcount: '51-200',
+              includedNaics: includeNaics,
+              excludedNaics: excludeNaics,
+              competitorPhrases
+            },
+            apolloReportedTotal: reportedTotal,
+            uniqueFetched: raw.length,
+            competitorRowsRemoved: competitors.length,
+            competitorNames: competitors.map(x => clean(x.name)),
+            finalRows: finalRows.length
+          }, null, 2));
+          console.log(`FINAL_ROWS=${finalRows.length}`);
+          console.log(`COMPETITORS_REMOVED=${competitors.length}`);
+          NODE
+          node /tmp/export-ojoor.mjs
+
+      - name: Upload isolated export artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ojoor-tier1-apollo-export
+          path: |
+            ojoor-tier1-companies.csv
+            ojoor-tier1-summary.json
+          if-no-files-found: error
+          retention-days: 1
