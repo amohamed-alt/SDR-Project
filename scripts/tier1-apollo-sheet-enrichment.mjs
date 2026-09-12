@@ -14,14 +14,25 @@ async function googleToken(){const r=await fetch("https://oauth2.googleapis.com/
 async function sheets(path,opts={},gt){const r=await fetch("https://sheets.googleapis.com/v4/spreadsheets/"+sheetId+path,{...opts,headers:{"authorization":"Bearer "+gt,"content-type":"application/json",...(opts.headers||{})}});if(!r.ok)throw new Error("Sheets "+r.status+" "+await r.text());return r.json()}
 async function apollo(path,body){const r=await fetch("https://api.apollo.io/api/v1/"+path,{method:"POST",headers:{"content-type":"application/json","x-api-key":apolloKey},body:JSON.stringify(body)});if(!r.ok)throw new Error("Apollo "+r.status);return r.json()}
 function parseRows(v){return v.values||[]}
-async function main(){if(!sheetId||!apolloKey||!serviceAccount)throw new Error("Missing required secrets");const gt=await googleToken();const data=await sheets("/values/"+encodeURIComponent(sheetName)+"!A1:T2165",{},gt);const rows=parseRows(data).slice(1);const targets=[];for(let i=0;i<rows.length;i++){const r=rows[i]||[];if(!String(r[8]||"").trim()&&!String(r[16]||"").trim()&&String(r[7]||"").trim())targets.push({row:i+2,org:String(r[7]).trim()})}const batch=targets.slice(0,maxCompanies);const found=[];let done=0;async function one(c){
+async function main(){if(!sheetId||!apolloKey||!serviceAccount)throw new Error("Missing required secrets");const gt=await googleToken();const data=await sheets("/values/"+encodeURIComponent(sheetName)+"!A1:T2165",{},gt);const rows=parseRows(data).slice(1);const targets=[];for(let i=0;i<rows.length;i++){const r=rows[i]||[];if(!String(r[8]||"").trim()&&!String(r[16]||"").trim()&&String(r[7]||"").trim())targets.push({row:i+2,org:String(r[7]).trim()})}const batch=targets.slice(0,maxCompanies);const found=[];let done=0;function isQualified(title, fallback) {
+  const value = String(title || "").toLowerCase();
+  if (fallback) {
+    return /chief executive|\bceo\b|founder|co-founder|owner|managing director|general manager|\bgm\b/.test(value) &&
+      !/assistant|deputy|advisor|consultant|coordinator/.test(value);
+  }
+  const hrSignal = /\bhr\b|human resources|human capital|\bpeople\b|payroll|compensation|benefits|personnel|employee services|shared services|chro|hrbp|people operations/;
+  const nonDecisionSignal = /vendor|procurement|supply chain|warehouse|logistics|operations performance|\boperations manager\b|executive assistant|assistant|coordinator|administrator|admin/;
+  return hrSignal.test(value) && !nonDecisionSignal.test(value);
+}
+
+async function one(c){
   try {
-    let d=await apollo("mixed_people/api_search",{organization_ids:[c.org],person_titles:hrTitles,per_page:25,page:1,include_similar_titles:true});
-    let people=(d.people||[]).filter(p=>p.has_email===true);
+    let d=await apollo("mixed_people/api_search",{organization_ids:[c.org],person_titles:hrTitles,per_page:25,page:1,include_similar_titles:false});
+    let people=(d.people||[]).filter(p=>p.has_email===true&&isQualified(p.title, false));
     let fallback=false;
     if(!people.length){
-      d=await apollo("mixed_people/api_search",{organization_ids:[c.org],person_titles:execTitles,organization_num_employees_ranges:["1,10","11,20","21,50","51,100","101,200"],per_page:25,page:1,include_similar_titles:true});
-      people=(d.people||[]).filter(p=>p.has_email===true);
+      d=await apollo("mixed_people/api_search",{organization_ids:[c.org],person_titles:execTitles,organization_num_employees_ranges:["1,10","11,20","21,50","51,100","101,200"],per_page:25,page:1,include_similar_titles:false});
+      people=(d.people||[]).filter(p=>p.has_email===true&&isQualified(p.title, true));
       fallback=true;
     }
     if(people[0]){
