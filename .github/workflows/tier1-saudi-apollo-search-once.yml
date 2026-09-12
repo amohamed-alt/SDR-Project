@@ -1,0 +1,343 @@
+name: Tier 1 Saudi Apollo People Search Once
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/tier1-saudi-apollo-search-once.yml
+
+permissions:
+  contents: read
+
+timeout-minutes: 60
+
+concurrency:
+  group: tier1-saudi-apollo-search-once
+  cancel-in-progress: true
+
+jobs:
+  search-only:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://sdr.dashboardtalentera.tech
+      DASHBOARD_USERNAME: ${{ secrets.DASHBOARD_USERNAME }}
+      DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+      APOLLO_API_KEY: ${{ secrets.APOLLO_API_KEY }}
+      MAX_COMPANIES: "2164"
+      DOMAIN_BATCH_SIZE: "20"
+      RATE_DELAY_MS: "900"
+    steps:
+      - name: Validate secrets
+        run: |
+          set -euo pipefail
+          test -n "$DASHBOARD_USERNAME" || { echo "::error::DASHBOARD_USERNAME is missing"; exit 1; }
+          test -n "$DASHBOARD_PASSWORD" || { echo "::error::DASHBOARD_PASSWORD is missing"; exit 1; }
+          test -n "$APOLLO_API_KEY" || { echo "::error::APOLLO_API_KEY is missing"; exit 1; }
+
+      - name: Search Apollo people without enrichment credits
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+
+          const BASE_URL = process.env.BASE_URL.replace(/\/$/, '');
+          const MAX_COMPANIES = Number(process.env.MAX_COMPANIES || 2164);
+          const DOMAIN_BATCH_SIZE = Number(process.env.DOMAIN_BATCH_SIZE || 20);
+          const RATE_DELAY_MS = Number(process.env.RATE_DELAY_MS || 900);
+          const auth = Buffer.from(`${process.env.DASHBOARD_USERNAME}:${process.env.DASHBOARD_PASSWORD}`).toString('base64');
+          const apolloKey = process.env.APOLLO_API_KEY;
+
+          const HR_TITLES = [
+            'Human Resources Manager',
+            'HR Manager',
+            'Head of Human Resources',
+            'Head of HR',
+            'Human Resources Director',
+            'HR Director',
+            'People Director',
+            'People Manager',
+            'Talent Acquisition Manager',
+            'Recruitment Manager',
+          ];
+          const EXEC_TITLES = [
+            'Chief Executive Officer',
+            'CEO',
+            'General Manager',
+            'GM',
+            'Founder',
+          ];
+          const EXCLUDED_TITLE = /\b(chro|chief\s+human\s+resources\s+officer|managing\s+director)\b/i;
+
+          const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+          function clean(value) {
+            return String(value || '').replace(/\s+/g, ' ').trim();
+          }
+          function normalizeDomain(value) {
+            let text = clean(value).toLowerCase();
+            if (!text) return '';
+            text = text.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0].split('?')[0].split('#')[0];
+            return text.replace(/[^a-z0-9.-]/g, '').replace(/\.$/, '');
+          }
+          function personName(person) {
+            return clean(person.name || [person.first_name, person.last_name].filter(Boolean).join(' '));
+          }
+          function organizationDomain(person) {
+            const org = person.organization || person.account || {};
+            return normalizeDomain(
+              org.primary_domain || org.domain || org.website_url || org.website ||
+              person.organization_primary_domain || person.organization_domain || person.account_domain
+            );
+          }
+          function titleScore(title, phase) {
+            const t = clean(title).toLowerCase();
+            if (!t || EXCLUDED_TITLE.test(t)) return -1000;
+            if (/human resources director|hr director/.test(t)) return 110;
+            if (/head of (human resources|hr)|director of (human resources|hr)|people director/.test(t)) return 105;
+            if (/human resources manager|hr manager|people manager/.test(t)) return 95;
+            if (/talent acquisition manager|recruitment manager/.test(t)) return 82;
+            if (phase === 'exec') {
+              if (/chief executive officer|\bceo\b/.test(t)) return 78;
+              if (/general manager|\bgm\b/.test(t)) return 72;
+              if (/founder|owner/.test(t)) return 62;
+            }
+            return phase === 'hr' ? 15 : 5;
+          }
+          function seniorityScore(person) {
+            const seniority = clean(person.seniority || person.seniorities?.[0]).toLowerCase();
+            if (/owner|founder|c_suite|executive/.test(seniority)) return 12;
+            if (/director|head/.test(seniority)) return 10;
+            if (/manager/.test(seniority)) return 6;
+            return 0;
+          }
+          function scorePerson(person, phase) {
+            return titleScore(person.title, phase) + seniorityScore(person) + (clean(person.linkedin_url) ? 2 : 0);
+          }
+          function toRow(account, person, phase) {
+            const org = person.organization || person.account || {};
+            const firstName = clean(person.first_name);
+            const lastName = clean(person.last_name || person.last_name_unobfuscated || person.last_name_obfuscated);
+            const name = personName(person);
+            const persona = /chief executive officer|\bceo\b|general manager|\bgm\b|founder|owner/i.test(clean(person.title)) ? 'Executive fallback' : 'HR decision maker';
+            const email = clean(person.email || person.work_email);
+            return {
+              companyName: account.name,
+              industry: account.industry,
+              domain: account.domain,
+              website: account.website || '',
+              companyLinkedIn: account.linkedin || '',
+              hqCity: account.hqCity || '',
+              hqRegion: account.hqRegion || '',
+              apolloOrganizationId: account.apolloOrganizationId || clean(org.id || person.organization_id || person.account_id),
+              contactName: name,
+              firstName,
+              lastName,
+              title: clean(person.title),
+              persona,
+              workEmail: email,
+              emailStatus: clean(person.email_status || person.email_true_status || (email ? 'returned_by_search' : 'not_revealed_search_only')),
+              contactLinkedIn: clean(person.linkedin_url),
+              apolloPersonId: clean(person.id || person.person_id),
+              selectionRule: phase === 'hr'
+                ? 'Apollo People Search only: HR Manager / Head of HR / HR Director; CHRO and Managing Director excluded'
+                : 'Apollo People Search only fallback: CEO / GM / Founder; Managing Director excluded',
+              source: 'Apollo People Search API',
+              enrichmentStatus: 'search_only_zero_credit',
+              score: scorePerson(person, phase),
+            };
+          }
+          function csvCell(value) {
+            const text = String(value ?? '');
+            return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+          }
+          function rowsToCsv(rows) {
+            const headers = [
+              'Company Name','Industry','Domain','Website','Company LinkedIn','HQ City','HQ Region','Apollo Organization ID',
+              'Contact Name','First Name','Last Name','Title','Persona','Work Email','Email Status','Contact LinkedIn','Apollo Person ID','Selection Rule','Source','Enrichment Status'
+            ];
+            const keys = ['companyName','industry','domain','website','companyLinkedIn','hqCity','hqRegion','apolloOrganizationId','contactName','firstName','lastName','title','persona','workEmail','emailStatus','contactLinkedIn','apolloPersonId','selectionRule','source','enrichmentStatus'];
+            return [headers.map(csvCell).join(','), ...rows.map((row) => keys.map((key) => csvCell(row[key])).join(','))].join('\n') + '\n';
+          }
+
+          async function dashboardJson(path) {
+            const response = await fetch(`${BASE_URL}${path}`, {
+              headers: { Authorization: `Basic ${auth}`, Accept: 'application/json', 'Cache-Control': 'no-cache' },
+              signal: AbortSignal.timeout(45_000),
+            });
+            const text = await response.text();
+            let payload = {};
+            try { payload = JSON.parse(text); } catch { payload = { raw: text.slice(0, 500) }; }
+            if (!response.ok) throw new Error(`Dashboard read failed ${response.status}: ${JSON.stringify(payload).slice(0, 500)}`);
+            return payload;
+          }
+
+          async function loadSaudiAccounts() {
+            const accounts = [];
+            let page = 1;
+            let totalPages = 1;
+            while (page <= totalPages && accounts.length < MAX_COMPANIES) {
+              const data = await dashboardJson(`/api/acquisition/coverage-status?country=${encodeURIComponent('Saudi Arabia')}&status=all&limit=200&page=${page}`);
+              totalPages = Number(data.pagination?.totalPages || page);
+              for (const account of data.accounts || []) {
+                const domain = normalizeDomain(account.domain);
+                if (!domain) continue;
+                accounts.push({
+                  name: clean(account.name) || domain,
+                  industry: clean(account.industry),
+                  domain,
+                  website: clean(account.website || account.websiteUrl),
+                  linkedin: clean(account.linkedin || account.linkedinUrl),
+                  hqCity: clean(account.hqCity || account.city),
+                  hqRegion: clean(account.hqRegion || account.region),
+                  apolloOrganizationId: clean(account.sourceId),
+                  status: clean(account.status),
+                  exclusionStatus: clean(account.exclusionStatus),
+                });
+                if (accounts.length >= MAX_COMPANIES) break;
+              }
+              page += 1;
+            }
+            const unique = [];
+            const seen = new Set();
+            for (const account of accounts) {
+              if (seen.has(account.domain)) continue;
+              seen.add(account.domain);
+              unique.push(account);
+            }
+            return unique.slice(0, MAX_COMPANIES);
+          }
+
+          async function apolloPeopleSearch(domains, titles, phase) {
+            const body = {
+              q_organization_domains_list: domains,
+              person_titles: titles,
+              contact_email_status: ['verified'],
+              include_similar_titles: true,
+              per_page: 100,
+              page: 1,
+            };
+            const endpoints = [
+              'https://api.apollo.io/api/v1/mixed_people/api_search',
+              'https://api.apollo.io/api/v1/mixed_people/search',
+            ];
+            let lastError = null;
+            for (const endpoint of endpoints) {
+              const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'x-api-key': apolloKey, Accept: 'application/json', 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+                signal: AbortSignal.timeout(45_000),
+              });
+              const payload = await response.json().catch(() => ({}));
+              if (response.ok) {
+                const people = Array.isArray(payload.people) ? payload.people : Array.isArray(payload.contacts) ? payload.contacts : [];
+                return { people, endpoint };
+              }
+              lastError = clean(payload.message || payload.error || `HTTP ${response.status}`);
+              if (response.status !== 404) break;
+            }
+            throw new Error(`Apollo ${phase} search failed for ${domains.length} domain(s): ${lastError}`);
+          }
+
+          function applyCandidates(selected, accountByDomain, people, phase) {
+            for (const person of people) {
+              const title = clean(person.title);
+              if (EXCLUDED_TITLE.test(title)) continue;
+              const domain = organizationDomain(person);
+              if (!domain || !accountByDomain.has(domain)) continue;
+              const score = scorePerson(person, phase);
+              if (score < 0) continue;
+              const existing = selected.get(domain);
+              if (!existing || score > existing.score) {
+                selected.set(domain, toRow(accountByDomain.get(domain), person, phase));
+              }
+            }
+          }
+
+          async function runPhase(accounts, selected, titles, phase) {
+            const pending = accounts.filter((account) => !selected.has(account.domain));
+            let calls = 0;
+            let peopleReturned = 0;
+            for (let i = 0; i < pending.length; i += DOMAIN_BATCH_SIZE) {
+              const batch = pending.slice(i, i + DOMAIN_BATCH_SIZE);
+              const domains = batch.map((account) => account.domain);
+              const accountByDomain = new Map(batch.map((account) => [account.domain, account]));
+              try {
+                const result = await apolloPeopleSearch(domains, titles, phase);
+                calls += 1;
+                peopleReturned += result.people.length;
+                applyCandidates(selected, accountByDomain, result.people, phase);
+                console.log(`${phase} batch ${Math.floor(i / DOMAIN_BATCH_SIZE) + 1}/${Math.ceil(pending.length / DOMAIN_BATCH_SIZE)}: domains=${domains.length} people=${result.people.length} selected=${selected.size}`);
+              } catch (error) {
+                calls += 1;
+                console.log(`::warning::${phase} batch failed: ${error.message}`);
+              }
+              await wait(RATE_DELAY_MS);
+            }
+            return { calls, peopleReturned };
+          }
+
+          const startedAt = new Date().toISOString();
+          const accounts = await loadSaudiAccounts();
+          const selected = new Map();
+          console.log(`Loaded Saudi accounts from production ledger: ${accounts.length}`);
+          const hr = await runPhase(accounts, selected, HR_TITLES, 'hr');
+          const exec = await runPhase(accounts, selected, EXEC_TITLES, 'exec');
+
+          const rows = accounts.map((account) => selected.get(account.domain) || {
+            companyName: account.name,
+            industry: account.industry,
+            domain: account.domain,
+            website: account.website || '',
+            companyLinkedIn: account.linkedin || '',
+            hqCity: account.hqCity || '',
+            hqRegion: account.hqRegion || '',
+            apolloOrganizationId: account.apolloOrganizationId || '',
+            contactName: '',
+            firstName: '',
+            lastName: '',
+            title: '',
+            persona: '',
+            workEmail: '',
+            emailStatus: 'not_found_search_only',
+            contactLinkedIn: '',
+            apolloPersonId: '',
+            selectionRule: 'No matching HR/CEO/GM/Finder returned by Apollo People Search without enrichment',
+            source: 'Apollo People Search API',
+            enrichmentStatus: 'search_only_zero_credit_not_found',
+            score: 0,
+          });
+
+          const summary = {
+            startedAt,
+            finishedAt: new Date().toISOString(),
+            companyCount: accounts.length,
+            selectedCount: rows.filter((row) => row.contactName).length,
+            missingCount: rows.filter((row) => !row.contactName).length,
+            hrCalls: hr.calls,
+            execFallbackCalls: exec.calls,
+            apolloPeopleSearchCalls: hr.calls + exec.calls,
+            apolloEnrichmentCalls: 0,
+            phoneRevealCalls: 0,
+            intendedProviderCreditsUsed: 0,
+            notes: [
+              'Search-only run. No Apollo people match, bulk match, organization enrich, or phone reveal endpoint was called.',
+              'CHRO and Managing Director titles are explicitly excluded.',
+              'Work Email is only populated if Apollo People Search returned it without enrichment; otherwise it remains blank/not_revealed_search_only.',
+            ],
+          };
+
+          fs.mkdirSync('out', { recursive: true });
+          fs.writeFileSync('out/tier1-saudi-apollo-search-only.json', JSON.stringify({ summary, rows }, null, 2));
+          fs.writeFileSync('out/tier1-saudi-apollo-search-only.csv', rowsToCsv(rows));
+          fs.writeFileSync('out/summary.json', JSON.stringify(summary, null, 2));
+          console.log(JSON.stringify(summary, null, 2));
+          NODE
+
+      - name: Upload zero-credit search artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tier1-saudi-apollo-search-only
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
