@@ -1,0 +1,351 @@
+name: TEMP Ojoor Contact Candidate Discovery
+
+on:
+  push:
+    branches:
+      - temp/ojoor-contact-discovery
+    paths:
+      - .github/workflows/ojoor-contact-discovery-temp.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      APOLLO_API_KEY: ${{ secrets.APOLLO_API_KEY }}
+    steps:
+      - name: Validate Apollo secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$APOLLO_API_KEY" || { echo "::error::APOLLO_API_KEY is not configured."; exit 1; }
+
+      - name: Download Tier 1 company export artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ojoor-tier1-apollo-export
+          path: input
+          repository: amohamed-alt/SDR-Project
+          run-id: 34699472060
+          github-token: ${{ github.token }}
+
+      - name: Discover one ranked verified-email candidate per company
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import csv
+          import json
+          import os
+          import re
+          import time
+          import urllib.error
+          import urllib.request
+          from concurrent.futures import ThreadPoolExecutor, as_completed
+          from pathlib import Path
+          from threading import Lock
+
+          API_KEY = os.environ["APOLLO_API_KEY"]
+          API_URL = "https://api.apollo.io/api/v1/mixed_people/api_search"
+          INPUT = Path("input/ojoor-tier1-companies.csv")
+          OUT_DIR = Path("output")
+          OUT_DIR.mkdir(exist_ok=True)
+
+          EXEC_TITLES = [
+              "Chief Executive Officer",
+              "CEO",
+              "General Manager",
+              "Managing Director",
+              "Country General Manager",
+              "Founder and CEO",
+              "Founder & CEO",
+          ]
+          HR_TITLES = [
+              "Chief Human Resources Officer",
+              "CHRO",
+              "VP Human Resources",
+              "VP HR",
+              "Head of Human Resources",
+              "Head of HR",
+              "Human Resources Director",
+              "HR Director",
+              "Director of Human Resources",
+              "Human Resources Manager",
+              "HR Manager",
+              "Head of People",
+              "People Director",
+              "People & Culture Director",
+              "People and Culture Director",
+              "People & Culture Manager",
+              "People and Culture Manager",
+          ]
+
+          lock = Lock()
+          stats = {"requests": 0, "retries": 0, "errors": 0}
+
+          def clean(value):
+              return " ".join(str(value or "").split())
+
+          def request_people(org_id, titles, small_only=False):
+              body = {
+                  "organization_ids": [org_id],
+                  "person_titles": titles,
+                  "include_similar_titles": True,
+                  "contact_email_status": ["verified"],
+                  "per_page": 10,
+                  "page": 1,
+              }
+              if small_only:
+                  body["organization_num_employees_ranges"] = ["51,100"]
+              payload = json.dumps(body).encode("utf-8")
+              for attempt in range(7):
+                  req = urllib.request.Request(
+                      API_URL,
+                      data=payload,
+                      method="POST",
+                      headers={
+                          "x-api-key": API_KEY,
+                          "accept": "application/json",
+                          "content-type": "application/json",
+                      },
+                  )
+                  try:
+                      with urllib.request.urlopen(req, timeout=45) as response:
+                          with lock:
+                              stats["requests"] += 1
+                          data = json.loads(response.read().decode("utf-8"))
+                          return data.get("people") or []
+                  except urllib.error.HTTPError as exc:
+                      body_text = exc.read().decode("utf-8", errors="replace")[:300]
+                      if exc.code == 429 or 500 <= exc.code < 600:
+                          with lock:
+                              stats["retries"] += 1
+                          time.sleep(min(20, 1.5 * (2 ** attempt)))
+                          continue
+                      raise RuntimeError(f"Apollo people search HTTP {exc.code}: {body_text}")
+                  except Exception:
+                      if attempt < 6:
+                          with lock:
+                              stats["retries"] += 1
+                          time.sleep(min(20, 1.5 * (2 ** attempt)))
+                          continue
+                      raise
+              raise RuntimeError("Apollo people search exhausted retries")
+
+          def normalize_title(title):
+              return re.sub(r"[^a-z0-9]+", " ", clean(title).lower()).strip()
+
+          def hr_score(title):
+              t = normalize_title(title)
+              if not t:
+                  return -1
+              if "chief human resources" in t or t == "chro": return 120
+              if ("vp" in t or "vice president" in t) and ("human resources" in t or re.search(r"\bhr\b", t)): return 115
+              if "head" in t and ("human resources" in t or re.search(r"\bhr\b", t)): return 110
+              if "director" in t and ("human resources" in t or re.search(r"\bhr\b", t)): return 105
+              if "manager" in t and ("human resources" in t or re.search(r"\bhr\b", t)): return 100
+              if "head of people" in t: return 95
+              if "people" in t and "culture" in t and "director" in t: return 92
+              if "people" in t and "culture" in t and "manager" in t: return 88
+              if "people director" in t: return 90
+              return -1
+
+          def exec_score(title):
+              t = normalize_title(title)
+              if not t:
+                  return -1
+              if "chief executive officer" in t or re.search(r"\bceo\b", t): return 110
+              if "general manager" in t: return 105
+              if "managing director" in t: return 100
+              if "founder" in t and ("ceo" in t or "chief executive" in t): return 98
+              return -1
+
+          def candidate_rows(people, persona, search_path):
+              rows = []
+              scorer = hr_score if persona == "HR" else exec_score
+              for person in people:
+                  pid = clean(person.get("id"))
+                  title = clean(person.get("title"))
+                  score = scorer(title)
+                  if not pid or score < 0 or not person.get("has_email"):
+                      continue
+                  rows.append({
+                      "apollo_person_id": pid,
+                      "first_name": clean(person.get("first_name")),
+                      "last_name_obfuscated": clean(person.get("last_name_obfuscated")),
+                      "title": title,
+                      "persona": persona,
+                      "search_path": search_path,
+                      "candidate_score": score,
+                      "email_status": "verified",
+                  })
+              rows.sort(key=lambda row: (-row["candidate_score"], row["title"].lower(), row["apollo_person_id"]))
+              return rows
+
+          def discover_for_company(company):
+              org_id = clean(company.get("Apollo Organization ID"))
+              if not org_id:
+                  return {"company": company, "candidates": [], "error": "missing_apollo_org_id"}
+              try:
+                  ranked = []
+                  seen = set()
+
+                  # Small companies (51-100): CEO/GM first.
+                  small_exec = candidate_rows(request_people(org_id, EXEC_TITLES, small_only=True), "Executive", "small_51_100_exec")
+                  for row in small_exec:
+                      if row["apollo_person_id"] not in seen:
+                          ranked.append(row); seen.add(row["apollo_person_id"])
+
+                  # Main rule for the wider 51-200 pool: HR leadership.
+                  hr = candidate_rows(request_people(org_id, HR_TITLES, small_only=False), "HR", "hr_leadership")
+                  for row in hr:
+                      if row["apollo_person_id"] not in seen:
+                          ranked.append(row); seen.add(row["apollo_person_id"])
+
+                  # Fallback when no suitable HR person has a verified email.
+                  if not ranked or all(row["persona"] != "HR" for row in ranked):
+                      exec_all = candidate_rows(request_people(org_id, EXEC_TITLES, small_only=False), "Executive", "exec_fallback")
+                      for row in exec_all:
+                          if row["apollo_person_id"] not in seen:
+                              ranked.append(row); seen.add(row["apollo_person_id"])
+
+                  # Re-rank so small-company exec remains first, otherwise HR beats fallback exec.
+                  def final_key(row):
+                      if row["search_path"] == "small_51_100_exec": priority = 0
+                      elif row["persona"] == "HR": priority = 1
+                      else: priority = 2
+                      return (priority, -row["candidate_score"], row["title"].lower())
+                  ranked.sort(key=final_key)
+                  return {"company": company, "candidates": ranked[:3], "error": ""}
+              except Exception as exc:
+                  with lock:
+                      stats["errors"] += 1
+                  return {"company": company, "candidates": [], "error": clean(exc)}
+
+          with INPUT.open(newline="", encoding="utf-8-sig") as handle:
+              companies = list(csv.DictReader(handle))
+
+          results = []
+          with ThreadPoolExecutor(max_workers=6) as pool:
+              futures = [pool.submit(discover_for_company, company) for company in companies]
+              for index, future in enumerate(as_completed(futures), start=1):
+                  results.append(future.result())
+                  if index % 100 == 0:
+                      print(f"Processed {index}/{len(companies)} companies")
+
+          company_order = {clean(company.get("Apollo Organization ID")): idx for idx, company in enumerate(companies)}
+          results.sort(key=lambda result: company_order.get(clean(result["company"].get("Apollo Organization ID")), 10**9))
+
+          candidate_fields = [
+              "Company Name", "Industry", "Domain", "Website", "Company LinkedIn", "HQ City", "HQ Region",
+              "Apollo Organization ID", "Candidate Rank", "Apollo Person ID", "First Name", "Last Name (masked)",
+              "Title", "Persona", "Search Path", "Email Status"
+          ]
+          primary_fields = [
+              "Company Name", "Industry", "Domain", "Website", "Company LinkedIn", "HQ City", "HQ Region",
+              "Apollo Organization ID", "Apollo Person ID", "First Name", "Last Name (masked)", "Title", "Persona",
+              "Search Path", "Email Status"
+          ]
+
+          all_candidate_path = OUT_DIR / "ojoor-contact-candidates.csv"
+          primary_path = OUT_DIR / "ojoor-primary-candidates.csv"
+          missing_path = OUT_DIR / "ojoor-companies-without-candidate.csv"
+
+          with all_candidate_path.open("w", newline="", encoding="utf-8-sig") as handle:
+              writer = csv.DictWriter(handle, fieldnames=candidate_fields)
+              writer.writeheader()
+              for result in results:
+                  company = result["company"]
+                  for rank, candidate in enumerate(result["candidates"], start=1):
+                      writer.writerow({
+                          "Company Name": company.get("Company Name", ""),
+                          "Industry": company.get("Industry", ""),
+                          "Domain": company.get("Domain", ""),
+                          "Website": company.get("Website", ""),
+                          "Company LinkedIn": company.get("LinkedIn", ""),
+                          "HQ City": company.get("HQ City", ""),
+                          "HQ Region": company.get("HQ Region", ""),
+                          "Apollo Organization ID": company.get("Apollo Organization ID", ""),
+                          "Candidate Rank": rank,
+                          "Apollo Person ID": candidate["apollo_person_id"],
+                          "First Name": candidate["first_name"],
+                          "Last Name (masked)": candidate["last_name_obfuscated"],
+                          "Title": candidate["title"],
+                          "Persona": candidate["persona"],
+                          "Search Path": candidate["search_path"],
+                          "Email Status": candidate["email_status"],
+                      })
+
+          with primary_path.open("w", newline="", encoding="utf-8-sig") as handle:
+              writer = csv.DictWriter(handle, fieldnames=primary_fields)
+              writer.writeheader()
+              for result in results:
+                  if not result["candidates"]:
+                      continue
+                  company = result["company"]
+                  candidate = result["candidates"][0]
+                  writer.writerow({
+                      "Company Name": company.get("Company Name", ""),
+                      "Industry": company.get("Industry", ""),
+                      "Domain": company.get("Domain", ""),
+                      "Website": company.get("Website", ""),
+                      "Company LinkedIn": company.get("LinkedIn", ""),
+                      "HQ City": company.get("HQ City", ""),
+                      "HQ Region": company.get("HQ Region", ""),
+                      "Apollo Organization ID": company.get("Apollo Organization ID", ""),
+                      "Apollo Person ID": candidate["apollo_person_id"],
+                      "First Name": candidate["first_name"],
+                      "Last Name (masked)": candidate["last_name_obfuscated"],
+                      "Title": candidate["title"],
+                      "Persona": candidate["persona"],
+                      "Search Path": candidate["search_path"],
+                      "Email Status": candidate["email_status"],
+                  })
+
+          with missing_path.open("w", newline="", encoding="utf-8-sig") as handle:
+              fields = ["Company Name", "Industry", "Domain", "Website", "LinkedIn", "HQ City", "HQ Region", "Apollo Organization ID", "Discovery Error"]
+              writer = csv.DictWriter(handle, fieldnames=fields)
+              writer.writeheader()
+              for result in results:
+                  if result["candidates"]:
+                      continue
+                  company = result["company"]
+                  writer.writerow({**{field: company.get(field, "") for field in fields if field != "Discovery Error"}, "Discovery Error": result["error"]})
+
+          found = sum(1 for result in results if result["candidates"])
+          alternatives = sum(max(0, len(result["candidates"]) - 1) for result in results)
+          errors = sum(1 for result in results if result["error"])
+          summary = {
+              "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "companies": len(companies),
+              "companiesWithPrimaryCandidate": found,
+              "companiesWithoutCandidate": len(companies) - found,
+              "fallbackAlternativesStored": alternatives,
+              "discoveryErrors": errors,
+              "apolloPeopleSearchRequests": stats["requests"],
+              "apolloPeopleSearchRetries": stats["retries"],
+              "enrichmentCreditsUsed": 0,
+              "rules": {
+                  "smallCompanyDefinition": "51-100 employees",
+                  "smallCompanyPriority": "CEO / General Manager / Managing Director with verified email",
+                  "otherwisePriority": "CHRO / VP HR / Head of HR / HR Director / HR Manager with verified email",
+                  "fallback": "Executive only when no suitable HR candidate with verified email is found",
+                  "maxFinalContactsPerCompany": 1,
+                  "candidateAlternativesStoredForEmailFallback": 3,
+              },
+          }
+          (OUT_DIR / "ojoor-contact-discovery-summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+          print(json.dumps(summary, indent=2))
+          PY
+
+      - name: Upload contact discovery artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ojoor-contact-discovery
+          path: output/*
+          retention-days: 1
+          if-no-files-found: error
