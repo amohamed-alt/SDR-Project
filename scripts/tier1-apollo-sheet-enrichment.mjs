@@ -14,7 +14,42 @@ async function googleToken(){const r=await fetch("https://oauth2.googleapis.com/
 async function sheets(path,opts={},gt){const r=await fetch("https://sheets.googleapis.com/v4/spreadsheets/"+sheetId+path,{...opts,headers:{"authorization":"Bearer "+gt,"content-type":"application/json",...(opts.headers||{})}});if(!r.ok)throw new Error("Sheets "+r.status+" "+await r.text());return r.json()}
 async function apollo(path,body){const r=await fetch("https://api.apollo.io/api/v1/"+path,{method:"POST",headers:{"content-type":"application/json","x-api-key":apolloKey},body:JSON.stringify(body)});if(!r.ok)throw new Error("Apollo "+r.status);return r.json()}
 function parseRows(v){return v.values||[]}
-async function main(){if(!sheetId||!apolloKey||!serviceAccount)throw new Error("Missing required secrets");const gt=await googleToken();const data=await sheets("/values/"+encodeURIComponent(sheetName)+"!A1:T2165",{},gt);const rows=parseRows(data).slice(1);const targets=[];for(let i=0;i<rows.length;i++){const r=rows[i]||[];if(!String(r[12]||"").trim()&&!String(r[16]||"").trim()&&String(r[7]||"").trim())targets.push({row:i+2,org:String(r[7]).trim()})}const batch=targets.slice(0,maxCompanies);const found=[];let done=0;async function one(c){let d=await apollo("mixed_people/api_search",{organization_ids:[c.org],person_titles:hrTitles,per_page:25,page:1,include_similar_titles:false});let people=(d.people||[]).filter(p=>p.has_email===true);let fallback=false;if(!people.length){d=await apollo("mixed_people/api_search",{organization_ids:[c.org],person_titles:execTitles,organization_num_employees_ranges:["1,10","11,20","21,50","51,100","101,200"],per_page:25,page:1,include_similar_titles:false});people=(d.people||[]).filter(p=>p.has_email===true);fallback=true}if(people[0]){const p=people[0];found.push({row:c.row,values:[p.first_name||"",p.last_name||"",p.title||"",fallback?"Executive fallback":"HR/payroll decision maker","",p.linkedin_url||"",p.id||"",fallback?"Small-company CEO/Founder/GM fallback":"Apollo email-available HR/payroll match","Apollo GitHub workflow","selected_search_only_pending_email_enrichment"]})}done++}
+async function main(){if(!sheetId||!apolloKey||!serviceAccount)throw new Error("Missing required secrets");const gt=await googleToken();const data=await sheets("/values/"+encodeURIComponent(sheetName)+"!A1:T2165",{},gt);const rows=parseRows(data).slice(1);const targets=[];for(let i=0;i<rows.length;i++){const r=rows[i]||[];if(!String(r[8]||"").trim()&&!String(r[16]||"").trim()&&String(r[7]||"").trim())targets.push({row:i+2,org:String(r[7]).trim()})}const batch=targets.slice(0,maxCompanies);const found=[];let done=0;async function one(c){
+  try {
+    let d=await apollo("mixed_people/api_search",{organization_ids:[c.org],person_titles:hrTitles,per_page:25,page:1,include_similar_titles:true});
+    let people=(d.people||[]).filter(p=>p.has_email===true);
+    let fallback=false;
+    if(!people.length){
+      d=await apollo("mixed_people/api_search",{organization_ids:[c.org],person_titles:execTitles,organization_num_employees_ranges:["1,10","11,20","21,50","51,100","101,200"],per_page:25,page:1,include_similar_titles:true});
+      people=(d.people||[]).filter(p=>p.has_email===true);
+      fallback=true;
+    }
+    if(people[0]){
+      const matched=await apollo("people/bulk_match",{details:[{id:people[0].id}],reveal_personal_emails:true});
+      const p=(matched.matches||[])[0];
+      if(p&&p.email){
+        found.push({row:c.row,values:[
+          p.name||[p.first_name||people[0].first_name||"",p.last_name||""].filter(Boolean).join(" "),
+          p.first_name||people[0].first_name||"",
+          p.last_name||"",
+          p.title||people[0].title||"",
+          fallback?"CEO / founder decision maker":"HR/payroll decision maker",
+          p.email,
+          p.email_status||"email_available",
+          p.linkedin_url||people[0].linkedin_url||"",
+          p.id||people[0].id,
+          fallback?"Apollo current-role match; small-company executive fallback; enriched email":"Apollo current-role match; HR/payroll match; enriched email",
+          "Apollo GitHub workflow",
+          "apollo_github_enriched"
+        ]});
+      }
+    }
+  }catch(error){
+    console.error(JSON.stringify({stage:"company",row:c.row,error:String(error)}));
+  }finally{
+    done++;
+  }
+}
 for(let i=0;i<batch.length;i+=10){await Promise.all(batch.slice(i,i+10).map(one));console.log(JSON.stringify({done:Math.min(i+10,batch.length),total:batch.length,found:found.length}))}
-const requests=found.map(x=>({updateCells:{range:{sheetId:625047448,startRowIndex:x.row-1,endRowIndex:x.row,startColumnIndex:8,endColumnIndex:20},rows:[{values:[x.values[0]+" "+x.values[1],x.values[0],x.values[1],x.values[2],x.values[3],"","email_available_needs_enrichment",x.values[5],x.values[6],x.values[7],x.values[8],x.values[9]].map(v=>({userEnteredValue:{stringValue:String(v)}}))}],fields:"userEnteredValue"}}));if(requests.length)await sheets(":batchUpdate",{method:"POST",body:JSON.stringify({requests})},gt);console.log(JSON.stringify({considered:batch.length,found:found.length,remaining:targets.length-batch.length,written:requests.length}))}
+const requests=found.map(x=>({updateCells:{range:{sheetId:625047448,startRowIndex:x.row-1,endRowIndex:x.row,startColumnIndex:8,endColumnIndex:20},rows:[{values:x.values.map(v=>({userEnteredValue:{stringValue:String(v??"")}}))}],fields:"userEnteredValue"}}));if(requests.length)await sheets(":batchUpdate",{method:"POST",body:JSON.stringify({requests})},gt);console.log(JSON.stringify({considered:batch.length,found:found.length,remaining:targets.length-batch.length,written:requests.length}))}
 main().catch(e=>{console.error(e);process.exit(1)});
