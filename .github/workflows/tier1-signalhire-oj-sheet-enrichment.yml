@@ -4,9 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       max_companies:
-        description: "Maximum no-contact companies to process"
+        description: "Maximum rows missing a work email to process"
         required: false
-        default: "50"
+        default: "200"
+  schedule:
+    - cron: "15 3 * * *"
 
 permissions:
   contents: read
@@ -23,7 +25,7 @@ jobs:
       SIGNALHIRE_API_KEY: ${{ secrets.SignalHire_Oj }}
       GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
       TIER1_SPREADSHEET_ID: "1QaJX18_ZcKzN3PNouc0Y067a4qIXSJZIWQGOMuxDC1M"
-      MAX_COMPANIES: ${{ github.event.inputs.max_companies || '50' }}
+      MAX_COMPANIES: ${{ github.event.inputs.max_companies || '200' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
