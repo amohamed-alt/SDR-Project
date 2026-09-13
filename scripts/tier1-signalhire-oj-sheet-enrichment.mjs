@@ -305,14 +305,78 @@ async function findBestForCompany(target) {
   return null;
 }
 
+function nameQuery(value) {
+  return String(value || "").trim();
+}
+
+async function findExistingContactEmail(target) {
+  if (target.linkedin && target.linkedin.includes("linkedin.com")) {
+    const linkedinItem = target.linkedin.replace(/^http:/, "https:");
+    const directResults = await enrichProfiles([{ uid: linkedinItem }]);
+    const direct = directResults
+      .map(result => candidateFromResult(result, { uid: linkedinItem, fullName: target.contactName }))
+      .find(candidate => extractEmail(candidate));
+    if (direct) return { profile: { uid: linkedinItem, fullName: target.contactName }, candidate: direct };
+  }
+
+  if (!target.contactName) return null;
+  const result = await signalHireRequest(
+    searchUrl,
+    {
+      fullName: nameQuery(target.contactName),
+      currentCompany: `"${String(target.company).replace(/["\\\\]/g, " ").trim()}"`,
+      location: "Saudi Arabia",
+      size: 10
+    },
+    "search (existing contact)"
+  );
+  const profiles = (Array.isArray(result?.profiles) ? result.profiles : [])
+    .filter(profile =>
+      profile?.uid &&
+      (!Array.isArray(profile?.experience) || !profile.experience.length || companyMatches(profile, target.company))
+    )
+    .slice(0, MAX_PROFILES_PER_PATH);
+  if (!profiles.length) return null;
+
+  const fullResults = await enrichProfiles(profiles);
+  const byUid = new Map(fullResults.map(item => [String(item?.item || ""), item]));
+  const withEmail = profiles
+    .map(profile => ({
+      profile,
+      candidate: candidateFromResult(byUid.get(String(profile.uid)), profile)
+    }))
+    .filter(item => item.candidate && extractEmail(item.candidate));
+  return withEmail[0] || null;
+}
+
 async function processOne(target) {
   try {
     if (stopRequested) return null;
+
+    if (target.contactName) {
+      const existing = await findExistingContactEmail(target);
+      if (!existing) return null;
+      const email = extractEmail(existing.candidate);
+      return {
+        row: target.row,
+        company: target.company,
+        mode: "email_only",
+        email: email.value,
+        emailStatus: email.subType === "work" ? (email.rating >= 90 ? "verified" : "likely") : "personal_email",
+        emailSelection: "SignalHire_Oj email enrichment; existing contact preserved; matched by LinkedIn/name + company",
+        values: [email.value, email.subType === "work" ? (email.rating >= 90 ? "verified" : "likely") : "personal_email"]
+      };
+    }
+
     const found = await findBestForCompany(target);
     if (!found) return null;
+    const email = extractEmail(found.candidate);
+    if (!email) return null;
     return {
       row: target.row,
       company: target.company,
+      mode: "new_contact",
+      email: email.value,
       values: makeSheetValues(found.profile, found.candidate, found.fallback)
     };
   } catch (error) {
@@ -334,19 +398,57 @@ function cellData(value) {
 
 async function writeResults(results, googleAccessToken) {
   if (!results.length) return;
-  const requests = results.map(result => ({
-    updateCells: {
-      range: {
-        sheetId: contactsSheetId,
-        startRowIndex: result.row - 1,
-        endRowIndex: result.row,
-        startColumnIndex: 8,
-        endColumnIndex: 20
-      },
-      rows: [{ values: result.values.map(cellData) }],
-      fields: "userEnteredValue"
+  const requests = [];
+  for (const result of results) {
+    if (result.mode === "email_only") {
+      requests.push({
+        updateCells: {
+          range: {
+            sheetId: contactsSheetId,
+            startRowIndex: result.row - 1,
+            endRowIndex: result.row,
+            startColumnIndex: 13,
+            endColumnIndex: 15
+          },
+          rows: [{ values: result.values.map(cellData) }],
+          fields: "userEnteredValue"
+        }
+      });
+      requests.push({
+        updateCells: {
+          range: {
+            sheetId: contactsSheetId,
+            startRowIndex: result.row - 1,
+            endRowIndex: result.row,
+            startColumnIndex: 17,
+            endColumnIndex: 20
+          },
+          rows: [{
+            values: [
+              cellData(result.emailSelection),
+              cellData("SignalHire_Oj"),
+              cellData("signalhire_oj_email_enriched")
+            ]
+          }],
+          fields: "userEnteredValue"
+        }
+      });
+    } else {
+      requests.push({
+        updateCells: {
+          range: {
+            sheetId: contactsSheetId,
+            startRowIndex: result.row - 1,
+            endRowIndex: result.row,
+            startColumnIndex: 8,
+            endColumnIndex: 20
+          },
+          rows: [{ values: result.values.map(cellData) }],
+          fields: "userEnteredValue"
+        }
+      });
     }
-  }));
+  }
   await sheetsRequest(":batchUpdate", {
     method: "POST",
     body: JSON.stringify({ requests })
@@ -370,17 +472,17 @@ async function main() {
     row: index + 2,
     company: String(row?.[0] || "").trim(),
     contactName: String(row?.[8] || "").trim(),
+    title: String(row?.[11] || "").trim(),
     email: String(row?.[13] || "").trim(),
     emailStatus: String(row?.[14] || "").trim().toLowerCase(),
+    linkedin: String(row?.[15] || "").trim(),
     personId: String(row?.[16] || "").trim()
   })).map(target => ({
     ...target,
     hasWorkEmail: Boolean(target.email) && target.emailStatus !== "personal_email"
   })).filter(target =>
     target.company &&
-    !target.contactName &&
-    !target.hasWorkEmail &&
-    !target.personId
+    !target.hasWorkEmail
   ).slice(0, maxCompanies);
 
   console.log(JSON.stringify({
@@ -404,21 +506,19 @@ async function main() {
       total: targets.length,
       writtenThisCheckpoint: groupResults.filter(Boolean).length,
       written: results.length,
-      writtenWithEmail: results.filter(result => Boolean(result.values[5])).length,
+      writtenWithEmail: results.filter(result => Boolean(result.email)).length,
       remainingInRun: Math.max(0, targets.length - processed),
       stoppedByQuota: stopRequested
     }));
   }
 
-  const withEmail = results.filter(result => Boolean(result.values[5])).length;
-  const withoutEmail = results.length - withEmail;
+  const withEmail = results.filter(result => Boolean(result.email)).length;
   console.log(JSON.stringify({
     stage: "complete",
     considered: processed,
     foundPerson: results.length,
     written: results.length,
     writtenWithEmail: withEmail,
-    writtenWithoutEmail: withoutEmail,
     eligibleRemainingAfterRun: Math.max(0, targets.length - processed),
     stoppedByQuota: stopRequested
   }));
