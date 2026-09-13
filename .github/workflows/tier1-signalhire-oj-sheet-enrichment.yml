@@ -1,1 +1,37 @@
-name: Tier 1 SignalHire Oj Sheet Enrichment\n\non:\n  workflow_dispatch:\n    inputs:\n      max_companies:\n        description: "Maximum no-contact companies to process"\n        required: false\n        default: "50"\n\npermissions:\n  contents: read\n\nconcurrency:\n  group: tier1-contacts-enrichment\n  cancel-in-progress: false\n\njobs:\n  enrich:\n    runs-on: ubuntu-latest\n    timeout-minutes: 45\n    env:\n      SIGNALHIRE_API_KEY: ${{ secrets.SignalHire_Oj }}\n      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}\n      TIER1_SPREADSHEET_ID: "1QaJX18_ZcKzN3PNouc0Y067a4qIXSJZIWQGOMuxDC1M"\n      MAX_COMPANIES: ${{ github.event.inputs.max_companies || '50' }}\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 22\n      - name: Validate secrets\n        run: |\n          test -n "$SIGNALHIRE_API_KEY" || { echo "::error::SignalHire_Oj secret is missing"; exit 1; }\n          test -n "$GOOGLE_SERVICE_ACCOUNT_JSON" || { echo "::error::GOOGLE_SERVICE_ACCOUNT_JSON is missing"; exit 1; }\n      - name: Run SignalHire Oj enrichment\n        run: node scripts/tier1-signalhire-oj-sheet-enrichment.mjs\n
+name: Tier 1 SignalHire Oj Sheet Enrichment
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_companies:
+        description: "Maximum no-contact companies to process"
+        required: false
+        default: "50"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tier1-contacts-enrichment
+  cancel-in-progress: false
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SIGNALHIRE_API_KEY: ${{ secrets.SignalHire_Oj }}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      TIER1_SPREADSHEET_ID: "1QaJX18_ZcKzN3PNouc0Y067a4qIXSJZIWQGOMuxDC1M"
+      MAX_COMPANIES: ${{ github.event.inputs.max_companies || '50' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate secrets
+        run: |
+          test -n "$SIGNALHIRE_API_KEY" || { echo "::error::SignalHire_Oj secret is missing"; exit 1; }
+          test -n "$GOOGLE_SERVICE_ACCOUNT_JSON" || { echo "::error::GOOGLE_SERVICE_ACCOUNT_JSON is missing"; exit 1; }
+      - name: Run SignalHire Oj enrichment
+        run: node scripts/tier1-signalhire-oj-sheet-enrichment.mjs
