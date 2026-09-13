@@ -113,8 +113,8 @@ function normalize(value) {
     .toLowerCase()
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\\b(limited|ltd|llc|inc|company|co|corp|corporation|saudi|arabia)\\b/g, " ")
-    .replace(/\\s+/g, " ")
+    .replace(/\b(limited|ltd|llc|inc|company|co|corp|corporation|saudi|arabia)\b/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -153,14 +153,14 @@ function isQualifiedTitle(title, kind) {
   const value = String(title || "").toLowerCase();
   if (!value) return false;
 
-  const excluded = /vendor|procurement|purchasing|supply chain|warehouse|logistics|operations performance|\\boperations manager\\b|executive assistant|\\bassistant\\b|\\bcoordinator\\b|\\badministrator\\b|\\badmin\\b|recruiter|recruitment|talent acquisition/;
+  const excluded = /vendor|procurement|purchasing|supply chain|warehouse|logistics|operations performance|\boperations manager\b|executive assistant|\bassistant\b|\bcoordinator\b|\badministrator\b|\badmin\b|recruiter|recruitment|talent acquisition/;
   if (excluded.test(value)) return false;
 
   if (kind === "hr") {
-    return /\\bhr\\b|human resources|human capital|\\bpeople\\b|payroll|compensation|benefits|personnel|employee services|shared services|\\bchro\\b|\\bhrbp\\b|people operations/.test(value);
+    return /\bhr\b|human resources|human capital|\bpeople\b|payroll|compensation|benefits|personnel|employee services|shared services|\bchro\b|\bhrbp\b|people operations/.test(value);
   }
 
-  return /chief executive|\\bceo\\b|founder|co-founder|\\bowner\\b|managing director|general manager|\\bgm\\b/.test(value) &&
+  return /chief executive|\bceo\b|founder|co-founder|\bowner\b|managing director|general manager|\bgm\b/.test(value) &&
     !/deputy|advisor|consultant/.test(value);
 }
 
@@ -174,7 +174,7 @@ function profileRank(profile, kind, companyName) {
   } else {
     if (/ceo|chief executive/.test(title)) score += 25;
     if (/founder|owner/.test(title)) score += 20;
-    if (/general manager|managing director|\\bgm\\b/.test(title)) score += 15;
+    if (/general manager|managing director|\bgm\b/.test(title)) score += 15;
   }
   if (profile?.location) score += 1;
   return score;
@@ -187,6 +187,7 @@ function dedupeProfiles(profiles, kind, companyName) {
       const uid = String(profile?.uid || "").trim();
       const title = titleFromProfile(profile);
       if (!uid || seen.has(uid) || !isQualifiedTitle(title, kind)) return false;
+      if (Array.isArray(profile?.experience) && profile.experience.length && !companyMatches(profile, companyName)) return false;
       seen.add(uid);
       return true;
     })
@@ -197,7 +198,7 @@ function dedupeProfiles(profiles, kind, companyName) {
 function extractEmail(candidate) {
   const contacts = Array.isArray(candidate?.contacts) ? candidate.contacts : [];
   const emails = contacts
-    .filter(contact => contact?.type === "email" && /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(String(contact?.value || "")))
+    .filter(contact => contact?.type === "email" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(contact?.value || "")))
     .map(contact => ({
       value: String(contact.value).trim(),
       subType: String(contact.subType || "").toLowerCase(),
@@ -213,7 +214,7 @@ function extractEmail(candidate) {
 
 function splitName(candidate, fallbackProfile) {
   const fullName = String(candidate?.fullName || fallbackProfile?.fullName || "").trim();
-  const parts = fullName.split(/\\s+/).filter(Boolean);
+  const parts = fullName.split(/\s+/).filter(Boolean);
   return {
     fullName,
     firstName: String(candidate?.firstName || candidate?.first_name || parts[0] || "").trim(),
@@ -289,6 +290,7 @@ function candidateFromResult(result, profile) {
 }
 
 async function findBestForCompany(target) {
+  let bestNoEmail = null;
   for (const kind of ["hr", "exec"]) {
     const profiles = await searchCandidates(target.company, kind);
     if (!profiles.length) continue;
@@ -296,12 +298,13 @@ async function findBestForCompany(target) {
     const byUid = new Map(results.map(result => [String(result?.item || ""), result]));
     const enriched = profiles
       .map(profile => ({ profile, candidate: candidateFromResult(byUid.get(String(profile.uid)), profile) }))
-      .filter(item => item.candidate);
+      .filter(item => item.candidate)
+      .filter(item => isQualifiedTitle(titleFromProfile(item.candidate) || titleFromProfile(item.profile), kind));
     const withEmail = enriched.find(item => extractEmail(item.candidate));
-    const selected = withEmail || enriched[0];
-    if (selected) return { ...selected, fallback: kind === "exec" };
+    if (withEmail) return { ...withEmail, fallback: kind === "exec" };
+    if (enriched[0] && !bestNoEmail) bestNoEmail = { ...enriched[0], fallback: kind === "exec" };
   }
-  return null;
+  return bestNoEmail;
 }
 
 async function processOne(target) {
