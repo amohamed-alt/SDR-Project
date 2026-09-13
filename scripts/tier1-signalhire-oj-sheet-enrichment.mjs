@@ -371,12 +371,15 @@ async function main() {
     company: String(row?.[0] || "").trim(),
     contactName: String(row?.[8] || "").trim(),
     email: String(row?.[13] || "").trim(),
-    emailStatus: String(row?.[14] || "").trim(),
+    emailStatus: String(row?.[14] || "").trim().toLowerCase(),
     personId: String(row?.[16] || "").trim()
+  })).map(target => ({
+    ...target,
+    hasWorkEmail: Boolean(target.email) && target.emailStatus !== "personal_email"
   })).filter(target =>
     target.company &&
     !target.contactName &&
-    !target.email &&
+    !target.hasWorkEmail &&
     !target.personId
   ).slice(0, maxCompanies);
 
