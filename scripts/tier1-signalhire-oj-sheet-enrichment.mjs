@@ -290,7 +290,6 @@ function candidateFromResult(result, profile) {
 }
 
 async function findBestForCompany(target) {
-  let bestNoEmail = null;
   for (const kind of ["hr", "exec"]) {
     const profiles = await searchCandidates(target.company, kind);
     if (!profiles.length) continue;
@@ -302,9 +301,8 @@ async function findBestForCompany(target) {
       .filter(item => isQualifiedTitle(titleFromProfile(item.candidate) || titleFromProfile(item.profile), kind));
     const withEmail = enriched.find(item => extractEmail(item.candidate));
     if (withEmail) return { ...withEmail, fallback: kind === "exec" };
-    if (enriched[0] && !bestNoEmail) bestNoEmail = { ...enriched[0], fallback: kind === "exec" };
   }
-  return bestNoEmail;
+  return null;
 }
 
 async function processOne(target) {
@@ -373,6 +371,7 @@ async function main() {
     company: String(row?.[0] || "").trim(),
     contactName: String(row?.[8] || "").trim(),
     email: String(row?.[13] || "").trim(),
+    emailStatus: String(row?.[14] || "").trim(),
     personId: String(row?.[16] || "").trim()
   })).filter(target =>
     target.company &&
