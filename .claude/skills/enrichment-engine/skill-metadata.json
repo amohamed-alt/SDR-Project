@@ -1,0 +1,12 @@
+{
+  "documents": {
+    "SKILL.md": {
+      "kind": "entrypoint",
+      "title": "Enrichment Engine",
+      "tags": [
+        "recipe"
+      ],
+      "providers": []
+    }
+  }
+}
