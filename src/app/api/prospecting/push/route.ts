@@ -1,3 +1,4 @@
+import { createScheduledMaritaTask, MaritaScheduleError } from "@/lib/marita-task-scheduler";
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -412,13 +413,14 @@ export async function POST(request: Request) {
     ];
     if (company.companyId) associations.push({ to: { id: company.companyId }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 192 }] });
 
-    const task = await hubspotRequest<{ id: string }>("/crm/objects/2026-03/tasks", {
+    const elevatus = /\belevatus\b/i.test(prospect.source);
+    const createTask = (dueAt: string) => hubspotRequest<{ id: string }>("/crm/objects/2026-03/tasks", {
       method: "POST",
       body: JSON.stringify({
         properties: {
-          hs_timestamp: clickedAt,
+          hs_timestamp: dueAt,
           hubspot_owner_id: owner.id,
-          hs_task_subject: `🔥 SALES SIGNAL — ${prospect.fullName}`,
+          hs_task_subject: `${elevatus ? "Elevatus — " : ""}🔥 SALES SIGNAL — ${prospect.fullName}`,
           hs_task_body: taskBody(prospect, clickedAt, owner.name),
           hs_task_status: "NOT_STARTED",
           hs_task_priority: prospect.priority === "high" ? "HIGH" : "MEDIUM",
@@ -427,6 +429,20 @@ export async function POST(request: Request) {
         associations,
       }),
     });
+
+    const scheduled = owner.id === MARITA_OWNER_ID
+      ? await createScheduledMaritaTask({
+        contactId,
+        companyId: company.companyId,
+        elevatus,
+        readTasks: () => searchAll("tasks", ["hubspot_owner_id", "hs_task_status", "hs_timestamp", "hs_task_subject"], [
+          { propertyName: "hubspot_owner_id", operator: "EQ", value: MARITA_OWNER_ID },
+          { propertyName: "hs_task_status", operator: "NEQ", value: "COMPLETED" },
+        ]),
+        createTask,
+      })
+      : { task: await createTask(clickedAt), dueAt: clickedAt };
+    const task = scheduled.task;
 
     await logAcquisitionPush(prospect, { companyId: company.companyId, contactId, taskId: String(task.id), owner });
 
@@ -444,13 +460,14 @@ export async function POST(request: Request) {
       ownerName: owner.name,
       ownerPreservedFromCompany: Boolean(company.existingOwnerId && owner.id === company.existingOwnerId),
       clickedAt,
+      scheduledAt: scheduled.dueAt,
       phonesStoredInTask: allPhones(prospect).length,
       emailsStoredInTask: allEmails(prospect).length,
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Push prospect to HubSpot failed", error);
     const message = error instanceof Error ? error.message : "Unable to push prospect to HubSpot.";
-    const status = /Owner authorization/.test(message) ? 401 : /not enabled for acquisition/.test(message) ? 400 : 500;
+    const status = error instanceof MaritaScheduleError ? error.status : /Owner authorization/.test(message) ? 401 : /not enabled for acquisition/.test(message) ? 400 : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }
