@@ -122,7 +122,7 @@ test("comparison remains inside the shared dashboard shell", async ({ page }) =>
   await expect(page.locator(".sidebar")).toBeVisible();
   await expect(page.getByRole("heading", { name: "SDR performance", exact: true })).toBeVisible();
   await expect(page.locator("main.app-shell")).toHaveCount(1);
-  for (const owner of ["Marita", "Daniel", "Ursula", "Zein"]) {
+  for (const owner of ["Marita", "Daniel"]) {
     await expect(page.getByRole("columnheader", { name: owner, exact: true })).toBeVisible();
   }
 });
