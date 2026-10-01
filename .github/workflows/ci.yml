@@ -82,7 +82,12 @@ jobs:
 
       - name: Install Playwright Chromium
         if: github.event_name == 'pull_request'
-        run: npx playwright install --with-deps chromium
+        run: |
+          if command -v google-chrome >/dev/null 2>&1; then
+            echo "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=$(command -v google-chrome)" >> "$GITHUB_ENV"
+          else
+            npx playwright install --with-deps chromium
+          fi
 
       - name: Browser E2E smoke
         if: github.event_name == 'pull_request'
