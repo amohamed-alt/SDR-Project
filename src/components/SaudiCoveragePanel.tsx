@@ -11,7 +11,7 @@ type Report = {
 };
 const percent = (value: number) => `${Math.round(value * 100)}%`;
 
-export function SaudiCoveragePanel({ unlocked, total, crmTotal, onChanged }: { unlocked: boolean; total: number; crmTotal: number; onChanged: () => Promise<void> }) {
+export function SaudiCoveragePanel({ unlocked, total, crmTotal, onChanged }: { unlocked: boolean; total?: number; crmTotal?: number; onChanged: () => Promise<void> }) {
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -51,10 +51,10 @@ export function SaudiCoveragePanel({ unlocked, total, crmTotal, onChanged }: { u
     {!report && !error ? <p role="status">Loading coverage…</p> : null}
     {coverage ? <>
       <div className={styles.coverageMetrics}>
-        <div><span>CRM histories checked</span><strong>{coverage.checked.toLocaleString()} / {crmTotal.toLocaleString()}</strong></div>
+        <div><span>CRM histories checked</span><strong>{coverage.checked.toLocaleString()} / {crmTotal?.toLocaleString() ?? "…"}</strong></div>
         <div><span>Connected call</span><strong>{coverage.connected.toLocaleString()}</strong></div>
         <div><span>Meeting held</span><strong>{coverage.meetingsHeld.toLocaleString()}</strong></div>
-        <div><span>Both milestones</span><strong>{coverage.both.toLocaleString()} / {total.toLocaleString()}</strong></div>
+        <div><span>Both milestones</span><strong>{coverage.both.toLocaleString()} / {total?.toLocaleString() ?? "…"}</strong></div>
       </div>
       <p>Only checked HubSpot histories contribute outcomes. Unchecked companies are unknown. Counts include company and contact activities. {coverage.lastCheckedAt ? `Last sync: ${new Date(coverage.lastCheckedAt).toLocaleString()}.` : "Historical sync has not run yet."}</p>
       <details><summary>{report.model.mode === "learning" ? "Learning from outcomes" : "Collecting evidence"} · {report.model.matureCompanies} mature companies</summary>

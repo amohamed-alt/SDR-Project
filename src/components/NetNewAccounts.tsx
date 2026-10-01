@@ -449,7 +449,7 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
     {notice ? <div role="status" className={styles.notice}><Check size={17}/><span>{notice}</span><button onClick={() => setNotice("")}><X size={14}/></button></div> : null}
 
     {inventoryScope && crawlProgress ? <p className={styles.costNote}>Apollo: {crawlProgress.completedPages.length} / {crawlProgress.totalPages ?? "pending"} pages · {crawlProgress.total === null ? "First source page pending" : `${number(crawlProgress.total)} source records`} · {crawlProgress.uncertainPages.length ? "Paused: uncertain provider response needs review" : crawlProgress.complete ? "Source pages reconciled" : crawlProgress.sourcePagesComplete ? `${number(crawlProgress.uniqueProviderOrganizations || 0)} unique Apollo identities — source reconciliation pending` : "Company stock loading"} · Source coverage is not a census of all Saudi companies</p> : null}
-    {inventoryScope ? <SaudiCoveragePanel unlocked={adminUnlocked} total={summary.total || 0} crmTotal={summary.existing_hubspot || 0} onChanged={load}/> : null}
+    {inventoryScope ? <SaudiCoveragePanel unlocked={adminUnlocked} total={payload?.summary.total} crmTotal={payload?.summary.existing_hubspot} onChanged={load}/> : null}
 
     <section className={styles.metrics}>
       <div><span>{inventory ? "Companies stored" : "Eligible"}</span><strong>{number((inventory ? summary.total : summary.eligible) || 0)}</strong><small>{inventoryScope ? "Saudi 200+ discovery" : "Net-new after exclusions"}</small></div>

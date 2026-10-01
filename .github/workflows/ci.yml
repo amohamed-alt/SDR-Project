@@ -122,7 +122,7 @@ jobs:
           PG=$(docker run -d --rm --network inventory-ci --name inventory-postgres -e POSTGRES_PASSWORD=inventory_ci -e POSTGRES_DB=inventory_ci postgres:16)
           trap 'docker rm -f "$PG" >/dev/null 2>&1 || true; docker network rm inventory-ci >/dev/null 2>&1 || true' EXIT
           for I in $(seq 1 30); do
-            if docker exec "$PG" pg_isready -U postgres -d inventory_ci; then break; fi
+            if docker exec "$PG" pg_isready -h inventory-postgres -U postgres -d inventory_ci; then break; fi
             sleep 1
           done
           docker run --rm --network inventory-ci \
