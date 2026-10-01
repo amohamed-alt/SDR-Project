@@ -2,9 +2,9 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-export const SAUDI_INVENTORY_VERSION = "saudi-200-v1";
+export const SAUDI_INVENTORY_VERSION = "saudi-200-v2";
 export const SAUDI_EMPLOYEE_RANGE = "200,1000000000";
-export type SaudiPage = { organizations: Record<string, unknown>[]; total: number };
+export type SaudiPage = { organizations: Record<string, unknown>[]; total: number; formatVersion?: number; scopeVerified?: boolean; legacyRepair?: boolean; providerResponse?: Record<string, unknown> };
 
 export class SaudiInventoryState {
   private directory: string;
@@ -40,16 +40,28 @@ export class SaudiInventoryState {
     try { files = await fs.readdir(this.directory); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") files = []; else throw error; }
     const pages = (suffix: string) => files.filter((name) => name.endsWith(`.${suffix}.json`)).map((name) => Number(name.split(".")[0])).sort((a, b) => a - b);
-    const completedPages = pages("result"), rawPages = pages("raw"), attemptedPages = pages("attempt");
+    const allResultPages = pages("result"), rawPages = pages("raw"), attemptedPages = pages("attempt");
+    const results = await Promise.all(allResultPages.map(async (page) => ({ page, result: await this.read<{ parserVersion?: number; providerIds?: string[] }>(page, "result") })));
+    const completedPages = results.filter((item) => item.result?.parserVersion === 2).map((item) => item.page);
     const first = await this.read<SaudiPage>(1, "raw");
     const total = first?.total ?? null;
     const totalPages = total === null ? null : Math.ceil(total / 100);
+    const savedRaw = await this.read<SaudiPage>(1, "saved-raw");
+    const savedTotalPages = savedRaw ? Math.ceil(savedRaw.total / 100) : null;
+    const savedResultPages = pages("saved-result");
+    const savedResults = await Promise.all(savedResultPages.map((page) => this.read<{ providerIds?: string[] }>(page, "saved-result")));
+    const providerIds = new Set([...results.map((item) => item.result), ...savedResults].flatMap((item) => item?.providerIds || []));
+    const savedComplete = savedTotalPages !== null && savedResultPages.length >= Math.max(1, savedTotalPages);
     let nextPage = 1;
     while (completedPages.includes(nextPage)) nextPage += 1;
+    const sourcePagesComplete = totalPages !== null && completedPages.length >= Math.max(1, totalPages);
+    const repairComplete = !first?.legacyRepair || (savedComplete && providerIds.size >= (total || 0));
     return { version: SAUDI_INVENTORY_VERSION, total, totalPages, completedPages, rawPages, attemptedPages,
       uncertainPages: attemptedPages.filter((page) => !rawPages.includes(page)),
       nextPage: totalPages !== null && nextPage > Math.max(1, totalPages) ? null : nextPage,
-      complete: totalPages !== null && completedPages.length >= Math.max(1, totalPages),
+      complete: sourcePagesComplete && repairComplete,
+      sourcePagesComplete, legacyRepair: Boolean(first?.legacyRepair), uniqueProviderOrganizations: providerIds.size,
+      savedAccountPages: savedResultPages.length, savedAccountTotalPages: savedTotalPages, savedAccountsComplete: savedComplete,
       providerCallsAttempted: attemptedPages.length, signalHireCreditsUsed: 0 };
   }
 }

@@ -155,7 +155,7 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
       try {
         const response = await fetch("/api/lead-inventory/saudi", { cache: "no-store" });
         const result = await response.json();
-        if (active && response.ok && result.version === "saudi-200-v1") {
+        if (active && response.ok && result.version === "saudi-200-v2") {
           setCrawlProgress(result);
           if (result.complete || result.uncertainPages.length) window.clearInterval(timer);
         }

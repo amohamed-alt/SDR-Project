@@ -1,3 +1,4 @@
+import { apolloCompanyRecords } from "@/lib/apollo-company-response";
 import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -196,11 +197,7 @@ async function apolloPage(page: number) {
     );
     throw new Error(`Apollo coverage discovery failed: ${message}`);
   }
-  const organizations = Array.isArray(payload.organizations)
-    ? payload.organizations as ApolloOrganization[]
-    : Array.isArray(payload.accounts)
-      ? payload.accounts as ApolloOrganization[]
-      : [];
+  const organizations = apolloCompanyRecords(payload) as ApolloOrganization[];
   const pagination = (payload.pagination || {}) as Record<string, unknown>;
   return {
     organizations,
