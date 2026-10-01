@@ -19,6 +19,7 @@ import { searchAll } from "@/lib/hubspot";
 import { normalizeCompanyDomain } from "@/lib/prospecting-company-intelligence";
 import { scoreTalenteraAccount } from "@/lib/talentera-intelligence";
 import { verifiedActiveJobCount } from "@/lib/acquisition-job-count";
+import { compatibleCompanyIdentity } from "@/lib/company-dedupe";
 import { manualTaskOwners } from "@/lib/acquisition-routing";
 import { sdrAdminAuthorized, sdrAdminConfigured } from "@/lib/sdr-admin-auth";
 
@@ -437,7 +438,7 @@ async function enrichPerson(account: AcquisitionAccount, person: AcquisitionPers
     primaryPersona: account.primaryPersona,
     secondaryPersona: account.secondaryPersona,
   })[0];
-  if (!verification || verification.score < 38 || !clean(current?.company)) {
+  if (!verification || verification.score < 38 || !current?.current || !compatibleCompanyIdentity({ requestedName: account.name, requestedDomain: "", existingName: clean(current?.company), existingDomain: "" })) {
     throw new Error("SignalHire enriched the person, but current-company/persona verification was too weak to push safely.");
   }
   const enriched: AcquisitionPerson = {

@@ -185,8 +185,8 @@ def acquisition_accounts_v2(
         params.append(normalize_domain(domain))
     if q:
         term = f"%{clean_text(q, 300)}%"
-        clauses.append("(a.name ILIKE %s OR a.domain ILIKE %s OR a.industry ILIKE %s OR a.country ILIKE %s OR a.primary_persona ILIKE %s)")
-        params.extend([term, term, term, term, term])
+        clauses.append("(a.name ILIKE %s OR a.domain ILIKE %s OR a.industry ILIKE %s OR a.country ILIKE %s OR a.primary_persona ILIKE %s OR a.detected_ats ILIKE %s OR a.strongest_signal ILIKE %s)")
+        params.extend([term, term, term, term, term, term, term])
 
     readiness_clause = ""
     if readiness == "ready":

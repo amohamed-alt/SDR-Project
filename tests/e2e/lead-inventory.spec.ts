@@ -1,5 +1,13 @@
 import { expect, test } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("sdr_v2_visitor_id", "visitor_playwright_inventory");
+    localStorage.setItem("sdr_v2_visitor_name", "Playwright inventory");
+    sessionStorage.setItem("sdr_v2_session_id", "session_playwright_inventory");
+  });
+});
+
 const account = {
   domain: "example.com", name: "Example company", country: "Saudi Arabia", industry: "Retail",
   employeeCount: 0, source: "Clay", evidence: { businessLine: "Talentera" }, gtmTier: "Watch", gtmScore: 0,

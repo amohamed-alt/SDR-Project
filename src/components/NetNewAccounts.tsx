@@ -320,6 +320,7 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
   async function push(person: Person) {
     if (!selected) return;
     if (selected.exclusionStatus !== "eligible") { setError("Qualify this company before pushing people."); return; }
+    if (inventory && !person.phones.length) { setError("A phone number is required for an SDR call task."); return; }
     if (person.enrichmentStatus !== "enriched" || (!person.emails.length && !person.phones.length)) {
       setError("Enrich the selected person and verify at least one email or phone before pushing to HubSpot.");
       return;
@@ -541,7 +542,7 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
               <div className={styles.personActions}>
                 <span className={styles.personScore}>{person.rankScore}</span>
                 {person.linkedinUrl ? <a href={person.linkedinUrl} target="_blank" rel="noreferrer" aria-label={`LinkedIn profile for ${person.fullName}`}><ExternalLink size={14}/></a> : null}
-                {person.enrichmentStatus !== "enriched" ? <button type="button" onClick={() => void enrich(person)} disabled={Boolean(busy) || !adminUnlocked || selected.exclusionStatus !== "eligible"}>{busy === `enrich:${person.uid}` ? <LoaderCircle className={styles.spin} size={13}/> : <Sparkles size={13}/>} Enrich</button> : <button type="button" className={styles.pushButton} onClick={() => void push(person)} disabled={Boolean(busy) || !adminUnlocked || selected.exclusionStatus !== "eligible"}>{busy === `push:${person.uid}` ? <LoaderCircle className={styles.spin} size={13}/> : <ArrowUpRight size={13}/>} Push</button>}
+                {person.enrichmentStatus !== "enriched" ? <button type="button" onClick={() => void enrich(person)} disabled={Boolean(busy) || !adminUnlocked || selected.exclusionStatus !== "eligible"}>{busy === `enrich:${person.uid}` ? <LoaderCircle className={styles.spin} size={13}/> : <Sparkles size={13}/>} Enrich</button> : <button type="button" className={styles.pushButton} onClick={() => void push(person)} disabled={Boolean(busy) || !adminUnlocked || selected.exclusionStatus !== "eligible" || (inventory && !person.phones.length)}>{busy === `push:${person.uid}` ? <LoaderCircle className={styles.spin} size={13}/> : <ArrowUpRight size={13}/>} Push</button>}
               </div>
             </div>)}
             {!people.length ? <div className={styles.peopleEmpty}><UserRoundSearch size={22}/><span>No people searched yet.</span></div> : null}

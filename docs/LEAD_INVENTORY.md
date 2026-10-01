@@ -9,7 +9,7 @@ Open `/?view=inventory` or `/lead-inventory`. The inventory uses the existing pe
 3. Import CSV or JSON, up to 100 companies / 250 KB. Choose the source, preview the duplicate/CRM checks, then save. Duplicate domains never overwrite existing inventory rows, even when imports race.
 4. Imported companies enter Review. Confirm identity and product fit before searching people. Existing HubSpot records and government signals remain excluded.
 5. Open the company, find ranked people using SignalHire, then choose an individual to enrich. Already-enriched people reuse stored results instead of another paid lookup. CRM is rechecked before paid enrichment.
-6. Choose Marita or Daniel for a newly assigned company. Existing assignments remain frozen. Push one person after reviewing the data. Inventory pushes recheck company/contact presence before CRM writes and retain existing task deduplication.
+6. Choose Marita or Daniel for a newly assigned company. Existing assignments remain frozen. Push one person after reviewing the data; SDR call tasks require a phone number. Inventory pushes recheck company/contact presence before CRM writes and retain existing task deduplication.
 
 ## Import format
 

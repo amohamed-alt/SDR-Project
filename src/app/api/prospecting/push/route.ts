@@ -375,6 +375,7 @@ export async function POST(request: Request) {
     const prospect = parsed.data;
     const requestedOwner = requestedAssignment(prospect, request);
     if (prospect.inventoryBusinessLine) {
+      if (!allPhones(prospect).length) return NextResponse.json({ error: "Inventory SDR call tasks require a phone number." }, { status: 409 });
       if (prospect.assignmentMode !== "acquisition") return NextResponse.json({ error: "Inventory pushes require authorized SDR assignment." }, { status: 403 });
       const storedAccount = await getAcquisitionAccount(companyDomain(prospect));
       if (!storedAccount || storedAccount.exclusionStatus !== "eligible") return NextResponse.json({ error: "Qualify this inventory company before pushing." }, { status: 409 });
