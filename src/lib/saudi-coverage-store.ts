@@ -18,3 +18,5 @@ export const finishInventoryOperation = (key: string, state: "completed" | "revi
 export const saveCoverage = (snapshot: CoverageSnapshot, observations: CoverageObservation[]) => acquisitionDataRequest("/v2/inventory/coverage", { method: "PUT", body: JSON.stringify({ domain: snapshot.domain, snapshot, observations }) }, 10_000);
 
 export const recoverPreReveal = (domain: string) => acquisitionDataRequest<{ recovered: boolean }>("/v2/inventory/recover-pre-reveal", { method: "POST", body: JSON.stringify({ domain }) }, 10_000);
+
+export const recoverVerifiedAts = (domain: string) => acquisitionDataRequest<{ recovered: boolean }>("/v2/inventory/recover-verified-ats", { method: "POST", body: JSON.stringify({ domain }) }, 10_000);

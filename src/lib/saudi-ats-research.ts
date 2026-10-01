@@ -17,7 +17,7 @@ async function publicCareerPage(url: string, domain: string) {
 
 export async function researchInventoryAts(account: AcquisitionAccount) {
   const previous = account.evidence.inventoryAts as InventoryAts | undefined;
-  if (previous && atsProduct(previous)) return { account, ats: previous };
+  if (previous && (atsProduct(previous) || (account.evidence.workerCareerCheckedAt && Date.now() - Date.parse(String(account.evidence.workerCareerCheckedAt)) < 86400000))) return { account, ats: previous };
   const ats: InventoryAts = { status: "unknown", vendor: "", careerUrl: "", evidenceUrl: "", reason: "Career/ATS verification is incomplete", checkedAt: new Date().toISOString() };
   try {
     // Fast first pass follows actual official-site links, without guessing URLs.
@@ -66,4 +66,24 @@ export async function researchInventoryAts(account: AcquisitionAccount) {
     evidence: { ...account.evidence, inventoryAts: ats, atsVerified: ats.status !== "unknown" } };
   await upsertAcquisitionAccounts([updated]);
   return { account: updated, ats };
+}
+
+// The existing authenticated scheduler supplies official HTML, never an asserted
+// vendor. The application applies the same evidence parser and routing policy.
+export async function recordWorkerCareerPages(account: AcquisitionAccount, pages: {url: string; html: string}[]) {
+  const previous = account.evidence.inventoryAts as InventoryAts | undefined;
+  const ats: InventoryAts = previous && atsProduct(previous) ? previous : { status: "unknown", vendor: "", careerUrl: "", evidenceUrl: "", reason: "Scheduled official-page research found no verified application process", checkedAt: new Date().toISOString() };
+  for (const page of pages) {
+    const url = new URL(page.url), host = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (!/^https?:$/.test(url.protocol) || url.username || url.password || (host !== account.domain && !host.endsWith(`.${account.domain}`))) continue;
+    const found = careerMarkup(page.html, page.url);
+    if (found.vendor) {
+      Object.assign(ats, { status: "detected", vendor: found.vendor, careerUrl: page.url, evidenceUrl: page.url, reason: `Official application link to ${found.vendor}: ${found.applicationUrl}`, checkedAt: new Date().toISOString() });
+      break;
+    }
+    if (found.direct && ats.status !== "detected") Object.assign(ats, { status: "no_ats_observed", vendor: "", careerUrl: page.url, evidenceUrl: page.url, reason: "Official career page accepts a CV through a direct form or recruitment email; no recognized ATS link was observed in the checked public application page.", checkedAt: new Date().toISOString() });
+  }
+  await upsertAcquisitionAccounts([{ ...account, careerPageUrl: ats.careerUrl || account.careerPageUrl, detectedAts: ats.vendor || account.detectedAts,
+    evidence: { ...account.evidence, inventoryAts: ats, atsVerified: !!atsProduct(ats), workerCareerCheckedAt: new Date().toISOString() } }]);
+  return ats;
 }
