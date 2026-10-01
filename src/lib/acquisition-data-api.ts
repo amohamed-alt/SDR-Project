@@ -139,6 +139,9 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs = READ
 }
 
 export async function listAcquisitionAccounts(filters: {
+  allSources?: boolean;
+  source?: string;
+  businessLine?: string;
   limit?: number;
   offset?: number;
   status?: string;
@@ -151,6 +154,9 @@ export async function listAcquisitionAccounts(filters: {
   includeExcluded?: boolean;
 } = {}) {
   const query = new URLSearchParams();
+  if (filters.allSources) query.set("all_sources", "true");
+  if (filters.source) query.set("source", filters.source);
+  if (filters.businessLine) query.set("business_line", filters.businessLine);
   query.set("limit", String(Math.min(1000, Math.max(1, filters.limit ?? 300))));
   query.set("offset", String(Math.max(0, Math.trunc(filters.offset ?? 0))));
   if (filters.status) query.set("status", filters.status);
@@ -183,11 +189,11 @@ export async function reclassifyStoredAcquisitionCoverage() {
   }>("/v2/acquisition/reclassify", { method: "POST", body: "{}" }, 60_000);
 }
 
-export async function upsertAcquisitionAccounts(accounts: AcquisitionAccount[]) {
+export async function upsertAcquisitionAccounts(accounts: AcquisitionAccount[], insertOnly = false) {
   if (!accounts.length) return { status: "stored", accounts: 0 };
   return request<{ status: string; accounts: number }>("/v1/acquisition/accounts", {
     method: "PUT",
-    body: JSON.stringify({ accounts: accounts.map(acquisitionAccountWritePayload) }),
+    body: JSON.stringify({ accounts: accounts.map(acquisitionAccountWritePayload), insertOnly }),
   }, Math.max(WRITE_TIMEOUT_MS, 10_000));
 }
 

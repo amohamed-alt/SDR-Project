@@ -302,3 +302,12 @@
   .personActions { grid-column: 2; justify-content: flex-start; }
   .personActions button { width: auto; }
 }
+
+.pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px; flex-wrap: wrap; font-size: 12px; }
+.pagination button { min-height: 40px; padding: 8px 14px; border: 1px solid #dce5e2; border-radius: 8px; background: #fff; color: #284744; cursor: pointer; }
+.pagination button:disabled { opacity: .5; cursor: default; }
+.importPreview { margin-top: 12px; font-size: 12px; }
+.importPreview ul { max-height: 240px; overflow: auto; padding-left: 18px; }
+.importPreview li { margin-bottom: 8px; }
+.importPreview small { display: block; color: #526078; }
+.page button:focus-visible, .page input:focus-visible, .page select:focus-visible { outline: 2px solid #20764b; outline-offset: 3px; }

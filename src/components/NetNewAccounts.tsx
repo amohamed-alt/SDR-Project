@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { parseInventoryFile } from "@/lib/lead-inventory-import";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft, ArrowUpRight, BadgeCheck, Building2, Check, ChevronRight, CircleAlert,
   Coins, Database, ExternalLink, Filter, KeyRound, LoaderCircle, Mail, Phone,
@@ -74,18 +75,12 @@ type Payload = {
   summary: Record<string, number>;
   accounts: Account[];
   configuration: Configuration;
+  pagination?: { filteredTotal: number; offset: number; returned: number };
   error?: string;
 };
 
 type FilterTier = "" | Account["gtmTier"];
-type FilterCountry = "" | "Saudi Arabia" | "United Arab Emirates";
-
-const OWNER_STORAGE_KEY = "sdr-acquisition-owner-token";
-
-function savedOwnerToken() {
-  if (typeof window === "undefined") return "";
-  return window.sessionStorage.getItem(OWNER_STORAGE_KEY) || "";
-}
+type FilterCountry = string;
 
 function number(value: number) {
   return new Intl.NumberFormat("en-US").format(value || 0);
@@ -96,7 +91,8 @@ function track(feature: string, meta: Record<string, unknown> = {}) {
 }
 
 function statusLabel(account: Account) {
-  if (account.status === "pushed") return "In HubSpot";
+  if (account.status === "pushed" || account.hubspotCompanyId) return "In HubSpot";
+  if (account.exclusionStatus === "excluded") return "Excluded";
   if (account.phoneReadyCount > 0) return "Phone ready";
   if (account.status === "enriched") return "Email ready";
   if (account.status === "people_ready") return "People found";
@@ -123,7 +119,8 @@ function first<T>(values: T[] | undefined) {
   return values?.[0];
 }
 
-export function NetNewAccounts({ onBack }: { onBack: () => void }) {
+export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => void; inventory?: boolean }) {
+  const loadRequest = useRef(0);
   const [payload, setPayload] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
@@ -134,32 +131,50 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
   const [country, setCountry] = useState<FilterCountry>("");
   const [selectedDomain, setSelectedDomain] = useState("");
   const [people, setPeople] = useState<Person[]>([]);
-  const [ownerToken, setOwnerToken] = useState(savedOwnerToken);
-  const [ownerTokenDraft, setOwnerTokenDraft] = useState(savedOwnerToken);
+  const [adminUnlocked, setAdminUnlocked] = useState(false);
+  const [adminPassword, setAdminPassword] = useState("");
+  const [page, setPage] = useState(0);
+  const [readiness, setReadiness] = useState("");
+  const [source, setSource] = useState("");
+  const [businessLine, setBusinessLine] = useState("");
+  const [routeOwner, setRouteOwner] = useState("31644369");
+  const [importSource, setImportSource] = useState("Clay");
+  const [importRows, setImportRows] = useState<unknown[]>([]);
+  const [importPreview, setImportPreview] = useState<{ candidates: number; duplicates: number; invalid: number; rows: { name: string; outcome: string; reason: string }[] } | null>(null);
   const [pages, setPages] = useState(1);
-  const [showExcluded, setShowExcluded] = useState(false);
+  const [showExcluded, setShowExcluded] = useState(inventory);
 
   const load = useCallback(async () => {
+    const requestId = ++loadRequest.current;
     setLoading(true);
     setError("");
     try {
-      const query = new URLSearchParams({ limit: "500" });
+      const query = new URLSearchParams({ limit: "100", offset: String(page * 100) });
+      if (inventory) query.set("allSources", "1");
+      if (search.trim()) query.set("q", search.trim());
+      if (country) query.set("country", country);
+      if (tier) query.set("tier", tier);
+      if (readiness) query.set("readiness", readiness);
+      if (source) query.set("source", source);
+      if (businessLine) query.set("businessLine", businessLine);
       if (showExcluded) query.set("includeExcluded", "1");
       const response = await fetch(`/api/acquisition?${query.toString()}`, { cache: "no-store" });
       const data = await response.json() as Payload;
       if (!response.ok) throw new Error(data.error || "Unable to load net-new accounts.");
-      setPayload(data);
+      if (requestId === loadRequest.current) setPayload(data);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to load net-new accounts.");
+      if (requestId === loadRequest.current) setError(requestError instanceof Error ? requestError.message : "Unable to load net-new accounts.");
     } finally {
-      setLoading(false);
+      if (requestId === loadRequest.current) setLoading(false);
     }
-  }, [showExcluded]);
+  }, [showExcluded, page, inventory, search, country, tier, readiness, source, businessLine]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
+    const timer = window.setTimeout(() => void load(), 250);
     return () => window.clearTimeout(timer);
   }, [load]);
+
+  useEffect(() => { void fetch("/api/sdr-admin", { cache: "no-store" }).then((response) => response.json()).then((data: { unlocked?: boolean }) => setAdminUnlocked(Boolean(data.unlocked))).catch(() => setAdminUnlocked(false)); }, []);
 
   const selected = useMemo(
     () => payload?.accounts.find((account) => account.domain === selectedDomain) || null,
@@ -167,19 +182,17 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
   );
 
   const filtered = useMemo(() => {
-    const query = search.trim().toLowerCase();
+
     return (payload?.accounts || []).filter((account) => {
       if (tier && account.gtmTier !== tier) return false;
       if (country && account.country !== country) return false;
-      if (!query) return true;
-      return [account.name, account.domain, account.industry, account.detectedAts, account.primaryPersona, account.strongestSignal]
-        .join(" ").toLowerCase().includes(query);
+      return true;
     }).sort((a, b) => {
       const phoneDelta = Number(b.phoneReadyCount > 0) - Number(a.phoneReadyCount > 0);
       if (phoneDelta) return phoneDelta;
       return b.gtmScore - a.gtmScore || b.intentScore - a.intentScore || b.activeJobs - a.activeJobs || a.name.localeCompare(b.name);
     });
-  }, [country, payload, search, tier]);
+  }, [country, payload, tier]);
 
   async function loadPeople(domain: string) {
     const response = await fetch(`/api/acquisition?domain=${encodeURIComponent(domain)}`, { cache: "no-store" });
@@ -198,23 +211,50 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
     setSelectedDomain(account.domain);
     setPeople([]);
     setNotice("");
-    try { await loadPeople(account.domain); } catch { setPeople([]); }
+    try { await loadPeople(account.domain); } catch (error) { setError(error instanceof Error ? error.message : "Unable to load people"); }
     track("net-new-account-open", { tier: account.gtmTier, status: account.status });
   }
 
-  function saveOwnerToken() {
-    const value = ownerTokenDraft.trim();
-    setOwnerToken(value);
-    if (value) window.sessionStorage.setItem(OWNER_STORAGE_KEY, value);
-    else window.sessionStorage.removeItem(OWNER_STORAGE_KEY);
-    setNotice(value ? "Owner key saved for this browser session." : "Owner key cleared.");
+  async function unlockAdmin() {
+    setBusy("unlock"); setError("");
+    try {
+      const response = await fetch("/api/sdr-admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: adminPassword }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Unable to unlock Admin");
+      setAdminUnlocked(true); setAdminPassword("");
+    } catch (error) { setError(error instanceof Error ? error.message : "Unable to unlock Admin"); }
+    finally { setBusy(""); }
+  }
+
+  async function importCompanies(execute: boolean) {
+    setBusy("import"); setError("");
+    try {
+      const response = await fetch("/api/lead-inventory", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: importSource, companies: importRows, execute }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error + (data.details ? `: ${JSON.stringify(data.details)}` : ""));
+      if (execute) { setNotice(`${data.added} companies saved; ${data.duplicates} duplicates preserved; ${data.invalid} invalid rows skipped.`); setImportRows([]); setImportPreview(null); await load(); }
+      else setImportPreview(data);
+    } catch (error) { setError(error instanceof Error ? error.message : "Import failed"); }
+    finally { setBusy(""); }
+  }
+
+  async function qualifyAccount() {
+    if (!selected || !window.confirm(`Confirm you reviewed ${selected.name}'s company identity and product fit?`)) return;
+    setBusy("qualify"); setError("");
+    try {
+      const response = await fetch("/api/lead-inventory", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ domain: selected.domain, identityReviewed: true, icpReviewed: true }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Qualification failed");
+      await load(); setNotice("Company qualified. Person search is available.");
+    } catch (error) { setError(error instanceof Error ? error.message : "Qualification failed"); }
+    finally { setBusy(""); }
   }
 
   async function action(body: Record<string, unknown>) {
-    if (!ownerToken) throw new Error("Enter your Owner key first.");
+    if (!adminUnlocked) throw new Error("Unlock Admin access first.");
     const response = await fetch("/api/acquisition", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-acquisition-owner-token": ownerToken },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
     const data = await response.json() as Record<string, unknown> & { error?: string };
@@ -271,7 +311,7 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
 
   async function ensureAssignment(account: Account) {
     if (account.assignedOwnerId) return { ownerId: account.assignedOwnerId, ownerName: account.assignedOwnerName };
-    const result = await action({ action: "assign", domain: account.domain });
+    const result = await action({ action: "assign", domain: account.domain, ...(inventory ? { ownerId: routeOwner } : {}) });
     const assignment = result.assignment as { ownerId: string; ownerName: string };
     await load();
     return assignment;
@@ -279,6 +319,7 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
 
   async function push(person: Person) {
     if (!selected) return;
+    if (selected.exclusionStatus !== "eligible") { setError("Qualify this company before pushing people."); return; }
     if (person.enrichmentStatus !== "enriched" || (!person.emails.length && !person.phones.length)) {
       setError("Enrich the selected person and verify at least one email or phone before pushing to HubSpot.");
       return;
@@ -291,12 +332,13 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
       const assignment = await ensureAssignment(selected);
       const response = await fetch("/api/prospecting/push", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-acquisition-owner-token": ownerToken },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           linkedinUrl: person.linkedinUrl,
-          source: "Net-New Acquisition",
+          source: inventory ? `Lead Inventory · ${String(selected.evidence.businessLine || "Talentera")} · ${selected.source}`.slice(0, 120) : "Net-New Acquisition",
           signalHireUid: person.uid,
           assignmentMode: "acquisition",
+          ...(inventory ? { inventoryBusinessLine: selected.evidence.businessLine === "Evalufy" ? "Evalufy" : "Talentera" } : {}),
           ownerId: assignment.ownerId,
           ownerName: assignment.ownerName,
           fullName: person.fullName,
@@ -305,8 +347,8 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
           companyWebsite: `https://${selected.domain}`,
           companyDomain: selected.domain,
           careerPageUrl: selected.careerPageUrl,
-          detectedAts: selected.detectedAts,
-          atsConfidence: selected.detectedAts ? "verified" : "",
+          detectedAts: selected.evidence.inventoryImport && !selected.evidence.atsVerified ? "" : selected.detectedAts,
+          atsConfidence: selected.evidence.inventoryImport ? "" : selected.detectedAts ? "verified" : "",
           careerConfidence: 0,
           companyEvidenceUrl: selected.careerPageUrl,
           companyVerificationReason: selected.strongestSignal,
@@ -335,7 +377,7 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
             { label: `GTM Tier ${selected.gtmTier}`, points: Math.min(100, selected.gtmScore) },
             { label: "Intent score", points: Math.min(100, selected.intentScore) },
             { label: "Persona match", points: Math.min(100, person.rankScore) },
-            { label: person.phones.length ? "Verified phone available" : "Email-only contact", points: person.phones.length ? 100 : 30 },
+            { label: person.phones.length ? "Phone available" : "Email-only contact", points: person.phones.length ? 100 : 30 },
           ],
         }),
       });
@@ -359,8 +401,8 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
         <button type="button" onClick={onBack} className={styles.back}><ArrowLeft size={16}/> Dashboard</button>
         <div className={styles.titleBlock}>
           <span>ACCOUNT ACQUISITION</span>
-          <h1>Net-New Accounts</h1>
-          <p>Company-first prospecting · Apollo discovery · GTM ranking · SignalHire personas · HubSpot routing</p>
+          <h1>{inventory ? "Lead Inventory" : "Net-New Accounts"}</h1>
+          <p>Persistent company stock · multiple sources · qualification · people · SDR routing</p>
         </div>
       </div>
       <div className={styles.headerActions}>
@@ -371,18 +413,18 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
 
     <section className={styles.heroStrip}>
       <div><ShieldCheck size={17}/><span><strong>Hard exclusions</strong> Government · semi-government · ATS/HRTech competitors · existing HubSpot companies</span></div>
-      <div><Target size={17}/><span><strong>Core ICP</strong> KSA + UAE · 201–2,000 employees · 5+ active jobs</span></div>
-      <div><Coins size={17}/><span><strong>Phone-first</strong> Verified phone leads are routed and pushed before email-only contacts</span></div>
+      <div><Target size={17}/><span><strong>Core ICP</strong> Product fit reviewed before enrichment</span></div>
+      <div><Coins size={17}/><span><strong>Phone-first</strong> Phone-available leads are routed and pushed before email-only contacts</span></div>
     </section>
 
-    {error ? <div className={styles.error}><CircleAlert size={18}/><span>{error}</span><button onClick={() => setError("")}><X size={14}/></button></div> : null}
-    {notice ? <div className={styles.notice}><Check size={17}/><span>{notice}</span><button onClick={() => setNotice("")}><X size={14}/></button></div> : null}
+    {error ? <div role="alert" className={styles.error}><CircleAlert size={18}/><span>{error}</span><button onClick={() => setError("")}><X size={14}/></button></div> : null}
+    {notice ? <div role="status" className={styles.notice}><Check size={17}/><span>{notice}</span><button onClick={() => setNotice("")}><X size={14}/></button></div> : null}
 
     <section className={styles.metrics}>
       <div><span>Eligible</span><strong>{number(summary.eligible || 0)}</strong><small>Net-new after exclusions</small></div>
       <div className={styles.metricHot}><span>Tier A</span><strong>{number(summary.tier_a || 0)}</strong><small>Highest priority</small></div>
-      <div><span>People ready</span><strong>{number(summary.people_ready || 0)}</strong><small>Persona search completed</small></div>
-      <div className={styles.metricHot}><span>Phone ready</span><strong>{number(summary.phone_ready || 0)}</strong><small>Verified phone available</small></div>
+      <div><span>Needs people</span><strong>{number(summary.needs_people || 0)}</strong><small>Awaiting persona search</small></div>
+      <div className={styles.metricHot}><span>Phone ready</span><strong>{number(summary.phone_ready || 0)}</strong><small>Phone available</small></div>
       <div><span>Pushed</span><strong>{number(summary.pushed || 0)}</strong><small>Company + contact + task</small></div>
       <div><span>Excluded</span><strong>{number(summary.excluded || 0)}</strong><small>Kept out of SDR queue</small></div>
     </section>
@@ -390,10 +432,12 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
     <div className={styles.layout}>
       <section className={styles.mainPanel}>
         <div className={styles.toolbar}>
-          <label className={styles.searchBox}><Search size={16}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search account, ATS, industry, persona..."/></label>
-          <label><Filter size={14}/><select value={tier} onChange={(event) => setTier(event.target.value as FilterTier)}><option value="">All tiers</option><option value="A">Tier A</option><option value="B">Tier B</option><option value="C">Tier C</option><option value="Watch">Watch</option></select></label>
-          <label><Building2 size={14}/><select value={country} onChange={(event) => setCountry(event.target.value as FilterCountry)}><option value="">KSA + UAE</option><option value="Saudi Arabia">Saudi Arabia</option><option value="United Arab Emirates">United Arab Emirates</option></select></label>
-          <label className={styles.checkLabel}><input type="checkbox" checked={showExcluded} onChange={(event) => setShowExcluded(event.target.checked)}/> Include excluded</label>
+          <label className={styles.searchBox}><Search size={16}/><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(0); }} placeholder="Search account, ATS, industry, persona..."/></label>
+          <label><Filter size={14}/><select value={tier} onChange={(event) => { setTier(event.target.value as FilterTier); setPage(0); }}><option value="">All tiers</option><option value="A">Tier A</option><option value="B">Tier B</option><option value="C">Tier C</option><option value="Watch">Watch</option></select></label>
+          <label><Building2 size={14}/><select value={country} onChange={(event) => { setCountry(event.target.value as FilterCountry); setPage(0); }}><option value="">All countries</option><option value="Egypt">Egypt</option><option value="South Africa">South Africa</option><option value="Saudi Arabia">Saudi Arabia</option><option value="United Arab Emirates">United Arab Emirates</option></select></label>
+          <label><select aria-label="Readiness" value={readiness} onChange={(event) => { setReadiness(event.target.value); setPage(0); }}><option value="">All stages</option><option value="needs_people">Needs people</option><option value="search_only">Needs enrichment</option><option value="ready">Ready to contact</option></select></label>
+          {inventory ? <><label><select aria-label="Source" value={source} onChange={(event) => { setSource(event.target.value); setPage(0); }}><option value="">All sources</option>{["Clay", "SignalHire", "Sales Navigator", "LinkedIn", "Public research", "Manual", "Apollo"].map((value) => <option key={value}>{value}</option>)}</select></label><label><select aria-label="Business line" value={businessLine} onChange={(event) => { setBusinessLine(event.target.value); setPage(0); }}><option value="">Both products</option><option>Talentera</option><option>Evalufy</option></select></label></> : null}
+          <label className={styles.checkLabel}><input type="checkbox" checked={showExcluded} onChange={(event) => { setShowExcluded(event.target.checked); setPage(0); }}/> Include review / excluded</label>
         </div>
 
         <div className={styles.tableWrap}>
@@ -401,7 +445,7 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
             <thead><tr><th>Account</th><th>GTM</th><th>Hiring</th><th>ATS</th><th>Best persona</th><th>Status</th><th>SDR</th><th/></tr></thead>
             <tbody>
               {filtered.map((account) => <tr key={account.domain} className={selectedDomain === account.domain ? styles.selectedRow : ""}>
-                <td><button type="button" className={styles.accountCell} onClick={() => void openAccount(account)}><span className={styles.companyMark}>{account.name.slice(0, 2).toUpperCase()}</span><span><strong>{account.name}</strong><small>{account.country || "Market unknown"} · {account.employeeCount ? `${number(account.employeeCount)} employees` : "Size pending"}</small><em>{account.domain}</em></span></button></td>
+                <td><button type="button" className={styles.accountCell} onClick={() => void openAccount(account)}><span className={styles.companyMark}>{account.name.slice(0, 2).toUpperCase()}</span><span><strong>{account.name}</strong><small>{account.country || "Market unknown"} · {account.employeeCount ? `${number(account.employeeCount)} employees` : "Size pending"}</small><em>{account.domain} · {account.source} · {String(account.evidence.businessLine || "Talentera")}</em></span></button></td>
                 <td><span className={`${styles.tier} ${tierClass(account.gtmTier)}`}>Tier {account.gtmTier}</span><b className={styles.score}>{account.gtmScore}</b></td>
                 <td><strong className={styles.jobs}>{number(account.activeJobs)}</strong><small className={styles.cellSub}>active jobs</small></td>
                 <td><span className={styles.ats}>{account.detectedAts || "To verify"}</span><small className={styles.cellSub}>{account.atsOpportunityScore}/100 opportunity</small></td>
@@ -410,10 +454,12 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
                 <td><span className={styles.owner}>{account.assignedOwnerName || "Smart route"}</span></td>
                 <td><button type="button" className={styles.rowAction} onClick={() => void openAccount(account)}><ChevronRight size={16}/></button></td>
               </tr>)}
+              {loading ? <tr><td colSpan={8}>Loading company inventory…</td></tr> : null}
               {!loading && !filtered.length ? <tr><td colSpan={8}><div className={styles.empty}><Database size={24}/><strong>No net-new accounts in this view</strong><span>{config?.apolloConfigured ? "Run Apollo discovery or change the filters." : "Add the Apollo server key, then run discovery."}</span></div></td></tr> : null}
             </tbody>
           </table>
         </div>
+        <div className={styles.pagination}><button disabled={page === 0 || loading} onClick={() => setPage((value) => value - 1)}>Previous</button><span>Page {page + 1} · {number(payload?.pagination?.filteredTotal || 0)} matching companies</span><button disabled={loading || (page + 1) * 100 >= (payload?.pagination?.filteredTotal || 0)} onClick={() => setPage((value) => value + 1)}>Next</button></div>
       </section>
 
       <aside className={styles.controlPanel}>
@@ -423,19 +469,27 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
           <div><span className={config?.signalHireConfigured ? styles.okDot : styles.offDot}/><p><strong>SignalHire</strong><small>{config?.signalHireConfigured ? "Search + enrichment ready" : "API key required"}</small></p></div>
           <div><span className={config?.ownerActionsConfigured ? styles.okDot : styles.offDot}/><p><strong>Owner actions</strong><small>{config?.ownerActionsConfigured ? "Server gate configured" : "Owner secret required"}</small></p></div>
         </div>
-        <label className={styles.ownerKey}><span><KeyRound size={14}/> Owner key</span><input type="password" value={ownerTokenDraft} onChange={(event) => setOwnerTokenDraft(event.target.value)} placeholder="Session-only key"/></label>
-        <button type="button" className={styles.saveKey} onClick={saveOwnerToken}><ShieldCheck size={15}/> Save for this session</button>
+        {adminUnlocked ? <p className={styles.costNote}><ShieldCheck size={14}/> Admin unlocked</p> : <><label className={styles.ownerKey}><span><KeyRound size={14}/> Admin password</span><input type="password" autoComplete="current-password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)}/></label><button className={styles.saveKey} disabled={Boolean(busy) || !adminPassword} onClick={() => void unlockAdmin()}>Unlock actions</button></>}
+        {inventory ? <>
+          <label className={styles.pageSelect}><span>Assign new accounts to</span><select value={routeOwner} onChange={(event) => setRouteOwner(event.target.value)}><option value="31644369">Marita Chedid</option><option value="37624223">Daniel Beaini</option></select></label>
+          <div className={styles.divider}/><strong>Import company stock</strong>
+          <label className={styles.pageSelect}><span>Source</span><select value={importSource} onChange={(event) => { setImportSource(event.target.value); setImportPreview(null); }}>{["Clay", "SignalHire", "Sales Navigator", "LinkedIn", "Public research", "Manual"].map((value) => <option key={value}>{value}</option>)}</select></label>
+          <label className={styles.ownerKey}><span>CSV or JSON · up to 100 companies</span><input type="file" accept=".csv,.json" onChange={async (event) => { const file = event.target.files?.[0]; setImportPreview(null); setImportRows([]); if (!file) return; try { if (file.size > 250_000) throw new Error("File must be below 250 KB"); const rows = parseInventoryFile(await file.text()); if (rows.length > 100) throw new Error("Import up to 100 companies per batch"); setImportRows(rows); setError(""); } catch (error) { setError(error instanceof Error ? error.message : "Invalid file"); } }}/></label>
+          <p className={styles.costNote}>Required columns: name, domain. Optional: country, industry, employeeCount, sourceUrl, linkedinUrl, careerPageUrl, detectedAts, evidence, businessLine (Talentera / Evalufy). Imported companies enter review.</p>
+          <button className={styles.saveKey} disabled={!adminUnlocked || !importRows.length || Boolean(busy)} onClick={() => void importCompanies(false)}>Preview & check duplicates</button>
+          {importPreview ? <div className={styles.importPreview}><strong>{importPreview.candidates} to save · {importPreview.duplicates} duplicates · {importPreview.invalid} invalid</strong><ul>{importPreview.rows.map((row, index) => <li key={index}>{row.name} · {row.outcome}<small>{row.reason}</small></li>)}</ul><button className={styles.discover} disabled={Boolean(busy) || !importPreview.candidates} onClick={() => void importCompanies(true)}>Save reviewed import</button></div> : null}
+        </> : null}
 
         <div className={styles.divider}/>
         <div className={styles.discoveryTitle}><div><span>APOLLO DISCOVERY</span><strong>Load medium-market accounts</strong></div><Sparkles size={17}/></div>
         <label className={styles.pageSelect}><span>Pages</span><select value={pages} onChange={(event) => setPages(Number(event.target.value))}>{[1,2,3,4,5,6].map((page) => <option key={page} value={page}>{page} · up to {page * 100} companies</option>)}</select></label>
         <p className={styles.costNote}><Coins size={13}/> Up to {pages} Apollo credit{pages === 1 ? "" : "s"}. Existing HubSpot accounts and hard exclusions are removed before SDR work.</p>
-        <button type="button" className={styles.discover} disabled={busy === "discover" || !config?.apolloConfigured || !config?.ownerActionsConfigured || !ownerToken} onClick={() => void discover()}>{busy === "discover" ? <LoaderCircle className={styles.spin} size={16}/> : <Zap size={16}/>} Discover & rank</button>
+        <button type="button" className={styles.discover} disabled={busy === "discover" || !config?.apolloConfigured || !config?.ownerActionsConfigured || !adminUnlocked} onClick={() => void discover()}>{busy === "discover" ? <LoaderCircle className={styles.spin} size={16}/> : <Zap size={16}/>} Discover & rank</button>
       </aside>
     </div>
 
     {selected ? <div className={styles.drawerBackdrop} onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedDomain(""); }}>
-      <aside className={styles.drawer}>
+      <aside className={styles.drawer} role="dialog" aria-modal="true" aria-label="Company details">
         <div className={styles.drawerHeader}>
           <div><span>NET-NEW ACCOUNT</span><h2>{selected.name}</h2><p>{selected.domain} · {selected.country || "Market unknown"}</p></div>
           <button type="button" onClick={() => setSelectedDomain("")}><X size={18}/></button>
@@ -464,9 +518,11 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
         </section>
 
         <section className={styles.drawerSection}>
+          <p>{selected.source} · {String(selected.evidence.businessLine || "Talentera")} · {selected.exclusionReason || "Qualified"}</p>
+          {selected.exclusionStatus === "review" ? <button className={styles.saveKey} disabled={!adminUnlocked || Boolean(busy)} onClick={() => void qualifyAccount()}>Confirm identity & ICP review</button> : null}
           <div className={styles.peopleHeader}>
             <div className={styles.sectionTitle}><UserRoundSearch size={16}/><div><span>SIGNALHIRE</span><strong>Best people at this company</strong></div></div>
-            <button type="button" onClick={() => void findPeople()} disabled={busy === "people" || !ownerToken || !config?.signalHireConfigured}>{busy === "people" ? <LoaderCircle className={styles.spin} size={14}/> : <Search size={14}/>} Find people</button>
+            <button type="button" onClick={() => void findPeople()} disabled={Boolean(busy) || !adminUnlocked || !config?.signalHireConfigured || selected.exclusionStatus !== "eligible"}>{busy === "people" ? <LoaderCircle className={styles.spin} size={14}/> : <Search size={14}/>} Find people</button>
           </div>
           <p className={styles.peoplePolicy}>Search results don&apos;t reveal contacts. We spend a Person API credit only after you choose a candidate to enrich.</p>
           <div className={styles.peopleList}>
@@ -484,8 +540,8 @@ export function NetNewAccounts({ onBack }: { onBack: () => void }) {
               </div>
               <div className={styles.personActions}>
                 <span className={styles.personScore}>{person.rankScore}</span>
-                {person.linkedinUrl ? <a href={person.linkedinUrl} target="_blank" rel="noreferrer" aria-label="LinkedIn"><ExternalLink size={14}/></a> : null}
-                {person.enrichmentStatus !== "enriched" ? <button type="button" onClick={() => void enrich(person)} disabled={busy === `enrich:${person.uid}` || !ownerToken}>{busy === `enrich:${person.uid}` ? <LoaderCircle className={styles.spin} size={13}/> : <Sparkles size={13}/>} Enrich</button> : <button type="button" className={styles.pushButton} onClick={() => void push(person)} disabled={busy === `push:${person.uid}` || !ownerToken}>{busy === `push:${person.uid}` ? <LoaderCircle className={styles.spin} size={13}/> : <ArrowUpRight size={13}/>} Push</button>}
+                {person.linkedinUrl ? <a href={person.linkedinUrl} target="_blank" rel="noreferrer" aria-label={`LinkedIn profile for ${person.fullName}`}><ExternalLink size={14}/></a> : null}
+                {person.enrichmentStatus !== "enriched" ? <button type="button" onClick={() => void enrich(person)} disabled={Boolean(busy) || !adminUnlocked || selected.exclusionStatus !== "eligible"}>{busy === `enrich:${person.uid}` ? <LoaderCircle className={styles.spin} size={13}/> : <Sparkles size={13}/>} Enrich</button> : <button type="button" className={styles.pushButton} onClick={() => void push(person)} disabled={Boolean(busy) || !adminUnlocked || selected.exclusionStatus !== "eligible"}>{busy === `push:${person.uid}` ? <LoaderCircle className={styles.spin} size={13}/> : <ArrowUpRight size={13}/>} Push</button>}
               </div>
             </div>)}
             {!people.length ? <div className={styles.peopleEmpty}><UserRoundSearch size={22}/><span>No people searched yet.</span></div> : null}

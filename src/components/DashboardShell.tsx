@@ -30,7 +30,7 @@ import { Dashboard as ExistingDashboard } from "./Dashboard";
 import { WorkspaceErrorBoundary } from "./WorkspaceErrorBoundary";
 import styles from "@/components/DashboardShell.module.css";
 
-type ShellView = "core" | "motion" | "maqsam" | "marita-priority" | "team-activity" | "net-new" | "gtm-brain" | "sales-handoff";
+type ShellView = "core" | "motion" | "maqsam" | "marita-priority" | "team-activity" | "net-new" | "inventory" | "gtm-brain" | "sales-handoff";
 
 function ViewLoading() {
   return <main className={styles.viewLoading}><LoaderCircle size={24}/><strong>Loading workspace…</strong></main>;
@@ -53,6 +53,10 @@ const TeamActivity = dynamic(
   () => import("@/components/TeamActivity").then((module) => module.TeamActivity),
   { ssr: false, loading: ViewLoading },
 );
+const LeadInventory = dynamic(
+  () => import("@/components/NetNewAccounts").then((module) => module.NetNewAccounts),
+  { ssr: false, loading: ViewLoading },
+);
 const ProspectingCoverage = dynamic(
   () => import("@/components/ProspectingCoverage").then((module) => module.ProspectingCoverage),
   { ssr: false, loading: ViewLoading },
@@ -72,6 +76,7 @@ function viewFromSearch(search: string): ShellView {
   if (view === "maqsam") return "maqsam";
   if (view === "marita-priority") return "marita-priority";
   if (view === "team-activity") return "team-activity";
+  if (view === "inventory") return "inventory";
   if (view === "net-new") return "net-new";
   if (view === "gtm-brain") return "gtm-brain";
   if (view === "sales-handoff") return "sales-handoff";
@@ -228,6 +233,10 @@ export function Dashboard({
               <span className={`${styles.toolIcon} ${styles.gtmIcon}`}><BriefcaseBusiness size={17}/></span>
               <span className={styles.toolCopy}><strong>Sales Handoff</strong><small>Marita → Ursula · follow-up · deals · pipeline risk</small></span>
             </button> : null}
+            <button className={styles.toolItem} type="button" onClick={() => changeView("inventory")}>
+              <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Building2 size={17}/></span>
+              <span className={styles.toolCopy}><strong>Lead Inventory</strong><small>Company stock · sources · qualification · Marita & Daniel</small></span>
+            </button>
             <button className={styles.toolItem} type="button" onClick={() => changeView("net-new")}>
               <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Target size={17}/></span>
               <span className={styles.toolCopy}><strong>Prospecting</strong><small>Persistent market coverage · Apollo universe · HubSpot dedupe</small></span>
@@ -312,6 +321,7 @@ export function Dashboard({
     case "maqsam": toolContent = <MaqsamCallsDashboard initialAgent={sdr === "daniel" ? "daniel" : "marita"} onBack={() => changeView("core")}/>; break;
     case "marita-priority": toolContent = <MaritaPriorityQueue onBack={() => changeView("core")}/>; break;
     case "team-activity": toolContent = <TeamActivity onBack={() => changeView("core")}/>; break;
+    case "inventory": toolContent = <LeadInventory inventory onBack={() => changeView("core")}/>; break;
     case "net-new": toolContent = <ProspectingCoverage onBack={() => changeView("core")}/>; break;
     case "gtm-brain": toolContent = <TalenteraIntelligenceWorkspace onBack={() => changeView("core")}/>; break;
     case "sales-handoff": toolContent = <SalesHandoffDashboard onBack={() => changeView("core")}/>; break;

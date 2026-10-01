@@ -92,6 +92,7 @@ class AcquisitionAccount(BaseModel):
 
 class AcquisitionAccountsWrite(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    insertOnly: bool = False
     accounts: list[AcquisitionAccount] = Field(min_length=1, max_length=500)
 
 
@@ -609,10 +610,11 @@ def usage_summary(
 @app.put("/v1/acquisition/accounts")
 def upsert_acquisition_accounts(body: AcquisitionAccountsWrite, response: Response) -> dict[str, Any]:
     initialize_usage_db()
+    stored = 0
     with usage_db() as connection:
         for item in body.accounts:
             domain = normalize_domain(item.domain)
-            connection.execute(
+            cursor = connection.execute(
                 """
                 INSERT INTO acquisition_accounts(
                     domain, name, source, source_id, country, employee_count, industry, active_jobs,
@@ -641,6 +643,7 @@ def upsert_acquisition_accounts(body: AcquisitionAccountsWrite, response: Respon
                     assigned_owner_id=CASE WHEN acquisition_accounts.assigned_owner_id <> '' THEN acquisition_accounts.assigned_owner_id ELSE EXCLUDED.assigned_owner_id END,
                     assigned_owner_name=CASE WHEN acquisition_accounts.assigned_owner_name <> '' THEN acquisition_accounts.assigned_owner_name ELSE EXCLUDED.assigned_owner_name END,
                     evidence=EXCLUDED.evidence, updated_at=NOW()
+                WHERE NOT %s
                 """,
                 (
                     domain, item.name, item.source, item.sourceId, item.country, item.employeeCount, item.industry,
@@ -649,11 +652,12 @@ def upsert_acquisition_accounts(body: AcquisitionAccountsWrite, response: Respon
                     item.exclusionStatus, item.exclusionReason, item.hubspotCompanyId, item.status,
                     item.primaryPersona, item.secondaryPersona, item.economicBuyer, item.technicalInfluencer,
                     item.strongestSignal, item.recommendedAngle, item.assignedOwnerId, item.assignedOwnerName,
-                    Jsonb(item.evidence),
+                    Jsonb(item.evidence), body.insertOnly,
                 ),
             )
+            stored += cursor.rowcount
     response.headers["Cache-Control"] = "no-store"
-    return {"status": "stored", "accounts": len(body.accounts)}
+    return {"status": "stored", "accounts": stored}
 
 
 @app.get("/v1/acquisition/accounts")
