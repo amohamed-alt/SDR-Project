@@ -1,4 +1,5 @@
-import { batchRead, getPropertyDefinitions } from "@/lib/hubspot";
+import { batchRead } from "@/lib/hubspot";
+import { CONNECTED_CALL_DISPOSITION } from "@/lib/config";
 import { getAcquisitionAccount } from "@/lib/acquisition-data-api";
 import { coverageQueue, saveCoverage } from "@/lib/saudi-coverage-store";
 import { INVENTORY_SDR_IDS, type CoverageObservation, type CoverageSnapshot } from "@/lib/saudi-coverage-learning";
@@ -44,9 +45,9 @@ export async function coverageAssociations(from: string, to: string, ids: string
 
 export async function syncSaudiCoverage(limit: number) {
   const queue = await coverageQueue("sync", limit);
-  const definitions = await getPropertyDefinitions("calls", ["hs_call_disposition"]);
-  const connectedCode = definitions[0]?.options?.find((o) => o.label.toLowerCase() === "connected")?.value;
-  if (!connectedCode) throw new Error("Connected call outcome is not available in this HubSpot portal");
+  // HubSpot's property REST response uses externalOptions and can omit call
+  // outcomes. Reuse the portal-verified Connected ID used by dashboard analytics.
+  const connectedCode = CONNECTED_CALL_DISPOSITION;
   const results: { domain: string; synced: boolean; error?: string }[] = [];
   for (const domain of queue.domains) {
     try {
