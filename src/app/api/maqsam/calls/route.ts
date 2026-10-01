@@ -1,7 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { listMaqsamCalls, upsertMaqsamCall } from "@/lib/maqsam-calls";
+import { listMaqsamCalls, maqsamHistoryStatus, upsertMaqsamCall } from "@/lib/maqsam-calls";
+import { maqsamAgentKey } from "@/lib/maqsam-agent.mjs";
 import type { MaqsamCallRecord } from "@/lib/maqsam-types";
 
 export const runtime = "nodejs";
@@ -93,8 +94,13 @@ export async function GET(request: NextRequest) {
   const requestedLimit = Number(request.nextUrl.searchParams.get("limit") ?? 1000);
   const limit = Math.min(5000, Math.max(1, Number.isFinite(requestedLimit) ? requestedLimit : 1000));
 
+  const agent = request.nextUrl.searchParams.get("agent") ?? "all";
+  if (!["all", "marita", "daniel"].includes(agent)) return NextResponse.json({ error: "Invalid agent" }, { status: 400 });
+  const offset = Math.max(0, Math.floor(Number(request.nextUrl.searchParams.get("offset")) || 0));
+  const identities = { maritaEmail: process.env.MAQSAM_TARGET_AGENT_EMAIL, danielEmail: process.env.MAQSAM_DANIEL_AGENT_EMAIL };
   const allCalls = await listMaqsamCalls();
-  const calls = allCalls.filter((record) => {
+  const filtered = allCalls.filter((record) => {
+    if (agent !== "all" && maqsamAgentKey(record, identities) !== agent) return false;
     const day = recordDate(record);
     if (from && day && day < from) return false;
     if (to && day && day > to) return false;
@@ -115,12 +121,17 @@ export async function GET(request: NextRequest) {
       if (!haystack.includes(query)) return false;
     }
     return true;
-  }).slice(0, limit);
+  });
+  const calls = filtered.slice(offset, offset + limit);
 
   return NextResponse.json({
     meta: {
+      history: await maqsamHistoryStatus(),
       generatedAt: new Date().toISOString(),
       totalStored: allCalls.length,
+      totalMatching: filtered.length,
+      nextOffset: offset + calls.length < filtered.length ? offset + calls.length : null,
+      earliestCall: filtered.length ? recordDate(filtered[filtered.length - 1]) : null,
       portalId: process.env.HUBSPOT_PORTAL_ID ?? "145742477",
     },
     calls,

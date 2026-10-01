@@ -215,6 +215,7 @@ services:
       HUBSPOT_PRIVATE_APP_TOKEN: ${HUBSPOT_PRIVATE_APP_TOKEN:?HUBSPOT_PRIVATE_APP_TOKEN is required}
     volumes:
       - sdr_runtime_env:/run/sdr-env:ro
+      - sdr_app_data:/app/data
     networks:
       - default
     logging: *default-logging

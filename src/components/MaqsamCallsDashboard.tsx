@@ -33,7 +33,9 @@ import {
 import styles from "@/components/MaqsamCallsDashboard.module.css";
 import type { MaqsamCallRecord, MaqsamCallsResponse, MaqsamMatchStatus } from "@/lib/maqsam-types";
 
-const defaultFrom = process.env.NEXT_PUBLIC_DEFAULT_START_DATE ?? new Date().toISOString().slice(0, 7) + "-01";
+import { isCompletedMaqsamCall } from "@/lib/maqsam-agent.mjs";
+
+const defaultFrom = "";
 const today = new Date().toISOString().slice(0, 10);
 
 function formatNumber(value: number) {
@@ -80,9 +82,7 @@ function normalizeSentiment(value?: string) {
 }
 
 function isCompletedCall(record: MaqsamCallRecord) {
-  const state = String(record.state ?? "").trim().toLowerCase();
-  if (!state) return true;
-  return /complete|completed|answered|connected|finished|ended|done/.test(state);
+  return isCompletedMaqsamCall(record);
 }
 
 function statusLabel(status?: MaqsamMatchStatus) {
@@ -115,7 +115,8 @@ function MetricCard({ label, value, helper, icon: Icon }: {
   </article>;
 }
 
-export function MaqsamCallsDashboard({ onBack }: { onBack: () => void }) {
+export function MaqsamCallsDashboard({ onBack, initialAgent = "marita" }: { onBack: () => void; initialAgent?: "marita" | "daniel" }) {
+  const [agent, setAgent] = useState<"all" | "marita" | "daniel">(initialAgent);
   const [data, setData] = useState<MaqsamCallsResponse | null>(null);
   const [from, setFrom] = useState(defaultFrom);
   const [to, setTo] = useState(today);
@@ -128,28 +129,37 @@ export function MaqsamCallsDashboard({ onBack }: { onBack: () => void }) {
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (signal: AbortSignal) => {
     setLoading(true);
+    setData(null);
     setError("");
     try {
-      const query = new URLSearchParams({
-        from: appliedRange.from,
-        to: appliedRange.to,
-        limit: "5000",
-      });
+      const query = new URLSearchParams({ from: appliedRange.from, to: appliedRange.to, agent, limit: "1000" });
       if (refreshKey) query.set("refresh", String(refreshKey));
-      const response = await fetch(`/api/maqsam/calls?${query.toString()}`, { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.details || payload.error || "Unable to load Maqsam calls");
-      setData(payload as MaqsamCallsResponse);
+      const calls: MaqsamCallRecord[] = [];
+      let payload: MaqsamCallsResponse;
+      let offset = 0;
+      do {
+        query.set("offset", String(offset));
+        const response = await fetch(`/api/maqsam/calls?${query}`, { cache: "no-store", signal });
+        payload = await response.json();
+        if (!response.ok) throw new Error((payload as unknown as { error: string }).error || "Unable to load Maqsam calls");
+        calls.push(...payload.calls);
+        offset = payload.meta.nextOffset ?? 0;
+      } while (offset);
+      if (!signal.aborted) setData({ ...payload, calls });
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to load Maqsam calls");
+      if (!signal.aborted) setError(requestError instanceof Error ? requestError.message : "Unable to load Maqsam calls");
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
-  }, [appliedRange, refreshKey]);
+  }, [agent, appliedRange, refreshKey]);
 
-  useEffect(() => { void loadData(); }, [loadData]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadData(controller.signal);
+    return () => controller.abort();
+  }, [loadData]);
 
   const model = useMemo(() => {
     const calls = data?.calls ?? [];
@@ -225,13 +235,15 @@ export function MaqsamCallsDashboard({ onBack }: { onBack: () => void }) {
         <button type="button" className={styles.secondaryButton} onClick={onBack}><ArrowLeft size={15}/>Analytics Dashboard</button>
         <div>
           <strong>Maqsam Call Intelligence</strong>
-          <span>Marita call summaries, transcripts, HubSpot matches, and sync status</span>
+          <span>Marita & Daniel · calls, summaries, transcripts, and HubSpot matches</span>
         </div>
       </div>
       <div className={styles.actions}>
+        <label><span>SDR</span><select aria-label="SDR agent" value={agent} onChange={(event) => { setAgent(event.target.value as typeof agent); setExpandedCallKey(""); }}><option value="marita">Marita</option><option value="daniel">Daniel</option><option value="all">All agents</option></select></label>
+        <button type="button" className={styles.secondaryButton} onClick={() => { setFrom(""); setTo(today); setAppliedRange({ from: "", to: today }); }}>Since first call</button>
         <label><span>From</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)}/></label>
         <label><span>To</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)}/></label>
-        <button type="button" className={styles.secondaryButton} onClick={() => setAppliedRange({ from, to })}>Apply range</button>
+        <button type="button" className={styles.secondaryButton} disabled={Boolean(from && to && from > to)} onClick={() => setAppliedRange({ from, to })}>Apply range</button>
         <button type="button" className={styles.primaryButton} disabled={loading} onClick={() => setRefreshKey((value) => value + 1)}>
           <RefreshCw size={14} className={loading ? styles.spin : ""}/>Refresh
         </button>
@@ -242,16 +254,17 @@ export function MaqsamCallsDashboard({ onBack }: { onBack: () => void }) {
       <section className={styles.hero}>
         <div>
           <span><PhoneCall size={15}/>CALL OPERATIONS</span>
-          <h1>Every completed Maqsam call stays visible, even when HubSpot has no matching contact.</h1>
-          <p>Matched calls receive HubSpot notes. Unmatched and ambiguous calls remain searchable in this dashboard with the full AI summary and transcript.</p>
+          <h1>Maqsam calls for Marita and Daniel, from the first available call.</h1>
+          <p>Choose an SDR to see calls, duration, available AI summaries and transcripts. Historical calls appear as the sync worker imports them; missing summaries remain visible.</p>
         </div>
         <aside>
           <strong>{data?.meta.totalStored ?? 0}</strong>
           <span>calls retained in durable dashboard storage</span>
-          <small>Unique key: Maqsam Call ID / Reference ID</small>
+          <small>First call in selection: {data?.meta.earliestCall || "No calls available"}</small>
         </aside>
       </section>
 
+      {data && <p role="status">{data.meta.history ? `Historical import ${data.meta.history.caughtUp ? "caught up" : "in progress"} · from ${data.meta.history.from} through ${formatDate(data.meta.history.importedThrough)}` : "Historical import status unavailable. The counts show calls currently stored; older calls may still be importing."}</p>}
       {error && <div className={styles.errorBanner}><AlertTriangle size={16}/>{error}</div>}
       {loading && !data && <div className={styles.loading}><div className={styles.loader}/><strong>Loading Maqsam calls…</strong></div>}
 
@@ -269,7 +282,7 @@ export function MaqsamCallsDashboard({ onBack }: { onBack: () => void }) {
 
         <section className={styles.chartGrid}>
           <article className={styles.panel}>
-            <div className={styles.panelHeading}><div><h2>Daily Maqsam calls</h2><p>Total calls split by HubSpot match result.</p></div><BarChart3 size={18}/></div>
+            <div className={styles.panelHeading}><div><h2>Daily Maqsam calls</h2><p>Completed calls and other states for the selected SDR.</p></div><BarChart3 size={18}/></div>
             {model.daily.length ? <ResponsiveContainer width="100%" height={300}>
               <BarChart data={model.daily} margin={{ left: -16, right: 10, top: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#dfe8e3"/>
@@ -327,7 +340,7 @@ export function MaqsamCallsDashboard({ onBack }: { onBack: () => void }) {
                     : "";
                   return <Fragment key={record.callKey}>
                     <tr className={styles.recordRow} onClick={() => setExpandedCallKey(expanded ? "" : record.callKey)}>
-                      <td><strong>#{record.callId ?? record.referenceId ?? record.callKey}</strong><span>{formatDate(record.noteTimestamp, record.timestamp)}</span><small>{record.agentName || record.agentEmail || "Marita"}</small></td>
+                      <td><strong>#{record.callId ?? record.referenceId ?? record.callKey}</strong><span>{formatDate(record.noteTimestamp, record.timestamp)}</span><small>{record.agentName || record.agentEmail || "Unknown agent"}</small></td>
                       <td><strong>{record.contactName || "No matched contact"}</strong><span>{record.phone || "—"}</span><small>{record.contactEmail || ""}</small></td>
                       <td><span className={styles.direction}>{record.direction || "Unknown"}</span></td>
                       <td><span className={styles.noteBadge} data-status={isCompletedCall(record) ? "synced" : "pending"}>{isCompletedCall(record) ? "Completed" : record.state || "Other"}</span></td>

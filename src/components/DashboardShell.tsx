@@ -298,6 +298,7 @@ export function Dashboard({
       initialSearch={initialSearch}
       workspaceNavigation={workspaceNavigation}
       onOpenMotion={() => changeView("motion")}
+      onOpenMaqsam={() => changeView("maqsam")}
       onToggleTools={() => setToolsOpen((current) => !current)}
       toolsOpen={toolsOpen}
       toolsCount={toolsCount}
@@ -308,7 +309,7 @@ export function Dashboard({
   let toolContent: ReactNode;
   switch (view) {
     case "motion": toolContent = <MotionDashboard sdr={sdr} onBack={() => changeView("core")}/>; break;
-    case "maqsam": toolContent = <MaqsamCallsDashboard onBack={() => changeView("core")}/>; break;
+    case "maqsam": toolContent = <MaqsamCallsDashboard initialAgent={sdr === "daniel" ? "daniel" : "marita"} onBack={() => changeView("core")}/>; break;
     case "marita-priority": toolContent = <MaritaPriorityQueue onBack={() => changeView("core")}/>; break;
     case "team-activity": toolContent = <TeamActivity onBack={() => changeView("core")}/>; break;
     case "net-new": toolContent = <ProspectingCoverage onBack={() => changeView("core")}/>; break;
@@ -326,7 +327,7 @@ export function Dashboard({
           <div className="nav-label">MAIN</div>
           <nav><button type="button" onClick={() => changeView("core")}><BadgeCheck size={18}/><span>Analytics Dashboard</span></button></nav>
           <div className="nav-label">ANALYSIS</div>
-          <nav><button className={view === "motion" ? "active" : ""} type="button" onClick={() => changeView("motion")}><Activity size={18}/><span>Inbound vs Outbound</span></button></nav>
+          <nav><button className={view === "motion" ? "active" : ""} type="button" onClick={() => changeView("motion")}><Activity size={18}/><span>Inbound vs Outbound</span></button><button className={view === "maqsam" ? "active" : ""} aria-current={view === "maqsam" ? "page" : undefined} type="button" onClick={() => changeView("maqsam")}><PhoneCall size={18}/><span>Maqsam Calls</span></button></nav>
           <div className="nav-label">WORKSPACE</div>
           <nav><button type="button" onClick={() => setToolsOpen((current) => !current)} aria-expanded={toolsOpen} aria-controls="sdr-tools-menu"><PhoneIncoming size={18}/><span>SDR Tools</span><small className="sdr-tools-count">{toolsCount}</small></button></nav>
           {workspaceNavigation}

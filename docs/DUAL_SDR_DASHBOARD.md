@@ -6,7 +6,7 @@ The existing navigation, analytics, filters, drilldowns and task/lead workspace 
 
 Comparison metrics use identical dates and the existing HubSpot definitions. Activity counts are for the period; portfolio and open/overdue workloads are current. Product labels identify each SDR's business assignment, not a product filter on CRM revenue. Missing sources retain warnings; unavailable owners display a dash. Meetings resolve `hs_created_by_user_id` using the Owners API `userId`, which must not be confused with `hubspot_owner_id`. The cache schema is bumped to prevent reuse of old meeting attribution.
 
-Daniel's analytics and work queue are operational independently of Marita. His meeting composer is unavailable until his own calendar integration is configured; HubSpot meeting links remain available. Marita-specific Maqsam/admin tools are not exposed in Daniel's workspace. This change does not change CRM assignments, task schedules, contacts or calendar credentials.
+Daniel's analytics and work queue are operational independently of Marita. His meeting composer is unavailable until his own calendar integration is configured; HubSpot meeting links remain available. Maqsam Calls is available for both SDRs with an agent selector; Marita-specific admin tools remain scoped to Marita. This change does not change CRM assignments, task schedules, contacts or calendar credentials.
 
 ## Data delivery on Hostinger
 

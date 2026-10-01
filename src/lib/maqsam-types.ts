@@ -45,8 +45,12 @@ export interface MaqsamCallRecord {
 
 export interface MaqsamCallsResponse {
   meta: {
+    history?: { from: string; importedThrough: string; updatedAt: string; caughtUp: boolean } | null;
     generatedAt: string;
     totalStored: number;
+    totalMatching?: number;
+    nextOffset?: number | null;
+    earliestCall?: string | null;
     portalId: string;
   };
   calls: MaqsamCallRecord[];

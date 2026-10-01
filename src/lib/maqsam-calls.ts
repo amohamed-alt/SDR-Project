@@ -10,7 +10,7 @@ type MaqsamStore = {
 
 const STORE_PATH = process.env.MAQSAM_CALL_STORE_PATH ?? "/app/data/maqsam-calls.json";
 const RETENTION_DAYS = Math.max(1, Number(process.env.MAQSAM_CALL_RETENTION_DAYS ?? 180));
-const MAX_RECORDS = Math.max(100, Number(process.env.MAQSAM_CALL_MAX_RECORDS ?? 5000));
+const MAX_RECORDS = Math.max(100, Number(process.env.MAQSAM_CALL_MAX_RECORDS ?? 50000));
 
 let writeQueue: Promise<unknown> = Promise.resolve();
 
@@ -96,4 +96,17 @@ export async function upsertMaqsamCall(incoming: Partial<MaqsamCallRecord> & Pic
 
   writeQueue = run.catch(() => undefined);
   return run;
+}
+
+export async function maqsamHistoryStatus() {
+  try {
+    const checkpointPath = process.env.MAQSAM_SYNC_CHECKPOINT_PATH ?? "/app/data/maqsam-sync-checkpoint.json";
+    const checkpoint = JSON.parse(await readFile(/* turbopackIgnore: true */ checkpointPath, "utf8"));
+    if (checkpoint.version !== 2 || !Number.isFinite(checkpoint.nextTime)) return null;
+    const lookback = Number(process.env.MAQSAM_SYNC_LOOKBACK_SECONDS || 10800);
+    return { from: String(checkpoint.from), importedThrough: new Date(checkpoint.nextTime * 1000).toISOString(), updatedAt: String(checkpoint.updatedAt), caughtUp: checkpoint.nextTime >= Date.now() / 1000 - lookback - 600 };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
 }

@@ -1,59 +1,31 @@
 # Maqsam Calls integration
 
-The SDR dashboard includes a `Maqsam Calls` view for Marita (`m.chedid@bayt.net`). It stores every completed call whose Maqsam AI summary is ready, including calls that cannot be matched safely to a HubSpot Contact.
+Open **Maqsam Calls** directly in the analytics sidebar or use `?view=maqsam`. Both Marita and Daniel workspaces expose the same view. It defaults to the active SDR and all available history; switch between Marita, Daniel, or All agents and apply a date range. **Since first call** clears the lower date bound. Counts include external call attempts without summaries, and `serviced` is treated as completed.
 
-## Data flow
+## Sync and history
 
-1. n8n scans the previous three hours of Maqsam calls every ten minutes.
-2. Only completed or serviced calls for `m.chedid@bayt.net` are processed.
-3. The workflow waits for a non-empty Maqsam summary, then keeps the full `transcription` and `segments` fields.
-4. HubSpot is searched by normalized phone number.
-5. Every call is upserted into `POST /api/maqsam/calls` using the Maqsam Call ID as the unique key.
-6. A unique safe HubSpot match receives a Note containing call metadata, AI summary, and transcript.
-7. Unmatched and ambiguous calls remain in the dashboard and are never attached to a random Contact.
+The existing `maqsam-sync` worker reuses the app image. Marita is matched by `MAQSAM_TARGET_AGENT_EMAIL` or exact full name **Marita Chedid**. Daniel is matched by exact full name **Daniel Beaini** or optional verified `MAQSAM_DANIEL_AGENT_EMAIL`. Unknown agents are never assigned to an SDR.
 
-## Match and Note statuses
+Recent calls are polled every ten minutes with a three-hour overlap. A background historical scan starts at `MAQSAM_BACKFILL_FROM` (default 2026-07-13, the SDR project start). This scan includes days before Daniel joined so his first available call is discovered rather than assuming an employment date. It reads one day at a time, all pages until empty, and upserts by Call ID. A persistent checkpoint advances only after the entire window succeeds. Failures retry the same window. If the provider ignores pagination or the page cap is reached, the checkpoint stops and worker logs report the failure.
 
-- `matched`: one unique safe HubSpot Contact match.
-- `unmatched`: no safe HubSpot Contact match.
-- `ambiguous`: multiple candidates tied at the strongest score.
-- `pending`: matched but the HubSpot Note has not been confirmed yet.
-- `synced`: the workflow created the HubSpot Note.
-- `already_synced`: an existing Note already contains the Call ID or Reference ID.
-- `not_applicable`: unmatched or ambiguous; no HubSpot Note is created.
+The existing `/app/data` volume stores calls and the worker checkpoint. Do not delete either during redeploys. The dashboard reports historical import progress; counts are incomplete until the import catches up. Available history remains subject to Maqsam availability and configured retention/capacity (180 days and 50,000 records by default; existing server overrides still apply).
 
-## Dashboard environment
+## HubSpot integrity
+
+Phone matching keeps unmatched and ambiguous calls visible without creating random contacts or notes. The worker preserves confirmed matched contact and note statuses on repeated syncs; it does not create HubSpot notes itself. An independently configured n8n flow may ingest calls and create confirmed notes. Missing summaries/transcripts stay explicit.
+
+## Settings
 
 ```env
-MAQSAM_INGEST_SECRET=<strong-random-shared-secret>
-MAQSAM_CALL_STORE_PATH=/app/data/maqsam-calls.json
+MAQSAM_TARGET_AGENT_EMAIL=m.chedid@bayt.net
+MAQSAM_DANIEL_AGENT_EMAIL=
+MAQSAM_BACKFILL_FROM=2026-07-13
+MAQSAM_SYNC_CHECKPOINT_PATH=/app/data/maqsam-sync-checkpoint.json
+MAQSAM_SYNC_INTERVAL_SECONDS=600
+MAQSAM_SYNC_LOOKBACK_SECONDS=10800
+MAQSAM_SYNC_PAGE_COUNT=12
 MAQSAM_CALL_RETENTION_DAYS=180
-MAQSAM_CALL_MAX_RECORDS=5000
+MAQSAM_CALL_MAX_RECORDS=50000
 ```
 
-The existing Docker volume mounted at `/app/data` persists Maqsam calls and Google Calendar credentials across rebuilds.
-
-## n8n setup
-
-Create an **HTTP Basic Auth** credential named `Maqsam Basic Auth`:
-
-- Username: rotated Maqsam Access Key
-- Password: rotated Maqsam Access Secret
-
-Configure these n8n environment variables:
-
-```env
-SDR_DASHBOARD_BASE_URL=https://sdr.dashboardtalentera.tech
-MAQSAM_INGEST_SECRET=<same-value-as-dashboard>
-```
-
-Never commit live values. The Maqsam key and secret must be rotated if they appeared in a workflow export or chat message.
-
-## Deployment and verification
-
-1. Redeploy the SDR dashboard after setting the dashboard environment variables.
-2. Import the updated n8n workflow and select the `Maqsam Basic Auth` credential plus the existing HubSpot Bearer credential.
-3. Run the workflow manually.
-4. Verify that a matched call appears in the `Maqsam Calls` view and creates a HubSpot Note.
-5. Verify that an unmatched number appears in the dashboard without creating a Contact or Note.
-6. Activate the ten-minute schedule.
+Maqsam and ingest credentials remain server-side in the persistent runtime env. Deploy through the canonical main CI → Hostinger workflow. Verify `/api/health` buildRef, the sidebar, both agent filters, historical progress, and actual Daniel records before claiming history is complete.

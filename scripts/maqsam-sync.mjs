@@ -1,3 +1,8 @@
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { maqsamAgentKey } from "../src/lib/maqsam-agent.mjs";
+
 const MAQSAM_API_URL = "https://api.mq.maqsam.com/v3/calls";
 const DEFAULT_TARGET_AGENT_EMAIL = "m.chedid@bayt.net";
 const DEFAULT_DASHBOARD_URL = "http://sdr-dashboard:3000";
@@ -18,6 +23,9 @@ const config = {
   maqsamAccessKey: env("MAQSAM_ACCESS_KEY"),
   maqsamAccessSecret: env("MAQSAM_ACCESS_SECRET"),
   hubspotToken: env("HUBSPOT_PRIVATE_APP_TOKEN"),
+  danielAgentEmail: env("MAQSAM_DANIEL_AGENT_EMAIL").toLowerCase(),
+  backfillFrom: env("MAQSAM_BACKFILL_FROM", "2026-07-13"),
+  checkpointPath: env("MAQSAM_SYNC_CHECKPOINT_PATH", "/app/data/maqsam-sync-checkpoint.json"),
   targetAgentEmail: env("MAQSAM_TARGET_AGENT_EMAIL", DEFAULT_TARGET_AGENT_EMAIL).toLowerCase(),
   intervalMs: numberEnv("MAQSAM_SYNC_INTERVAL_SECONDS", 600) * 1000,
   lookbackSeconds: numberEnv("MAQSAM_SYNC_LOOKBACK_SECONDS", 3 * 60 * 60),
@@ -107,20 +115,18 @@ function extractSummary(summary) {
   return { text: "", language: "" };
 }
 
-function isTargetAgentCall(call) {
+export function targetAgentForCall(call, identities = { maritaEmail: config.targetAgentEmail, danielEmail: config.danielAgentEmail }) {
   const agents = Array.isArray(call.agents) ? call.agents : [];
-  return agents.some((agent) => String(agent?.email ?? "").trim().toLowerCase() === config.targetAgentEmail);
+  return agents.find((agent) => maqsamAgentKey(agent, identities) !== "unknown");
 }
 
-function isReadyCall(call) {
-  const type = String(call.type ?? "").toLowerCase();
-  const state = String(call.state ?? "").toLowerCase();
-  const duration = Number(call.duration ?? 0);
-  return type !== "internal" && ["completed", "serviced"].includes(state) && duration > 0;
+export function isEligibleCall(call) {
+  // Counts include unanswered calls and calls without an AI summary.
+  return String(call.type ?? "").toLowerCase() !== "internal";
 }
 
 async function fetchJson(url, options) {
-  const response = await fetch(url, options);
+  const response = await fetch(url, { ...options, signal: AbortSignal.timeout(30_000) });
   const text = await response.text();
   let body = {};
   try {
@@ -132,13 +138,10 @@ async function fetchJson(url, options) {
   return body;
 }
 
-async function fetchRecentCalls() {
-  const endTime = Math.floor(Date.now() / 1000);
-  const startTime = endTime - config.lookbackSeconds;
+export async function fetchCalls(startTime, endTime, authorization = authHeader(), pageCount = config.pageCount) {
   const output = new Map();
-  const authorization = authHeader();
 
-  for (let page = 1; page <= config.pageCount; page += 1) {
+  for (let page = 1; page <= pageCount; page += 1) {
     const url = new URL(MAQSAM_API_URL);
     url.searchParams.set("page", String(page));
     url.searchParams.set("start_time", String(startTime));
@@ -148,14 +151,18 @@ async function fetchRecentCalls() {
       headers: { Authorization: authorization, Accept: "application/json" },
     });
 
-    const calls = Array.isArray(payload.message) ? payload.message : [];
+    if (!Array.isArray(payload.message)) throw new Error("Unexpected Maqsam calls response; refusing to advance history checkpoint.");
+    const calls = payload.message;
+    if (!calls.length) return [...output.values()];
+    let added = 0;
     for (const call of calls) {
       const key = String(call?.id ?? call?.referenceId ?? "").trim();
-      if (key && !output.has(key)) output.set(key, call);
+      if (key && !output.has(key)) { output.set(key, call); added += 1; }
     }
+    if (!added) throw new Error("Maqsam pagination did not advance; refusing to skip history.");
   }
 
-  return [...output.values()];
+  throw new Error("Maqsam page limit reached; increase MAQSAM_SYNC_PAGE_COUNT before advancing history.");
 }
 
 function scoreCandidate(callPhone, contact) {
@@ -235,29 +242,26 @@ async function upsertDashboardCall(record) {
   });
 }
 
-async function syncOnce() {
-  const calls = await fetchRecentCalls();
+async function syncOnce(startTime, endTime) {
+  const calls = await fetchCalls(startTime, endTime);
+  const existingPayload = await fetchJson(`${config.dashboardBaseUrl}/api/maqsam/calls?from=${new Date(startTime * 1000).toISOString().slice(0, 10)}&to=${new Date(endTime * 1000).toISOString().slice(0, 10)}&limit=5000`);
+  const existing = new Map((existingPayload.calls ?? []).map((record) => [record.callKey, record]));
   let ready = 0;
   let upserted = 0;
   let skipped = 0;
 
   for (const call of calls) {
-    if (!isTargetAgentCall(call) || !isReadyCall(call)) {
+    const targetAgent = targetAgentForCall(call);
+    if (!targetAgent || !isEligibleCall(call)) {
       skipped += 1;
       continue;
     }
 
     const { text: summary, language: summaryLanguage } = extractSummary(call.summary);
-    if (!summary) {
-      skipped += 1;
-      continue;
-    }
 
     const callKey = String(call.id ?? call.referenceId ?? "").trim();
     const timestampSeconds = Number(call.timestamp);
     const timestampMs = Number.isFinite(timestampSeconds) && timestampSeconds > 0 ? timestampSeconds * 1000 : Date.now();
-    const agents = Array.isArray(call.agents) ? call.agents : [];
-    const targetAgent = agents.find((agent) => String(agent?.email ?? "").trim().toLowerCase() === config.targetAgentEmail) ?? agents[0] ?? {};
     const phoneRaw = getPhone(call);
     const phone = phoneParts(phoneRaw);
 
@@ -267,7 +271,14 @@ async function syncOnce() {
     }
 
     ready += 1;
-    const match = await resolveHubspotContact(phone).catch((error) => {
+    const previous = existing.get(callKey);
+    const match = previous?.matchStatus === "matched" ? {
+      matchStatus: previous.matchStatus, hubspotContactId: previous.hubspotContactId,
+      contactName: previous.contactName, contactEmail: previous.contactEmail,
+      contactPhone: previous.contactPhone, contactMobilePhone: previous.contactMobilePhone,
+      contactMatchScore: previous.contactMatchScore, hubspotNoteStatus: previous.hubspotNoteStatus,
+      hubspotNoteId: previous.hubspotNoteId,
+    } : await resolveHubspotContact(phone).catch((error) => {
       console.warn(`HubSpot match failed for call ${callKey}: ${error.message}`);
       return { matchStatus: "unmatched", hubspotNoteStatus: "not_applicable" };
     });
@@ -288,37 +299,72 @@ async function syncOnce() {
       holdTimeSeconds: Number(call.holdTime ?? 0),
       waitingTimeSeconds: Number(call.waitingTime ?? 0),
       handlingTimeSeconds: Number(call.handlingTime ?? 0),
-      summary,
-      summaryLanguage,
-      transcription: String(call.transcription ?? ""),
-      segments: Array.isArray(call.segments) ? call.segments : [],
+      summary: summary || previous?.summary || "",
+      summaryLanguage: summaryLanguage || previous?.summaryLanguage || "",
+      transcription: String(call.transcription || previous?.transcription || ""),
+      segments: Array.isArray(call.segments) && call.segments.length ? call.segments : previous?.segments ?? [],
       sentiment: String(call.sentiment ?? ""),
       tags: [...(Array.isArray(call.tags) ? call.tags : []), ...(Array.isArray(call.autoTags) ? call.autoTags : [])],
       ...match,
     });
     upserted += 1;
+    await new Promise((resolve) => setTimeout(resolve, 150));
   }
 
   console.log(`Maqsam sync: fetched=${calls.length}; ready=${ready}; upserted=${upserted}; skipped=${skipped}`);
 }
 
+async function readCheckpoint() {
+  const startTime = Date.parse(`${config.backfillFrom}T00:00:00Z`) / 1000;
+  if (!Number.isFinite(startTime)) throw new Error("Invalid MAQSAM_BACKFILL_FROM");
+  try {
+    const saved = JSON.parse(await readFile(config.checkpointPath, "utf8"));
+    if (saved.version === 2 && saved.from === config.backfillFrom && Number.isFinite(saved.nextTime)) return saved.nextTime;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  return startTime;
+}
+
+async function saveCheckpoint(nextTime) {
+  await mkdir(path.dirname(config.checkpointPath), { recursive: true });
+  const temporary = `${config.checkpointPath}.${process.pid}.tmp`;
+  await writeFile(temporary, JSON.stringify({ version: 2, from: config.backfillFrom, nextTime, updatedAt: new Date().toISOString() }));
+  await rename(temporary, config.checkpointPath);
+}
+
 async function main() {
   required(config.ingestSecret, "MAQSAM_INGEST_SECRET is missing.");
   authHeader();
-  console.log(`Maqsam sync worker started; target=${config.targetAgentEmail}; every=${Math.round(config.intervalMs / 1000)}s; lookback=${config.lookbackSeconds}s`);
-
+  console.log("Maqsam sync worker started; agents=Marita,Daniel; historical import enabled");
+  let nextTime = await readCheckpoint();
+  let lastRecentSync = 0;
   while (true) {
-    const started = Date.now();
-    await syncOnce().catch((error) => {
-      console.error(`Maqsam sync failed: ${error.stack || error.message}`);
-    });
-
-    const elapsed = Date.now() - started;
-    await new Promise((resolve) => setTimeout(resolve, Math.max(5_000, config.intervalMs - elapsed)));
+    let failed = false;
+    const now = Math.floor(Date.now() / 1000);
+    try {
+      if (Date.now() - lastRecentSync >= config.intervalMs) {
+        await syncOnce(now - config.lookbackSeconds, now);
+        lastRecentSync = Date.now();
+      }
+      // One bounded day at a time. Advance only after every call was upserted.
+      const historicalEnd = now - config.lookbackSeconds;
+      if (nextTime < historicalEnd) {
+        const endTime = Math.min(nextTime + 86400, historicalEnd);
+        await syncOnce(nextTime, endTime);
+        await saveCheckpoint(endTime);
+        nextTime = endTime;
+        console.log(`Maqsam historical import through ${new Date(nextTime * 1000).toISOString()}`);
+      }
+    } catch (error) {
+      failed = true;
+      console.error(`Maqsam sync failed: ${error.message}`);
+    }
+    const importing = nextTime < now - config.lookbackSeconds;
+    await new Promise((resolve) => setTimeout(resolve, failed ? 60_000 : importing ? 1_000 : config.intervalMs));
   }
 }
 
-main().catch((error) => {
-  console.error(error.stack || error.message);
-  process.exit(1);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => { console.error(error.message); process.exit(1); });
+}
