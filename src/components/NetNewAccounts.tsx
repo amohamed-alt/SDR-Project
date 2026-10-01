@@ -270,7 +270,7 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
     setNotice("");
     try {
       const result = await action({ action: "discover", pages, confirmCredits: true });
-      setNotice(`Discovery complete · ${String(result.fetched || 0)} fetched · ${String(result.eligible || 0)} eligible · ${String(result.excluded || 0)} excluded.`);
+      setNotice(`Discovery complete · ${String(result.fetched || 0)} fetched · ${String(result.stored || 0)} newly stored · ${String(result.eligible || 0)} eligible · ${String(result.excluded || 0)} excluded.`);
       track("net-new-discover", { pages, fetched: result.fetched, eligible: result.eligible });
       await load();
     } catch (requestError) {
@@ -473,7 +473,7 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
         {inventory ? <>
           <label className={styles.pageSelect}><span>Assign new accounts to</span><select value={routeOwner} onChange={(event) => setRouteOwner(event.target.value)}><option value="31644369">Marita Chedid</option><option value="37624223">Daniel Beaini</option></select></label>
           <div className={styles.divider}/><strong>Import company stock</strong>
-          <label className={styles.pageSelect}><span>Source</span><select value={importSource} onChange={(event) => { setImportSource(event.target.value); setImportPreview(null); }}>{["Clay", "SignalHire", "Sales Navigator", "LinkedIn", "Public research", "Manual"].map((value) => <option key={value}>{value}</option>)}</select></label>
+          <label className={styles.pageSelect}><span>Import source</span><select value={importSource} onChange={(event) => { setImportSource(event.target.value); setImportPreview(null); }}>{["Clay", "SignalHire", "Sales Navigator", "LinkedIn", "Public research", "Manual"].map((value) => <option key={value}>{value}</option>)}</select></label>
           <label className={styles.ownerKey}><span>CSV or JSON · up to 100 companies</span><input type="file" accept=".csv,.json" onChange={async (event) => { const file = event.target.files?.[0]; setImportPreview(null); setImportRows([]); if (!file) return; try { if (file.size > 250_000) throw new Error("File must be below 250 KB"); const rows = parseInventoryFile(await file.text()); if (rows.length > 100) throw new Error("Import up to 100 companies per batch"); setImportRows(rows); setError(""); } catch (error) { setError(error instanceof Error ? error.message : "Invalid file"); } }}/></label>
           <p className={styles.costNote}>Required columns: name, domain. Optional: country, industry, employeeCount, sourceUrl, linkedinUrl, careerPageUrl, detectedAts, evidence, businessLine (Talentera / Evalufy). Imported companies enter review.</p>
           <button className={styles.saveKey} disabled={!adminUnlocked || !importRows.length || Boolean(busy)} onClick={() => void importCompanies(false)}>Preview & check duplicates</button>

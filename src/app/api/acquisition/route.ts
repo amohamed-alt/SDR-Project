@@ -483,7 +483,7 @@ async function openTaskCounts() {
 
 async function assignAccount(account: AcquisitionAccount, requestedOwnerId?: string) {
   if (account.assignedOwnerId) return { ownerId: account.assignedOwnerId, ownerName: account.assignedOwnerName, reason: "Existing acquisition assignment preserved" };
-  const counts = await openTaskCounts();
+  const counts = requestedOwnerId ? {} : await openTaskCounts();
   const owner = requestedOwnerId
     ? { ...manualTaskOwners().find((item) => item.id === requestedOwnerId)!, reason: "Selected SDR for inventory" }
     : chooseAcquisitionOwner(account.domain, counts);

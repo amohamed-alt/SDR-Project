@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
       const scored = scoreTalenteraAccount({ companyId: domain, name: company.name, domain, country: company.country, employeeCount: company.employeeCount, industry: company.industry, activeJobs: 0, newJobs30d: 0, ats: company.detectedAts });
       const evalufy = company.businessLine === "Evalufy";
       accounts.push({
-        domain, name: company.name, source: input.source, sourceId: company.sourceUrl,
+        domain, name: company.name, source: input.source, sourceId: company.sourceUrl.slice(0, 160),
         country: scored.country || company.country, employeeCount: company.employeeCount, industry: company.industry,
         activeJobs: 0, headcountGrowth: 0, hrHeadcount: 0, careerPageUrl: company.careerPageUrl, detectedAts: company.detectedAts,
         gtmScore: evalufy ? 0 : scored.score, gtmTier: evalufy ? "Watch" : scored.tier,
