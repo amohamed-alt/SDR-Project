@@ -1,3 +1,4 @@
+import { productPersonas } from "@/lib/saudi-coverage-learning";
 import { NextRequest, NextResponse } from "next/server";
 import { getAcquisitionAccount, upsertAcquisitionAccounts, type AcquisitionAccount } from "@/lib/acquisition-data-api";
 import { inventoryDomain, inventoryImportSchema } from "@/lib/lead-inventory-import";
@@ -75,9 +76,10 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   if (!sdrAdminAuthorized(request)) return NextResponse.json({ error: "Unlock Admin access first." }, { status: 401 });
   if (!originMatchesRequestHosts({ origin: request.headers.get("origin"), host: request.headers.get("host"), forwardedHost: request.headers.get("x-forwarded-host"), requestHost: request.nextUrl.host })) return NextResponse.json({ error: "Cross-site actions are not allowed." }, { status: 403 });
-  const body = await request.json().catch(() => null) as { domain?: string; identityReviewed?: boolean; icpReviewed?: boolean } | null;
+  const body = await request.json().catch(() => null) as { domain?: string; identityReviewed?: boolean; icpReviewed?: boolean; businessLine?: "Talentera" | "Evalufy" } | null;
   if (!body || typeof body.domain !== "string" || body.identityReviewed !== true || body.icpReviewed !== true) return NextResponse.json({ error: "Confirm company identity and ICP review." }, { status: 400 });
   try {
+    if (body.businessLine && !["Talentera", "Evalufy"].includes(body.businessLine)) return NextResponse.json({ error: "Invalid business line" }, { status: 400 });
     const domain = inventoryDomain(body.domain);
     const account = await getAcquisitionAccount(domain);
     if (!account) return NextResponse.json({ error: "Company not found" }, { status: 404 });
@@ -85,7 +87,9 @@ export async function PATCH(request: NextRequest) {
     const matches = await searchAll("companies", ["name", "domain"], [{ propertyName: "domain", operator: "EQ", value: domain }]);
     const names = matches.length ? [] : await searchAll("companies", ["name", "domain"], [{ propertyName: "name", operator: "EQ", value: account.name }]);
     if (matches.length || names.length) return NextResponse.json({ error: "Company now exists in HubSpot; keep it out of the new-company queue." }, { status: 409 });
-    await upsertAcquisitionAccounts([{ ...account, exclusionStatus: "eligible", exclusionReason: "", status: "qualified", evidence: { ...account.evidence, identityReviewed: true, icpReviewed: true, reviewedAt: new Date().toISOString() } }]);
+    const businessLine = body.businessLine || (account.evidence.businessLine === "Evalufy" ? "Evalufy" : "Talentera");
+    const personas = productPersonas(businessLine, `${account.industry} ${account.name}`, account.employeeCount);
+    await upsertAcquisitionAccounts([{ ...account, primaryPersona: personas.primary, secondaryPersona: personas.secondary, exclusionStatus: "eligible", exclusionReason: "", status: "qualified", evidence: { ...account.evidence, businessLine, productReviewed: true, identityReviewed: true, icpReviewed: true, reviewedAt: new Date().toISOString() } }]);
     return NextResponse.json({ qualified: true, domain });
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Qualification failed" }, { status: 502 }); }
 }

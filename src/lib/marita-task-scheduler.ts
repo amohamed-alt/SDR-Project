@@ -50,7 +50,7 @@ export function cairoMorning(day: string) {
   return new Date(Date.parse(`${day}T09:00:00Z`) - offset * 60_000).toISOString();
 }
 
-export function planMaritaTask(tasks: ScheduledTask[], reservations: Reservation[], elevatus: boolean, now = new Date()) {
+export function planMaritaTask(tasks: ScheduledTask[], reservations: Reservation[], elevatus: boolean, now = new Date(), policy = { ownerId: "31644369", dailyCap: MARITA_DAILY_CAP, elevatusTarget: ELEVATUS_DAILY_TARGET }) {
   const counts = new Map<string, { total: number; elevatus: number }>();
   const observed = new Set<string>();
   const today = cairoDate(now);
@@ -68,8 +68,8 @@ export function planMaritaTask(tasks: ScheduledTask[], reservations: Reservation
   for (const task of tasks) {
     if (observed.has(task.id)) continue;
     observed.add(task.id);
-    if (task.properties.hubspot_owner_id !== "31644369" || task.properties.hs_task_status === "COMPLETED") continue;
-    if (!task.properties.hs_timestamp) throw new MaritaScheduleError("An open Marita task has no date; reconcile it before automatic scheduling.");
+    if (task.properties.hubspot_owner_id !== policy.ownerId || task.properties.hs_task_status === "COMPLETED") continue;
+    if (!task.properties.hs_timestamp) throw new MaritaScheduleError(`An open task for SDR ${policy.ownerId} has no date; reconcile it before automatic scheduling.`);
     count(task.properties.hs_timestamp, /\belevatus\b/i.test(task.properties.hs_task_subject || ""));
   }
   for (const reservation of reservations) {
@@ -80,13 +80,13 @@ export function planMaritaTask(tasks: ScheduledTask[], reservations: Reservation
     const weekday = new Date(`${day}T12:00:00Z`).getUTCDay();
     if (weekday === 5 || weekday === 6) continue;
     const used = counts.get(day) || { total: 0, elevatus: 0 };
-    const carried = Math.min(carry, Math.max(0, MARITA_DAILY_CAP - used.total));
+    const carried = Math.min(carry, Math.max(0, policy.dailyCap - used.total));
     carry -= carried;
     used.total += carried;
-    const reservedForElevatus = Math.max(0, ELEVATUS_DAILY_TARGET - used.elevatus);
+    const reservedForElevatus = Math.max(0, policy.elevatusTarget - used.elevatus);
     const hasRoom = elevatus
-      ? used.total < MARITA_DAILY_CAP && used.elevatus < ELEVATUS_DAILY_TARGET
-      : used.total < MARITA_DAILY_CAP - reservedForElevatus;
+      ? used.total < policy.dailyCap && used.elevatus < policy.elevatusTarget
+      : used.total < policy.dailyCap - reservedForElevatus;
     if (hasRoom) return cairoMorning(day);
   }
   throw new MaritaScheduleError("No Marita capacity is available in the next year.");
@@ -123,8 +123,10 @@ export async function createScheduledMaritaTask<T extends { id: string }>(input:
   createTask: (dueAt: string) => Promise<T>;
   now?: Date;
   stateDirectory?: string;
+  ownerId?: "31644369" | "37624223";
 }) {
-  const directory = input.stateDirectory || "/app/data/marita-task-schedule";
+  const ownerId = input.ownerId || "31644369";
+  const directory = input.stateDirectory || (ownerId === "37624223" ? "/app/data/daniel-task-schedule" : "/app/data/marita-task-schedule");
   await mkdir(directory, { recursive: true });
   const lock = path.join(directory, "lock");
   try { await mkdir(lock); }
@@ -145,7 +147,7 @@ export async function createScheduledMaritaTask<T extends { id: string }>(input:
     const existing = journal.reservations.find((r) => r.contactId === input.contactId || (input.companyId && r.companyId === input.companyId));
     if (existing) throw new MaritaScheduleError(`A Marita task is already reserved for this contact/company${existing.taskId ? ` (task ${existing.taskId})` : "; reconcile the previous uncertain write"}.`);
     const tasks = await input.readTasks();
-    const dueAt = planMaritaTask(tasks, journal.reservations, input.elevatus, now);
+    const dueAt = planMaritaTask(tasks, journal.reservations, input.elevatus, now, { ownerId, dailyCap: ownerId === "37624223" ? 50 : MARITA_DAILY_CAP, elevatusTarget: ownerId === "37624223" ? 0 : ELEVATUS_DAILY_TARGET });
     const reservation: Reservation = { contactId: input.contactId, companyId: input.companyId, dueAt, elevatus: input.elevatus };
     journal.reservations.push(reservation);
     await saveJournal(file, journal);

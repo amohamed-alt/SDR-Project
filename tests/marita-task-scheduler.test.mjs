@@ -87,3 +87,8 @@ test("an ambiguous POST failure keeps the reservation across process restarts", 
     assert.equal(calls, 1);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+test("Daniel inventory scheduling uses his own 50/day capacity and preserves backlog", () => {
+  const tasks = Array.from({ length: 50 }, (_, i) => ({ id: String(i), properties: { hubspot_owner_id: "37624223", hs_task_status: "NOT_STARTED", hs_timestamp: "2026-10-04T06:00:00Z" } }));
+  const due = planMaritaTask(tasks, [], false, new Date("2026-10-01T10:00:00Z"), { ownerId: "37624223", dailyCap: 50, elevatusTarget: 0 });
+  assert.equal(cairoDate(due), "2026-10-05");
+});

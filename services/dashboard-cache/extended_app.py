@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app import app, clean_text, initialize_usage_db, iso, normalize_domain, usage_db
 
 APP_EXTENSION_VERSION = "coverage-ledger-v3"
+import inventory_engine  # noqa: F401 - registers persistent inventory routes
 COVERAGE_SOURCE = "Apollo · GCC+Egypt market coverage"
 
 

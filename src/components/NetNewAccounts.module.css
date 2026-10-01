@@ -311,3 +311,19 @@
 .importPreview li { margin-bottom: 8px; }
 .importPreview small { display: block; color: #526078; }
 .page button:focus-visible, .page input:focus-visible, .page select:focus-visible { outline: 2px solid #20764b; outline-offset: 3px; }
+.coveragePanel { border: 1px solid var(--border, #cbd5e1); border-radius: 14px; padding: 18px; margin: 16px 0; background: var(--surface, #fff); color: var(--text, #0f172a); }
+.coveragePanel h2 { font-size: 17px; margin: 0 0 6px; }
+.coveragePanel p { font-size: 13px; line-height: 1.6; margin: 8px 0; }
+.coverageHeading { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.coverageActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.coverageActions button { min-height: 44px; border: 1px solid #94a3b8; border-radius: 8px; background: transparent; color: inherit; padding: 8px 12px; cursor: pointer; }
+.coverageActions button:disabled { opacity: .5; cursor: not-allowed; }
+.coverageActions button:focus-visible { outline: 3px solid #10b981; outline-offset: 2px; }
+.coverageMetrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 16px 0; }
+.coverageMetrics span { display: block; font-size: 12px; margin-bottom: 7px; }
+.coverageMetrics strong { font-size: 24px; }
+.coveragePanel summary { cursor: pointer; padding: 10px 0; font-size: 14px; font-weight: 600; }
+.coverageTable { overflow-x: auto; }
+.coverageTable table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
+.coverageTable td, .coverageTable th { padding: 9px; border-bottom: 1px solid #cbd5e1; }
+@media (max-width: 700px) { .coverageMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .coveragePanel { padding: 12px; } .coverageMetrics strong { font-size: 20px; } }

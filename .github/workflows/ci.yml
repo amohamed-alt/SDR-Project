@@ -90,7 +90,7 @@ jobs:
 
       - name: Dashboard cache Python syntax
         if: github.event_name == 'pull_request'
-        run: python -m py_compile services/dashboard-cache/app.py services/dashboard-cache/extended_app.py services/dashboard-cache/smoke.py
+        run: python -m py_compile services/dashboard-cache/app.py services/dashboard-cache/extended_app.py services/dashboard-cache/inventory_engine.py services/dashboard-cache/smoke.py
 
       - name: Dashboard cache container smoke
         if: github.event_name == 'pull_request'
@@ -108,3 +108,20 @@ jobs:
           done
           docker logs "$CID" || true
           exit 1
+
+      - name: Inventory PostgreSQL concurrency gates
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          docker network create inventory-ci
+          PG=$(docker run -d --rm --network inventory-ci --name inventory-postgres -e POSTGRES_PASSWORD=inventory_ci -e POSTGRES_DB=inventory_ci postgres:16)
+          trap 'docker rm -f "$PG" >/dev/null 2>&1 || true; docker network rm inventory-ci >/dev/null 2>&1 || true' EXIT
+          for I in $(seq 1 30); do
+            if docker exec "$PG" pg_isready -U postgres -d inventory_ci; then break; fi
+            sleep 1
+          done
+          docker run --rm --network inventory-ci \
+            -e INVENTORY_TEST_DATABASE=true \
+            -e USAGE_DATABASE_URL=postgresql://postgres:inventory_ci@inventory-postgres:5432/inventory_ci \
+            -v "$PWD/tests/inventory-engine-db.py:/tmp/inventory-engine-db.py:ro" \
+            sdr-dashboard-cache-ci python /tmp/inventory-engine-db.py

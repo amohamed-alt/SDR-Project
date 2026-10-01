@@ -14,6 +14,20 @@ test("builds a focused TA SignalHire query", () => {
   assert.match(query, /Director/);
 });
 
+test("corporate assessment search does not route into university admissions", () => {
+  const query = signalHirePersonaQuery("Assessment / Talent Acquisition Manager", "HR Director");
+  assert.match(query, /Talent Acquisition/);
+  assert.doesNotMatch(query, /Admissions/);
+});
+
+test("Evalufy admissions decision makers receive functional persona credit", () => {
+  const result = rankAcquisitionCandidates([
+    { uid: "1", fullName: "Admissions", title: "Admissions Manager", currentCompany: "Example University", location: "Riyadh" },
+    { uid: "2", fullName: "HR", title: "HR Director", currentCompany: "Example University", location: "Riyadh" },
+  ], { accountName: "Example University", country: "Saudi Arabia", primaryPersona: "Admissions / Assessment Manager", secondaryPersona: "Registrar" });
+  assert.equal(result[0].uid, "1");
+});
+
 test("ranks current-company senior TA candidates first", () => {
   const ranked = rankAcquisitionCandidates([
     { uid: "1", fullName: "A", title: "HR Coordinator", currentCompany: "Example Group", location: "Riyadh" },

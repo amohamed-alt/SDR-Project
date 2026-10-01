@@ -8,6 +8,7 @@ import {
   RefreshCw, Search, ShieldCheck, Sparkles, Target, UserRoundSearch, UsersRound, X, Zap,
 } from "lucide-react";
 import styles from "./NetNewAccounts.module.css";
+import { SaudiCoveragePanel } from "./SaudiCoveragePanel";
 
 type Account = {
   domain: string;
@@ -136,10 +137,11 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
   const [page, setPage] = useState(0);
   const [readiness, setReadiness] = useState("");
   const [source, setSource] = useState("");
-  const [crawlProgress, setCrawlProgress] = useState<{ total: number | null; totalPages: number | null; completedPages: number[]; complete: boolean; uncertainPages: number[] } | null>(null);
+  const [crawlProgress, setCrawlProgress] = useState<{ total: number | null; totalPages: number | null; completedPages: number[]; complete: boolean; uncertainPages: number[]; sourcePagesComplete?: boolean; uniqueProviderOrganizations?: number } | null>(null);
   const [crmPresence, setCrmPresence] = useState("");
   const [inventoryScope, setInventoryScope] = useState(inventory ? "saudi200" : "");
   const [businessLine, setBusinessLine] = useState("");
+  const [reviewProduct, setReviewProduct] = useState("Talentera");
   const [routeOwner, setRouteOwner] = useState("31644369");
   const [importSource, setImportSource] = useState("Clay");
   const [importRows, setImportRows] = useState<unknown[]>([]);
@@ -233,6 +235,7 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
 
   async function openAccount(account: Account) {
     setSelectedDomain(account.domain);
+    setReviewProduct(account.evidence.businessLine === "Evalufy" ? "Evalufy" : "Talentera");
     setPeople([]);
     setNotice("");
     try { await loadPeople(account.domain); } catch (error) { setError(error instanceof Error ? error.message : "Unable to load people"); }
@@ -266,7 +269,7 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
     if (!selected || !window.confirm(`Confirm you reviewed ${selected.name}'s company identity and product fit?`)) return;
     setBusy("qualify"); setError("");
     try {
-      const response = await fetch("/api/lead-inventory", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ domain: selected.domain, identityReviewed: true, icpReviewed: true }) });
+      const response = await fetch("/api/lead-inventory", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ domain: selected.domain, identityReviewed: true, icpReviewed: true, businessLine: reviewProduct }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Qualification failed");
       await load(); setNotice("Company qualified. Person search is available.");
@@ -445,7 +448,8 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
     {error ? <div role="alert" className={styles.error}><CircleAlert size={18}/><span>{error}</span><button onClick={() => setError("")}><X size={14}/></button></div> : null}
     {notice ? <div role="status" className={styles.notice}><Check size={17}/><span>{notice}</span><button onClick={() => setNotice("")}><X size={14}/></button></div> : null}
 
-    {inventoryScope && crawlProgress ? <p className={styles.costNote}>Apollo: {crawlProgress.completedPages.length} / {crawlProgress.totalPages ?? "pending"} pages · {crawlProgress.total === null ? "First source page pending" : `${number(crawlProgress.total)} source records`} · {crawlProgress.uncertainPages.length ? "Paused: uncertain provider response needs review" : crawlProgress.complete ? "Company stock complete" : "Company stock loading"} · No person enrichment credits</p> : null}
+    {inventoryScope && crawlProgress ? <p className={styles.costNote}>Apollo: {crawlProgress.completedPages.length} / {crawlProgress.totalPages ?? "pending"} pages · {crawlProgress.total === null ? "First source page pending" : `${number(crawlProgress.total)} source records`} · {crawlProgress.uncertainPages.length ? "Paused: uncertain provider response needs review" : crawlProgress.complete ? "Source pages reconciled" : crawlProgress.sourcePagesComplete ? `${number(crawlProgress.uniqueProviderOrganizations || 0)} unique Apollo identities — source reconciliation pending` : "Company stock loading"} · Source coverage is not a census of all Saudi companies</p> : null}
+    {inventoryScope ? <SaudiCoveragePanel unlocked={adminUnlocked} total={summary.total || 0} crmTotal={summary.existing_hubspot || 0} onChanged={load}/> : null}
 
     <section className={styles.metrics}>
       <div><span>{inventory ? "Companies stored" : "Eligible"}</span><strong>{number((inventory ? summary.total : summary.eligible) || 0)}</strong><small>{inventoryScope ? "Saudi 200+ discovery" : "Net-new after exclusions"}</small></div>
@@ -548,7 +552,7 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
 
         <section className={styles.drawerSection}>
           <p>{selected.source} · {String(selected.evidence.businessLine || "Talentera")} · {selected.exclusionReason || "Qualified"}</p>
-          {selected.exclusionStatus === "review" ? <button className={styles.saveKey} disabled={!adminUnlocked || Boolean(busy)} onClick={() => void qualifyAccount()}>Confirm identity & ICP review</button> : null}
+          {selected.exclusionStatus === "review" ? <><label>Product fit <select aria-label="Reviewed product fit" value={reviewProduct} onChange={(event) => setReviewProduct(event.target.value)}><option>Talentera</option><option>Evalufy</option></select></label><button className={styles.saveKey} disabled={!adminUnlocked || Boolean(busy)} onClick={() => void qualifyAccount()}>Confirm identity & ICP review</button></> : null}
           <div className={styles.peopleHeader}>
             <div className={styles.sectionTitle}><UserRoundSearch size={16}/><div><span>SIGNALHIRE</span><strong>Best people at this company</strong></div></div>
             <button type="button" onClick={() => void findPeople()} disabled={Boolean(busy) || !adminUnlocked || !config?.signalHireConfigured || selected.exclusionStatus !== "eligible"}>{busy === "people" ? <LoaderCircle className={styles.spin} size={14}/> : <Search size={14}/>} Find people</button>
