@@ -3,12 +3,13 @@ import type { CoverageObservation, CoverageSnapshot } from "@/lib/saudi-coverage
 
 export const coverageData = () => acquisitionDataRequest<{
   snapshots: CoverageSnapshot[]; observations: CoverageObservation[];
+  reviews: { key: string; kind: string; state: string; result: { error?: string } }[];
   operations: { kind: string; state: string; count: number }[];
 }>("/v2/inventory/coverage", {}, 20_000);
 
 export const coverageQueue = (kind: "sync" | "work", limit: number) => acquisitionDataRequest<{ domains: string[] }>(`/v2/inventory/${kind}-queue?limit=${limit}`, {}, 10_000);
 
-export const reserveInventoryOperation = (key: string, kind: "enrichment" | "pipeline" | "push", dailyLimit = 10) => acquisitionDataRequest<{
+export const reserveInventoryOperation = (key: string, kind: "enrichment" | "company_enrichment" | "pipeline" | "push", dailyLimit = 10) => acquisitionDataRequest<{
   reserved: boolean; state: string; result?: Record<string, unknown>;
 }>("/v2/inventory/reserve", { method: "POST", body: JSON.stringify({ key, kind, dailyLimit }) }, 10_000);
 

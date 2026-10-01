@@ -6,6 +6,7 @@ import type { learnCoverage } from "@/lib/saudi-coverage-learning";
 type Report = {
   coverage: { checked: number; attempted: number; connected: number; meetingsHeld: number; both: number; futureTask: number; lastCheckedAt: string | null };
   model: ReturnType<typeof learnCoverage>;
+  reviews?: { key: string; kind: string; result: { error?: string } }[];
   operations: { kind: string; state: string; count: number }[];
 };
 const percent = (value: number) => `${Math.round(value * 100)}%`;
@@ -25,7 +26,7 @@ export function SaudiCoveragePanel({ unlocked, total, crmTotal, onChanged }: { u
   }, []);
   useEffect(() => { const timer = window.setTimeout(() => void refresh(), 0); return () => window.clearTimeout(timer); }, [refresh]);
   async function run(action: "sync" | "run") {
-    if (action === "run" && !window.confirm("Process up to 2 qualified Saudi companies, reveal at most one person per company within the 10/day shared limit, then create phone-qualified HubSpot contacts and tasks for Marita or Daniel?")) return;
+    if (action === "run" && !window.confirm("Process up to 2 qualified Saudi companies, enrich missing company details in Apollo and reveal at most one person per company within separate 10/day limits, then create phone-qualified HubSpot contacts and tasks for Marita or Daniel?")) return;
     setBusy(true); setError(""); setNotice("");
     try {
       const response = await fetch("/api/lead-inventory/engine", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action === "sync" ? { action, limit: 10 } : { action, limit: 2, confirmCredits: true }) });
@@ -59,7 +60,8 @@ export function SaudiCoveragePanel({ unlocked, total, crmTotal, onChanged }: { u
       <details><summary>{report.model.mode === "learning" ? "Learning from outcomes" : "Collecting evidence"} · {report.model.matureCompanies} mature companies</summary>
         <p>30-day outcomes after the first SDR call; at least 20 distinct companies per segment before learned ranking applies. Untouched and recent companies are not failures. These are observed associations, not proof of causation.</p>
         {report.model.segments.length ? <div className={styles.coverageTable}><table><thead><tr><th>Product</th><th>Segment</th><th>Companies</th><th>Connected</th><th>Held meeting</th><th>95% interval</th><th>Use</th></tr></thead><tbody>{report.model.segments.slice(0, 15).map((s) => <tr key={`${s.product}:${s.dimension}:${s.value}`}><td>{s.product}</td><td>{s.dimension}: {s.value}</td><td>{s.companies}</td><td>{percent(s.connectionRate)}</td><td>{percent(s.meetingRate)}</td><td>{percent(s.lower)}–{percent(s.upper)}</td><td>{s.usable ? "Ranking" : "More evidence needed"}</td></tr>)}</tbody></table></div> : <p>No mature, product-attributed SDR outcomes yet.</p>}
-        <p>Daily limits: 10 company attempts and 10 person reveals shared across the engine and Saudi inventory actions. Failed or uncertain operations stay in review.</p>
+        <p>Daily limits: 10 company attempts, 10 Apollo company enrichments and 10 person reveals shared across the engine and Saudi inventory actions. Failed or uncertain operations stay in review.</p>
+        {report.reviews?.length ? <details><summary>Operations needing review ({report.reviews.length})</summary><ul>{report.reviews.map((r) => <li key={r.key}>{r.key}: {r.result.error || "Reconcile the previous operation before retrying"}</li>)}</ul></details> : null}
         {report.operations.length ? <ul>{report.operations.map((o) => <li key={`${o.kind}:${o.state}`}>{o.kind} · {o.state}: {o.count} in the last 24 hours</li>)}</ul> : null}
       </details>
     </> : null}

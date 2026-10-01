@@ -27,7 +27,7 @@ if (!ready) throw new Error("Requested production build is not live; no Apollo c
 
 let fetched = 0, newRows = 0, existing = 0, calls = 0;
 const initial = await request("/api/lead-inventory/saudi");
-if (initial.rawPages.length && !initial.complete) {
+if (initial.rawPages.length && !initial.complete && !initial.sourcePagesComplete) {
   const seed = JSON.parse(await readFile("data/saudi-apollo-recovery-2026-10-01.json", "utf8"));
   for (const page of initial.rawPages) {
     const organizations = seed.pages.find(item => item.page === page)?.organizations || [];
@@ -46,7 +46,7 @@ if (initial.rawPages.length && !initial.complete) {
 for (let iteration = 0; iteration < 500; iteration += 1) {
   const progress = await request("/api/lead-inventory/saudi");
   if (progress.uncertainPages.length) throw new Error(`Uncertain paid page(s): ${progress.uncertainPages.join(",")}; manual review required`);
-  if (progress.complete) break;
+  if (progress.complete || progress.sourcePagesComplete) break;
   if (!progress.nextPage || progress.nextPage > 500) throw new Error("Apollo display cap reached; partition discovery before more spend");
   // POST is deliberately not retried; persistent raw pages allow safe resume.
   const result = await request("/api/lead-inventory/saudi", { page: progress.nextPage, confirmCredits: true });
@@ -58,4 +58,5 @@ const progress = await request("/api/lead-inventory/saudi");
 const inventory = await request("/api/acquisition?allSources=1&scope=saudi200&includeExcluded=1&limit=1");
 console.log(JSON.stringify({ fetchedThisRun: fetched, newRowsThisRun: newRows, existingHubSpotThisRun: existing, paidCallsThisRun: calls, signalHireCreditsUsed: 0, progress, inventory: inventory.summary }, null, 2));
 if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, `## Saudi 200+ inventory\n\n- Source records: ${progress.total}\n- Completed pages: ${progress.completedPages.length}/${progress.totalPages}\n- Stored scoped companies: ${inventory.summary.total}\n- Already in HubSpot: ${inventory.summary.existing_hubspot}\n- Needs review: ${inventory.summary.review}\n- Apollo page calls this run: ${calls}\n- SignalHire credits: 0\n`);
-if (!progress.complete) throw new Error("Crawl incomplete; rerun resumes from stored checkpoint");
+if (!progress.complete && !progress.sourcePagesComplete) throw new Error("Crawl incomplete; rerun resumes from stored checkpoint");
+if (!progress.complete) console.warn(`Source reconciliation pending: ${progress.uniqueProviderOrganizations}/${progress.total} identities; all source pages retained, no repeated paid discovery.`);

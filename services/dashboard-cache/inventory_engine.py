@@ -1,5 +1,6 @@
 """Persistent Saudi coverage and at-most-once external-operation reservations."""
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Literal
 from fastapi import HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -28,7 +29,7 @@ class CoverageWrite(BaseModel):
 class Reservation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     key: str = Field(min_length=3, max_length=500)
-    kind: Literal["enrichment", "pipeline", "push"]
+    kind: Literal["enrichment", "company_enrichment", "pipeline", "push"]
     dailyLimit: int = Field(default=10, ge=1, le=100)
 
 
@@ -49,7 +50,7 @@ def reserve_operation(body: Reservation):
             existing = connection.execute("SELECT state, result FROM inventory_operations WHERE operation_key=%s", (body.key,)).fetchone()
             if existing:
                 return {"reserved": False, **existing}
-            day = datetime.now(timezone.utc).astimezone(__import__('zoneinfo').ZoneInfo('Asia/Riyadh')).date().isoformat()
+            day = datetime.now(timezone.utc).astimezone(ZoneInfo('Asia/Riyadh')).date().isoformat()
             used = connection.execute("SELECT COUNT(*) AS n FROM inventory_operations WHERE kind=%s AND (created_at AT TIME ZONE 'Asia/Riyadh')::date=%s::date", (body.kind, day)).fetchone()["n"]
             if used >= body.dailyLimit:
                 return {"reserved": False, "state": "budget_exhausted", "used": used}
@@ -86,8 +87,10 @@ def read_coverage(response: Response):
             JOIN acquisition_accounts a ON a.domain=c.domain WHERE a.evidence->>'saudi200'='true'""").fetchall()
         operations = connection.execute("""SELECT kind,state,COUNT(*) AS count FROM inventory_operations
             WHERE created_at >= NOW()-INTERVAL '1 day' GROUP BY kind,state""").fetchall()
+        reviews = connection.execute("""SELECT operation_key AS key, kind, state, result FROM inventory_operations
+            WHERE state='review' ORDER BY created_at DESC LIMIT 30""").fetchall()
     response.headers["Cache-Control"] = "no-store"
-    return {"snapshots": [r["snapshot"] for r in rows], "observations": [o for r in rows for o in r["observations"]], "operations": operations}
+    return {"reviews": reviews, "snapshots": [r["snapshot"] for r in rows], "observations": [o for r in rows for o in r["observations"]], "operations": operations}
 
 
 @app.get("/v2/inventory/sync-queue")

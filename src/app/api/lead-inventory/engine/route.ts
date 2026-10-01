@@ -10,6 +10,7 @@ import { saudiPolicyExcluded } from "@/lib/saudi-inventory-policy";
 import { coverageData, coverageQueue, reserveInventoryOperation, finishInventoryOperation } from "@/lib/saudi-coverage-store";
 import { chooseInventorySdr, INVENTORY_SDR_IDS, learnedPriority, learnCoverage, personaFamily, productPersonas, suggestProduct } from "@/lib/saudi-coverage-learning";
 import { syncSaudiCoverage } from "@/lib/saudi-coverage-sync";
+import { enrichSaudiCompany } from "@/lib/saudi-company-enrichment";
 import { sdrAdminAuthorized } from "@/lib/sdr-admin-auth";
 import { originMatchesRequestHosts } from "@/lib/request-origin";
 
@@ -20,7 +21,7 @@ const input = z.discriminatedUnion("action", [
   z.object({ action: z.literal("run"), limit: z.number().int().min(1).max(5).default(1), confirmCredits: z.literal(true) }),
 ]);
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const data = await coverageData();
     const snapshots = [...new Map(data.snapshots.sort((a, b) => a.checkedAt.localeCompare(b.checkedAt)).map((s) => [s.companyId, s])).values()];
@@ -28,7 +29,7 @@ export async function GET() {
       coverage: { checked: snapshots.length, attempted: snapshots.filter((s) => s.attempted).length, connected: snapshots.filter((s) => s.connected).length,
         meetingsHeld: snapshots.filter((s) => s.meetingHeld).length, both: snapshots.filter((s) => s.connected && s.meetingHeld).length,
         futureTask: snapshots.filter((s) => s.futureTask).length, lastCheckedAt: snapshots.map((s) => s.checkedAt).sort().at(-1) || null },
-      model: learnCoverage(data.observations), operations: data.operations,
+      model: learnCoverage(data.observations), operations: data.operations, ...(sdrAdminAuthorized(request) ? { reviews: data.reviews } : {}),
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Coverage unavailable" }, { status: 503 }); }
 }
@@ -68,7 +69,7 @@ export async function POST(request: NextRequest) {
     }
     const results: { domain: string; status: string; ownerId?: string; error?: string }[] = [];
     for (const candidate of candidates.slice(0, parsed.data.limit)) {
-      const { account, product, personas, learned } = candidate;
+      let { account, product, personas, learned } = candidate;
       const operationKey = `pipeline:${account.domain}`;
       const reservation = await reserveInventoryOperation(operationKey, "pipeline", 10);
       if (!reservation.reserved) { results.push({ domain: account.domain, status: reservation.state }); continue; }
@@ -84,6 +85,14 @@ export async function POST(request: NextRequest) {
           await upsertAcquisitionAccounts([{ ...account, status: "existing_hubspot", exclusionStatus: "excluded", exclusionReason: "Already exists in HubSpot", hubspotCompanyId: (existing[0] || names[0]).id }]);
           throw new Error("Company already exists in HubSpot; excluded before enrichment");
         }
+        account = await enrichSaudiCompany(account);
+        if (account.country !== "Saudi Arabia" || (account.employeeCount > 0 && account.employeeCount < 200) || saudiPolicyExcluded(account.domain, `${account.name} ${account.industry} ${account.evidence.sourceText || ""}`)) {
+          await upsertAcquisitionAccounts([{ ...account, exclusionStatus: "excluded", exclusionReason: "Enriched company profile is outside the Saudi 200+ commercial policy", status: "excluded" }]);
+          throw new Error("Enriched company profile is outside the Saudi 200+ policy; no person reveal");
+        }
+        product = account.evidence.productReviewed ? (account.evidence.businessLine === "Evalufy" ? "Evalufy" : "Talentera") : suggestProduct(account.industry, String(account.evidence.sourceText || account.name));
+        personas = productPersonas(product, `${account.industry} ${account.name}`, account.employeeCount);
+        learned = learnedPriority(account.gtmScore, product, account.industry, account.employeeCount, personas.primary, model);
         const updated = { ...account, primaryPersona: personas.primary, secondaryPersona: personas.secondary, evidence: { ...account.evidence, businessLine: product, productReason: personas.reason, priorityModel: model.method, learnedLift: learned.lift } };
         await upsertAcquisitionAccounts([updated]);
         let people = (await listAcquisitionPeople(account.domain)).people;
