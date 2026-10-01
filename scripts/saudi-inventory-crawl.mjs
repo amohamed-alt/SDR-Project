@@ -1,4 +1,4 @@
-import { appendFile } from "node:fs/promises";
+import { appendFile, readFile } from "node:fs/promises";
 
 const base = process.env.BASE_URL || "https://sdr.dashboardtalentera.tech";
 const token = process.env.ACQUISITION_OWNER_TOKEN;
@@ -19,13 +19,30 @@ for (let attempt = 0; attempt < 180; attempt += 1) {
   try {
     const health = await request("/api/health");
     const progress = await request("/api/lead-inventory/saudi");
-    if (progress.version === "saudi-200-v1" && (!expectedSha || health.buildRef === expectedSha)) { ready = true; break; }
+    if (progress.version === "saudi-200-v2" && (!expectedSha || health.buildRef === expectedSha)) { ready = true; break; }
   } catch { /* Wait for deployment before spending. */ }
   await new Promise((resolve) => setTimeout(resolve, 10_000));
 }
 if (!ready) throw new Error("Requested production build is not live; no Apollo calls made");
 
 let fetched = 0, newRows = 0, existing = 0, calls = 0;
+const initial = await request("/api/lead-inventory/saudi");
+if (initial.rawPages.length && !initial.complete) {
+  const seed = JSON.parse(await readFile("data/saudi-apollo-recovery-2026-10-01.json", "utf8"));
+  for (const page of initial.rawPages) {
+    const organizations = seed.pages.find(item => item.page === page)?.organizations || [];
+    const result = await request("/api/lead-inventory/saudi", { page, confirmCredits: true, recoveryOrganizations: organizations });
+    console.log(JSON.stringify(result));
+    if (result.providerCreditsUsed) throw new Error("Recovery must not use paid calls");
+  }
+  for (let page = 1; page <= 500; page += 1) {
+    const result = await request("/api/lead-inventory/saudi", { page, confirmCredits: true, mode: "saved_accounts" });
+    console.log(JSON.stringify(result));
+    if (page >= Math.max(1, result.totalPages)) break;
+  }
+  const repaired = await request("/api/lead-inventory/saudi");
+  if (!repaired.complete) throw new Error(`Recovery incomplete: ${repaired.uniqueProviderOrganizations}/${repaired.total} source identities; paid calls disabled`);
+}
 for (let iteration = 0; iteration < 500; iteration += 1) {
   const progress = await request("/api/lead-inventory/saudi");
   if (progress.uncertainPages.length) throw new Error(`Uncertain paid page(s): ${progress.uncertainPages.join(",")}; manual review required`);

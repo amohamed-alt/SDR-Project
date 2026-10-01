@@ -1,3 +1,4 @@
+import { apolloCompanyRecords, apolloSaudiScopeEcho } from "@/lib/apollo-company-response";
 import { createHash } from "node:crypto";
 import { saudi200Candidate, saudiPolicyExcluded } from "@/lib/saudi-inventory-policy";
 import { NextRequest, NextResponse } from "next/server";
@@ -14,7 +15,7 @@ import { originMatchesRequestHosts } from "@/lib/request-origin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const state = new SaudiInventoryState();
-const input = z.object({ page: z.number().int().min(1).max(500), confirmCredits: z.literal(true) }).strict();
+const input = z.object({ page: z.number().int().min(1).max(500), confirmCredits: z.literal(true), mode: z.enum(["page", "saved_accounts"]).default("page"), recoveryOrganizations: z.array(z.record(z.string(), z.unknown())).max(100).optional() }).strict();
 const clean = (value: unknown, max = 300) => String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
 
 export async function GET() {
@@ -22,24 +23,26 @@ export async function GET() {
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Cannot read crawl state" }, { status: 503 }); }
 }
 
-async function fetchPage(page: number): Promise<SaudiPage> {
+async function fetchPage(page: number, savedAccounts = false): Promise<SaudiPage> {
   const key = process.env.APOLLO_API_KEY;
   if (!key) throw new Error("APOLLO_API_KEY is not configured");
   // Numeric ceiling exceeds any plausible global company headcount. Apollo's
   // documented API requires min,max; no practical upper-size cutoff is imposed.
   const query = new URLSearchParams({ "organization_locations[]": "Saudi Arabia", "organization_num_employees_ranges[]": SAUDI_EMPLOYEE_RANGE, per_page: "100", page: String(page) });
-  await state.claim(page);
-  const response = await fetch(`https://api.apollo.io/api/v1/mixed_companies/search?${query}`, {
+  if (!savedAccounts) await state.claim(page);
+  const response = await fetch(`https://api.apollo.io/api/v1/${savedAccounts ? "accounts" : "mixed_companies"}/search?${query}`, {
     method: "POST", headers: { "x-api-key": key, "Content-Type": "application/json", Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(45_000),
   });
   if (!response.ok) throw new Error(`Apollo search failed HTTP ${response.status}; page attempt retained to prevent accidental repeat spend`);
   const payload = await response.json() as Record<string, unknown>;
-  const organizations = Array.isArray(payload.organizations) ? payload.organizations : Array.isArray(payload.accounts) ? payload.accounts : null;
+  const organizations = apolloCompanyRecords(payload);
+  const scopeVerified = apolloSaudiScopeEcho(payload.breadcrumbs);
+  if (savedAccounts && !scopeVerified) throw new Error(`Free saved-account search did not confirm Saudi/200+ filters; no rows imported. Breadcrumb fields: ${JSON.stringify(payload.breadcrumbs)}`);
   const pagination = payload.pagination as Record<string, unknown> | undefined;
   const total = Number(pagination?.total_entries ?? pagination?.total ?? payload.total_entries);
   if (!organizations || !Number.isSafeInteger(total) || total < 0 || organizations.length > 100) throw new Error("Apollo returned an unexpected search response; crawl stopped");
-  const result = { organizations: organizations as Record<string, unknown>[], total };
-  await state.write(page, "raw", result);
+  const result: SaudiPage = { organizations, total, formatVersion: 2, scopeVerified, providerResponse: payload };
+  await state.write(page, savedAccounts ? "saved-raw" : "raw", result);
   return result;
 }
 
@@ -50,13 +53,20 @@ export async function POST(request: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: "Supply page and confirmCredits:true" }, { status: 400 });
   const page = parsed.data.page;
   try {
-    const completed = await state.read<Record<string, unknown>>(page, "result");
-    if (completed) return NextResponse.json({ ...completed, reused: true, providerCreditsUsed: 0 });
+    const savedAccounts = parsed.data.mode === "saved_accounts";
+    const suffix = savedAccounts ? "saved-result" : "result";
+    const completed = await state.read<Record<string, unknown>>(page, suffix);
+    if (completed?.parserVersion === 2 && !parsed.data.recoveryOrganizations) return NextResponse.json({ ...completed, reused: true, providerCreditsUsed: 0 });
     const progress = await state.summary();
-    if (progress.nextPage !== page) return NextResponse.json({ error: "Process the next incomplete page", nextPage: progress.nextPage }, { status: 409 });
+    if (!savedAccounts && !parsed.data.recoveryOrganizations && progress.nextPage !== page) return NextResponse.json({ error: "Process the next incomplete page", nextPage: progress.nextPage }, { status: 409 });
     if (!process.env.HUBSPOT_PRIVATE_APP_TOKEN || !process.env.DASHBOARD_CACHE_API_URL) throw new Error("CRM/storage configuration missing; no provider call made");
-    const storedRaw = await state.read<SaudiPage>(page, "raw");
-    const raw = storedRaw || await fetchPage(page);
+    const storedRaw = await state.read<SaudiPage>(page, savedAccounts ? "saved-raw" : "raw");
+    if (parsed.data.recoveryOrganizations && (!storedRaw || savedAccounts)) throw new Error("Recovery requires a retained paid page; no paid request made");
+    let raw = storedRaw || await fetchPage(page, savedAccounts);
+    if (parsed.data.recoveryOrganizations) {
+      raw = { ...raw, legacyRepair: true, formatVersion: 2, organizations: [...new Map([...parsed.data.recoveryOrganizations, ...raw.organizations].map(org => [String(org.organization_id || org.id || org.name), org])).values()] };
+      await state.write(page, "raw", raw);
+    }
     const identities = raw.organizations.map((org) => {
       const name = clean(org.name);
       let domain = "";
@@ -73,7 +83,8 @@ export async function POST(request: NextRequest) {
       for (const row of rows) { try { matches.set(inventoryDomain(row.properties.domain || ""), row.id); } catch { /* Name matching follows. */ } }
     }
     const names = [...new Set(identities.map((item) => item.name).filter(Boolean))];
-    const nameMatches = names.length ? await searchAll("companies", ["name", "domain"], [{ propertyName: "name", operator: "IN", values: names }]) : [];
+    const nameMatches = [];
+    for (let index = 0; index < names.length; index += 100) nameMatches.push(...await searchAll("companies", ["name", "domain"], [{ propertyName: "name", operator: "IN", values: names.slice(index, index + 100) }]));
     const byName = new Map(nameMatches.map((row) => [clean(row.properties.name).toLowerCase(), row.id]));
     const accounts: AcquisitionAccount[] = identities.map(({ org, name, domain, key, uid }) => {
       const count = Number(org.estimated_num_employees ?? org.employee_count ?? org.num_employees ?? 0);
@@ -91,10 +102,14 @@ export async function POST(request: NextRequest) {
         evidence: { businessLine: "Talentera", saudi200: true, saudi200Page: page, saudi200CheckedAt: new Date().toISOString(), saudi200EmployeeRange: SAUDI_EMPLOYEE_RANGE, sourceText: text, companyLinkedIn: clean(org.linkedin_url, 2000), syntheticDomainKey: !domain, inventoryImport: true, atsVerified: false } };
     });
     const unique = [...new Map(accounts.map((account) => [account.domain, account])).values()];
-    const saved = await upsertAcquisitionAccounts(unique, true);
-    await markSaudiInventoryMembership(unique.filter((account) => saudi200Candidate(account.country, account.employeeCount)).map((account) => ({ domain: account.domain, employeeCount: account.employeeCount, hubspotCompanyId: account.hubspotCompanyId, policyExcluded: !account.hubspotCompanyId && account.exclusionStatus === "excluded", evidence: { saudi200: true, saudi200Page: page, saudi200CheckedAt: account.evidence.saudi200CheckedAt, saudi200EmployeeRange: SAUDI_EMPLOYEE_RANGE } })));
-    const result = { page, total: raw.total, totalPages: Math.ceil(raw.total / 100), fetched: raw.organizations.length, newInventoryRows: saved.accounts, existingHubSpot: unique.filter((account) => account.hubspotCompanyId).length, notInHubSpot: unique.filter((account) => !account.hubspotCompanyId).length, review: unique.filter((account) => account.exclusionStatus === "review").length, providerCreditsUsed: storedRaw ? 0 : 1, signalHireCreditsUsed: 0, checkedAt: new Date().toISOString() };
-    await state.write(page, "result", result);
+    let inserted = 0;
+    for (let offset = 0; offset < unique.length; offset += 100) {
+    const chunk = unique.slice(offset, offset + 100);
+    inserted += (await upsertAcquisitionAccounts(chunk, true)).accounts;
+    await markSaudiInventoryMembership(chunk.filter((account) => saudi200Candidate(account.country, account.employeeCount)).map((account) => ({ domain: account.domain, employeeCount: account.employeeCount, hubspotCompanyId: account.hubspotCompanyId, policyExcluded: !account.hubspotCompanyId && account.exclusionStatus === "excluded", evidence: { saudi200: true, saudi200Page: page, saudi200CheckedAt: account.evidence.saudi200CheckedAt, saudi200EmployeeRange: SAUDI_EMPLOYEE_RANGE } })));
+    }
+    const result = { parserVersion: 2, providerIds: identities.map(item => item.uid).filter(Boolean), page, total: raw.total, totalPages: Math.ceil(raw.total / 100), fetched: raw.organizations.length, newInventoryRows: inserted, existingHubSpot: unique.filter((account) => account.hubspotCompanyId).length, notInHubSpot: unique.filter((account) => !account.hubspotCompanyId).length, review: unique.filter((account) => account.exclusionStatus === "review").length, providerCreditsUsed: storedRaw || savedAccounts ? 0 : 1, signalHireCreditsUsed: 0, checkedAt: new Date().toISOString() };
+    await state.write(page, suffix, result);
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Saudi inventory crawl failed", page }, { status: 502 }); }
 }

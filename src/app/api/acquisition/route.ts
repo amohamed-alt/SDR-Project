@@ -1,3 +1,4 @@
+import { apolloCompanyRecords } from "@/lib/apollo-company-response";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
@@ -203,11 +204,7 @@ async function apolloPage(page: number) {
     const message = clean((payload.error as Record<string, unknown> | undefined)?.message || payload.message || `HTTP ${response.status}`);
     throw new Error(`Apollo organization search failed: ${message}`);
   }
-  const organizations = Array.isArray(payload.organizations)
-    ? payload.organizations as ApolloOrganization[]
-    : Array.isArray(payload.accounts)
-      ? payload.accounts as ApolloOrganization[]
-      : [];
+  const organizations = apolloCompanyRecords(payload) as ApolloOrganization[];
   const pagination = (payload.pagination || {}) as Record<string, unknown>;
   return {
     organizations,
