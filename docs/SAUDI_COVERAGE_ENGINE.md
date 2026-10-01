@@ -16,6 +16,8 @@ The Lead Inventory now connects company stock to CRM coverage and product-specif
 
 ## Coverage and learning
 
+Association reads use a shared queue paced at two requests per second. A short HubSpot 429 limit is retried at most twice, honoring Retry-After and sharing the cooldown with queued reads. Daily/long limits remain visible failures. This retry applies only to history reads; paid enrichments and CRM writes retain their one-attempt reservations.
+
 `POST /api/lead-inventory/engine` with `{action:"sync",limit:10}` refreshes oldest company histories first. It reads direct company activities and activities associated with all its contacts, following association pagination. It records attempted call, exact Connected outcome, scheduled/held meetings, future tasks and ownership/retention/deal protection. Existing companies are read only.
 
 Company coverage is deduplicated and cumulative. A company reaches the goal only when both a Connected call and a completed meeting are observed. Booked/cancelled/no-show meetings do not satisfy the held-meeting milestone. Unchecked companies remain unknown, not zero activity. The displayed checked denominator exposes partial backfills.
