@@ -5,26 +5,22 @@ import { SDR_OWNERS, type SdrDashboardProps } from "@/lib/sdr-owners";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Activity,
   BadgeCheck,
   BrainCircuit,
   BriefcaseBusiness,
   Building2,
-  ChevronDown,
-  ChevronUp,
   ListTodo,
   LockKeyhole,
   LoaderCircle,
   PhoneCall,
-  PhoneIncoming,
   Radar,
   Target,
   UserPlus,
   FileUp,
   Wrench,
-  X,
 } from "lucide-react";
 import { Dashboard as ExistingDashboard } from "./Dashboard";
 import { WorkspaceErrorBoundary } from "./WorkspaceErrorBoundary";
@@ -96,15 +92,12 @@ export function Dashboard({
   workspaceNavigation,
 }: SdrDashboardProps & { initialSearch?: string; workspaceNavigation?: ReactNode }) {
   const [view, setView] = useState<ShellView>(() => viewFromSearch(initialSearch));
-  const [toolsOpen, setToolsOpen] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminChecked, setAdminChecked] = useState(false);
   const [adminPrompt, setAdminPrompt] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
   const [adminError, setAdminError] = useState("");
   const [adminBusy, setAdminBusy] = useState(false);
-  const toolsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const syncFromUrl = () => setView(viewFromSearch(window.location.search));
@@ -134,27 +127,8 @@ export function Dashboard({
     url.searchParams.delete("view");
     window.history.replaceState({}, "", url);
     setView("core");
-    setToolsOpen(true);
     setAdminPrompt(true);
   }, [adminChecked, adminUnlocked, view]);
-
-  useEffect(() => {
-    if (!toolsOpen) return;
-    const closeOnOutside = (event: PointerEvent) => {
-      const target = event.target;
-      if (target instanceof Element && target.closest('[aria-controls="sdr-tools-menu"]')) return;
-      if (toolsRef.current && !toolsRef.current.contains(target as Node)) setToolsOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setToolsOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOnOutside);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutside);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [toolsOpen]);
 
   async function unlockAdmin(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -171,7 +145,6 @@ export function Dashboard({
       setAdminUnlocked(true);
       setAdminChecked(true);
       setAdminPrompt(false);
-      setAdvancedOpen(true);
       setAdminPassword("");
       window.dispatchEvent(new CustomEvent("sdr:admin-auth-changed"));
     } catch (error) {
@@ -181,18 +154,10 @@ export function Dashboard({
     }
   }
 
-  function toggleAdvanced() {
-    if (advancedOpen) { setAdvancedOpen(false); return; }
-    if (adminUnlocked) { setAdvancedOpen(true); setAdminPrompt(false); return; }
-    setAdminPrompt(true);
-    setAdvancedOpen(true);
-  }
-
   function changeView(next: ShellView) {
     const adminViews: ShellView[] = ["marita-priority"];
     if (adminViews.includes(next) && !adminUnlocked) {
       setView("core");
-      setToolsOpen(true);
       setAdminPrompt(true);
       return;
     }
@@ -200,13 +165,11 @@ export function Dashboard({
     if (next === "core") url.searchParams.delete("view");
     else url.searchParams.set("view", next);
     window.history.pushState({}, "", url);
-    setToolsOpen(false);
     setView(next);
     trackFeature(next === "core" ? "dashboard" : next);
   }
 
   const owner = SDR_OWNERS[sdr];
-  const toolsCount = sdr === "marita" ? 12 : 11;
   const adminToolLabels = [
     ["Sales Nav Source", "Chrome companion · net-new people"],
     ["Sales Nav Full Run", "Live capture pipeline · resumable full search"],
@@ -216,44 +179,39 @@ export function Dashboard({
     ["Company Repair", "Evidence-backed HubSpot property fixes"],
   ] as const;
 
-  const toolsMenu = toolsOpen ? <div className={styles.toolsDock} ref={toolsRef}>
-        <div className={styles.toolsMenu} id="sdr-tools-menu">
-          <div className={styles.toolsHeader}>
-            <div><span>SDR WORKSPACE</span><strong>Daily workflow</strong></div>
-            <button type="button" onClick={() => setToolsOpen(false)} aria-label="Close tools menu"><X size={16}/></button>
-          </div>
-
-          <div className={styles.toolList}>
-            <div className={styles.toolSectionLabel}>CORE WORK</div>
-            <button className={styles.toolItem} type="button" onClick={() => changeView("gtm-brain")}>
+  // Render inside both sidebar layouts; navigation must never depend on a popup.
+  const sidebarTools = <section className={styles.sidebarTools} aria-label="SDR Tools">
+    <div className={styles.toolsTitle}>SDR TOOLS</div>
+    <nav className={styles.toolList} aria-label="SDR tools navigation">
+            <button className={`${styles.toolItem} ${view === "gtm-brain" ? styles.activeTool : ""}`} type="button" aria-current={view === "gtm-brain" ? "page" : undefined} onClick={() => changeView("gtm-brain")}>
               <span className={`${styles.toolIcon} ${styles.brainIcon}`}><BrainCircuit size={17}/></span>
               <span className={styles.toolCopy}><strong>Talentera Intelligence</strong><small>Account priority · target pool · call strategy</small></span>
             </button>
-            {sdr === "marita" ? <button className={styles.toolItem} type="button" onClick={() => changeView("sales-handoff")}>
+            {sdr === "marita" ? <button className={`${styles.toolItem} ${view === "sales-handoff" ? styles.activeTool : ""}`} type="button" aria-current={view === "sales-handoff" ? "page" : undefined} onClick={() => changeView("sales-handoff")}>
               <span className={`${styles.toolIcon} ${styles.gtmIcon}`}><BriefcaseBusiness size={17}/></span>
               <span className={styles.toolCopy}><strong>Sales Handoff</strong><small>Marita → Ursula · follow-up · deals · pipeline risk</small></span>
             </button> : null}
-            <button className={styles.toolItem} type="button" onClick={() => changeView("inventory")}>
+            <button className={`${styles.toolItem} ${view === "inventory" ? styles.activeTool : ""}`} type="button" aria-current={view === "inventory" ? "page" : undefined} onClick={() => changeView("inventory")}>
               <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Building2 size={17}/></span>
               <span className={styles.toolCopy}><strong>Lead Inventory</strong><small>Company stock · sources · qualification · Marita & Daniel</small></span>
             </button>
-            <button className={styles.toolItem} type="button" onClick={() => changeView("net-new")}>
+            <button className={`${styles.toolItem} ${view === "net-new" ? styles.activeTool : ""}`} type="button" aria-current={view === "net-new" ? "page" : undefined} onClick={() => changeView("net-new")}>
               <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Target size={17}/></span>
               <span className={styles.toolCopy}><strong>Prospecting</strong><small>Persistent market coverage · Apollo universe · HubSpot dedupe</small></span>
             </button>
-            <button className={styles.toolItem} type="button" onClick={() => changeView("maqsam")}>
+            <button className={`${styles.toolItem} ${view === "maqsam" ? styles.activeTool : ""}`} type="button" aria-current={view === "maqsam" ? "page" : undefined} onClick={() => changeView("maqsam")}>
               <span className={`${styles.toolIcon} ${styles.callsIcon}`}><PhoneCall size={17}/></span>
               <span className={styles.toolCopy}><strong>Calls</strong><small>Maqsam call intelligence · transcripts · sync</small></span>
             </button>
-            <button className={styles.toolItem} type="button" onClick={() => changeView("team-activity")}>
+            <button className={`${styles.toolItem} ${view === "team-activity" ? styles.activeTool : ""}`} type="button" aria-current={view === "team-activity" ? "page" : undefined} onClick={() => changeView("team-activity")}>
               <span className={`${styles.toolIcon} ${styles.gtmIcon}`}><Activity size={17}/></span>
               <span className={styles.toolCopy}><strong>Team Activity</strong><small>Usage · adoption · workspace health</small></span>
             </button>
 
-            <button className={styles.advancedToggle} type="button" onClick={toggleAdvanced} aria-expanded={advancedOpen}>
-              <span><Wrench size={14}/><strong>Admin Tools · 6</strong><small>{adminUnlocked ? "Admin unlocked · sources and controlled ops" : "Password protected · expand to preview"}</small></span>
-              {advancedOpen ? <ChevronUp size={16}/> : <ChevronDown size={16}/>} 
-            </button>
+            <div className={styles.adminHeading}>
+                <Wrench size={14}/><strong>Admin Tools</strong>
+                <small>{adminUnlocked ? "Unlocked" : "Password protected"}</small>
+              </div>
 
             {adminPrompt && !adminUnlocked ? <form className={styles.adminGate} onSubmit={(event) => void unlockAdmin(event)}>
               <strong>Admin password</strong>
@@ -263,7 +221,7 @@ export function Dashboard({
               <button type="submit" disabled={adminBusy || !adminPassword.trim()}>{adminBusy ? "Unlocking…" : "Unlock admin tools"}</button>
             </form> : null}
 
-            {advancedOpen && adminUnlocked ? <div className={styles.advancedList}>
+            {adminUnlocked ? <div className={styles.advancedList}>
               <Link className={styles.toolItem} href="/salesnav-prospecting" onClick={() => trackFeature("sales-nav")}>
                 <span className={`${styles.toolIcon} ${styles.salesIcon}`}><Radar size={17}/></span>
                 <span className={styles.toolCopy}><strong>Sales Nav Source</strong><small>Chrome companion · net-new people</small></span>
@@ -280,7 +238,7 @@ export function Dashboard({
                 <span className={`${styles.toolIcon} ${styles.salesIcon}`}><FileUp size={17}/></span>
                 <span className={styles.toolCopy}><strong>SignalHire CSV Queue</strong><small>CSV upload · dry-run · HubSpot push</small></span>
               </Link>
-              <button className={styles.toolItem} type="button" onClick={() => changeView("marita-priority")}>
+              <button className={`${styles.toolItem} ${view === "marita-priority" ? styles.activeTool : ""}`} type="button" aria-current={view === "marita-priority" ? "page" : undefined} onClick={() => changeView("marita-priority")}>
                 <span className={`${styles.toolIcon} ${styles.priorityIcon}`}><ListTodo size={17}/></span>
                 <span className={styles.toolCopy}><strong>Call Queue Ops</strong><small>Marita Extensive-Lighter scheduling</small></span>
               </button>
@@ -290,15 +248,14 @@ export function Dashboard({
               </Link>
             </div> : null}
 
-            {advancedOpen && !adminUnlocked ? <div className={styles.advancedList}>
+            {!adminUnlocked ? <div className={styles.advancedList}>
               {adminToolLabels.map(([label, description]) => <button className={`${styles.toolItem} ${styles.lockedTool}`} type="button" key={label} onClick={() => setAdminPrompt(true)}>
                 <span className={`${styles.toolIcon} ${styles.salesIcon}`}><LockKeyhole size={16}/></span>
                 <span className={styles.toolCopy}><strong>{label}</strong><small>{description}</small></span>
               </button>)}
             </div> : null}
-          </div>
-        </div>
-    </div> : null;
+          </nav>
+    </section>;
 
   if (view === "core") return <div className={styles.shell}>
     <ExistingDashboard
@@ -308,11 +265,8 @@ export function Dashboard({
       workspaceNavigation={workspaceNavigation}
       onOpenMotion={() => changeView("motion")}
       onOpenMaqsam={() => changeView("maqsam")}
-      onToggleTools={() => setToolsOpen((current) => !current)}
-      toolsOpen={toolsOpen}
-      toolsCount={toolsCount}
+      sidebarTools={sidebarTools}
     />
-    {toolsMenu}
   </div>;
 
   let toolContent: ReactNode;
@@ -338,11 +292,10 @@ export function Dashboard({
           <nav><button type="button" onClick={() => changeView("core")}><BadgeCheck size={18}/><span>Analytics Dashboard</span></button></nav>
           <div className="nav-label">ANALYSIS</div>
           <nav><button className={view === "motion" ? "active" : ""} type="button" onClick={() => changeView("motion")}><Activity size={18}/><span>Inbound vs Outbound</span></button><button className={view === "maqsam" ? "active" : ""} aria-current={view === "maqsam" ? "page" : undefined} type="button" onClick={() => changeView("maqsam")}><PhoneCall size={18}/><span>Maqsam Calls</span></button></nav>
-          <div className="nav-label">WORKSPACE</div>
-          <nav><button type="button" onClick={() => setToolsOpen((current) => !current)} aria-expanded={toolsOpen} aria-controls="sdr-tools-menu"><PhoneIncoming size={18}/><span>SDR Tools</span><small className="sdr-tools-count">{toolsCount}</small></button></nav>
           {workspaceNavigation}
           <div className="nav-label owner-label">SDR OWNER</div>
           <div className="owner-card"><div className="avatar">{owner.initials}</div><div><span>Reporting for</span><strong>{owner.name}</strong></div><BadgeCheck size={17}/></div>
+          {sidebarTools}
         </aside>
         <div className={`content ${styles.toolContent}`}>
           <WorkspaceErrorBoundary key={view} onBack={() => changeView("core")}>
@@ -351,6 +304,5 @@ export function Dashboard({
         </div>
       </div>
     </div>
-    {toolsMenu}
   </div>;
 }
