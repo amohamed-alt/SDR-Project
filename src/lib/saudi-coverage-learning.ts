@@ -94,11 +94,13 @@ export function learnedPriority(baseScore: number, product: InventoryProduct, in
   return { score: Math.min(100, Math.max(0, baseScore) + lift), lift, supportedBy: matching.map((s) => `${s.dimension}: ${s.value} (${s.companies} companies)`) };
 }
 
-export function chooseInventorySdr(loads: Record<string, number>, assigned = "") {
+export function chooseInventorySdr(loads: Record<string, number>, product: InventoryProduct, assigned = "") {
   if (assigned) {
     if (!(INVENTORY_SDR_IDS as readonly string[]).includes(assigned)) throw new Error("Existing assignment belongs to another owner; manual review required");
     return assigned;
   }
   if (INVENTORY_SDR_IDS.some((id) => !Number.isFinite(loads[id]) || loads[id] < 0)) throw new Error("Both SDR workloads must be available before routing");
-  return [...INVENTORY_SDR_IDS].sort((a, b) => loads[a] - loads[b] || a.localeCompare(b))[0];
+  // Match the existing SDR workspaces: Marita owns Talentera, Daniel Evalufy.
+  // Backlog affects task dates; it must not silently cross product ownership.
+  return product === "Evalufy" ? "37624223" : "31644369";
 }

@@ -11,7 +11,7 @@ The Lead Inventory now connects company stock to CRM coverage and product-specif
 - Missing exact company size and industry are enriched from Apollo only after fresh HubSpot exclusion, with a durable 10/day budget. Domain identity and Saudi/200+ policy are checked again before person spend.
 - One selected current-employer-verified person per company, with a phone required before CRM push. Existing saved enrichment is reused.
 - At most 10 company processing attempts, 10 Apollo company enrichments (one documented credit per organization), 10 person reveal attempts and 10 inventory push reservations per Riyadh calendar day. These ceilings include failures and ambiguous provider responses; no credit purchase is authorized or performed by the engine.
-- New assignments go only to Marita or Daniel using current open-task load. Inventory task scheduling keeps Marita's existing 70/day rule and uses 50/day for Daniel, including overdue carry and Sun–Thu workdays. Existing task dates/owners are not rewritten.
+- New assignments follow the existing product workspaces: Talentera to Marita, Evalufy to Daniel. Current workload controls task scheduling rather than moving a lead to the other product owner. Inventory task scheduling keeps Marita's existing 70/day rule and uses 50/day for Daniel, including overdue carry and Sun–Thu workdays. Existing task dates/owners are not rewritten.
 - External-operation reservations live in Postgres. An uncertain reveal/write stays blocked for reconciliation. No automatic retry can produce a second charge or CRM POST for the same reserved operation. A review outcome is not a successful push.
 
 ## Coverage and learning

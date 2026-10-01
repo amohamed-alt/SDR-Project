@@ -1,5 +1,13 @@
 import { test, expect } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("sdr_v2_visitor_id", "visitor_playwright_ci");
+    localStorage.setItem("sdr_v2_visitor_name", "Playwright CI");
+    sessionStorage.setItem("sdr_v2_session_id", "session_playwright_ci");
+  });
+});
+
 for (const owner of ["marita", "daniel"]) {
   test(`${owner}: tools stay in the sidebar across navigation, reload and escape`, async ({ page }, testInfo) => {
     test.setTimeout(90_000);
