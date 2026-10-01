@@ -6,7 +6,7 @@ import { targetAgentForCall, isEligibleCall, fetchCalls } from '../scripts/maqsa
 test('SDRs use exact email or full name; unknown agents are never assigned to Marita', () => {
   assert.equal(maqsamAgentKey({ agentEmail: ' M.CHEDID@BAYT.NET ' }), 'marita');
   assert.equal(maqsamAgentKey({ agentName: 'Daniel  Beaini' }), 'daniel');
-  assert.equal(maqsamAgentKey({ agentEmail: 'D.BEAINI@TALENTERA.COM', agentName: 'D. Beaini' }), 'daniel');
+  assert.equal(maqsamAgentKey({ agentEmail: 'D.BEAINI@BAYT.NET', agentName: 'D. Beaini' }), 'daniel');
   assert.equal(maqsamAgentKey({ email: 'verified@example.test' }, { danielEmail: 'verified@example.test' }), 'daniel');
   assert.equal(maqsamAgentKey({ agentName: 'Daniel Other' }), 'unknown');
   assert.equal(maqsamAgentKey({}), 'unknown');

@@ -4,7 +4,7 @@ Open **Maqsam Calls** directly in the analytics sidebar or use `?view=maqsam`. B
 
 ## Sync and history
 
-The existing `maqsam-sync` worker reuses the app image. Marita is matched by `MAQSAM_TARGET_AGENT_EMAIL` or exact full name **Marita Chedid**. Daniel is matched by verified HubSpot email `d.beaini@talentera.com` or exact full name **Daniel Beaini**; `MAQSAM_DANIEL_AGENT_EMAIL` can override the email if his Maqsam login differs. Unknown agents are never assigned to an SDR.
+The existing `maqsam-sync` worker reuses the app image. Marita is matched by `MAQSAM_TARGET_AGENT_EMAIL` or exact full name **Marita Chedid**. Daniel is matched by verified Maqsam email `d.beaini@bayt.net` or exact full name **Daniel Beaini**; `MAQSAM_DANIEL_AGENT_EMAIL` can override the email if his Maqsam login differs. Unknown agents are never assigned to an SDR.
 
 Recent calls are polled every ten minutes with a three-hour overlap. A background historical scan starts at `MAQSAM_BACKFILL_FROM` (default 2026-09-07, the creation date of Daniel’s verified HubSpot user record). Existing Marita history is retained. This scan includes Daniel’s onboarding day so his first available call is discovered rather than using the current month. It reads one day at a time, all pages until empty, and upserts by Call ID. A persistent checkpoint advances only after the entire window succeeds. Failures retry the same window. Busy windows that exceed the page budget split into smaller time windows automatically. If the provider ignores pagination or a one-minute window still hits the page cap, the checkpoint stops and worker logs report the failure.
 
@@ -18,7 +18,7 @@ Phone matching keeps unmatched and ambiguous calls visible without creating rand
 
 ```env
 MAQSAM_TARGET_AGENT_EMAIL=m.chedid@bayt.net
-MAQSAM_DANIEL_AGENT_EMAIL=d.beaini@talentera.com
+MAQSAM_DANIEL_AGENT_EMAIL=d.beaini@bayt.net
 MAQSAM_BACKFILL_FROM=2026-09-07
 MAQSAM_SYNC_CHECKPOINT_PATH=/app/data/maqsam-sync-checkpoint.json
 MAQSAM_SYNC_INTERVAL_SECONDS=600
