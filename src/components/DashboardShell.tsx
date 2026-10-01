@@ -206,7 +206,7 @@ export function Dashboard({
   }
 
   const owner = SDR_OWNERS[sdr];
-  const toolsCount = sdr === "marita" ? 11 : 10;
+  const toolsCount = sdr === "marita" ? 12 : 11;
   const adminToolLabels = [
     ["Sales Nav Source", "Chrome companion · net-new people"],
     ["Sales Nav Full Run", "Live capture pipeline · resumable full search"],

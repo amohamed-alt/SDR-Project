@@ -413,9 +413,9 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
     </header>
 
     <section className={styles.heroStrip}>
-      <div><ShieldCheck size={17}/><span><strong>Hard exclusions</strong> Government · semi-government · ATS/HRTech competitors · existing HubSpot companies</span></div>
+      <div><ShieldCheck size={17}/><span><strong>Import safety</strong> HubSpot duplicate checks · government import exclusions · identity review before enrichment</span></div>
       <div><Target size={17}/><span><strong>Core ICP</strong> Product fit reviewed before enrichment</span></div>
-      <div><Coins size={17}/><span><strong>Phone-first</strong> Phone-available leads are routed and pushed before email-only contacts</span></div>
+      <div><Coins size={17}/><span><strong>Phone-first</strong> Phone required for inventory call tasks · paid enrichment runs only on selected people</span></div>
     </section>
 
     {error ? <div role="alert" className={styles.error}><CircleAlert size={18}/><span>{error}</span><button onClick={() => setError("")}><X size={14}/></button></div> : null}
@@ -478,7 +478,7 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
           <label className={styles.ownerKey}><span>CSV or JSON · up to 100 companies</span><input type="file" accept=".csv,.json" onChange={async (event) => { const file = event.target.files?.[0]; setImportPreview(null); setImportRows([]); if (!file) return; try { if (file.size > 250_000) throw new Error("File must be below 250 KB"); const rows = parseInventoryFile(await file.text()); if (rows.length > 100) throw new Error("Import up to 100 companies per batch"); setImportRows(rows); setError(""); } catch (error) { setError(error instanceof Error ? error.message : "Invalid file"); } }}/></label>
           <p className={styles.costNote}>Required columns: name, domain. Optional: country, industry, employeeCount, sourceUrl, linkedinUrl, careerPageUrl, detectedAts, evidence, businessLine (Talentera / Evalufy). Imported companies enter review.</p>
           <button className={styles.saveKey} disabled={!adminUnlocked || !importRows.length || Boolean(busy)} onClick={() => void importCompanies(false)}>Preview & check duplicates</button>
-          {importPreview ? <div className={styles.importPreview}><strong>{importPreview.candidates} to save · {importPreview.duplicates} duplicates · {importPreview.invalid} invalid</strong><ul>{importPreview.rows.map((row, index) => <li key={index}>{row.name} · {row.outcome}<small>{row.reason}</small></li>)}</ul><button className={styles.discover} disabled={Boolean(busy) || !importPreview.candidates} onClick={() => void importCompanies(true)}>Save reviewed import</button></div> : null}
+          {importPreview ? <div className={styles.importPreview}><strong>{importPreview.candidates} to save · {importPreview.duplicates} duplicates · {importPreview.invalid} invalid</strong><ul>{importPreview.rows.map((row, index) => <li key={index}>{row.name} · {row.outcome}<small>{row.reason}</small></li>)}</ul><button className={styles.discover} disabled={Boolean(busy) || !importPreview.candidates} onClick={() => void importCompanies(true)}>Save to inventory</button></div> : null}
         </> : null}
 
         <div className={styles.divider}/>
@@ -493,7 +493,7 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
       <aside className={styles.drawer} role="dialog" aria-modal="true" aria-label="Company details">
         <div className={styles.drawerHeader}>
           <div><span>NET-NEW ACCOUNT</span><h2>{selected.name}</h2><p>{selected.domain} · {selected.country || "Market unknown"}</p></div>
-          <button type="button" onClick={() => setSelectedDomain("")}><X size={18}/></button>
+          <button type="button" aria-label="Close company details" onClick={() => setSelectedDomain("")}><X size={18}/></button>
         </div>
 
         <div className={styles.drawerScoreRow}>

@@ -48,9 +48,9 @@ test("company import previews first and only saves after the explicit save actio
   await page.goto("/lead-inventory");
   await page.locator('input[type="file"]').setInputFiles({ name: "companies.csv", mimeType: "text/csv", buffer: Buffer.from("name,domain,country\nExample company,example.com,Saudi Arabia") });
   await page.getByRole("button", { name: "Preview & check duplicates" }).click();
-  await expect(page.getByRole("button", { name: "Save reviewed import" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save to inventory" })).toBeVisible();
   expect(writes).toHaveLength(1); expect(writes[0].execute).toBe(false);
-  await page.getByRole("button", { name: "Save reviewed import" }).click();
+  await page.getByRole("button", { name: "Save to inventory" }).click();
   await expect(page.getByRole("status")).toContainText("1 companies saved");
   expect(writes).toHaveLength(2); expect(writes[1].execute).toBe(true);
 });
