@@ -4,17 +4,17 @@ import { getAcquisitionAccount } from "@/lib/acquisition-data-api";
 import { coverageQueue, saveCoverage } from "@/lib/saudi-coverage-store";
 import { INVENTORY_SDR_IDS, type CoverageObservation, type CoverageSnapshot } from "@/lib/saudi-coverage-learning";
 import type { HubSpotRecord } from "@/lib/types";
+import { createCoverageReader } from "@/lib/saudi-coverage-reader";
 
 const unique = (values: string[]) => [...new Set(values)];
 const stamp = (row: HubSpotRecord) => row.properties.hs_timestamp || row.properties.hs_meeting_start_time || "";
 const earliest = (rows: HubSpotRecord[]) => rows.map(stamp).filter((s) => Number.isFinite(Date.parse(s))).sort((a, b) => Date.parse(a) - Date.parse(b))[0] || null;
 
+const readCoverage = createCoverageReader({ fetch: (...args) => fetch(...args), now: Date.now, sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) });
 async function crm<T>(path: string, body?: unknown): Promise<T> {
   const token = process.env.HUBSPOT_PRIVATE_APP_TOKEN;
   if (!token) throw new Error("HubSpot is not configured");
-  const response = await fetch(`https://api.hubapi.com${path}`, { method: body ? "POST" : "GET", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}), cache: "no-store", signal: AbortSignal.timeout(30_000) });
-  if (!response.ok) throw new Error(`Coverage CRM read failed (${response.status})`);
-  return response.json() as Promise<T>;
+  return readCoverage<T>(path, token, body);
 }
 
 // Follow association pagination: incomplete contact histories must never become

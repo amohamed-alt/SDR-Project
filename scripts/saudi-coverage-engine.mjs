@@ -42,6 +42,7 @@ let synced = 0, pushed = 0, review = 0, historicalSyncIncomplete = false;
 for (let i = 0; i < 10; i++) {
   const result = await request("/api/lead-inventory/engine", { action: "sync", limit: 10 });
   synced += result.synced;
+  if (result.synced < result.requested) historicalSyncIncomplete = true;
   console.log(JSON.stringify({ action: "sync", requested: result.requested, synced: result.synced, failed: result.requested - result.synced,
     failureCategories: result.results.filter((r) => !r.synced).map((r) => failureCategory(r.error)) }));
   if (!result.requested) break;
