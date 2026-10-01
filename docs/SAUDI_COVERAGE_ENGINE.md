@@ -30,7 +30,7 @@ Limitations: historical titles/product labels use current CRM values, because hi
 
 `GET /api/lead-inventory/engine` returns aggregate coverage, model state and operation counts. Authenticated POST `{action:"run",limit:1,confirmCredits:true}` processes the bounded qualified queue. The dashboard offers an explicit two-company run. Existing admin cookies or the acquisition automation token authorize writes; provider credentials stay server-side.
 
-The existing Saudi inventory GitHub workflow runs the engine at 04:00 UTC Sun–Thu, with 100 historical company refreshes and up to 10 company attempts per run. Initial push waits for the exact production build before actions. It uses the canonical deployment workflow; no new Docker service, data volume or deployment path is introduced. n8n can invoke the same authenticated API when orchestration is consolidated there.
+The existing Saudi inventory GitHub workflow runs the engine at 04:00 UTC Sun–Thu, with 100 historical company refreshes and up to 10 company attempts per run. Initial push waits for the requested production build or a newer deployed descendant verified through GitHub before actions. Discovery and coverage each serialize independently, so a waiting discovery run does not block replenishment. It uses the canonical deployment workflow; no new Docker service, data volume or deployment path is introduced. n8n can invoke the same authenticated API when orchestration is consolidated there.
 
 Detailed contact data and per-company operation results stay in Postgres/HubSpot. GitHub job logs contain aggregate counts only. To pause the schedule, disable the existing Saudi inventory workflow; manual inventory actions remain subject to the durable reservations and daily limits.
 
