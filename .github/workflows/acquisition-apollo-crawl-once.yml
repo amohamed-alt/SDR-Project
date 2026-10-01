@@ -10,6 +10,9 @@ on:
       - '.github/workflows/acquisition-apollo-crawl-once.yml'
       - 'scripts/saudi-inventory-crawl.mjs'
       - 'scripts/saudi-coverage-engine.mjs'
+      - 'src/lib/saudi-coverage-*.ts'
+      - 'src/lib/saudi-company-enrichment.ts'
+      - 'src/app/api/lead-inventory/engine/**'
 
 permissions:
   contents: read
