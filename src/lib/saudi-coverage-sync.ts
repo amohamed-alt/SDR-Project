@@ -25,7 +25,17 @@ export async function coverageAssociations(from: string, to: string, ids: string
   for (let i = 0; i < ids.length; i += 100) {
     const batch = ids.slice(i, i + 100);
     const payload = await crm<{ results: (Page & { from: { id: string } })[]; errors?: unknown[]; status?: string }>(`/crm/v4/associations/${from}/${to}/batch/read`, { inputs: batch.map((id) => ({ id })) });
-    if (payload.errors?.length || payload.status === "PENDING" || payload.results.length !== batch.length) throw new Error("Incomplete HubSpot association response; coverage was not updated");
+    if (payload.errors?.length || payload.status === "PENDING") throw new Error("Incomplete HubSpot association response; coverage was not updated");
+    // Some batch responses omit records with no associations. Verify every
+    // missing input through the paginated single-record endpoint before using
+    // an empty history; absence from the batch alone is never negative evidence.
+    for (const id of batch) {
+      if (!payload.results.some((r) => String(r.from.id) === id)) {
+        const page = await crm<Page>(`/crm/v4/objects/${from}/${encodeURIComponent(id)}/associations/${to}?limit=500`);
+        if (!Array.isArray(page.results)) throw new Error("Incomplete HubSpot association response; coverage was not updated");
+        payload.results.push({ from: { id }, to: page.results, paging: page.paging });
+      }
+    }
     for (const row of payload.results) {
       const targets = (row.to || []).map((x) => String(x.toObjectId));
       let after = row.paging?.next?.after;
@@ -37,7 +47,7 @@ export async function coverageAssociations(from: string, to: string, ids: string
         targets.push(...(page.results || []).map((x) => String(x.toObjectId)));
         after = page.paging?.next?.after;
       }
-      map.set(row.from.id, unique(targets));
+      map.set(String(row.from.id), unique(targets));
     }
   }
   return map;
