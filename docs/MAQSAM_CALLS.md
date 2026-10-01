@@ -6,7 +6,7 @@ Open **Maqsam Calls** directly in the analytics sidebar or use `?view=maqsam`. B
 
 The existing `maqsam-sync` worker reuses the app image. Marita is matched by `MAQSAM_TARGET_AGENT_EMAIL` or exact full name **Marita Chedid**. Daniel is matched by verified HubSpot email `d.beaini@talentera.com` or exact full name **Daniel Beaini**; `MAQSAM_DANIEL_AGENT_EMAIL` can override the email if his Maqsam login differs. Unknown agents are never assigned to an SDR.
 
-Recent calls are polled every ten minutes with a three-hour overlap. A background historical scan starts at `MAQSAM_BACKFILL_FROM` (default 2026-07-13, the SDR project start). This scan includes days before Daniel joined so his first available call is discovered rather than assuming an employment date. It reads one day at a time, all pages until empty, and upserts by Call ID. A persistent checkpoint advances only after the entire window succeeds. Failures retry the same window. If the provider ignores pagination or the page cap is reached, the checkpoint stops and worker logs report the failure.
+Recent calls are polled every ten minutes with a three-hour overlap. A background historical scan starts at `MAQSAM_BACKFILL_FROM` (default 2026-09-07, the creation date of Daniel’s verified HubSpot user record). Existing Marita history is retained. This scan includes Daniel’s onboarding day so his first available call is discovered rather than using the current month. It reads one day at a time, all pages until empty, and upserts by Call ID. A persistent checkpoint advances only after the entire window succeeds. Failures retry the same window. If the provider ignores pagination or the page cap is reached, the checkpoint stops and worker logs report the failure.
 
 The existing `/app/data` volume stores calls and the worker checkpoint. Do not delete either during redeploys. The dashboard reports historical import progress; counts are incomplete until the import catches up. Available history remains subject to Maqsam availability and configured retention/capacity (180 days and 50,000 records by default; existing server overrides still apply).
 
@@ -19,7 +19,7 @@ Phone matching keeps unmatched and ambiguous calls visible without creating rand
 ```env
 MAQSAM_TARGET_AGENT_EMAIL=m.chedid@bayt.net
 MAQSAM_DANIEL_AGENT_EMAIL=d.beaini@talentera.com
-MAQSAM_BACKFILL_FROM=2026-07-13
+MAQSAM_BACKFILL_FROM=2026-09-07
 MAQSAM_SYNC_CHECKPOINT_PATH=/app/data/maqsam-sync-checkpoint.json
 MAQSAM_SYNC_INTERVAL_SECONDS=600
 MAQSAM_SYNC_LOOKBACK_SECONDS=10800

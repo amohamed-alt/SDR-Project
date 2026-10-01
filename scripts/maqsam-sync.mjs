@@ -24,7 +24,7 @@ const config = {
   maqsamAccessSecret: env("MAQSAM_ACCESS_SECRET"),
   hubspotToken: env("HUBSPOT_PRIVATE_APP_TOKEN"),
   danielAgentEmail: env("MAQSAM_DANIEL_AGENT_EMAIL").toLowerCase(),
-  backfillFrom: env("MAQSAM_BACKFILL_FROM", "2026-07-13"),
+  backfillFrom: env("MAQSAM_BACKFILL_FROM", "2026-09-07"),
   checkpointPath: env("MAQSAM_SYNC_CHECKPOINT_PATH", "/app/data/maqsam-sync-checkpoint.json"),
   targetAgentEmail: env("MAQSAM_TARGET_AGENT_EMAIL", DEFAULT_TARGET_AGENT_EMAIL).toLowerCase(),
   intervalMs: numberEnv("MAQSAM_SYNC_INTERVAL_SECONDS", 600) * 1000,
