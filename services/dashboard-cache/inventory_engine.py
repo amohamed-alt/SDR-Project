@@ -47,10 +47,13 @@ def reserve_operation(body: Reservation):
         # A transaction plus a shared advisory lock makes the daily ceiling atomic.
         with connection.transaction():
             connection.execute("SELECT pg_advisory_xact_lock(704200250)")
-            existing = connection.execute("SELECT state, result FROM inventory_operations WHERE operation_key=%s", (body.key,)).fetchone()
-            if existing:
-                return {"reserved": False, **existing}
             day = datetime.now(timezone.utc).astimezone(ZoneInfo('Asia/Riyadh')).date().isoformat()
+            existing = connection.execute("SELECT state, result, (created_at AT TIME ZONE 'Asia/Riyadh')::date=%s::date AS same_day FROM inventory_operations WHERE operation_key=%s", (day, body.key)).fetchone()
+            if existing:
+                if body.kind == "pipeline" and existing["state"] == "retry_ready" and existing["same_day"]:
+                    connection.execute("UPDATE inventory_operations SET state='reserved' WHERE operation_key=%s", (body.key,))
+                    return {"reserved": True, "state": "reserved", "recovered": True}
+                return {"reserved": False, "state": existing["state"], "result": existing["result"]}
             used = connection.execute("SELECT COUNT(*) AS n FROM inventory_operations WHERE kind=%s AND (created_at AT TIME ZONE 'Asia/Riyadh')::date=%s::date", (body.kind, day)).fetchone()["n"]
             if used >= body.dailyLimit:
                 return {"reserved": False, "state": "budget_exhausted", "used": used}
@@ -62,10 +65,36 @@ def reserve_operation(body: Reservation):
 def operation_result(body: OperationResult):
     with usage_db() as connection:
         initialize_engine(connection)
-        row = connection.execute("UPDATE inventory_operations SET state=%s, result=%s WHERE operation_key=%s RETURNING operation_key", (body.state, Jsonb(body.result), body.key)).fetchone()
+        row = connection.execute("UPDATE inventory_operations SET state=%s, result=(result-'error') || %s WHERE operation_key=%s RETURNING operation_key", (body.state, Jsonb(body.result), body.key)).fetchone()
         if not row:
             raise HTTPException(409, "Operation was not reserved")
     return {"saved": True}
+
+
+class PreRevealRecovery(BaseModel):
+    domain: str = Field(min_length=3, max_length=255)
+
+
+@app.post("/v2/inventory/recover-pre-reveal")
+def recover_pre_reveal(body: PreRevealRecovery):
+    with usage_db() as connection:
+        initialize_engine(connection)
+        with connection.transaction():
+            connection.execute("SELECT pg_advisory_xact_lock(704200250)")
+            row = connection.execute("""UPDATE inventory_operations o SET state='retry_ready',
+                result=result || '{"preRevealRecovered":true}'::jsonb
+                WHERE operation_key=%s AND kind='pipeline' AND state='review'
+                AND NOT (result ? 'preRevealRecovered')
+                AND (created_at AT TIME ZONE 'Asia/Riyadh')::date=(NOW() AT TIME ZONE 'Asia/Riyadh')::date
+                AND result->>'error' IN (
+                    'No verified matching persona found; review the company/persona before retrying',
+                    'Enriched company profile is outside the Saudi 200+ policy; no person reveal')
+                AND EXISTS(SELECT 1 FROM inventory_operations c WHERE c.operation_key=%s AND c.state='completed')
+                AND NOT EXISTS(SELECT 1 FROM inventory_operations p WHERE p.operation_key=%s)
+                AND NOT EXISTS(SELECT 1 FROM inventory_operations e JOIN acquisition_people p
+                    ON e.operation_key='enrichment:'||p.uid WHERE p.account_domain=%s)
+                RETURNING operation_key""", (f"pipeline:{body.domain}", f"company_enrichment:{body.domain}", f"push:{body.domain}", body.domain)).fetchone()
+    return {"recovered": bool(row)}
 
 
 @app.put("/v2/inventory/coverage")
@@ -111,7 +140,7 @@ def work_queue(limit: int = Query(default=100, ge=1, le=500)):
         rows = connection.execute("""SELECT a.domain FROM acquisition_accounts a
             WHERE a.evidence->>'saudi200'='true' AND a.exclusion_status='eligible'
             AND a.hubspot_company_id='' AND a.status<>'pushed' AND RIGHT(a.domain,8)<>'.invalid'
-            AND NOT EXISTS(SELECT 1 FROM inventory_operations o WHERE o.operation_key='pipeline:'||a.domain)
+            AND NOT EXISTS(SELECT 1 FROM inventory_operations o WHERE o.operation_key='pipeline:'||a.domain AND o.state<>'retry_ready')
             ORDER BY CASE WHEN a.employee_count>=250 THEN 0 WHEN a.employee_count>=200 THEN 1 ELSE 2 END,
             a.gtm_score DESC,a.domain LIMIT %s""", (limit,)).fetchall()
     return {"domains": [r["domain"] for r in rows]}

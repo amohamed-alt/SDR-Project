@@ -19,6 +19,8 @@ for (let i = 0; i < 180; i++) {
   await new Promise((r) => setTimeout(r, 10_000));
 }
 if (!ready) throw new Error("Expected coverage build is not live; no provider spend or CRM writes made");
+const recovery = await request("/api/lead-inventory/engine", { action: "recover_pre_reveal" });
+console.log(JSON.stringify({ action: "recover_pre_reveal", recovered: recovery.recovered }));
 // Only static categories may reach public Actions logs. Details stay in the app.
 function failureCategory(message = "") {
   const value = String(message);

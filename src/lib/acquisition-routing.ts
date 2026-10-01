@@ -70,7 +70,8 @@ export function manualTaskOwners() {
 }
 
 export function signalHirePersonaQuery(primaryPersona: string, secondaryPersona = "") {
-  const source = `${primaryPersona} ${secondaryPersona}`.toLowerCase();
+  const primary = primaryPersona.toLowerCase();
+  const source = primary || secondaryPersona.toLowerCase();
   if (/admissions|examinations|enrollment|registrar/.test(source)) {
     return '(Assessment OR Admissions OR Examinations OR Enrollment OR Registrar OR "Student Recruitment") AND (Manager OR Head OR Director OR Lead)';
   }
@@ -79,7 +80,7 @@ export function signalHirePersonaQuery(primaryPersona: string, secondaryPersona 
     return '(HRIS OR "HR Systems" OR "People Systems" OR "HR Technology" OR "People Technology") AND (Manager OR Head OR Director OR Lead)';
   }
   if (/talent acquisition|recruit|talent operations/.test(source)) {
-    return '("Talent Acquisition" OR Recruitment OR Recruiting OR "Talent Operations") AND (Head OR Director OR Manager OR Lead OR VP)';
+    return '("Talent Acquisition" OR Recruitment OR Recruiting OR "Talent Operations" OR "Human Resources" OR HR) AND (Head OR Director OR Manager OR Lead OR VP)';
   }
   if (/chro|chief|vp|vice president/.test(source)) {
     return '(CHRO OR "Chief Human Resources" OR "Chief People Officer" OR "VP Human Resources" OR "VP People")';
