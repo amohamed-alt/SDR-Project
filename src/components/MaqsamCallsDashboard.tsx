@@ -264,7 +264,7 @@ export function MaqsamCallsDashboard({ onBack, initialAgent = "marita" }: { onBa
         </aside>
       </section>
 
-      {data && <p role="status">{data.meta.history ? `Historical import ${data.meta.history.caughtUp ? "caught up" : "in progress"} · from ${data.meta.history.from} through ${formatDate(data.meta.history.importedThrough)}` : "Historical import status unavailable. The counts show calls currently stored; older calls may still be importing."}</p>}
+      {data && <p role="status">{data.meta.history ? `Historical import ${data.meta.history.retrying ? "retrying after a sync failure" : data.meta.history.caughtUp ? "caught up" : "in progress"} · from ${data.meta.history.from} through ${formatDate(data.meta.history.importedThrough)}` : "Historical import status unavailable. The counts show calls currently stored; older calls may still be importing."}</p>}
       {error && <div className={styles.errorBanner}><AlertTriangle size={16}/>{error}</div>}
       {loading && !data && <div className={styles.loading}><div className={styles.loader}/><strong>Loading Maqsam calls…</strong></div>}
 

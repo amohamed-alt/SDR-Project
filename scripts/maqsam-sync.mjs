@@ -335,10 +335,10 @@ async function readCheckpoint() {
   return startTime;
 }
 
-async function saveCheckpoint(nextTime) {
+async function saveCheckpoint(nextTime, retrying = false) {
   await mkdir(path.dirname(config.checkpointPath), { recursive: true });
   const temporary = `${config.checkpointPath}.${process.pid}.tmp`;
-  await writeFile(temporary, JSON.stringify({ version: 2, from: config.backfillFrom, nextTime, updatedAt: new Date().toISOString() }));
+  await writeFile(temporary, JSON.stringify({ version: 2, from: config.backfillFrom, nextTime, retrying, updatedAt: new Date().toISOString() }));
   await rename(temporary, config.checkpointPath);
 }
 
@@ -367,6 +367,7 @@ async function main() {
       }
     } catch (error) {
       failed = true;
+      await saveCheckpoint(nextTime, true).catch(() => undefined);
       console.error(`Maqsam sync failed: ${error.message}`);
     }
     const importing = nextTime < now - config.lookbackSeconds;

@@ -104,7 +104,7 @@ export async function maqsamHistoryStatus() {
     const checkpoint = JSON.parse(await readFile(/* turbopackIgnore: true */ checkpointPath, "utf8"));
     if (checkpoint.version !== 2 || !Number.isFinite(checkpoint.nextTime)) return null;
     const lookback = Number(process.env.MAQSAM_SYNC_LOOKBACK_SECONDS || 10800);
-    return { from: String(checkpoint.from), importedThrough: new Date(checkpoint.nextTime * 1000).toISOString(), updatedAt: String(checkpoint.updatedAt), caughtUp: checkpoint.nextTime >= Date.now() / 1000 - lookback - 600 };
+    return { retrying: Boolean(checkpoint.retrying), from: String(checkpoint.from), importedThrough: new Date(checkpoint.nextTime * 1000).toISOString(), updatedAt: String(checkpoint.updatedAt), caughtUp: !checkpoint.retrying && checkpoint.nextTime >= Date.now() / 1000 - lookback - 600 };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;

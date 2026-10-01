@@ -45,7 +45,7 @@ export interface MaqsamCallRecord {
 
 export interface MaqsamCallsResponse {
   meta: {
-    history?: { from: string; importedThrough: string; updatedAt: string; caughtUp: boolean } | null;
+    history?: { retrying?: boolean; from: string; importedThrough: string; updatedAt: string; caughtUp: boolean } | null;
     generatedAt: string;
     totalStored: number;
     totalMatching?: number;
