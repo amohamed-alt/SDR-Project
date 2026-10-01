@@ -9,7 +9,7 @@ export const coverageData = () => acquisitionDataRequest<{
 
 export const coverageQueue = (kind: "sync" | "work", limit: number) => acquisitionDataRequest<{ domains: string[] }>(`/v2/inventory/${kind}-queue?limit=${limit}`, {}, 10_000);
 
-export const reserveInventoryOperation = (key: string, kind: "enrichment" | "company_enrichment" | "pipeline" | "push", dailyLimit = 10) => acquisitionDataRequest<{
+export const reserveInventoryOperation = (key: string, kind: "enrichment" | "person_identity" | "company_enrichment" | "pipeline" | "push", dailyLimit = 10) => acquisitionDataRequest<{
   reserved: boolean; state: string; result?: Record<string, unknown>;
 }>("/v2/inventory/reserve", { method: "POST", body: JSON.stringify({ key, kind, dailyLimit }) }, 10_000);
 

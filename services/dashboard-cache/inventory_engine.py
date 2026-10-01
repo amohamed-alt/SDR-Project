@@ -29,7 +29,7 @@ class CoverageWrite(BaseModel):
 class Reservation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     key: str = Field(min_length=3, max_length=500)
-    kind: Literal["enrichment", "company_enrichment", "pipeline", "push"]
+    kind: Literal["enrichment", "person_identity", "company_enrichment", "pipeline", "push"]
     dailyLimit: int = Field(default=10, ge=1, le=100)
 
 
@@ -138,9 +138,14 @@ def work_queue(limit: int = Query(default=100, ge=1, le=500)):
     with usage_db() as connection:
         initialize_engine(connection)
         rows = connection.execute("""SELECT a.domain FROM acquisition_accounts a
-            WHERE a.evidence->>'saudi200'='true' AND a.exclusion_status='eligible'
+            WHERE a.evidence->>'saudi200'='true' AND a.exclusion_status IN ('eligible','review')
             AND a.hubspot_company_id='' AND a.status<>'pushed' AND RIGHT(a.domain,8)<>'.invalid'
-            AND NOT EXISTS(SELECT 1 FROM inventory_operations o WHERE o.operation_key='pipeline:'||a.domain AND o.state<>'retry_ready')
-            ORDER BY CASE WHEN a.employee_count>=250 THEN 0 WHEN a.employee_count>=200 THEN 1 ELSE 2 END,
+            AND NOT EXISTS(SELECT 1 FROM inventory_operations o WHERE o.operation_key='pipeline:ats-v2:'||a.domain)
+            AND NOT EXISTS(SELECT 1 FROM inventory_operations o WHERE o.operation_key='push:'||a.domain)
+            AND NOT EXISTS(SELECT 1 FROM inventory_operations o WHERE o.operation_key='pipeline:'||a.domain AND o.state='reserved')
+            AND NOT EXISTS(SELECT 1 FROM inventory_operations o JOIN acquisition_people p
+                ON o.operation_key='enrichment:'||p.uid WHERE p.account_domain=a.domain AND o.state<>'completed')
+            ORDER BY CASE WHEN a.evidence->'recentActivity'->>'kind'='linkedin_recent_post' THEN 0 ELSE 1 END,
+            CASE WHEN a.employee_count>=250 THEN 0 WHEN a.employee_count>=200 THEN 1 ELSE 2 END,
             a.gtm_score DESC,a.domain LIMIT %s""", (limit,)).fetchall()
     return {"domains": [r["domain"] for r in rows]}

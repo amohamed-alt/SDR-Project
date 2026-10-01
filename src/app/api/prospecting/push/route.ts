@@ -1,3 +1,4 @@
+import { atsProduct, SAUDI_DAILY_LIMIT, usablePhone, type InventoryAts } from "@/lib/saudi-ats-policy";
 import { createScheduledMaritaTask, MaritaScheduleError } from "@/lib/marita-task-scheduler";
 import { timingSafeEqual } from "node:crypto";
 import { sdrAdminAuthorized } from "@/lib/sdr-admin-auth";
@@ -30,6 +31,8 @@ const prospectSchema = z.object({
   company: z.string().trim().max(250).default(""),
   companyWebsite: z.string().trim().max(1000).default(""),
   companyDomain: z.string().trim().max(300).default(""),
+  companyEmployeeCount: z.number().int().min(0).max(10000000).default(0),
+  companyCountry: z.string().trim().max(100).default(""),
   companyLinkedIn: z.string().trim().max(1000).default(""),
   careerPageUrl: z.string().trim().max(1500).default(""),
   detectedAts: z.string().trim().max(250).default(""),
@@ -221,6 +224,8 @@ function companyPropertiesFromProspect(prospect: Prospect, includeIdentity = tru
   if (includeIdentity && prospect.companyWebsite) properties.company_website = prospect.companyWebsite;
   if (includeIdentity && ownerId) properties.hubspot_owner_id = ownerId;
   if (includeIdentity && prospect.inventoryBusinessLine) properties.talentera_business_line = prospect.inventoryBusinessLine === "Evalufy" ? "Evalufy" : "ATS";
+  if (includeIdentity && prospect.inventoryBusinessLine && prospect.companyEmployeeCount >= 200) properties.numberofemployees = String(prospect.companyEmployeeCount);
+  if (includeIdentity && prospect.inventoryBusinessLine && prospect.companyCountry) properties.country = prospect.companyCountry;
   if (prospect.careerPageUrl) properties.career_page_url = prospect.careerPageUrl;
   if (prospect.detectedAts && !directApplication) {
     properties.detected_ats = prospect.detectedAts;
@@ -377,17 +382,21 @@ export async function POST(request: Request) {
     const prospect = parsed.data;
     const requestedOwner = requestedAssignment(prospect, request);
     if (prospect.inventoryBusinessLine) {
-      if (!allPhones(prospect).length) return NextResponse.json({ error: "Inventory SDR call tasks require a phone number." }, { status: 409 });
+      if (!allPhones(prospect).some(usablePhone)) return NextResponse.json({ error: "Inventory SDR call tasks require a phone number." }, { status: 409 });
       if (prospect.assignmentMode !== "acquisition") return NextResponse.json({ error: "Inventory pushes require authorized SDR assignment." }, { status: 403 });
       const storedAccount = await getAcquisitionAccount(companyDomain(prospect));
       if (!storedAccount || storedAccount.exclusionStatus !== "eligible") return NextResponse.json({ error: "Qualify this inventory company before pushing." }, { status: 409 });
       if (String(storedAccount.evidence.businessLine || "Talentera") !== prospect.inventoryBusinessLine) return NextResponse.json({ error: "Business line does not match the inventory record." }, { status: 409 });
       if (storedAccount.evidence.saudi200) {
+        const ats = storedAccount.evidence.inventoryAts as InventoryAts | undefined;
+        if (!ats || atsProduct(ats) !== prospect.inventoryBusinessLine || requestedOwner.id !== (prospect.inventoryBusinessLine === "Evalufy" ? "37624223" : "31644369")) return NextResponse.json({ error: "Verified ATS routing is required before Saudi inventory pushes." }, { status: 409 });
+        prospect.careerPageUrl = ats.careerUrl; prospect.detectedAts = ats.vendor; prospect.companyEvidenceUrl = ats.evidenceUrl; prospect.companyVerificationReason = ats.reason;
+        prospect.companyEmployeeCount = storedAccount.employeeCount; prospect.companyCountry = storedAccount.country;
         const person = (await listAcquisitionPeople(storedAccount.domain)).people.find((p) => p.uid === prospect.signalHireUid);
         if (!person || person.enrichmentStatus !== "enriched" || !person.meta.verifiedCurrentCompany || !allPhones(prospect).every((v) => person.phones.includes(v)) || !allEmails(prospect).every((v) => person.emails.includes(v))) return NextResponse.json({ error: "Use the verified stored inventory person and contact details." }, { status: 409 });
         if (storedAccount.assignedOwnerId !== requestedOwner.id || !["31644369", "37624223"].includes(requestedOwner.id)) return NextResponse.json({ error: "Preserve the inventory SDR assignment." }, { status: 409 });
         const key = `push:${storedAccount.domain}`;
-        const reservation = await reserveInventoryOperation(key, "push", 10);
+        const reservation = await reserveInventoryOperation(key, "push", SAUDI_DAILY_LIMIT);
         if (!reservation.reserved) {
           if (reservation.state === "completed") return NextResponse.json({ ...reservation.result, pushed: false, duplicate: true });
           return NextResponse.json({ error: `Inventory push is ${reservation.state}; reconcile it before another CRM write.` }, { status: 409 });
