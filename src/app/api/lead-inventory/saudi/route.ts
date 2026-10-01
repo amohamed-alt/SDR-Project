@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { saudi200Candidate, saudiPolicyExcluded } from "@/lib/saudi-inventory-policy";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { SaudiInventoryState, SAUDI_EMPLOYEE_RANGE, type SaudiPage } from "@/lib/saudi-inventory-state";
@@ -81,7 +82,7 @@ export async function POST(request: NextRequest) {
       const industry = clean(org.industry);
       const text = clean([name, industry, org.short_description, org.seo_description, ...(Array.isArray(org.keywords) ? org.keywords : [])].join(" "), 3000);
       const hubspotCompanyId = matches.get(domain) || byName.get(name.toLowerCase()) || "";
-      const excluded = /government|ministry|municipality|job board|recruitment software|applicant tracking software|وزارة|بلدية|حكوم/.test(text.toLowerCase()) || country !== "Saudi Arabia" || (employeeCount > 0 && employeeCount < 200);
+      const excluded = saudiPolicyExcluded(domain, text) || !saudi200Candidate(country, employeeCount);
       const exclusionReason = hubspotCompanyId ? "Already exists in HubSpot" : excluded ? "Outside Saudi 200+ prospecting policy / government or job-board signal" : !domain ? "Resolve company domain before CRM creation" : "Net-new candidate: identity and ICP review required before contact enrichment";
       const scored = scoreTalenteraAccount({ companyId: uid || key, name, domain, country, employeeCount, industry, activeJobs: 0, newJobs30d: 0, ats: "" });
       return { domain: key, name: name || key, source: "Apollo · Saudi 200+", sourceId: uid, country, employeeCount, industry, activeJobs: 0, headcountGrowth: 0, hrHeadcount: 0, careerPageUrl: "", detectedAts: "", gtmScore: scored.score, gtmTier: scored.tier, fitScore: scored.fitScore, intentScore: 0, atsOpportunityScore: scored.atsOpportunityScore,
@@ -91,7 +92,7 @@ export async function POST(request: NextRequest) {
     });
     const unique = [...new Map(accounts.map((account) => [account.domain, account])).values()];
     const saved = await upsertAcquisitionAccounts(unique, true);
-    await markSaudiInventoryMembership(unique.filter((account) => account.country === "Saudi Arabia" && (!account.employeeCount || account.employeeCount >= 200)).map((account) => ({ domain: account.domain, employeeCount: account.employeeCount, hubspotCompanyId: account.hubspotCompanyId, policyExcluded: !account.hubspotCompanyId && account.exclusionStatus === "excluded", evidence: { saudi200: true, saudi200Page: page, saudi200CheckedAt: account.evidence.saudi200CheckedAt, saudi200EmployeeRange: SAUDI_EMPLOYEE_RANGE } })));
+    await markSaudiInventoryMembership(unique.filter((account) => saudi200Candidate(account.country, account.employeeCount)).map((account) => ({ domain: account.domain, employeeCount: account.employeeCount, hubspotCompanyId: account.hubspotCompanyId, policyExcluded: !account.hubspotCompanyId && account.exclusionStatus === "excluded", evidence: { saudi200: true, saudi200Page: page, saudi200CheckedAt: account.evidence.saudi200CheckedAt, saudi200EmployeeRange: SAUDI_EMPLOYEE_RANGE } })));
     const result = { page, total: raw.total, totalPages: Math.ceil(raw.total / 100), fetched: raw.organizations.length, newInventoryRows: saved.accounts, existingHubSpot: unique.filter((account) => account.hubspotCompanyId).length, notInHubSpot: unique.filter((account) => !account.hubspotCompanyId).length, review: unique.filter((account) => account.exclusionStatus === "review").length, providerCreditsUsed: storedRaw ? 0 : 1, signalHireCreditsUsed: 0, checkedAt: new Date().toISOString() };
     await state.write(page, "result", result);
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
