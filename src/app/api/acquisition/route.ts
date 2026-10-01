@@ -510,6 +510,8 @@ export async function GET(request: NextRequest) {
       offset: Number(request.nextUrl.searchParams.get("offset") || 0),
       q: clean(request.nextUrl.searchParams.get("q"), 300),
       allSources: request.nextUrl.searchParams.get("allSources") === "1",
+      saudi200: request.nextUrl.searchParams.get("scope") === "saudi200",
+      crmPresence: z.enum(["new", "existing", ""]).catch("").parse(request.nextUrl.searchParams.get("crmPresence") || ""),
       source: clean(request.nextUrl.searchParams.get("source"), 80),
       businessLine: clean(request.nextUrl.searchParams.get("businessLine"), 30),
       readiness: z.enum(["ready", "needs_people", "search_only", ""]).catch("").parse(request.nextUrl.searchParams.get("readiness") || ""),

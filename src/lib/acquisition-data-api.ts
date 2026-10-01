@@ -139,6 +139,8 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs = READ
 }
 
 export async function listAcquisitionAccounts(filters: {
+  saudi200?: boolean;
+  crmPresence?: string;
   allSources?: boolean;
   source?: string;
   businessLine?: string;
@@ -154,6 +156,8 @@ export async function listAcquisitionAccounts(filters: {
   includeExcluded?: boolean;
 } = {}) {
   const query = new URLSearchParams();
+  if (filters.saudi200) query.set("saudi_200", "true");
+  if (filters.crmPresence) query.set("crm_presence", filters.crmPresence);
   if (filters.allSources) query.set("all_sources", "true");
   if (filters.source) query.set("source", filters.source);
   if (filters.businessLine) query.set("business_line", filters.businessLine);
@@ -195,6 +199,11 @@ export async function upsertAcquisitionAccounts(accounts: AcquisitionAccount[], 
     method: "PUT",
     body: JSON.stringify({ accounts: accounts.map(acquisitionAccountWritePayload), insertOnly }),
   }, Math.max(WRITE_TIMEOUT_MS, 10_000));
+}
+
+export async function markSaudiInventoryMembership(accounts: Array<{ domain: string; employeeCount: number; hubspotCompanyId: string; policyExcluded: boolean; evidence: Record<string, unknown> }>) {
+  if (!accounts.length) return;
+  return request("/v2/acquisition/saudi-membership", { method: "POST", body: JSON.stringify({ accounts }) }, Math.max(WRITE_TIMEOUT_MS, 10_000));
 }
 
 export async function listAcquisitionPeople(domain: string) {

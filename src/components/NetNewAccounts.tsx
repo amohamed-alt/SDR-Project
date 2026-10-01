@@ -136,6 +136,9 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
   const [page, setPage] = useState(0);
   const [readiness, setReadiness] = useState("");
   const [source, setSource] = useState("");
+  const [crawlProgress, setCrawlProgress] = useState<{ total: number | null; totalPages: number | null; completedPages: number[]; complete: boolean; uncertainPages: number[] } | null>(null);
+  const [crmPresence, setCrmPresence] = useState("");
+  const [inventoryScope, setInventoryScope] = useState(inventory ? "saudi200" : "");
   const [businessLine, setBusinessLine] = useState("");
   const [routeOwner, setRouteOwner] = useState("31644369");
   const [importSource, setImportSource] = useState("Clay");
@@ -144,6 +147,25 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
   const [pages, setPages] = useState(1);
   const [showExcluded, setShowExcluded] = useState(inventory);
 
+  useEffect(() => {
+    if (!inventory || inventoryScope !== "saudi200") return;
+    let active = true;
+    const timer = window.setInterval(() => { void refreshProgress(); }, 30_000);
+    async function refreshProgress() {
+      try {
+        const response = await fetch("/api/lead-inventory/saudi", { cache: "no-store" });
+        const result = await response.json();
+        if (active && response.ok && result.version === "saudi-200-v1") {
+          setCrawlProgress(result);
+          if (result.complete || result.uncertainPages.length) window.clearInterval(timer);
+        }
+      } catch { /* The company inventory request reports storage failures. */ }
+    }
+    void refreshProgress();
+    return () => { active = false; window.clearInterval(timer); };
+  }, [inventory, inventoryScope]);
+
+
   const load = useCallback(async () => {
     const requestId = ++loadRequest.current;
     setLoading(true);
@@ -151,6 +173,8 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
     try {
       const query = new URLSearchParams({ limit: "100", offset: String(page * 100) });
       if (inventory) query.set("allSources", "1");
+      if (inventoryScope) query.set("scope", inventoryScope);
+      if (crmPresence) query.set("crmPresence", crmPresence);
       if (search.trim()) query.set("q", search.trim());
       if (country) query.set("country", country);
       if (tier) query.set("tier", tier);
@@ -167,7 +191,7 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
     } finally {
       if (requestId === loadRequest.current) setLoading(false);
     }
-  }, [showExcluded, page, inventory, search, country, tier, readiness, source, businessLine]);
+  }, [showExcluded, page, inventory, search, country, tier, readiness, source, businessLine, inventoryScope, crmPresence]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 250);
@@ -403,7 +427,7 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
         <div className={styles.titleBlock}>
           <span>ACCOUNT ACQUISITION</span>
           <h1>{inventory ? "Lead Inventory" : "Net-New Accounts"}</h1>
-          <p>Persistent company stock · multiple sources · qualification · people · SDR routing</p>
+          <p>{inventoryScope ? "Saudi company stock · 200+ employees · HubSpot comparison · contacts when needed" : "Persistent company stock · multiple sources · qualification · people · SDR routing"}</p>
         </div>
       </div>
       <div className={styles.headerActions}>
@@ -421,12 +445,14 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
     {error ? <div role="alert" className={styles.error}><CircleAlert size={18}/><span>{error}</span><button onClick={() => setError("")}><X size={14}/></button></div> : null}
     {notice ? <div role="status" className={styles.notice}><Check size={17}/><span>{notice}</span><button onClick={() => setNotice("")}><X size={14}/></button></div> : null}
 
+    {inventoryScope && crawlProgress ? <p className={styles.costNote}>Apollo: {crawlProgress.completedPages.length} / {crawlProgress.totalPages ?? "pending"} pages · {crawlProgress.total === null ? "First source page pending" : `${number(crawlProgress.total)} source records`} · {crawlProgress.uncertainPages.length ? "Paused: uncertain provider response needs review" : crawlProgress.complete ? "Company stock complete" : "Company stock loading"} · No person enrichment credits</p> : null}
+
     <section className={styles.metrics}>
-      <div><span>Eligible</span><strong>{number(summary.eligible || 0)}</strong><small>Net-new after exclusions</small></div>
-      <div className={styles.metricHot}><span>Tier A</span><strong>{number(summary.tier_a || 0)}</strong><small>Highest priority</small></div>
-      <div><span>Needs people</span><strong>{number(summary.needs_people || 0)}</strong><small>Awaiting persona search</small></div>
+      <div><span>{inventory ? "Companies stored" : "Eligible"}</span><strong>{number((inventory ? summary.total : summary.eligible) || 0)}</strong><small>{inventoryScope ? "Saudi 200+ discovery" : "Net-new after exclusions"}</small></div>
+      <div className={styles.metricHot}><span>{inventory ? "In HubSpot" : "Tier A"}</span><strong>{number((inventory ? summary.existing_hubspot : summary.tier_a) || 0)}</strong><small>{inventory ? "Excluded from new-company work" : "Highest priority"}</small></div>
+      <div><span>{inventory ? "Needs review" : "Needs people"}</span><strong>{number((inventory ? summary.review : summary.needs_people) || 0)}</strong><small>{inventory ? "Verify identity and product fit" : "Awaiting persona search"}</small></div>
       <div className={styles.metricHot}><span>Phone ready</span><strong>{number(summary.phone_ready || 0)}</strong><small>Phone available</small></div>
-      <div><span>Pushed</span><strong>{number(summary.pushed || 0)}</strong><small>Company + contact + task</small></div>
+      <div><span>{inventory ? "Not in HubSpot" : "Pushed"}</span><strong>{number(inventory ? Math.max(0, (summary.total || 0) - (summary.existing_hubspot || 0)) : summary.pushed || 0)}</strong><small>{inventory ? "Includes records needing review" : "Company + contact + task"}</small></div>
       <div><span>Excluded</span><strong>{number(summary.excluded || 0)}</strong><small>Kept out of SDR queue</small></div>
     </section>
 
@@ -435,6 +461,8 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
         <div className={styles.toolbar}>
           <label className={styles.searchBox}><Search size={16}/><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(0); }} placeholder="Search account, ATS, industry, persona..."/></label>
           <label><Filter size={14}/><select value={tier} onChange={(event) => { setTier(event.target.value as FilterTier); setPage(0); }}><option value="">All tiers</option><option value="A">Tier A</option><option value="B">Tier B</option><option value="C">Tier C</option><option value="Watch">Watch</option></select></label>
+          {inventory ? <label><select aria-label="HubSpot presence" value={crmPresence} onChange={(event) => { setCrmPresence(event.target.value); setPage(0); }}><option value="">All HubSpot states</option><option value="existing">Already in HubSpot</option><option value="new">Not in HubSpot</option></select></label> : null}
+          {inventory ? <label><select aria-label="Inventory scope" value={inventoryScope} onChange={(event) => { setInventoryScope(event.target.value); setCountry(""); setSource(""); setPage(0); }}><option value="saudi200">Saudi Arabia · 200+ employees</option><option value="">All inventory</option></select></label> : null}
           <label><Building2 size={14}/><select value={country} onChange={(event) => { setCountry(event.target.value as FilterCountry); setPage(0); }}><option value="">All countries</option><option value="Egypt">Egypt</option><option value="South Africa">South Africa</option><option value="Saudi Arabia">Saudi Arabia</option><option value="United Arab Emirates">United Arab Emirates</option></select></label>
           <label><select aria-label="Readiness" value={readiness} onChange={(event) => { setReadiness(event.target.value); setPage(0); }}><option value="">All stages</option><option value="needs_people">Needs people</option><option value="search_only">Needs enrichment</option><option value="ready">Ready to contact</option></select></label>
           {inventory ? <><label><select aria-label="Source" value={source} onChange={(event) => { setSource(event.target.value); setPage(0); }}><option value="">All sources</option>{["Clay", "SignalHire", "Sales Navigator", "LinkedIn", "Public research", "Manual", "Apollo"].map((value) => <option key={value}>{value}</option>)}</select></label><label><select aria-label="Business line" value={businessLine} onChange={(event) => { setBusinessLine(event.target.value); setPage(0); }}><option value="">Both products</option><option>Talentera</option><option>Evalufy</option></select></label></> : null}
@@ -446,7 +474,7 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
             <thead><tr><th>Account</th><th>GTM</th><th>Hiring</th><th>ATS</th><th>Best persona</th><th>Status</th><th>SDR</th><th/></tr></thead>
             <tbody>
               {filtered.map((account) => <tr key={account.domain} className={selectedDomain === account.domain ? styles.selectedRow : ""}>
-                <td><button type="button" className={styles.accountCell} onClick={() => void openAccount(account)}><span className={styles.companyMark}>{account.name.slice(0, 2).toUpperCase()}</span><span><strong>{account.name}</strong><small>{account.country || "Market unknown"} · {account.employeeCount ? `${number(account.employeeCount)} employees` : "Size pending"}</small><em>{account.domain} · {account.source} · {String(account.evidence.businessLine || "Talentera")}</em></span></button></td>
+                <td><button type="button" className={styles.accountCell} onClick={() => void openAccount(account)}><span className={styles.companyMark}>{account.name.slice(0, 2).toUpperCase()}</span><span><strong>{account.name}</strong><small>{account.country || "Market unknown"} · {account.employeeCount ? `${number(account.employeeCount)} employees` : account.evidence.saudi200 ? "200+ source filter · exact size pending" : "Size pending"}</small><em>{account.domain} · {account.source} · {String(account.evidence.businessLine || "Talentera")}</em></span></button></td>
                 <td><span className={`${styles.tier} ${tierClass(account.gtmTier)}`}>Tier {account.gtmTier}</span><b className={styles.score}>{account.gtmScore}</b></td>
                 <td><strong className={styles.jobs}>{number(account.activeJobs)}</strong><small className={styles.cellSub}>active jobs</small></td>
                 <td><span className={styles.ats}>{account.detectedAts || "To verify"}</span><small className={styles.cellSub}>{account.atsOpportunityScore}/100 opportunity</small></td>
@@ -482,10 +510,10 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
         </> : null}
 
         <div className={styles.divider}/>
-        <div className={styles.discoveryTitle}><div><span>APOLLO DISCOVERY</span><strong>Load medium-market accounts</strong></div><Sparkles size={17}/></div>
+        {inventory ? <p className={styles.costNote}>Saudi 200+ stock is loaded by the resumable Apollo coverage workflow. One results page returns up to 100 companies. Person enrichment is separate and runs only when selected.</p> : <><div className={styles.discoveryTitle}><div><span>APOLLO DISCOVERY</span><strong>Load medium-market accounts</strong></div><Sparkles size={17}/></div>
         <label className={styles.pageSelect}><span>Pages</span><select value={pages} onChange={(event) => setPages(Number(event.target.value))}>{[1,2,3,4,5,6].map((page) => <option key={page} value={page}>{page} · up to {page * 100} companies</option>)}</select></label>
         <p className={styles.costNote}><Coins size={13}/> Up to {pages} Apollo credit{pages === 1 ? "" : "s"}. Existing HubSpot accounts and hard exclusions are removed before SDR work.</p>
-        <button type="button" className={styles.discover} disabled={busy === "discover" || !config?.apolloConfigured || !config?.ownerActionsConfigured || !adminUnlocked} onClick={() => void discover()}>{busy === "discover" ? <LoaderCircle className={styles.spin} size={16}/> : <Zap size={16}/>} Discover & rank</button>
+        <button type="button" className={styles.discover} disabled={busy === "discover" || !config?.apolloConfigured || !config?.ownerActionsConfigured || !adminUnlocked} onClick={() => void discover()}>{busy === "discover" ? <LoaderCircle className={styles.spin} size={16}/> : <Zap size={16}/>} Discover & rank</button></>}
       </aside>
     </div>
 
@@ -499,7 +527,7 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
         <div className={styles.drawerScoreRow}>
           <div className={`${styles.bigScore} ${tierClass(selected.gtmTier)}`}><span>Tier {selected.gtmTier}</span><strong>{selected.gtmScore}</strong><small>GTM score</small></div>
           <div><span>Intent</span><strong>{selected.intentScore}</strong><small>{selected.activeJobs} active jobs</small></div>
-          <div><span>Fit</span><strong>{selected.fitScore}</strong><small>{selected.employeeCount ? `${number(selected.employeeCount)} employees` : "Size pending"}</small></div>
+          <div><span>Fit</span><strong>{selected.fitScore}</strong><small>{selected.employeeCount ? `${number(selected.employeeCount)} employees` : selected.evidence.saudi200 ? "200+ source filter · exact size pending" : "Size pending"}</small></div>
           <div><span>ATS opp.</span><strong>{selected.atsOpportunityScore}</strong><small>{selected.detectedAts || "ATS to verify"}</small></div>
         </div>
 

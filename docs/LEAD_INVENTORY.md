@@ -42,3 +42,15 @@ Readiness means a stored enriched contact has a phone or email, not independent 
 ## Verification
 
 Run lint, typecheck, unit tests, production build and Python syntax checks. Browser tests cover import preview/save, filters, pagination and narrow-screen rendering without real CRM writes or paid enrichment.
+
+## Saudi 200+ stock (2026-10-01)
+
+Inventory defaults to the Saudi 200+ discovery scope. Use HubSpot presence to compare existing companies with companies absent from CRM. The All inventory scope retains historical multi-country records. Summary cards describe the selected discovery scope; pagination reflects additional filters.
+
+The existing Apollo coverage workflow now runs the resumable Saudi stock crawler. A main push changing its workflow/script starts the authorized crawl after the matching build is deployed; workflow_dispatch resumes without recurring schedules. Search uses Saudi headquarters and a documented numeric range of 200–1,000,000,000 employees (no practical upper cap), 100 results/page. It follows the live total rather than a historical estimate. Apollo exposes a maximum 500 pages per query; the crawler stops visibly if partitioning is required. This is coverage of Apollo records, not proof of every registered company in Saudi Arabia.
+
+Each paid attempt is atomically claimed before the provider call. Raw pages are saved on the persistent application data volume before CRM comparison. After CRM/storage failures, the raw page can be reprocessed at zero provider cost. An uncertain provider response is not automatically retried. Completed pages are reused, so resuming a finished crawl spends zero credits. Actual billing is controlled by the Apollo plan; the app tracks page calls using the configured 1-credit/page estimate.
+
+Records are retained even when domains/headcounts are missing. Missing exact headcounts are displayed as Size pending; membership proves the provider size filter, not an invented exact count. Domain variants and exact company names are compared with HubSpot. CRM failures stop the page instead of treating companies as new. New records enter Review; government/job-board signals are excluded. Existing inventory assignments, people, tasks and researched fields are preserved via insert-only writes and an atomic metadata-only scope update. No SignalHire credits, contacts, companies or tasks are created in HubSpot by this crawl. Contacts are selected/enriched separately when needed.
+
+Progress: GET /api/lead-inventory/saudi. Authorized page processing: POST with {page,confirmCredits:true}. Data: GET /api/acquisition?allSources=1&scope=saudi200&includeExcluded=1 (optional crmPresence=new/existing). Crawl state is separate from the historical GCC/Egypt paid-page ledger.
