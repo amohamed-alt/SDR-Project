@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=appuser:appuser app.py ./app.py
 COPY --chown=appuser:appuser extended_app.py ./extended_app.py
+COPY --chown=appuser:appuser inventory_engine.py ./inventory_engine.py
 USER appuser
 
 EXPOSE 8000

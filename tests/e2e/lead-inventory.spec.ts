@@ -1,6 +1,10 @@
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
+  await page.route("**/api/lead-inventory/engine", (route) => route.fulfill({ json: {
+    coverage: { checked: 12, attempted: 9, connected: 6, meetingsHeld: 3, both: 2, futureTask: 5, lastCheckedAt: "2026-10-01T08:00:00Z" },
+    model: { mode: "collecting", matureCompanies: 12, segments: [] }, operations: [],
+  } }));
   await page.addInitScript(() => {
     localStorage.setItem("sdr_v2_visitor_id", "visitor_playwright_inventory");
     localStorage.setItem("sdr_v2_visitor_name", "Playwright inventory");
@@ -25,6 +29,8 @@ test("inventory filters and pagination use all-source server queries", async ({ 
   });
   await page.goto("/lead-inventory");
   await expect(page.getByRole("heading", { name: "Lead Inventory" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Saudi coverage & learning" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Process 2 companies" })).toBeDisabled();
   await expect(page.getByText("Example company", { exact: true })).toBeVisible();
   expect(requests.at(-1)?.searchParams.get("allSources")).toBe("1");
   expect(requests.at(-1)?.searchParams.get("scope")).toBe("saudi200");

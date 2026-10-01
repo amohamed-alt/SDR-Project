@@ -3,7 +3,8 @@ import { timingSafeEqual } from "node:crypto";
 import { sdrAdminAuthorized } from "@/lib/sdr-admin-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { getAcquisitionAccount, writeAcquisitionPush } from "@/lib/acquisition-data-api";
+import { getAcquisitionAccount, listAcquisitionPeople, writeAcquisitionPush } from "@/lib/acquisition-data-api";
+import { reserveInventoryOperation, finishInventoryOperation } from "@/lib/saudi-coverage-store";
 import { manualTaskOwners } from "@/lib/acquisition-routing";
 import { batchRead, HubSpotApiError, readAssociations, searchAll } from "@/lib/hubspot";
 import { normalizeCompanyDomain } from "@/lib/prospecting-company-intelligence";
@@ -369,6 +370,7 @@ async function logAcquisitionPush(prospect: Prospect, result: {
 
 export async function POST(request: Request) {
   const clickedAt = new Date().toISOString();
+  let inventoryOperationKey = "";
   try {
     const parsed = prospectSchema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: "Invalid prospect payload.", details: parsed.error.flatten() }, { status: 400 });
@@ -380,6 +382,18 @@ export async function POST(request: Request) {
       const storedAccount = await getAcquisitionAccount(companyDomain(prospect));
       if (!storedAccount || storedAccount.exclusionStatus !== "eligible") return NextResponse.json({ error: "Qualify this inventory company before pushing." }, { status: 409 });
       if (String(storedAccount.evidence.businessLine || "Talentera") !== prospect.inventoryBusinessLine) return NextResponse.json({ error: "Business line does not match the inventory record." }, { status: 409 });
+      if (storedAccount.evidence.saudi200) {
+        const person = (await listAcquisitionPeople(storedAccount.domain)).people.find((p) => p.uid === prospect.signalHireUid);
+        if (!person || person.enrichmentStatus !== "enriched" || !person.meta.verifiedCurrentCompany || !allPhones(prospect).every((v) => person.phones.includes(v)) || !allEmails(prospect).every((v) => person.emails.includes(v))) return NextResponse.json({ error: "Use the verified stored inventory person and contact details." }, { status: 409 });
+        if (storedAccount.assignedOwnerId !== requestedOwner.id || !["31644369", "37624223"].includes(requestedOwner.id)) return NextResponse.json({ error: "Preserve the inventory SDR assignment." }, { status: 409 });
+        const key = `push:${storedAccount.domain}`;
+        const reservation = await reserveInventoryOperation(key, "push", 10);
+        if (!reservation.reserved) {
+          if (reservation.state === "completed") return NextResponse.json({ ...reservation.result, pushed: false, duplicate: true });
+          return NextResponse.json({ error: `Inventory push is ${reservation.state}; reconcile it before another CRM write.` }, { status: 409 });
+        }
+        inventoryOperationKey = key;
+      }
       const existingContactId = await findContact(allEmails(prospect), prospect.linkedinUrl);
       if (existingContactId && storedAccount.status !== "pushed") return NextResponse.json({ error: "Contact already exists in HubSpot. Review ownership and company associations before using the new-company queue." }, { status: 409 });
       const existingCompanyId = await findCompanyId(prospect);
@@ -405,6 +419,7 @@ export async function POST(request: Request) {
     if (duplicateTask) {
       const taskId = String(duplicateTask.id);
       await logAcquisitionPush(prospect, { companyId: company.companyId, contactId, taskId, owner, status: "pushed" });
+      if (inventoryOperationKey) await finishInventoryOperation(inventoryOperationKey, "completed", { contactId, companyId: company.companyId, taskId, ownerId: owner.id, ownerName: owner.name });
       return NextResponse.json({
         pushed: false,
         duplicate: true,
@@ -445,13 +460,14 @@ export async function POST(request: Request) {
       }),
     });
 
-    const scheduled = owner.id === MARITA_OWNER_ID
+    const scheduled = owner.id === MARITA_OWNER_ID || (Boolean(prospect.inventoryBusinessLine) && owner.id === "37624223")
       ? await createScheduledMaritaTask({
         contactId,
         companyId: company.companyId,
+        ownerId: owner.id as "31644369" | "37624223",
         elevatus,
         readTasks: () => searchAll("tasks", ["hubspot_owner_id", "hs_task_status", "hs_timestamp", "hs_task_subject"], [
-          { propertyName: "hubspot_owner_id", operator: "EQ", value: MARITA_OWNER_ID },
+          { propertyName: "hubspot_owner_id", operator: "EQ", value: owner.id },
           { propertyName: "hs_task_status", operator: "NEQ", value: "COMPLETED" },
         ]),
         createTask,
@@ -461,6 +477,7 @@ export async function POST(request: Request) {
 
     await logAcquisitionPush(prospect, { companyId: company.companyId, contactId, taskId: String(task.id), owner });
 
+    if (inventoryOperationKey) await finishInventoryOperation(inventoryOperationKey, "completed", { contactId, companyId: company.companyId, taskId: String(task.id), ownerId: owner.id, ownerName: owner.name });
     return NextResponse.json({
       pushed: true,
       duplicate: false,
@@ -480,6 +497,7 @@ export async function POST(request: Request) {
       emailsStoredInTask: allEmails(prospect).length,
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    if (inventoryOperationKey) await finishInventoryOperation(inventoryOperationKey, "review", { error: error instanceof Error ? error.message : "CRM write uncertain" }).catch(() => undefined);
     console.error("Push prospect to HubSpot failed", error);
     const message = error instanceof Error ? error.message : "Unable to push prospect to HubSpot.";
     const status = error instanceof MaritaScheduleError ? error.status : /Owner authorization/.test(message) ? 401 : /not enabled for acquisition/.test(message) ? 400 : 500;

@@ -123,7 +123,7 @@ function assertConfigured() {
   if (!DATA_API_URL) throw new Error("Dashboard data API is not configured.");
 }
 
-async function request<T>(path: string, init: RequestInit = {}, timeoutMs = READ_TIMEOUT_MS): Promise<T> {
+export async function acquisitionDataRequest<T>(path: string, init: RequestInit = {}, timeoutMs = READ_TIMEOUT_MS): Promise<T> {
   assertConfigured();
   const response = await fetch(`${DATA_API_URL}${path}`, {
     ...init,
@@ -137,6 +137,8 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs = READ
   }
   return await response.json() as T;
 }
+
+const request = acquisitionDataRequest;
 
 export async function listAcquisitionAccounts(filters: {
   saudi200?: boolean;

@@ -23,6 +23,7 @@ import { verifiedActiveJobCount } from "@/lib/acquisition-job-count";
 import { compatibleCompanyIdentity } from "@/lib/company-dedupe";
 import { manualTaskOwners } from "@/lib/acquisition-routing";
 import { sdrAdminAuthorized, sdrAdminConfigured } from "@/lib/sdr-admin-auth";
+import { reserveInventoryOperation, finishInventoryOperation } from "@/lib/saudi-coverage-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -553,8 +554,19 @@ export async function POST(request: NextRequest) {
       if (person.enrichmentStatus === "enriched") return NextResponse.json({ action: "enrich_person", person, reused: true });
       const existing = await existingHubSpotDomains([account.domain]);
       if (existing.has(account.domain)) return NextResponse.json({ error: "This company now exists in HubSpot. Recheck its ownership before spending enrichment credits." }, { status: 409 });
-      const result = await enrichPerson(account, person);
-      return NextResponse.json({ action: "enrich_person", account: { domain: account.domain, name: account.name }, ...result });
+      const operationKey = `enrichment:${person.uid}`;
+      if (account.evidence.saudi200) {
+        const reservation = await reserveInventoryOperation(operationKey, "enrichment", 10);
+        if (!reservation.reserved) return NextResponse.json({ error: `Person enrichment is ${reservation.state}; stored attempts are never charged twice automatically.` }, { status: 409 });
+      }
+      try {
+        const result = await enrichPerson(account, person);
+        if (account.evidence.saudi200) await finishInventoryOperation(operationKey, "completed", { phones: result.person.phones.length, emails: result.person.emails.length });
+        return NextResponse.json({ action: "enrich_person", account: { domain: account.domain, name: account.name }, ...result });
+      } catch (error) {
+        if (account.evidence.saudi200) await finishInventoryOperation(operationKey, "review", { error: error instanceof Error ? error.message : "Provider result uncertain" }).catch(() => undefined);
+        throw error;
+      }
     }
 
     const assignment = await assignAccount(account, parsed.data.ownerId);

@@ -71,9 +71,10 @@ export function manualTaskOwners() {
 
 export function signalHirePersonaQuery(primaryPersona: string, secondaryPersona = "") {
   const source = `${primaryPersona} ${secondaryPersona}`.toLowerCase();
-  if (/assessment|admissions|examinations|enrollment|registrar/.test(source)) {
+  if (/admissions|examinations|enrollment|registrar/.test(source)) {
     return '(Assessment OR Admissions OR Examinations OR Enrollment OR Registrar OR "Student Recruitment") AND (Manager OR Head OR Director OR Lead)';
   }
+  if (/assessment|selection/.test(source)) return '(Assessment OR Selection OR "Talent Acquisition" OR Recruitment) AND (Manager OR Head OR Director OR Lead)';
   if (/hris|hr systems|people systems|hr technology|people technology/.test(source)) {
     return '(HRIS OR "HR Systems" OR "People Systems" OR "HR Technology" OR "People Technology") AND (Manager OR Head OR Director OR Lead)';
   }
@@ -94,7 +95,8 @@ function titleScore(title: string, primaryPersona: string, secondaryPersona: str
   if (/\b(head|director|vp|vice president|chief|chro)\b/.test(value)) score += 28;
   else if (/\b(manager|lead)\b/.test(value)) score += 18;
 
-  if (/talent acquisition/.test(primary) && /talent acquisition/.test(value)) score += 38;
+  if (/admissions|assessment|examinations|enrollment|registrar/.test(primary) && /admissions|assessment|examinations|enrollment|registrar|student recruitment|selection/.test(value)) score += 38;
+  else if (/talent acquisition/.test(primary) && /talent acquisition/.test(value)) score += 38;
   else if (/recruit/.test(primary) && /recruit/.test(value)) score += 35;
   else if (/hris|hr systems|people systems/.test(primary) && /hris|hr systems|people systems|hr technology|people technology/.test(value)) score += 42;
   else if (/human resources|\bhr\b|people/.test(primary) && /human resources|\bhr\b|people/.test(value)) score += 30;

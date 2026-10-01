@@ -1,12 +1,15 @@
 name: Saudi 200+ Company Inventory
 
 on:
+  schedule:
+    - cron: '0 4 * * 0-4'
   workflow_dispatch:
   push:
     branches: [main]
     paths:
       - '.github/workflows/acquisition-apollo-crawl-once.yml'
       - 'scripts/saudi-inventory-crawl.mjs'
+      - 'scripts/saudi-coverage-engine.mjs'
 
 permissions:
   contents: read
@@ -17,6 +20,7 @@ concurrency:
 
 jobs:
   inventory:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -30,3 +34,17 @@ jobs:
           node-version: '22'
       - name: Resume Saudi company stock and HubSpot comparison
         run: node scripts/saudi-inventory-crawl.mjs
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    env:
+      BASE_URL: https://sdr.dashboardtalentera.tech
+      ACQUISITION_OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN || secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD }}
+      EXPECTED_BUILD_REF: ${{ github.event_name == 'push' && github.sha || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Refresh coverage and replenish qualified phone-ready companies
+        run: node scripts/saudi-coverage-engine.mjs
