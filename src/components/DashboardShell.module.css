@@ -597,6 +597,7 @@
   .shell :global(.sidebar nav button span) { display: block; }
   .shell :global(.sidebar nav) { display: flex; flex-direction: column; }
   .shell :global(.sidebar nav button) { width: 100%; justify-content: flex-start; }
+  .shell :global(.sidebar nav button:nth-child(n+5)) { display: flex; }
   .sidebarTools .toolList, .sidebarTools .advancedList { max-height: none; overflow: visible; }
   .sidebarTools .toolItem { min-height: 44px; }
 }
