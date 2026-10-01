@@ -2,7 +2,7 @@ export function maqsamAgentKey(agent, identities = {}) {
   const email = String(agent?.email ?? agent?.agentEmail ?? "").trim().toLowerCase();
   const name = String(agent?.name ?? agent?.agentName ?? "").trim().toLowerCase().replace(/\s+/g, " ");
   const maritaEmail = String(identities.maritaEmail || "m.chedid@bayt.net").toLowerCase();
-  const danielEmail = String(identities.danielEmail || "").toLowerCase();
+  const danielEmail = String(identities.danielEmail || "d.beaini@talentera.com").toLowerCase();
   if (email && email === maritaEmail) return "marita";
   if (email && danielEmail && email === danielEmail) return "daniel";
   if (name === "marita chedid") return "marita";
