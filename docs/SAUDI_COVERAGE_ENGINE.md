@@ -11,7 +11,7 @@ The Lead Inventory now connects company stock to CRM coverage and product-specif
 - Missing exact company size and industry are enriched from Apollo only after fresh HubSpot exclusion, with a durable 10/day budget. Domain identity and Saudi/200+ policy are checked again before person spend.
 - One selected current-employer-verified person per company, with a phone required before CRM push. Existing saved enrichment is reused.
 - At most 10 company processing attempts, 10 Apollo company enrichments (one documented credit per organization), 10 person reveal attempts and 10 inventory push reservations per Riyadh calendar day. These ceilings include failures and ambiguous provider responses; no credit purchase is authorized or performed by the engine.
-- New assignments go only to Marita or Daniel using current open-task load. Inventory task scheduling keeps Marita's existing 70/day rule and uses 50/day for Daniel, including overdue carry and Sun–Thu workdays. Existing task dates/owners are not rewritten.
+- New assignments follow the existing product workspaces: Talentera to Marita, Evalufy to Daniel. Current workload controls task scheduling rather than moving a lead to the other product owner. Inventory task scheduling keeps Marita's existing 70/day rule and uses 50/day for Daniel, including overdue carry and Sun–Thu workdays. Existing task dates/owners are not rewritten.
 - External-operation reservations live in Postgres. An uncertain reveal/write stays blocked for reconciliation. No automatic retry can produce a second charge or CRM POST for the same reserved operation. A review outcome is not a successful push.
 
 ## Coverage and learning
@@ -30,7 +30,7 @@ Limitations: historical titles/product labels use current CRM values, because hi
 
 `GET /api/lead-inventory/engine` returns aggregate coverage, model state and operation counts. Authenticated POST `{action:"run",limit:1,confirmCredits:true}` processes the bounded qualified queue. The dashboard offers an explicit two-company run. Existing admin cookies or the acquisition automation token authorize writes; provider credentials stay server-side.
 
-The existing Saudi inventory GitHub workflow runs the engine at 04:00 UTC Sun–Thu, with 100 historical company refreshes and up to 10 company attempts per run. Initial push waits for the exact production build before actions. It uses the canonical deployment workflow; no new Docker service, data volume or deployment path is introduced. n8n can invoke the same authenticated API when orchestration is consolidated there.
+The existing Saudi inventory GitHub workflow runs the engine at 04:00 UTC Sun–Thu, with 100 historical company refreshes and up to 10 company attempts per run. Initial push waits for the requested production build or a newer deployed descendant verified through GitHub before actions. Discovery and coverage each serialize independently, so a waiting discovery run does not block replenishment. It uses the canonical deployment workflow; no new Docker service, data volume or deployment path is introduced. n8n can invoke the same authenticated API when orchestration is consolidated there.
 
 Detailed contact data and per-company operation results stay in Postgres/HubSpot. GitHub job logs contain aggregate counts only. To pause the schedule, disable the existing Saudi inventory workflow; manual inventory actions remain subject to the durable reservations and daily limits.
 

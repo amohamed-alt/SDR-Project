@@ -1,4 +1,5 @@
 import { appendFile, readFile } from "node:fs/promises";
+import { inventoryBuildReady } from "./inventory-build-gate.mjs";
 
 const base = process.env.BASE_URL || "https://sdr.dashboardtalentera.tech";
 const token = process.env.ACQUISITION_OWNER_TOKEN;
@@ -19,7 +20,7 @@ for (let attempt = 0; attempt < 180; attempt += 1) {
   try {
     const health = await request("/api/health");
     const progress = await request("/api/lead-inventory/saudi");
-    if (progress.version === "saudi-200-v2" && (!expectedSha || health.buildRef === expectedSha)) { ready = true; break; }
+    if (progress.version === "saudi-200-v2" && await inventoryBuildReady(expectedSha, health.buildRef, process.env.GITHUB_REPOSITORY)) { ready = true; break; }
   } catch { /* Wait for deployment before spending. */ }
   await new Promise((resolve) => setTimeout(resolve, 10_000));
 }

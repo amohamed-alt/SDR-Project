@@ -54,7 +54,7 @@ test("Daniel deep links render the Evalufy workspace on the server", async ({ pa
   await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
   await expect(page.locator(".evalufy-logo")).toHaveAttribute("src", /evalufy-logo\.png/);
   await expect(page.locator(".sidebar").getByRole("button", { name: /Inbound vs Outbound/i })).toBeVisible();
-  await expect(page.locator(".sidebar").getByRole("button", { name: /SDR Tools/i })).toBeVisible();
+  await expect(page.locator(".sidebar").getByRole("region", { name: "SDR Tools", exact: true })).toBeVisible();
 });
 
 test("sidebar and owner workspaces remain mounted across tool navigation and reload", async ({ page }) => {
@@ -62,8 +62,7 @@ test("sidebar and owner workspaces remain mounted across tool navigation and rel
   const sidebar = page.locator(".sidebar");
   await expect(sidebar.getByText("TEAM WORKSPACES")).toBeVisible();
 
-  await sidebar.getByRole("button", { name: /SDR Tools/i }).click();
-  await page.getByRole("button", { name: /Talentera Intelligence/i }).click();
+  await sidebar.getByRole("region", { name: "SDR Tools", exact: true }).getByRole("button", { name: /Talentera Intelligence/i }).click();
   await expect(page.getByText("Priority Accounts")).toBeVisible();
   await expect(sidebar).toHaveCount(1);
   await expect(sidebar.getByText("TEAM WORKSPACES")).toBeVisible();
@@ -80,13 +79,13 @@ test("sidebar and owner workspaces remain mounted across tool navigation and rel
 
 test("Team Activity is discoverable and locked admin tools remain visible", async ({ page }) => {
   await page.goto("/");
-  await page.locator(".sidebar").getByRole("button", { name: /SDR Tools/i }).click();
-  await expect(page.getByRole("button", { name: /Team Activity/i })).toBeVisible();
+  const tools = page.locator(".sidebar").getByRole("region", { name: "SDR Tools", exact: true });
+  await expect(tools.getByRole("button", { name: /Team Activity/i })).toBeVisible();
 
-  await page.getByRole("button", { name: /Admin Tools · 6/i }).click();
-  await expect(page.getByText("Admin password", { exact: true })).toBeVisible();
+  await tools.getByRole("button", { name: /Company Repair/i }).click();
+  await expect(tools.getByText("Admin password", { exact: true })).toBeVisible();
   for (const label of ["Sales Nav Source", "Sales Nav Full Run", "SignalHire Source", "SignalHire CSV Queue", "Call Queue Ops", "Company Repair"]) {
-    await expect(page.getByRole("button", { name: new RegExp(label) })).toBeVisible();
+    await expect(tools.getByRole("button", { name: new RegExp(label) })).toBeVisible();
   }
 });
 

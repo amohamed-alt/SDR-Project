@@ -10,6 +10,7 @@ on:
       - '.github/workflows/acquisition-apollo-crawl-once.yml'
       - 'scripts/saudi-inventory-crawl.mjs'
       - 'scripts/saudi-coverage-engine.mjs'
+      - 'scripts/inventory-build-gate.mjs'
       - 'src/lib/saudi-coverage-*.ts'
       - 'src/lib/saudi-company-enrichment.ts'
       - 'src/app/api/lead-inventory/engine/**'
@@ -17,12 +18,11 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: saudi-200-inventory
-  cancel-in-progress: false
-
 jobs:
   inventory:
+    concurrency:
+      group: saudi-company-discovery
+      cancel-in-progress: false
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -30,6 +30,7 @@ jobs:
       BASE_URL: https://sdr.dashboardtalentera.tech
       ACQUISITION_OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN || secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD }}
       EXPECTED_BUILD_REF: ${{ github.event_name == 'push' && github.sha || '' }}
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -38,12 +39,16 @@ jobs:
       - name: Resume Saudi company stock and HubSpot comparison
         run: node scripts/saudi-inventory-crawl.mjs
   coverage:
+    concurrency:
+      group: saudi-company-coverage
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 100
     env:
       BASE_URL: https://sdr.dashboardtalentera.tech
       ACQUISITION_OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN || secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD }}
       EXPECTED_BUILD_REF: ${{ github.event_name == 'push' && github.sha || '' }}
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -91,6 +91,7 @@ export async function POST(request: NextRequest) {
           throw new Error("Enriched company profile is outside the Saudi 200+ policy; no person reveal");
         }
         product = account.evidence.productReviewed ? (account.evidence.businessLine === "Evalufy" ? "Evalufy" : "Talentera") : suggestProduct(account.industry, String(account.evidence.sourceText || account.name));
+        const ownerId = chooseInventorySdr(loads, product, account.assignedOwnerId);
         personas = productPersonas(product, `${account.industry} ${account.name}`, account.employeeCount);
         learned = learnedPriority(account.gtmScore, product, account.industry, account.employeeCount, personas.primary, model);
         const updated = { ...account, primaryPersona: personas.primary, secondaryPersona: personas.secondary, evidence: { ...account.evidence, businessLine: product, productReason: personas.reason, priorityModel: model.method, learnedLift: learned.lift } };
@@ -113,7 +114,6 @@ export async function POST(request: NextRequest) {
           person = enriched.person as AcquisitionPerson;
         }
         if (!person.phones.length || !person.meta.verifiedCurrentCompany) throw new Error("Phone or current-employer verification missing; no CRM push");
-        const ownerId = chooseInventorySdr(loads, account.assignedOwnerId);
         const assigned = await internalAction(request, "/api/acquisition", { action: "assign", domain: account.domain, ownerId }, acquisitionAction);
         if (assigned.assignment.ownerId !== ownerId) throw new Error("Assignment changed concurrently; review before pushing");
         const result = await internalAction(request, "/api/prospecting/push", {

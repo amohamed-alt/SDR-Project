@@ -1,4 +1,5 @@
 import { appendFile } from "node:fs/promises";
+import { inventoryBuildReady } from "./inventory-build-gate.mjs";
 const base = process.env.BASE_URL || "https://sdr.dashboardtalentera.tech";
 const token = process.env.ACQUISITION_OWNER_TOKEN;
 if (!token) throw new Error("Inventory engine authorization is missing");
@@ -13,7 +14,7 @@ for (let i = 0; i < 180; i++) {
   try {
     const health = await request("/api/health");
     const report = await request("/api/lead-inventory/engine");
-    if ((!process.env.EXPECTED_BUILD_REF || health.buildRef === process.env.EXPECTED_BUILD_REF) && report.version === "saudi-coverage-v1") { ready = true; break; }
+    if (report.version === "saudi-coverage-v1" && await inventoryBuildReady(process.env.EXPECTED_BUILD_REF, health.buildRef, process.env.GITHUB_REPOSITORY)) { ready = true; break; }
   } catch { /* Wait for the canonical deployment; never print credentials. */ }
   await new Promise((r) => setTimeout(r, 10_000));
 }

@@ -36,9 +36,10 @@ test("Evalufy education and corporate assessment use different personas", () => 
   assert.match(productPersonas("Evalufy", "Retail").primary, /Talent Acquisition/);
   assert.equal(personaFamily("Assessment Manager"), "Assessment / selection");
 });
-test("SDR routing preserves assignments, never selects an RM, and fails on missing workload", () => {
-  assert.equal(chooseInventorySdr({ "31644369": 8, "37624223": 2 }), "37624223");
-  assert.equal(chooseInventorySdr({ "31644369": 8, "37624223": 2 }, "31644369"), "31644369");
-  assert.throws(() => chooseInventorySdr({ "31644369": 1 }));
-  assert.throws(() => chooseInventorySdr({}, "76369997"));
+test("SDR routing respects products, preserves assignments, and never selects an RM", () => {
+  assert.equal(chooseInventorySdr({ "31644369": 8, "37624223": 2 }, "Talentera"), "31644369");
+  assert.equal(chooseInventorySdr({ "31644369": 1, "37624223": 20 }, "Evalufy"), "37624223");
+  assert.equal(chooseInventorySdr({ "31644369": 8, "37624223": 2 }, "Evalufy", "31644369"), "31644369");
+  assert.throws(() => chooseInventorySdr({ "31644369": 1 }, "Talentera"));
+  assert.throws(() => chooseInventorySdr({}, "Talentera", "76369997"));
 });
