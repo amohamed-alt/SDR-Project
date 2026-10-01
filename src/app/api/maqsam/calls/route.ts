@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { listMaqsamCalls, maqsamHistoryStatus, upsertMaqsamCall } from "@/lib/maqsam-calls";
+import { listMaqsamCalls, maqsamDanielCandidates, maqsamHistoryStatus, upsertMaqsamCall } from "@/lib/maqsam-calls";
 import { maqsamAgentKey } from "@/lib/maqsam-agent.mjs";
 import type { MaqsamCallRecord } from "@/lib/maqsam-types";
 
@@ -126,6 +126,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     meta: {
+      danielCandidates: await maqsamDanielCandidates(),
       history: await maqsamHistoryStatus(),
       generatedAt: new Date().toISOString(),
       totalStored: allCalls.length,

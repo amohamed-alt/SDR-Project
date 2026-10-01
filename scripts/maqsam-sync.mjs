@@ -253,6 +253,22 @@ async function upsertDashboardCall(record) {
 
 async function syncOnce(startTime, endTime) {
   const calls = await fetchCalls(startTime, endTime);
+  const candidates = new Map();
+  for (const call of calls) {
+    for (const agent of Array.isArray(call.agents) ? call.agents : []) {
+      const email = String(agent?.email ?? "").trim();
+      const name = String(agent?.name ?? "").trim();
+      if (/daniel|beaini/i.test(`${name} ${email}`)) candidates.set(email || name, { email, name });
+    }
+  }
+  if (candidates.size) {
+    const discoveryPath = path.join(path.dirname(config.checkpointPath), "maqsam-daniel-agents.json");
+    await mkdir(path.dirname(discoveryPath), { recursive: true });
+    const discoveryTemporary = `${discoveryPath}.${process.pid}.tmp`;
+    await writeFile(discoveryTemporary, JSON.stringify({ candidates: [...candidates.values()], observedAt: new Date().toISOString() }));
+    await rename(discoveryTemporary, discoveryPath);
+    console.log(`Maqsam Daniel identities: ${JSON.stringify([...candidates.values()])}`);
+  }
   const existingPayload = await fetchJson(`${config.dashboardBaseUrl}/api/maqsam/calls?from=${new Date(startTime * 1000).toISOString().slice(0, 10)}&to=${new Date(endTime * 1000).toISOString().slice(0, 10)}&limit=5000`);
   const existing = new Map((existingPayload.calls ?? []).map((record) => [record.callKey, record]));
   let ready = 0;

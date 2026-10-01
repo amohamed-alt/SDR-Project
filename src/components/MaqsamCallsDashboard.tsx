@@ -147,7 +147,7 @@ export function MaqsamCallsDashboard({ onBack, initialAgent = "marita" }: { onBa
         calls.push(...payload.calls);
         offset = payload.meta.nextOffset ?? 0;
       } while (offset);
-      if (!signal.aborted) setData({ ...payload, calls });
+      if (!signal.aborted) setData({ ...payload, calls: [...new Map(calls.map((call) => [call.callKey, call])).values()] });
     } catch (requestError) {
       if (!signal.aborted) setError(requestError instanceof Error ? requestError.message : "Unable to load Maqsam calls");
     } finally {

@@ -334,7 +334,7 @@ jobs:
           LOG_CODE=$(api_get "$VM/docker/$PROJECT/logs" /tmp/maqsam-worker-logs.json 1 12) || true
           if [ "$LOG_CODE" = 200 ]; then
             jq -r '.[] | select((.service // "") | contains("maqsam")) | .entries[]? | .line // empty' /tmp/maqsam-worker-logs.json \
-              | grep -E 'Maqsam (sync worker started|sync failed|historical import through|sync:)' \
+              | grep -E 'Maqsam (sync worker started|sync failed|historical import through|sync:|Daniel identities)'  \
               | tail -12 || true
           fi
 

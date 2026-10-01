@@ -110,3 +110,14 @@ export async function maqsamHistoryStatus() {
     throw error;
   }
 }
+
+export async function maqsamDanielCandidates() {
+  try {
+    const checkpointPath = process.env.MAQSAM_SYNC_CHECKPOINT_PATH ?? "/app/data/maqsam-sync-checkpoint.json";
+    const raw = JSON.parse(await readFile(/* turbopackIgnore: true */ path.join(path.dirname(checkpointPath), "maqsam-daniel-agents.json"), "utf8"));
+    return Array.isArray(raw.candidates) ? raw.candidates : [];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+}
