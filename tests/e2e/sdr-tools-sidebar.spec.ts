@@ -16,7 +16,7 @@ for (const owner of ["marita", "daniel"]) {
     })).toBe(true);
 
     const clickTool = async (name: string) => {
-      const control = tools.getByRole("button", { name, exact: true });
+      const control = tools.getByRole("button", { name: new RegExp(`^${name}(?:\\s|$)`) });
       await control.scrollIntoViewIfNeeded();
       await expect(control).toBeVisible();
       await control.click();
@@ -36,13 +36,13 @@ for (const owner of ["marita", "daniel"]) {
     await expect(page).toHaveURL(/view=inventory/);
     await page.goBack();
     await expect(page).toHaveURL(/view=team-activity/);
-    await expect(tools.getByRole("button", { name: "Team Activity", exact: true })).toHaveAttribute("aria-current", "page");
+    await expect(tools.getByRole("button", { name: /^Team Activity\b/ })).toHaveAttribute("aria-current", "page");
 
     await page.reload();
     await expect(tools).toBeVisible();
-    await expect(tools.getByRole("button", { name: "Team Activity", exact: true })).toHaveAttribute("aria-current", "page");
+    await expect(tools.getByRole("button", { name: /^Team Activity\b/ })).toHaveAttribute("aria-current", "page");
 
-    const companyRepair = tools.getByRole("button", { name: "Company Repair", exact: true });
+    const companyRepair = tools.getByRole("button", { name: /^Company Repair\b/ });
     await companyRepair.scrollIntoViewIfNeeded();
     await companyRepair.click();
     await expect(tools.getByPlaceholder("Admin password")).toBeVisible();
@@ -50,7 +50,7 @@ for (const owner of ["marita", "daniel"]) {
 
     for (const width of [1440, 768, 390]) {
       await page.setViewportSize({ width, height: 1000 });
-      const callsControl = tools.getByRole("button", { name: "Calls", exact: true });
+      const callsControl = tools.getByRole("button", { name: /^Calls\b/ });
       await callsControl.scrollIntoViewIfNeeded();
       await expect(callsControl).toBeVisible();
       const box = await callsControl.boundingBox();
