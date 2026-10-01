@@ -136,6 +136,7 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
   const [page, setPage] = useState(0);
   const [readiness, setReadiness] = useState("");
   const [source, setSource] = useState("");
+  const [crawlProgress, setCrawlProgress] = useState<{ total: number | null; totalPages: number | null; completedPages: number[]; complete: boolean; uncertainPages: number[] } | null>(null);
   const [crmPresence, setCrmPresence] = useState("");
   const [inventoryScope, setInventoryScope] = useState(inventory ? "saudi200" : "");
   const [businessLine, setBusinessLine] = useState("");
@@ -145,6 +146,25 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
   const [importPreview, setImportPreview] = useState<{ candidates: number; duplicates: number; invalid: number; rows: { name: string; outcome: string; reason: string }[] } | null>(null);
   const [pages, setPages] = useState(1);
   const [showExcluded, setShowExcluded] = useState(inventory);
+
+  useEffect(() => {
+    if (!inventory || inventoryScope !== "saudi200") return;
+    let active = true;
+    const timer = window.setInterval(() => { void refreshProgress(); }, 30_000);
+    async function refreshProgress() {
+      try {
+        const response = await fetch("/api/lead-inventory/saudi", { cache: "no-store" });
+        const result = await response.json();
+        if (active && response.ok && result.version === "saudi-200-v1") {
+          setCrawlProgress(result);
+          if (result.complete || result.uncertainPages.length) window.clearInterval(timer);
+        }
+      } catch { /* The company inventory request reports storage failures. */ }
+    }
+    void refreshProgress();
+    return () => { active = false; window.clearInterval(timer); };
+  }, [inventory, inventoryScope]);
+
 
   const load = useCallback(async () => {
     const requestId = ++loadRequest.current;
@@ -424,6 +444,8 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
 
     {error ? <div role="alert" className={styles.error}><CircleAlert size={18}/><span>{error}</span><button onClick={() => setError("")}><X size={14}/></button></div> : null}
     {notice ? <div role="status" className={styles.notice}><Check size={17}/><span>{notice}</span><button onClick={() => setNotice("")}><X size={14}/></button></div> : null}
+
+    {inventoryScope && crawlProgress ? <p className={styles.costNote}>Apollo: {crawlProgress.completedPages.length} / {crawlProgress.totalPages ?? "pending"} pages · {crawlProgress.total === null ? "First source page pending" : `${number(crawlProgress.total)} source records`} · {crawlProgress.uncertainPages.length ? "Paused: uncertain provider response needs review" : crawlProgress.complete ? "Company stock complete" : "Company stock loading"} · No person enrichment credits</p> : null}
 
     <section className={styles.metrics}>
       <div><span>{inventory ? "Companies stored" : "Eligible"}</span><strong>{number((inventory ? summary.total : summary.eligible) || 0)}</strong><small>{inventoryScope ? "Saudi 200+ discovery" : "Net-new after exclusions"}</small></div>
