@@ -46,3 +46,18 @@ test('history scans every page, deduplicates IDs and fails closed on incomplete 
     await assert.rejects(fetchCalls(100, 200, 'Basic test', 4), /Unexpected Maqsam/);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test('busy historical windows split to avoid a fixed pagination cap truncating calls', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url) => {
+      const params = new URL(url).searchParams;
+      const start = Number(params.get('start_time'));
+      const end = Number(params.get('end_time'));
+      const page = Number(params.get('page'));
+      const rows = end - start > 100 ? [{ id: page }] : page === 1 ? [{ id: start }] : [];
+      return new Response(JSON.stringify({ message: rows }));
+    };
+    assert.deepEqual((await fetchCalls(0, 200, 'Basic test', 2)).map(call => call.id), [0, 100]);
+  } finally { globalThis.fetch = originalFetch; }
+});

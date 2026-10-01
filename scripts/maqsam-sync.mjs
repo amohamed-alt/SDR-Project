@@ -162,7 +162,16 @@ export async function fetchCalls(startTime, endTime, authorization = authHeader(
     if (!added) throw new Error("Maqsam pagination did not advance; refusing to skip history.");
   }
 
-  throw new Error("Maqsam page limit reached; increase MAQSAM_SYNC_PAGE_COUNT before advancing history.");
+  if (endTime - startTime > 60) {
+    // Busy days can exceed the bounded page budget. Split the time window
+    // instead of silently truncating calls or getting stuck on the same day.
+    const middle = Math.floor((startTime + endTime) / 2);
+    const left = await fetchCalls(startTime, middle, authorization, pageCount);
+    const right = await fetchCalls(middle, endTime, authorization, pageCount);
+    const merged = new Map([...left, ...right].map((call) => [String(call.id ?? call.referenceId), call]));
+    return [...merged.values()];
+  }
+  throw new Error("Maqsam page limit reached in a one-minute window; increase MAQSAM_SYNC_PAGE_COUNT before advancing history.");
 }
 
 function scoreCandidate(callPhone, contact) {
