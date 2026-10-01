@@ -27,6 +27,9 @@ test("inventory filters and pagination use all-source server queries", async ({ 
   await expect(page.getByRole("heading", { name: "Lead Inventory" })).toBeVisible();
   await expect(page.getByText("Example company", { exact: true })).toBeVisible();
   expect(requests.at(-1)?.searchParams.get("allSources")).toBe("1");
+  expect(requests.at(-1)?.searchParams.get("scope")).toBe("saudi200");
+  await page.getByRole("combobox", { name: "HubSpot presence", exact: true }).selectOption("new");
+  await expect.poll(() => requests.at(-1)?.searchParams.get("crmPresence")).toBe("new");
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await expect.poll(() => requests.at(-1)?.searchParams.get("offset")).toBe("100");
   await page.getByRole("combobox", { name: "Source", exact: true }).selectOption("Clay");

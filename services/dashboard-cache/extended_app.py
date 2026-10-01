@@ -5,6 +5,7 @@ from typing import Any
 
 from fastapi import Query, Response
 from psycopg.types.json import Jsonb
+from pydantic import BaseModel, ConfigDict, Field
 
 from app import app, clean_text, initialize_usage_db, iso, normalize_domain, usage_db
 
@@ -53,7 +54,7 @@ def account_json(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def global_summary(connection, all_sources: bool = False) -> dict[str, Any]:
+def global_summary(connection, all_sources: bool = False, saudi_200: bool = False) -> dict[str, Any]:
     row = connection.execute(
         """
         SELECT
@@ -101,9 +102,9 @@ def global_summary(connection, all_sources: bool = False) -> dict[str, Any]:
                   )
             ) AS phone_ready
         FROM acquisition_accounts
-        WHERE (%s OR source = %s)
+        WHERE (%s OR source = %s) AND (NOT %s OR evidence->>'saudi200' = 'true')
         """,
-        (all_sources, COVERAGE_SOURCE),
+        (all_sources, COVERAGE_SOURCE, saudi_200),
     ).fetchone() or {}
     return {key: int(value or 0) for key, value in row.items()}
 
@@ -153,6 +154,8 @@ def acquisition_accounts_v2(
     all_sources: bool = Query(default=False),
     source: str = Query(default="", max_length=80),
     business_line: str = Query(default="", max_length=30),
+    saudi_200: bool = Query(default=False),
+    crm_presence: str = Query(default="", max_length=20),
 ) -> dict[str, Any]:
     initialize_usage_db()
     clauses: list[str] = ["TRUE"]
@@ -160,6 +163,12 @@ def acquisition_accounts_v2(
     if not all_sources and not domain:
         clauses.append("a.source = %s")
         params.append(COVERAGE_SOURCE)
+    if saudi_200:
+        clauses.append("a.evidence->>'saudi200' = 'true'")
+    if crm_presence == "existing":
+        clauses.append("(a.hubspot_company_id <> '' OR a.status = 'pushed')")
+    elif crm_presence == "new":
+        clauses.append("a.hubspot_company_id = '' AND a.status <> 'pushed'")
     if source:
         clauses.append("a.source LIKE %s" if source == "Apollo" else "a.source = %s")
         params.append("Apollo%" if source == "Apollo" else source)
@@ -234,7 +243,7 @@ def acquisition_accounts_v2(
             """,
             (*params, limit, offset),
         ).fetchall()
-        summary = global_summary(connection, all_sources)
+        summary = global_summary(connection, all_sources, saudi_200)
         countries = country_facets(connection, all_sources)
 
     response.headers["Cache-Control"] = "private, no-store, max-age=0"
@@ -328,3 +337,47 @@ def acquisition_reclassify_v2(response: Response) -> dict[str, Any]:
         "before": before,
         "after": after,
     }
+
+
+class SaudiMembership(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    domain: str = Field(min_length=3, max_length=255)
+    employeeCount: int = Field(default=0, ge=0, le=10_000_000)
+    hubspotCompanyId: str = Field(default="", max_length=80)
+    evidence: dict[str, Any]
+
+
+class SaudiMembershipWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    accounts: list[SaudiMembership] = Field(min_length=1, max_length=100)
+
+
+@app.post("/v2/acquisition/saudi-membership")
+def saudi_inventory_membership(body: SaudiMembershipWrite, response: Response) -> dict[str, Any]:
+    initialize_usage_db()
+    stored = 0
+    with usage_db() as connection:
+        for item in body.accounts:
+            evidence = {key: value for key, value in item.evidence.items() if key in
+                        ("saudi200", "saudi200Page", "saudi200CheckedAt", "saudi200EmployeeRange")}
+            cursor = connection.execute(
+                """
+                UPDATE acquisition_accounts SET
+                  evidence = evidence || %s,
+                  employee_count = CASE WHEN %s > 0 THEN %s ELSE employee_count END,
+                  country = 'Saudi Arabia',
+                  hubspot_company_id = CASE WHEN %s <> '' THEN %s ELSE hubspot_company_id END,
+                  exclusion_status = CASE WHEN %s <> '' AND status <> 'pushed' THEN 'excluded' ELSE exclusion_status END,
+                  exclusion_reason = CASE WHEN %s <> '' AND status <> 'pushed' THEN 'Already exists in HubSpot' ELSE exclusion_reason END,
+                  status = CASE WHEN %s <> '' AND status <> 'pushed' THEN 'existing_hubspot' ELSE status END,
+                  updated_at = NOW()
+                WHERE domain = %s
+                """,
+                (Jsonb(evidence), item.employeeCount, item.employeeCount,
+                 item.hubspotCompanyId, item.hubspotCompanyId,
+                 item.hubspotCompanyId, item.hubspotCompanyId, item.hubspotCompanyId,
+                 normalize_domain(item.domain)),
+            )
+            stored += cursor.rowcount
+    response.headers["Cache-Control"] = "no-store"
+    return {"accounts": stored}
