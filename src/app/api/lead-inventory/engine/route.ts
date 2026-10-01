@@ -7,11 +7,11 @@ import { searchAll } from "@/lib/hubspot";
 import { inventoryDomain } from "@/lib/lead-inventory-import";
 import { compatibleCompanyIdentity } from "@/lib/company-dedupe";
 import { saudiPolicyExcluded } from "@/lib/saudi-inventory-policy";
-import { coverageData, coverageQueue, reserveInventoryOperation, finishInventoryOperation, recoverPreReveal } from "@/lib/saudi-coverage-store";
+import { coverageData, coverageQueue, reserveInventoryOperation, finishInventoryOperation, recoverPreReveal, recoverVerifiedAts } from "@/lib/saudi-coverage-store";
 import { chooseInventorySdr, INVENTORY_SDR_IDS, learnedPriority, learnCoverage, personaFamily, productPersonas, suggestProduct } from "@/lib/saudi-coverage-learning";
 import { syncSaudiCoverage } from "@/lib/saudi-coverage-sync";
 import { enrichSaudiCompany } from "@/lib/saudi-company-enrichment";
-import { researchInventoryAts } from "@/lib/saudi-ats-research";
+import { researchInventoryAts, recordWorkerCareerPages } from "@/lib/saudi-ats-research";
 import { findApolloInventoryPeople } from "@/lib/saudi-apollo-people";
 import { atsProduct, SAUDI_DAILY_LIMIT, SAUDI_PIPELINE_PREFIX, usablePhone, recentActivityBoost } from "@/lib/saudi-ats-policy";
 import { sdrAdminAuthorized } from "@/lib/sdr-admin-auth";
@@ -21,8 +21,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const input = z.discriminatedUnion("action", [
   z.object({ action: z.literal("recover_pre_reveal") }),
+  z.object({ action: z.literal("record_career_pages"), domain: z.string().min(3).max(255), pages: z.array(z.object({ url: z.string().url().max(2000), html: z.string().max(1500000) })).max(4) }),
   z.object({ action: z.literal("sync"), limit: z.number().int().min(1).max(50).default(10) }),
-  z.object({ action: z.literal("run"), limit: z.number().int().min(1).max(5).default(1), confirmCredits: z.literal(true) }),
+  z.object({ action: z.literal("run"), limit: z.number().int().min(1).max(5).default(1), domain: z.string().min(3).max(255).optional(), confirmCredits: z.literal(true) }),
 ]);
 
 export async function GET(request: NextRequest) {
@@ -54,6 +55,13 @@ export async function POST(request: NextRequest) {
   const parsed = input.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Invalid engine action" }, { status: 400 });
   try {
+    if (parsed.data.action === "record_career_pages") {
+      const account = await getAcquisitionAccount(inventoryDomain(parsed.data.domain));
+      if (!account?.evidence.saudi200 || account.hubspotCompanyId || account.exclusionStatus === "excluded") return NextResponse.json({ error: "Company is not net-new Saudi research stock" }, { status: 409 });
+      const ats = await recordWorkerCareerPages(account, parsed.data.pages);
+      const recovered = atsProduct(ats) ? (await recoverVerifiedAts(account.domain)).recovered : false;
+      return NextResponse.json({ status: ats.status, recovered });
+    }
     if (parsed.data.action === "sync") return NextResponse.json(await syncSaudiCoverage(parsed.data.limit));
     if (parsed.data.action === "recover_pre_reveal") {
       let recovered = 0;
@@ -74,7 +82,8 @@ export async function POST(request: NextRequest) {
     for (let offset = 1000; offset < (accounts.pagination?.filteredTotal || 0); offset += 1000) {
       accounts.accounts.push(...(await listAcquisitionAccounts({ allSources: true, saudi200: true, crmPresence: "new", includeExcluded: true, limit: 1000, offset })).accounts);
     }
-    const queued = new Set(queue.domains);
+    const requestedDomain = parsed.data.domain;
+    const queued = new Set(queue.domains.filter(domain => !requestedDomain || domain === requestedDomain));
     for (const account of accounts.accounts.filter((a) => queued.has(a.domain))) {
       const product = account.evidence.productReviewed ? (account.evidence.businessLine === "Evalufy" ? "Evalufy" : "Talentera") : suggestProduct(account.industry, String(account.evidence.sourceText || account.name));
       const personas = productPersonas(product, `${account.industry} ${account.name}`, account.employeeCount);

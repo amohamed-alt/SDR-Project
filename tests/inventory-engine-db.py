@@ -67,3 +67,21 @@ for domain in domains[1:]: assert domain not in queue, queue
 engine.reserve_operation(engine.Reservation(key="pipeline:ats-v2:ats-review.example",kind="pipeline",dailyLimit=100))
 assert "ats-review.example" not in engine.work_queue(limit=100)["domains"]
 print("PASS: ATS policy requalification respects uncertain charges, CRM reservations and one company pass")
+
+# Only a known ATS-before-spend failure can be recovered from trusted new evidence.
+ats_error = "ATS result is unknown; research required before routing or person spend"
+for domain in ["ats-recover.example", "ats-unsafe.example"]:
+    with usage_db() as connection:
+        connection.execute("INSERT INTO acquisition_accounts(domain,name,evidence) VALUES (%s,%s,'{\"saudi200\":true,\"atsVerified\":true,\"inventoryAts\":{\"status\":\"detected\"}}')", (domain,domain))
+    engine.reserve_operation(engine.Reservation(key=f"pipeline:ats-v2:{domain}",kind="pipeline",dailyLimit=100))
+    engine.operation_result(engine.OperationResult(key=f"pipeline:ats-v2:{domain}",state="review",result={"error":ats_error}))
+with usage_db() as connection:
+    connection.execute("INSERT INTO inventory_operations(operation_key,kind) VALUES ('push:ats-unsafe.example','push')")
+assert not engine.recover_verified_ats(engine.PreRevealRecovery(domain="ats-unsafe.example"))["recovered"]
+assert engine.recover_verified_ats(engine.PreRevealRecovery(domain="ats-recover.example"))["recovered"]
+assert "ats-recover.example" in engine.work_queue(limit=100)["domains"]
+assert not engine.recover_verified_ats(engine.PreRevealRecovery(domain="ats-recover.example"))["recovered"]
+assert engine.reserve_operation(engine.Reservation(key="pipeline:ats-v2:ats-recover.example",kind="pipeline",dailyLimit=100))["reserved"]
+engine.operation_result(engine.OperationResult(key="pipeline:ats-v2:ats-recover.example",state="review",result={"error":ats_error}))
+assert not engine.recover_verified_ats(engine.PreRevealRecovery(domain="ats-recover.example"))["recovered"]
+print("PASS: ATS evidence recovery only once, no pending CRM write, same company slot")

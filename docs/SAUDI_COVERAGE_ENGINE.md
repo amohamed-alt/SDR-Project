@@ -39,6 +39,12 @@ The first model is Beta(1,1)-smoothed segment ranking with a 95% Wilson interval
 
 Limitations: historical titles/product labels use current CRM values, because historical feature snapshots were not previously captured. Owner, seasonality and selection differences can confound results; probability calibration and temporal holdout validation are required before presenting predictive performance. Start recording immutable decision-time features before upgrading to a predictive model. Missing exact employee counts must be enriched/reviewed before size comparisons are meaningful.
 
+## Scheduled career evidence
+
+The existing scheduled worker fetches up to four actual official-site pages and privately submits HTML to the authenticated `record_career_pages` action. The application validates page origins and runs its own ATS/direct-application parser; the worker cannot merely assert a vendor. No HTML, domains or contact details are printed in public job logs. Website failures stay unknown.
+
+A same-day ATS-v2 failure with the exact pre-spend unknown-ATS reason can recover once when new verified evidence arrives. Pending person operations and every CRM push reservation block recovery. The recovered company reuses its original daily slot. Other review reasons cannot be recovered through this path. Worker evidence is recorded so the same automated research is not repeated endlessly; unresolved cases remain review work.
+
 ## Execution and persistence
 
 `GET /api/lead-inventory/engine` returns aggregate coverage, model state and operation counts. Authenticated POST `{action:"run",limit:1,confirmCredits:true}` processes the bounded ATS-verification queue. The dashboard offers an explicit two-company run. Existing admin cookies or the acquisition automation token authorize writes; provider credentials stay server-side.

@@ -140,7 +140,7 @@ def work_queue(limit: int = Query(default=100, ge=1, le=500)):
         rows = connection.execute("""SELECT a.domain FROM acquisition_accounts a
             WHERE a.evidence->>'saudi200'='true' AND a.exclusion_status IN ('eligible','review')
             AND a.hubspot_company_id='' AND a.status<>'pushed' AND RIGHT(a.domain,8)<>'.invalid'
-            AND NOT EXISTS(SELECT 1 FROM inventory_operations o WHERE o.operation_key='pipeline:ats-v2:'||a.domain)
+            AND NOT EXISTS(SELECT 1 FROM inventory_operations o WHERE o.operation_key='pipeline:ats-v2:'||a.domain AND o.state<>'retry_ready')
             AND NOT EXISTS(SELECT 1 FROM inventory_operations o WHERE o.operation_key='push:'||a.domain)
             AND NOT EXISTS(SELECT 1 FROM inventory_operations o WHERE o.operation_key='pipeline:'||a.domain AND o.state='reserved')
             AND NOT EXISTS(SELECT 1 FROM inventory_operations o JOIN acquisition_people p
@@ -149,3 +149,25 @@ def work_queue(limit: int = Query(default=100, ge=1, le=500)):
             CASE WHEN a.employee_count>=250 THEN 0 WHEN a.employee_count>=200 THEN 1 ELSE 2 END,
             a.gtm_score DESC,a.domain LIMIT %s""", (limit,)).fetchall()
     return {"domains": [r["domain"] for r in rows]}
+
+
+@app.post("/v2/inventory/recover-verified-ats")
+def recover_verified_ats(body: PreRevealRecovery):
+    with usage_db() as connection:
+        initialize_engine(connection)
+        with connection.transaction():
+            connection.execute("SELECT pg_advisory_xact_lock(704200250)")
+            row = connection.execute("""UPDATE inventory_operations o SET state='retry_ready',
+                result=result || '{"atsResearchRecovered":true}'::jsonb
+                WHERE operation_key=%s AND kind='pipeline' AND state='review'
+                AND NOT (result ? 'atsResearchRecovered')
+                AND result->>'error'='ATS result is unknown; research required before routing or person spend'
+                AND (created_at AT TIME ZONE 'Asia/Riyadh')::date=(NOW() AT TIME ZONE 'Asia/Riyadh')::date
+                AND EXISTS(SELECT 1 FROM acquisition_accounts a WHERE a.domain=%s
+                    AND a.hubspot_company_id='' AND a.evidence->>'atsVerified'='true'
+                    AND a.evidence->'inventoryAts'->>'status' IN ('detected','no_ats_observed'))
+                AND NOT EXISTS(SELECT 1 FROM inventory_operations p WHERE p.operation_key=%s)
+                AND NOT EXISTS(SELECT 1 FROM inventory_operations e JOIN acquisition_people p
+                    ON e.operation_key='enrichment:'||p.uid WHERE p.account_domain=%s AND e.state<>'completed')
+                RETURNING operation_key""", (f"pipeline:ats-v2:{body.domain}",body.domain,f"push:{body.domain}",body.domain)).fetchone()
+    return {"recovered": bool(row)}

@@ -1,4 +1,5 @@
 import { appendFile } from "node:fs/promises";
+import { collectOfficialCareerPages } from "./inventory-career-research.mjs";
 import { inventoryBuildReady } from "./inventory-build-gate.mjs";
 const base = process.env.BASE_URL || "https://sdr.dashboardtalentera.tech";
 const token = process.env.ACQUISITION_OWNER_TOKEN;
@@ -39,16 +40,27 @@ function failureCategory(message = "") {
   return "other_protected_error";
 }
 let synced = 0, pushed = 0, review = 0, historicalSyncIncomplete = false;
-const acquisitionDeadline = Date.now() + 75 * 60_000;
-for (let i = 0; i < 100 && Date.now() < acquisitionDeadline; i++) {
+const acquisitionDeadline = Date.now() + 70 * 60_000;
+const stock = await request("/api/acquisition?allSources=1&scope=saudi200&crmPresence=new&includeExcluded=1&limit=1000");
+for (let offset = 1000; offset < (stock.pagination?.filteredTotal || 0); offset += 1000) {
+  stock.accounts.push(...(await request(`/api/acquisition?allSources=1&scope=saudi200&crmPresence=new&includeExcluded=1&limit=1000&offset=${offset}`)).accounts);
+}
+const candidates = stock.accounts.filter(a => ["eligible","review"].includes(a.exclusionStatus) && !a.domain.endsWith(".invalid") && !a.hubspotCompanyId && !a.evidence.workerCareerCheckedAt)
+  .sort((a,b) => Number(b.employeeCount>=250)-Number(a.employeeCount>=250) || Number(b.employeeCount>=200)-Number(a.employeeCount>=200) || b.gtmScore-a.gtmScore || a.domain.localeCompare(b.domain));
+for (const account of candidates.slice(0,100)) {
+  if (Date.now() >= acquisitionDeadline) break;
+  const pages = await collectOfficialCareerPages(account);
+  const researched = await request("/api/lead-inventory/engine", { action: "record_career_pages", domain: account.domain, pages });
+  console.log(JSON.stringify({ action: "career_research", status: researched.status, recovered: researched.recovered, pages: pages.length }));
   // POSTs are not retried. Durable reservations block uncertain external writes.
-  const result = await request("/api/lead-inventory/engine", { action: "run", limit: 1, confirmCredits: true });
+  const result = await request("/api/lead-inventory/engine", { action: "run", domain: account.domain, limit: 1, confirmCredits: true });
   pushed += result.pushed;
   review += result.results.filter((r) => r.status === "review").length;
   console.log(JSON.stringify({ action: "run", processed: result.processed, pushed: result.pushed, statuses: result.results.map((r) => r.status),
     reviewCategories: result.results.filter((r) => r.status === "review").map((r) => failureCategory(r.error)) }));
-  if (!result.processed || result.results.some((r) => r.status === "budget_exhausted")) break;
+  if (result.results.some((r) => r.status === "budget_exhausted")) break;
 }
+
 for (let i = 0; i < 10; i++) {
   const result = await request("/api/lead-inventory/engine", { action: "sync", limit: 10 });
   synced += result.synced;
