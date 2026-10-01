@@ -9,7 +9,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import {
   Activity, AlertTriangle, ArrowUpRight, BadgeCheck, BriefcaseBusiness,
   Building2, CalendarDays, CheckCircle2, ChevronRight, CircleDollarSign, Clock3, Database,
-  Filter, Gauge, ListFilter, ListTodo, Mail, Menu, Phone, PhoneIncoming,
+  Filter, Gauge, ListFilter, ListTodo, Mail, Phone, PhoneIncoming,
   RefreshCw, Search, ShieldCheck, Target, UsersRound, type LucideIcon,
 } from "lucide-react";
 import {
@@ -73,17 +73,13 @@ export function Dashboard({
   initialSearch = "",
   onOpenMotion,
   onOpenMaqsam,
-  onToggleTools,
-  toolsOpen = false,
-  toolsCount = 0,
+  sidebarTools,
   workspaceNavigation,
 }: SdrDashboardProps & {
   initialSearch?: string;
   onOpenMotion?: () => void;
   onOpenMaqsam?: () => void;
-  onToggleTools?: () => void;
-  toolsOpen?: boolean;
-  toolsCount?: number;
+  sidebarTools?: ReactNode;
   workspaceNavigation?: ReactNode;
 }) {
   const owner = SDR_OWNERS[sdr];
@@ -251,7 +247,7 @@ export function Dashboard({
     <header className="topbar"><div className="top-title"><strong>SDR Command Center</strong><span>Live HubSpot performance & attribution</span></div><div className="top-actions"><span className={"status-pill " + (data?.meta.isDemo ? "demo" : "live")}><i/>{data?.meta.isDemo ? "Demo data" : refreshBusy ? "UPDATING · HUBSPOT" : "HUBSPOT SNAPSHOT"}</span><ShareViewButton/>{pageMode === "analytics" && <button className="icon-button" onClick={() => setFiltersOpen(!filtersOpen)} aria-label="Toggle filters"><Filter size={18}/></button>}<button className="refresh-button" onClick={() => setRefreshKey((key) => key + 1)} disabled={refreshBusy}><RefreshCw size={16} className={refreshBusy ? "spin" : ""}/>{refreshBusy ? "Refreshing…" : "Refresh data"}</button></div></header>
 
     <div className="workspace">
-      <aside className="sidebar"><div className="brand">{sdr === "daniel" ? <span className="evalufy-brand-mark"><Image src="/evalufy-logo.png" alt="Evalufy" width={1200} height={628} className="evalufy-logo" priority/></span> : <div className="brand-logo" role="img" aria-label="Talentera ATS"/>}<span className="brand-subtitle">SDR Intelligence</span></div><div className="nav-label">MAIN</div><nav>{tabs.map(({ id, label, icon: Icon }) => <button key={id} className={pageMode === "analytics" && activeTab === id ? "active" : ""} onClick={() => selectTab(id)}><Icon size={17}/><span>{label}</span>{pageMode === "analytics" && activeTab === id && <ChevronRight size={15}/>}</button>)}</nav>{onOpenMotion ? <><div className="nav-label">ANALYSIS</div><nav><button type="button" onClick={onOpenMotion}><PhoneIncoming size={17}/><span>Inbound vs Outbound</span></button>{onOpenMaqsam ? <button type="button" onClick={onOpenMaqsam}><Phone size={17}/><span>Maqsam Calls</span></button> : null}</nav></> : null}{onToggleTools ? <><div className="nav-label">WORKSPACE</div><nav><button type="button" onClick={onToggleTools} aria-expanded={toolsOpen} aria-controls="sdr-tools-menu"><Menu size={17}/><span>{toolsOpen ? "Close SDR Tools" : "SDR Tools"}</span>{toolsCount ? <small className="sdr-tools-count">{toolsCount}</small> : null}</button></nav></> : null}{workspaceNavigation}<div className="nav-label owner-label">SDR OWNER</div><div className="owner-card"><div className="avatar">{owner.initials}</div><div><span>Reporting for</span><strong>{data?.meta.ownerName ?? owner.name}</strong></div><BadgeCheck size={17}/></div><div className="sync-card"><Database size={18}/><div><strong>Last sync</strong><span>{data ? new Date(data.meta.generatedAt).toLocaleString("en-GB") : "Loading…"}</span></div></div></aside>
+      <aside className="sidebar"><div className="brand">{sdr === "daniel" ? <span className="evalufy-brand-mark"><Image src="/evalufy-logo.png" alt="Evalufy" width={1200} height={628} className="evalufy-logo" priority/></span> : <div className="brand-logo" role="img" aria-label="Talentera ATS"/>}<span className="brand-subtitle">SDR Intelligence</span></div><div className="nav-label">MAIN</div><nav>{tabs.map(({ id, label, icon: Icon }) => <button key={id} className={pageMode === "analytics" && activeTab === id ? "active" : ""} onClick={() => selectTab(id)}><Icon size={17}/><span>{label}</span>{pageMode === "analytics" && activeTab === id && <ChevronRight size={15}/>}</button>)}</nav>{onOpenMotion ? <><div className="nav-label">ANALYSIS</div><nav><button type="button" onClick={onOpenMotion}><PhoneIncoming size={17}/><span>Inbound vs Outbound</span></button>{onOpenMaqsam ? <button type="button" onClick={onOpenMaqsam}><Phone size={17}/><span>Maqsam Calls</span></button> : null}</nav></> : null}{workspaceNavigation}<div className="nav-label owner-label">SDR OWNER</div><div className="owner-card"><div className="avatar">{owner.initials}</div><div><span>Reporting for</span><strong>{data?.meta.ownerName ?? owner.name}</strong></div><BadgeCheck size={17}/></div>{sidebarTools}<div className="sync-card"><Database size={18}/><div><strong>Last sync</strong><span>{data ? new Date(data.meta.generatedAt).toLocaleString("en-GB") : "Loading…"}</span></div></div></aside>
 
       <div className="content"><div className="page-title"><div><span className="eyebrow">{owner.brand.toUpperCase()} · SDR PERFORMANCE</span><h1>{pageMode === "workspace" ? `${owner.shortName} Workspace` : tabs.find((tab) => tab.id === activeTab)?.label}</h1><p>{data ? pageMode === "workspace" ? "Daily execution center · Live HubSpot data" : shortDate(data.meta.from) + " – " + shortDate(data.meta.to) + " · " + data.meta.timezone : "Loading dashboard data…"}</p></div></div>
 
