@@ -32,7 +32,7 @@ Limitations: historical titles/product labels use current CRM values, because hi
 
 The existing Saudi inventory GitHub workflow runs the engine at 04:00 UTC Sun–Thu, with 100 historical company refreshes and up to 10 company attempts per run. Initial push waits for the requested production build or a newer deployed descendant verified through GitHub before actions. Discovery and coverage each serialize independently, so a waiting discovery run does not block replenishment. It uses the canonical deployment workflow; no new Docker service, data volume or deployment path is introduced. n8n can invoke the same authenticated API when orchestration is consolidated there.
 
-Detailed contact data and per-company operation results stay in Postgres/HubSpot. GitHub job logs contain aggregate counts only. To pause the schedule, disable the existing Saudi inventory workflow; manual inventory actions remain subject to the durable reservations and daily limits.
+Detailed contact data and per-company operation results stay in Postgres/HubSpot. GitHub job logs contain aggregate counts and fixed non-identifying error categories only. A fully failed history batch stays visibly incomplete and fails the job after the independently guarded acquisition pass; it never supplies negative learning examples. To pause the schedule, disable the existing Saudi inventory workflow; manual inventory actions remain subject to the durable reservations and daily limits.
 
 Before retrying a reserved or review operation, reconcile the provider/CRM result and the stored person/company/task. Do not delete reservations merely to retry an uncertain write. If a task write succeeded while its audit failed, recover the identifiers and mark the operation complete.
 
