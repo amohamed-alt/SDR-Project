@@ -13,6 +13,8 @@ on:
       - 'scripts/inventory-build-gate.mjs'
       - 'src/lib/saudi-coverage-*.ts'
       - 'src/lib/saudi-company-enrichment.ts'
+      - 'src/lib/saudi-ats-*.ts'
+      - 'src/lib/saudi-apollo-people.ts'
       - 'src/app/api/lead-inventory/engine/**'
 
 permissions:

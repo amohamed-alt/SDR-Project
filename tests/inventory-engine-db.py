@@ -52,3 +52,18 @@ assert sum(row["reserved"] for row in retried) == 1
 engine.operation_result(engine.OperationResult(key="pipeline:recover.example",state="review",result={"error":safe_error}))
 assert not engine.recover_pre_reveal(engine.PreRevealRecovery(domain="recover.example"))["recovered"]
 print("PASS: one pre-reveal recovery, concurrent recovery reservation, charge/write protection")
+
+# A new ATS-policy pass can revisit completed old-policy reviews, but never a
+# pending charge/write. Domain resolution review is eligible for research only.
+domains = ["ats-review.example", "ats-pending.example", "ats-push.example", "ats-charge.example"]
+with usage_db() as connection:
+    for domain in domains:
+        connection.execute("INSERT INTO acquisition_accounts(domain,name,exclusion_status,evidence) VALUES (%s,%s,'review','{\"saudi200\":true}')", (domain,domain))
+    connection.execute("INSERT INTO inventory_operations(operation_key,kind,state) VALUES ('pipeline:ats-review.example','pipeline','review'),('pipeline:ats-pending.example','pipeline','reserved'),('push:ats-push.example','push','completed'),('enrichment:ats-charge','enrichment','reserved')")
+    connection.execute("INSERT INTO acquisition_people(uid,account_domain) VALUES ('ats-charge','ats-charge.example')")
+queue = engine.work_queue(limit=100)["domains"]
+assert "ats-review.example" in queue, queue
+for domain in domains[1:]: assert domain not in queue, queue
+engine.reserve_operation(engine.Reservation(key="pipeline:ats-v2:ats-review.example",kind="pipeline",dailyLimit=100))
+assert "ats-review.example" not in engine.work_queue(limit=100)["domains"]
+print("PASS: ATS policy requalification respects uncertain charges, CRM reservations and one company pass")

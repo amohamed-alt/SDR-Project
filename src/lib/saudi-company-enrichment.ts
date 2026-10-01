@@ -1,6 +1,7 @@
 import { type AcquisitionAccount, upsertAcquisitionAccounts } from "@/lib/acquisition-data-api";
 import { reserveInventoryOperation, finishInventoryOperation } from "@/lib/saudi-coverage-store";
 import { inventoryDomain } from "@/lib/lead-inventory-import";
+import { SAUDI_DAILY_LIMIT } from "@/lib/saudi-ats-policy";
 
 // Company details are fetched only for a company that already passed a fresh
 // CRM exclusion check. Apollo documents one credit per organization enrichment.
@@ -9,7 +10,7 @@ export async function enrichSaudiCompany(account: AcquisitionAccount): Promise<A
   const key = process.env.APOLLO_API_KEY;
   if (!key) throw new Error("Apollo company enrichment is not configured");
   const operationKey = `company_enrichment:${account.domain}`;
-  const reservation = await reserveInventoryOperation(operationKey, "company_enrichment", 10);
+  const reservation = await reserveInventoryOperation(operationKey, "company_enrichment", SAUDI_DAILY_LIMIT);
   if (!reservation.reserved) throw new Error(`Company enrichment is ${reservation.state}; review the retained attempt before another charge`);
   try {
     const query = new URLSearchParams({ domain: account.domain, name: account.name });

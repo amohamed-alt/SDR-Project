@@ -24,6 +24,7 @@ import { compatibleCompanyIdentity } from "@/lib/company-dedupe";
 import { manualTaskOwners } from "@/lib/acquisition-routing";
 import { sdrAdminAuthorized, sdrAdminConfigured } from "@/lib/sdr-admin-auth";
 import { reserveInventoryOperation, finishInventoryOperation } from "@/lib/saudi-coverage-store";
+import { SAUDI_DAILY_LIMIT, usablePhone } from "@/lib/saudi-ats-policy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -341,8 +342,9 @@ async function findPeople(account: AcquisitionAccount) {
     body: JSON.stringify({
       currentTitle: query,
       currentCompany: `\"${account.name.replace(/\"/g, "")}\"`,
-      location: account.country || undefined,
-      size: 10,
+      // The scope is the employer's Saudi presence; regional decision makers
+      // may live elsewhere. Current employer is independently verified later.
+      size: 50,
     }),
     cache: "no-store",
     signal: AbortSignal.timeout(30_000),
@@ -370,7 +372,9 @@ async function findPeople(account: AcquisitionAccount) {
     secondaryPersona: account.secondaryPersona,
   }).slice(0, 8);
 
-  const people: AcquisitionPerson[] = ranked.map((person, index) => ({
+  const savedPeople = new Map((await listAcquisitionPeople(account.domain)).people.map(person => [person.uid, person]));
+  const people: AcquisitionPerson[] = ranked.map((person, index) => savedPeople.get(person.uid)?.enrichmentStatus === "enriched"
+    ? savedPeople.get(person.uid)! : ({
     uid: person.uid,
     accountDomain: account.domain,
     fullName: person.fullName,
@@ -450,7 +454,7 @@ async function enrichPerson(account: AcquisitionAccount, person: AcquisitionPers
     rankScore: verification.score,
     fitReason: verification.reason,
     emails: uniqueContacts(candidate, "email"),
-    phones: uniqueContacts(candidate, "phone"),
+    phones: uniqueContacts(candidate, "phone").filter(usablePhone),
     enrichmentStatus: "enriched",
     selected: true,
     meta: { ...person.meta, provider: "SignalHire Person API", verifiedCurrentCompany: true },
@@ -556,7 +560,7 @@ export async function POST(request: NextRequest) {
       if (existing.has(account.domain)) return NextResponse.json({ error: "This company now exists in HubSpot. Recheck its ownership before spending enrichment credits." }, { status: 409 });
       const operationKey = `enrichment:${person.uid}`;
       if (account.evidence.saudi200) {
-        const reservation = await reserveInventoryOperation(operationKey, "enrichment", 10);
+        const reservation = await reserveInventoryOperation(operationKey, "enrichment", SAUDI_DAILY_LIMIT);
         if (!reservation.reserved) return NextResponse.json({ error: `Person enrichment is ${reservation.state}; stored attempts are never charged twice automatically.` }, { status: 409 });
       }
       try {
