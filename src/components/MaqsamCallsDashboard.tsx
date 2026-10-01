@@ -241,8 +241,8 @@ export function MaqsamCallsDashboard({ onBack, initialAgent = "marita" }: { onBa
       <div className={styles.actions}>
         <label><span>SDR</span><select aria-label="SDR agent" value={agent} onChange={(event) => { setAgent(event.target.value as typeof agent); setExpandedCallKey(""); }}><option value="marita">Marita</option><option value="daniel">Daniel</option><option value="all">All agents</option></select></label>
         <button type="button" className={styles.secondaryButton} onClick={() => { setFrom(""); setTo(today); setAppliedRange({ from: "", to: today }); }}>Since first call</button>
-        <label><span>From</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)}/></label>
-        <label><span>To</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)}/></label>
+        <label><span>From</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} onInput={(event) => setFrom(event.currentTarget.value)}/></label>
+        <label><span>To</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} onInput={(event) => setTo(event.currentTarget.value)}/></label>
         <button type="button" className={styles.secondaryButton} disabled={Boolean(from && to && from > to)} onClick={() => setAppliedRange({ from, to })}>Apply range</button>
         <button type="button" className={styles.primaryButton} disabled={loading} onClick={() => setRefreshKey((value) => value + 1)}>
           <RefreshCw size={14} className={loading ? styles.spin : ""}/>Refresh
@@ -259,7 +259,7 @@ export function MaqsamCallsDashboard({ onBack, initialAgent = "marita" }: { onBa
         </div>
         <aside>
           <strong>{data?.meta.totalStored ?? 0}</strong>
-          <span>calls retained in durable dashboard storage</span>
+          <span>Maqsam calls available across both SDRs</span>
           <small>First call in selection: {data?.meta.earliestCall || "No calls available"}</small>
         </aside>
       </section>
