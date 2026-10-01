@@ -71,6 +71,9 @@ export function manualTaskOwners() {
 
 export function signalHirePersonaQuery(primaryPersona: string, secondaryPersona = "") {
   const source = `${primaryPersona} ${secondaryPersona}`.toLowerCase();
+  if (/assessment|admissions|examinations|enrollment|registrar/.test(source)) {
+    return '(Assessment OR Admissions OR Examinations OR Enrollment OR Registrar OR "Student Recruitment") AND (Manager OR Head OR Director OR Lead)';
+  }
   if (/hris|hr systems|people systems|hr technology|people technology/.test(source)) {
     return '(HRIS OR "HR Systems" OR "People Systems" OR "HR Technology" OR "People Technology") AND (Manager OR Head OR Director OR Lead)';
   }

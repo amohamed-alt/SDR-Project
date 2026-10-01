@@ -1,9 +1,10 @@
 import { createScheduledMaritaTask, MaritaScheduleError } from "@/lib/marita-task-scheduler";
 import { timingSafeEqual } from "node:crypto";
-import { NextResponse } from "next/server";
+import { sdrAdminAuthorized } from "@/lib/sdr-admin-auth";
+import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { writeAcquisitionPush } from "@/lib/acquisition-data-api";
-import { acquisitionOwners } from "@/lib/acquisition-routing";
+import { getAcquisitionAccount, writeAcquisitionPush } from "@/lib/acquisition-data-api";
+import { manualTaskOwners } from "@/lib/acquisition-routing";
 import { batchRead, HubSpotApiError, readAssociations, searchAll } from "@/lib/hubspot";
 import { normalizeCompanyDomain } from "@/lib/prospecting-company-intelligence";
 import { compatibleCompanyIdentity, normalizedCompanyName } from "@/lib/company-dedupe";
@@ -17,6 +18,7 @@ const DIRECT_APPLICATION_LABEL = "Direct Application Form";
 
 const prospectSchema = z.object({
   linkedinUrl: z.string().trim().max(1000).default(""),
+  inventoryBusinessLine: z.enum(["Talentera", "Evalufy"]).optional(),
   source: z.string().trim().max(120).default("Sales Navigator"),
   signalHireUid: z.string().trim().max(160).default(""),
   assignmentMode: z.enum(["marita", "acquisition"]).default("marita"),
@@ -77,13 +79,13 @@ function safeEqual(left: string, right: string) {
 function acquisitionAuthorized(request: Request) {
   const expected = String(process.env.ACQUISITION_OWNER_TOKEN || "").trim();
   const supplied = String(request.headers.get("x-acquisition-owner-token") || "").trim();
-  return Boolean(expected && supplied && safeEqual(expected, supplied));
+  return sdrAdminAuthorized(new NextRequest(request.url, { headers: request.headers })) || Boolean(expected && supplied && safeEqual(expected, supplied));
 }
 
 function requestedAssignment(prospect: Prospect, request: Request): Assignment {
   if (prospect.assignmentMode !== "acquisition") return { id: MARITA_OWNER_ID, name: MARITA_OWNER_NAME, mode: "marita" };
   if (!acquisitionAuthorized(request)) throw new Error("Owner authorization is required for acquisition pushes.");
-  const owner = acquisitionOwners().find((item) => item.id === prospect.ownerId);
+  const owner = manualTaskOwners().find((item) => item.id === prospect.ownerId);
   if (!owner) throw new Error("The requested SDR is not enabled for acquisition routing.");
   return { id: owner.id, name: owner.name, mode: "acquisition" };
 }
@@ -144,6 +146,7 @@ async function findContact(emails: string[], linkedinUrl: string) {
 async function createContact(prospect: Prospect, ownerId: string) {
   const name = splitName(prospect.fullName);
   const properties: Record<string, string> = { firstname: name.firstname, lastname: name.lastname, hubspot_owner_id: ownerId };
+  if (prospect.inventoryBusinessLine) { properties.business_name = prospect.inventoryBusinessLine === "Evalufy" ? "Evalufy" : "ATS"; properties.sdr_owner = ownerId; }
   if (prospect.email) properties.email = prospect.email.toLowerCase();
   if (prospect.phone) properties.phone = prospect.phone;
   if (prospect.title) properties.jobtitle = prospect.title;
@@ -216,6 +219,7 @@ function companyPropertiesFromProspect(prospect: Prospect, includeIdentity = tru
   if (includeIdentity && domain) properties.domain = domain;
   if (includeIdentity && prospect.companyWebsite) properties.company_website = prospect.companyWebsite;
   if (includeIdentity && ownerId) properties.hubspot_owner_id = ownerId;
+  if (includeIdentity && prospect.inventoryBusinessLine) properties.talentera_business_line = prospect.inventoryBusinessLine === "Evalufy" ? "Evalufy" : "ATS";
   if (prospect.careerPageUrl) properties.career_page_url = prospect.careerPageUrl;
   if (prospect.detectedAts && !directApplication) {
     properties.detected_ats = prospect.detectedAts;
@@ -263,7 +267,7 @@ async function ensureCompany(prospect: Prospect, requestedOwnerId: string) {
 
 function finalAssignment(requested: Assignment, companyExistingOwnerId: string): Assignment {
   if (requested.mode !== "acquisition" || !companyExistingOwnerId) return requested;
-  const existing = acquisitionOwners().find((owner) => owner.id === companyExistingOwnerId);
+  const existing = manualTaskOwners().find((owner) => owner.id === companyExistingOwnerId);
   return existing ? { id: existing.id, name: existing.name, mode: "acquisition" } : requested;
 }
 
@@ -370,6 +374,17 @@ export async function POST(request: Request) {
     if (!parsed.success) return NextResponse.json({ error: "Invalid prospect payload.", details: parsed.error.flatten() }, { status: 400 });
     const prospect = parsed.data;
     const requestedOwner = requestedAssignment(prospect, request);
+    if (prospect.inventoryBusinessLine) {
+      if (!allPhones(prospect).length) return NextResponse.json({ error: "Inventory SDR call tasks require a phone number." }, { status: 409 });
+      if (prospect.assignmentMode !== "acquisition") return NextResponse.json({ error: "Inventory pushes require authorized SDR assignment." }, { status: 403 });
+      const storedAccount = await getAcquisitionAccount(companyDomain(prospect));
+      if (!storedAccount || storedAccount.exclusionStatus !== "eligible") return NextResponse.json({ error: "Qualify this inventory company before pushing." }, { status: 409 });
+      if (String(storedAccount.evidence.businessLine || "Talentera") !== prospect.inventoryBusinessLine) return NextResponse.json({ error: "Business line does not match the inventory record." }, { status: 409 });
+      const existingContactId = await findContact(allEmails(prospect), prospect.linkedinUrl);
+      if (existingContactId && storedAccount.status !== "pushed") return NextResponse.json({ error: "Contact already exists in HubSpot. Review ownership and company associations before using the new-company queue." }, { status: 409 });
+      const existingCompanyId = await findCompanyId(prospect);
+      if (existingCompanyId && existingCompanyId !== storedAccount.hubspotCompanyId) return NextResponse.json({ error: "Company now exists in HubSpot. Recheck ownership before pushing new contacts." }, { status: 409 });
+    }
 
     const company = await ensureCompany(prospect, requestedOwner.id);
     const owner = finalAssignment(requestedOwner, company.existingOwnerId);

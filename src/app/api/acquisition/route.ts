@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
+  getAcquisitionAccount,
   listAcquisitionAccounts,
   listAcquisitionPeople,
   upsertAcquisitionAccounts,
@@ -18,6 +19,8 @@ import { searchAll } from "@/lib/hubspot";
 import { normalizeCompanyDomain } from "@/lib/prospecting-company-intelligence";
 import { scoreTalenteraAccount } from "@/lib/talentera-intelligence";
 import { verifiedActiveJobCount } from "@/lib/acquisition-job-count";
+import { compatibleCompanyIdentity } from "@/lib/company-dedupe";
+import { manualTaskOwners } from "@/lib/acquisition-routing";
 import { sdrAdminAuthorized, sdrAdminConfigured } from "@/lib/sdr-admin-auth";
 
 export const runtime = "nodejs";
@@ -27,7 +30,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("discover"), pages: z.number().int().min(1).max(6).default(1), confirmCredits: z.boolean() }),
   z.object({ action: z.literal("find_people"), domain: z.string().trim().min(3).max(255) }),
   z.object({ action: z.literal("enrich_person"), domain: z.string().trim().min(3).max(255), uid: z.string().trim().min(1).max(160) }),
-  z.object({ action: z.literal("assign"), domain: z.string().trim().min(3).max(255) }),
+  z.object({ action: z.literal("assign"), domain: z.string().trim().min(3).max(255), ownerId: z.enum(["31644369", "37624223"]).optional() }),
 ]);
 
 type ApolloOrganization = Record<string, unknown> & {
@@ -273,7 +276,7 @@ async function discoverAccounts(pages: number) {
       secondaryPersona: scored.personas.secondary,
       economicBuyer: scored.personas.economicBuyer,
       technicalInfluencer: scored.personas.technicalInfluencer,
-      strongestSignal: scored.signals[0]?.evidence || `${jobs}+ active jobs matched the Apollo discovery filter`,
+      strongestSignal: scored.signals[0]?.evidence || (jobs > 0 ? `${jobs} reported active jobs` : "Hiring activity not verified"),
       recommendedAngle: scored.recommendedAngle,
       assignedOwnerId: "",
       assignedOwnerName: "",
@@ -286,11 +289,14 @@ async function discoverAccounts(pages: number) {
     };
   });
 
-  await upsertAcquisitionAccounts(accounts);
+  let stored = 0;
+  for (let index = 0; index < accounts.length; index += 100) {
+    stored += (await upsertAcquisitionAccounts(accounts.slice(index, index + 100), true)).accounts;
+  }
   return {
     rawTotal,
     fetched: organizations.length,
-    stored: accounts.length,
+    stored,
     eligible: accounts.filter((account) => account.exclusionStatus === "eligible").length,
     review: accounts.filter((account) => account.exclusionStatus === "review").length,
     excluded: accounts.filter((account) => account.exclusionStatus === "excluded").length,
@@ -313,8 +319,7 @@ async function discoverAccounts(pages: number) {
 
 async function getAccount(domain: string) {
   const normalized = normalizeCompanyDomain(domain);
-  const data = await listAcquisitionAccounts({ limit: 1000, includeExcluded: true });
-  const account = data.accounts.find((item) => item.domain === normalized);
+  const account = await getAcquisitionAccount(normalized);
   if (!account) throw new Error(`Account ${normalized || domain} is not in the acquisition queue.`);
   return account;
 }
@@ -433,7 +438,7 @@ async function enrichPerson(account: AcquisitionAccount, person: AcquisitionPers
     primaryPersona: account.primaryPersona,
     secondaryPersona: account.secondaryPersona,
   })[0];
-  if (!verification || verification.score < 38 || !clean(current?.company)) {
+  if (!verification || verification.score < 38 || !current?.current || !compatibleCompanyIdentity({ requestedName: account.name, requestedDomain: "", existingName: clean(current?.company), existingDomain: "" })) {
     throw new Error("SignalHire enriched the person, but current-company/persona verification was too weak to push safely.");
   }
   const enriched: AcquisitionPerson = {
@@ -477,10 +482,12 @@ async function openTaskCounts() {
   return counts;
 }
 
-async function assignAccount(account: AcquisitionAccount) {
+async function assignAccount(account: AcquisitionAccount, requestedOwnerId?: string) {
   if (account.assignedOwnerId) return { ownerId: account.assignedOwnerId, ownerName: account.assignedOwnerName, reason: "Existing acquisition assignment preserved" };
-  const counts = await openTaskCounts();
-  const owner = chooseAcquisitionOwner(account.domain, counts);
+  const counts = requestedOwnerId ? {} : await openTaskCounts();
+  const owner = requestedOwnerId
+    ? { ...manualTaskOwners().find((item) => item.id === requestedOwnerId)!, reason: "Selected SDR for inventory" }
+    : chooseAcquisitionOwner(account.domain, counts);
   await upsertAcquisitionAccounts([{ ...account, assignedOwnerId: owner.id, assignedOwnerName: owner.name }]);
   const refreshed = await getAccount(account.domain);
   return {
@@ -500,6 +507,12 @@ export async function GET(request: NextRequest) {
     }
     const data = await listAcquisitionAccounts({
       limit: Number(request.nextUrl.searchParams.get("limit") || 300),
+      offset: Number(request.nextUrl.searchParams.get("offset") || 0),
+      q: clean(request.nextUrl.searchParams.get("q"), 300),
+      allSources: request.nextUrl.searchParams.get("allSources") === "1",
+      source: clean(request.nextUrl.searchParams.get("source"), 80),
+      businessLine: clean(request.nextUrl.searchParams.get("businessLine"), 30),
+      readiness: z.enum(["ready", "needs_people", "search_only", ""]).catch("").parse(request.nextUrl.searchParams.get("readiness") || ""),
       country: clean(request.nextUrl.searchParams.get("country"), 160),
       tier: clean(request.nextUrl.searchParams.get("tier"), 20),
       status: clean(request.nextUrl.searchParams.get("status"), 40),
@@ -526,7 +539,7 @@ export async function POST(request: NextRequest) {
     }
 
     const account = await getAccount(parsed.data.domain);
-    if (account.exclusionStatus === "excluded") return NextResponse.json({ error: `This account is excluded: ${account.exclusionReason}` }, { status: 409 });
+    if (account.exclusionStatus !== "eligible") return NextResponse.json({ error: `This account is excluded: ${account.exclusionReason}` }, { status: 409 });
 
     if (parsed.data.action === "find_people") {
       const result = await findPeople(account);
@@ -538,11 +551,14 @@ export async function POST(request: NextRequest) {
       const stored = await listAcquisitionPeople(account.domain);
       const person = stored.people.find((item) => item.uid === uid);
       if (!person) return NextResponse.json({ error: "Select a person from the account search results first." }, { status: 404 });
+      if (person.enrichmentStatus === "enriched") return NextResponse.json({ action: "enrich_person", person, reused: true });
+      const existing = await existingHubSpotDomains([account.domain]);
+      if (existing.has(account.domain)) return NextResponse.json({ error: "This company now exists in HubSpot. Recheck its ownership before spending enrichment credits." }, { status: 409 });
       const result = await enrichPerson(account, person);
       return NextResponse.json({ action: "enrich_person", account: { domain: account.domain, name: account.name }, ...result });
     }
 
-    const assignment = await assignAccount(account);
+    const assignment = await assignAccount(account, parsed.data.ownerId);
     return NextResponse.json({ action: "assign", account: { domain: account.domain, name: account.name }, assignment });
   } catch (error) {
     console.error("Acquisition action failed", error);

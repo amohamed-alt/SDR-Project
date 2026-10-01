@@ -53,7 +53,7 @@ def account_json(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def global_summary(connection) -> dict[str, Any]:
+def global_summary(connection, all_sources: bool = False) -> dict[str, Any]:
     row = connection.execute(
         """
         SELECT
@@ -101,14 +101,14 @@ def global_summary(connection) -> dict[str, Any]:
                   )
             ) AS phone_ready
         FROM acquisition_accounts
-        WHERE source = %s
+        WHERE (%s OR source = %s)
         """,
-        (COVERAGE_SOURCE,),
+        (all_sources, COVERAGE_SOURCE),
     ).fetchone() or {}
     return {key: int(value or 0) for key, value in row.items()}
 
 
-def country_facets(connection) -> list[dict[str, Any]]:
+def country_facets(connection, all_sources: bool = False) -> list[dict[str, Any]]:
     rows = connection.execute(
         """
         SELECT country,
@@ -118,11 +118,11 @@ def country_facets(connection) -> list[dict[str, Any]]:
                COUNT(*) FILTER (WHERE exclusion_status='excluded') AS excluded,
                COUNT(*) FILTER (WHERE status='existing_hubspot' OR hubspot_company_id <> '') AS existing_hubspot
         FROM acquisition_accounts
-        WHERE source = %s AND country <> ''
+        WHERE (%s OR source = %s) AND country <> ''
         GROUP BY country
         ORDER BY country ASC
         """,
-        (COVERAGE_SOURCE,),
+        (all_sources, COVERAGE_SOURCE),
     ).fetchall()
     return [
         {
@@ -150,10 +150,22 @@ def acquisition_accounts_v2(
     q: str = Query(default="", max_length=300),
     readiness: str = Query(default="", max_length=30),
     include_excluded: bool = Query(default=False),
+    all_sources: bool = Query(default=False),
+    source: str = Query(default="", max_length=80),
+    business_line: str = Query(default="", max_length=30),
 ) -> dict[str, Any]:
     initialize_usage_db()
-    clauses: list[str] = ["a.source = %s"]
-    params: list[Any] = [COVERAGE_SOURCE]
+    clauses: list[str] = ["TRUE"]
+    params: list[Any] = []
+    if not all_sources and not domain:
+        clauses.append("a.source = %s")
+        params.append(COVERAGE_SOURCE)
+    if source:
+        clauses.append("a.source LIKE %s" if source == "Apollo" else "a.source = %s")
+        params.append("Apollo%" if source == "Apollo" else source)
+    if business_line:
+        clauses.append("COALESCE(a.evidence->>'businessLine', 'Talentera') = %s")
+        params.append(business_line)
     if not include_excluded:
         clauses.append("a.exclusion_status = 'eligible'")
     if status:
@@ -173,8 +185,8 @@ def acquisition_accounts_v2(
         params.append(normalize_domain(domain))
     if q:
         term = f"%{clean_text(q, 300)}%"
-        clauses.append("(a.name ILIKE %s OR a.domain ILIKE %s OR a.industry ILIKE %s OR a.country ILIKE %s OR a.primary_persona ILIKE %s)")
-        params.extend([term, term, term, term, term])
+        clauses.append("(a.name ILIKE %s OR a.domain ILIKE %s OR a.industry ILIKE %s OR a.country ILIKE %s OR a.primary_persona ILIKE %s OR a.detected_ats ILIKE %s OR a.strongest_signal ILIKE %s)")
+        params.extend([term, term, term, term, term, term, term])
 
     readiness_clause = ""
     if readiness == "ready":
@@ -222,8 +234,8 @@ def acquisition_accounts_v2(
             """,
             (*params, limit, offset),
         ).fetchall()
-        summary = global_summary(connection)
-        countries = country_facets(connection)
+        summary = global_summary(connection, all_sources)
+        countries = country_facets(connection, all_sources)
 
     response.headers["Cache-Control"] = "private, no-store, max-age=0"
     return {
