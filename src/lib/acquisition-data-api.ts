@@ -201,7 +201,7 @@ export async function upsertAcquisitionAccounts(accounts: AcquisitionAccount[], 
   }, Math.max(WRITE_TIMEOUT_MS, 10_000));
 }
 
-export async function markSaudiInventoryMembership(accounts: Array<{ domain: string; employeeCount: number; hubspotCompanyId: string; evidence: Record<string, unknown> }>) {
+export async function markSaudiInventoryMembership(accounts: Array<{ domain: string; employeeCount: number; hubspotCompanyId: string; policyExcluded: boolean; evidence: Record<string, unknown> }>) {
   if (!accounts.length) return;
   return request("/v2/acquisition/saudi-membership", { method: "POST", body: JSON.stringify({ accounts }) }, Math.max(WRITE_TIMEOUT_MS, 10_000));
 }

@@ -345,6 +345,7 @@ class SaudiMembership(BaseModel):
     employeeCount: int = Field(default=0, ge=0, le=10_000_000)
     hubspotCompanyId: str = Field(default="", max_length=80)
     evidence: dict[str, Any]
+    policyExcluded: bool = False
 
 
 class SaudiMembershipWrite(BaseModel):
@@ -367,15 +368,15 @@ def saudi_inventory_membership(body: SaudiMembershipWrite, response: Response) -
                   employee_count = CASE WHEN %s > 0 THEN %s ELSE employee_count END,
                   country = 'Saudi Arabia',
                   hubspot_company_id = CASE WHEN %s <> '' THEN %s ELSE hubspot_company_id END,
-                  exclusion_status = CASE WHEN %s <> '' AND status <> 'pushed' THEN 'excluded' ELSE exclusion_status END,
-                  exclusion_reason = CASE WHEN %s <> '' AND status <> 'pushed' THEN 'Already exists in HubSpot' ELSE exclusion_reason END,
-                  status = CASE WHEN %s <> '' AND status <> 'pushed' THEN 'existing_hubspot' ELSE status END,
+                  exclusion_status = CASE WHEN (%s <> '' OR %s) AND status <> 'pushed' THEN 'excluded' ELSE exclusion_status END,
+                  exclusion_reason = CASE WHEN %s <> '' AND status <> 'pushed' THEN 'Already exists in HubSpot' WHEN %s AND status <> 'pushed' THEN 'Saudi stock policy: government / job-board exclusion' ELSE exclusion_reason END,
+                  status = CASE WHEN %s <> '' AND status <> 'pushed' THEN 'existing_hubspot' WHEN %s AND status <> 'pushed' THEN 'excluded' ELSE status END,
                   updated_at = NOW()
                 WHERE domain = %s
                 """,
                 (Jsonb(evidence), item.employeeCount, item.employeeCount,
                  item.hubspotCompanyId, item.hubspotCompanyId,
-                 item.hubspotCompanyId, item.hubspotCompanyId, item.hubspotCompanyId,
+                 item.hubspotCompanyId, item.policyExcluded, item.hubspotCompanyId, item.policyExcluded, item.hubspotCompanyId, item.policyExcluded,
                  normalize_domain(item.domain)),
             )
             stored += cursor.rowcount
