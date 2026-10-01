@@ -65,3 +65,12 @@ test("smart routing preserves configured existing owner and otherwise picks lowe
   });
   assert.equal(selected.id, "76369997");
 });
+
+
+test("secondary HR systems persona cannot replace primary recruitment search", () => {
+  const query = signalHirePersonaQuery("Talent Acquisition / Recruitment Manager", "HR Director / HR Systems Manager");
+  assert.match(query, /Talent Acquisition/);
+  assert.match(query, /Human Resources/);
+  assert.doesNotMatch(query, /HRIS/);
+  assert.match(signalHirePersonaQuery("HR Systems Manager", "Talent Acquisition Manager"), /HRIS/);
+});

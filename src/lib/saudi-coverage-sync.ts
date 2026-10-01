@@ -25,7 +25,9 @@ export async function coverageAssociations(from: string, to: string, ids: string
   for (let i = 0; i < ids.length; i += 100) {
     const batch = ids.slice(i, i + 100);
     const payload = await crm<{ results: (Page & { from: { id: string } })[]; errors?: unknown[]; status?: string }>(`/crm/v4/associations/${from}/${to}/batch/read`, { inputs: batch.map((id) => ({ id })) });
-    if (payload.errors?.length || payload.status === "PENDING") throw new Error("Incomplete HubSpot association response; coverage was not updated");
+    // A failed/pending batch is not a history. Read each requested record
+    // directly in that case, and accept only a successful paginated response.
+    if (payload.errors?.length || (payload.status && payload.status !== "COMPLETE")) payload.results = [];
     // Some batch responses omit records with no associations. Verify every
     // missing input through the paginated single-record endpoint before using
     // an empty history; absence from the batch alone is never negative evidence.

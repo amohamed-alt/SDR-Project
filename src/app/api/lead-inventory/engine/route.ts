@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { POST as acquisitionAction } from "@/app/api/acquisition/route";
 import { POST as pushAction } from "@/app/api/prospecting/push/route";
-import { listAcquisitionAccounts, listAcquisitionPeople, upsertAcquisitionAccounts, type AcquisitionPerson } from "@/lib/acquisition-data-api";
+import { getAcquisitionAccount, listAcquisitionAccounts, listAcquisitionPeople, upsertAcquisitionAccounts, type AcquisitionPerson } from "@/lib/acquisition-data-api";
 import { searchAll } from "@/lib/hubspot";
 import { inventoryDomain } from "@/lib/lead-inventory-import";
 import { compatibleCompanyIdentity } from "@/lib/company-dedupe";
 import { saudiPolicyExcluded } from "@/lib/saudi-inventory-policy";
-import { coverageData, coverageQueue, reserveInventoryOperation, finishInventoryOperation } from "@/lib/saudi-coverage-store";
+import { coverageData, coverageQueue, reserveInventoryOperation, finishInventoryOperation, recoverPreReveal } from "@/lib/saudi-coverage-store";
 import { chooseInventorySdr, INVENTORY_SDR_IDS, learnedPriority, learnCoverage, personaFamily, productPersonas, suggestProduct } from "@/lib/saudi-coverage-learning";
 import { syncSaudiCoverage } from "@/lib/saudi-coverage-sync";
 import { enrichSaudiCompany } from "@/lib/saudi-company-enrichment";
@@ -17,6 +17,7 @@ import { originMatchesRequestHosts } from "@/lib/request-origin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const input = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("recover_pre_reveal") }),
   z.object({ action: z.literal("sync"), limit: z.number().int().min(1).max(50).default(10) }),
   z.object({ action: z.literal("run"), limit: z.number().int().min(1).max(5).default(1), confirmCredits: z.literal(true) }),
 ]);
@@ -51,6 +52,18 @@ export async function POST(request: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: "Invalid engine action" }, { status: 400 });
   try {
     if (parsed.data.action === "sync") return NextResponse.json(await syncSaudiCoverage(parsed.data.limit));
+    if (parsed.data.action === "recover_pre_reveal") {
+      let recovered = 0;
+      const data = await coverageData();
+      for (const review of data.reviews.filter((r) => r.kind === "pipeline").slice(0, 10)) {
+        const account = await getAcquisitionAccount(review.key.replace(/^pipeline:/, ""));
+        if (!account?.evidence.saudi200 || !account.evidence.companyEnrichedAt || account.hubspotCompanyId || account.country !== "Saudi Arabia" || account.employeeCount < 200 || saudiPolicyExcluded(account.domain, `${account.name} ${account.industry}`)) continue;
+        if (!(await recoverPreReveal(account.domain)).recovered) continue;
+        await upsertAcquisitionAccounts([{ ...account, exclusionStatus: "eligible", exclusionReason: "", status: "qualified", evidence: { ...account.evidence, preRevealRetryAuthorized: new Date().toISOString() } }]);
+        recovered++;
+      }
+      return NextResponse.json({ recovered });
+    }
     const data = await coverageData(), model = learnCoverage(data.observations);
     const queue = await coverageQueue("work", 100);
     const candidates = [];
@@ -62,7 +75,7 @@ export async function POST(request: NextRequest) {
       const learned = learnedPriority(account.gtmScore, product, account.industry, account.employeeCount, personas.primary, model);
       candidates.push({ account, product, personas, learned });
     }
-    candidates.sort((a, b) => Number(b.account.employeeCount >= 250) - Number(a.account.employeeCount >= 250) || b.learned.score - a.learned.score);
+    candidates.sort((a, b) => Number(Boolean(b.account.evidence.preRevealRetryAuthorized)) - Number(Boolean(a.account.evidence.preRevealRetryAuthorized)) || Number(b.account.employeeCount >= 250) - Number(a.account.employeeCount >= 250) || b.learned.score - a.learned.score);
     const loads: Record<string, number> = {};
     for (const owner of INVENTORY_SDR_IDS) {
       loads[owner] = (await searchAll("tasks", ["hs_task_status"], [{ propertyName: "hubspot_owner_id", operator: "EQ", value: owner }, { propertyName: "hs_task_status", operator: "NEQ", value: "COMPLETED" }])).length;
@@ -74,7 +87,7 @@ export async function POST(request: NextRequest) {
       const reservation = await reserveInventoryOperation(operationKey, "pipeline", 10);
       if (!reservation.reserved) { results.push({ domain: account.domain, status: reservation.state }); continue; }
       try {
-        if (!account.evidence.saudi200 || account.country !== "Saudi Arabia" || (account.employeeCount > 0 && account.employeeCount < 200) || saudiPolicyExcluded(account.domain, `${account.name} ${account.industry} ${account.evidence.sourceText || ""}`)) throw new Error("Company is outside the Saudi 200+ commercial policy");
+        if (!account.evidence.saudi200 || account.country !== "Saudi Arabia" || (account.employeeCount > 0 && account.employeeCount < 200) || saudiPolicyExcluded(account.domain, `${account.name} ${account.industry}`)) throw new Error("Company is outside the Saudi 200+ commercial policy");
         inventoryDomain(account.domain);
         // Fresh aliases + name checks before any provider spend. No existing CRM
         // company is recycled through this acquisition pipeline.
@@ -86,7 +99,7 @@ export async function POST(request: NextRequest) {
           throw new Error("Company already exists in HubSpot; excluded before enrichment");
         }
         account = await enrichSaudiCompany(account);
-        if (account.country !== "Saudi Arabia" || (account.employeeCount > 0 && account.employeeCount < 200) || saudiPolicyExcluded(account.domain, `${account.name} ${account.industry} ${account.evidence.sourceText || ""}`)) {
+        if (account.country !== "Saudi Arabia" || (account.employeeCount > 0 && account.employeeCount < 200) || saudiPolicyExcluded(account.domain, `${account.name} ${account.industry}`)) {
           await upsertAcquisitionAccounts([{ ...account, exclusionStatus: "excluded", exclusionReason: "Enriched company profile is outside the Saudi 200+ commercial policy", status: "excluded" }]);
           throw new Error("Enriched company profile is outside the Saudi 200+ policy; no person reveal");
         }
@@ -97,7 +110,7 @@ export async function POST(request: NextRequest) {
         const updated = { ...account, primaryPersona: personas.primary, secondaryPersona: personas.secondary, evidence: { ...account.evidence, businessLine: product, productReason: personas.reason, priorityModel: model.method, learnedLift: learned.lift } };
         await upsertAcquisitionAccounts([updated]);
         let people = (await listAcquisitionPeople(account.domain)).people;
-        if (!people.length) {
+        if (!people.length || (account.evidence.preRevealRetryAuthorized && people.every((p) => p.enrichmentStatus === "search_only"))) {
           await internalAction(request, "/api/acquisition", { action: "find_people", domain: account.domain }, acquisitionAction);
           people = (await listAcquisitionPeople(account.domain)).people;
         }
