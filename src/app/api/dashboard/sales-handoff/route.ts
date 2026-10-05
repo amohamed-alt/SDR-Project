@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
   CALL_PROPERTIES,
+  CONNECTED_CALL_DISPOSITION,
+  CALL_DISPOSITION_LABELS,
   COMMUNICATION_PROPERTIES,
   DEAL_PROPERTIES,
   EMAIL_PROPERTIES,
   HUBSPOT_TIMEZONE,
   MEETING_PROPERTIES,
+  TASK_PROPERTIES,
   hubspotRecordUrl,
 } from "@/lib/config";
 import { compressedJsonResponse } from "@/lib/compressed-json";
@@ -18,6 +21,8 @@ import {
   searchAll,
   type SearchFilter,
 } from "@/lib/hubspot";
+import { HANDOFF_START_DATE, reviewHandoff, type FollowUpEvent, type HandoffReview } from "@/lib/handoff-review";
+import { bookingSdr, type BookingSdr } from "@/lib/handoff-attribution";
 import { meetingCreatorId } from "@/lib/owner-attribution";
 import { SALES_REP_OWNER_IDS } from "@/lib/sales-reps";
 import { SDR_OWNERS } from "@/lib/sdr-owners";
@@ -29,10 +34,9 @@ export const maxDuration = 60;
 const DEFAULT_SALES_REP_ID = "76369997"; // Ursula Waked / Orsla 1
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 12;
-const FOLLOW_UP_DAYS = 90;
+
 const MAX_REPORT_DAYS = 180;
 const OUTCOME_PRIORITY = ["COMPLETED", "NO_SHOW", "CANCELED", "RESCHEDULED", "SCHEDULED"];
-const MARITA_BOOKING_MARKER = "booked by marita";
 
 const HANDOFF_MEETING_PROPERTIES = [
   ...MEETING_PROPERTIES,
@@ -59,19 +63,14 @@ const HANDOFF_COMPANY_PROPERTIES = ["name", "domain", "country"] as const;
 const querySchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  salesRepId: z.string().regex(/^\d+$/),
+  salesRepId: z.string().regex(/^(?:\d+|all)$/),
 });
 
 type FollowUpStatus = "Within 24h" | "24–48h" | "48h+" | "No follow-up";
 type AttentionLevel = "critical" | "warning" | "ok";
 type FollowUpType = "Call" | "Email" | "WhatsApp" | "Meeting";
 
-type ActivityEvent = {
-  id: string;
-  type: FollowUpType;
-  at: string;
-  detail: string;
-};
+type ActivityEvent = FollowUpEvent;
 
 type MeetingGroup = {
   id: string;
@@ -80,7 +79,9 @@ type MeetingGroup = {
   startAt: string;
   endAt: string;
   contactIds: string[];
-  maritaCreated: boolean;
+  companyIds: string[];
+  dealIds: string[];
+  bookedBy: BookingSdr | null;
 };
 
 type HandoffDeal = {
@@ -99,6 +100,11 @@ type HandoffDeal = {
 
 type HandoffRow = {
   id: string;
+  bookedBy: { id: string; name: string };
+  review: HandoffReview;
+  salesRep: { id: string; name: string };
+  overdueTask: { id: string; subject: string; dueAt: string; url: string } | null;
+  nextTask: { id: string; subject: string; dueAt: string; url: string } | null;
   meetingId: string;
   meetingTitle: string;
   meetingDate: string;
@@ -141,10 +147,11 @@ type HandoffPayload = {
     from: string;
     to: string;
     timezone: string;
-    sdr: { id: string; name: string };
+    sdrs: Array<{ id: string; name: string }>;
     salesRep: { id: string; name: string };
     salesReps: Array<{ id: string; name: string }>;
-    followUpDays: number;
+    followUpThrough: string;
+    excludedUnattributed: number;
     cache: "hit" | "miss";
   };
   kpis: {
@@ -209,12 +216,6 @@ function meetingEnd(record: HubSpotRecord, startAt: string) {
   return start ? new Date(start + 60 * 60 * 1000).toISOString() : startAt;
 }
 
-function addDays(day: string, days: number) {
-  const date = new Date(`${day}T12:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
 function rangeDays(from: string, to: string) {
   return Math.floor((new Date(`${to}T12:00:00Z`).getTime() - new Date(`${from}T12:00:00Z`).getTime()) / 86_400_000) + 1;
 }
@@ -227,9 +228,10 @@ function activityFilters(ownerId: string, from: string, to: string, dateProperty
   ];
 }
 
-function meetingKey(record: HubSpotRecord, associations: Map<string, string[]>) {
+function meetingKey(record: HubSpotRecord, associations: Map<string, string[]>, companies: Map<string, string[]>) {
   const start = meetingTimestamp(record);
-  const contactKey = [...(associations.get(record.id) ?? [])].sort().join(",");
+  const contactKey = [...(associations.get(record.id) ?? [])].sort().join(",")
+    || `companies:${[...(companies.get(record.id) ?? [])].sort().join(",")}`.replace(/^companies:$/, "");
   const minute = validDate(start) ? new Date(start).toISOString().slice(0, 16) : start;
   const title = value(record, "hs_meeting_title").toLowerCase().replace(/\s+/g, " ").slice(0, 80);
   return `${contactKey || title || record.id}|${minute}`;
@@ -238,20 +240,19 @@ function meetingKey(record: HubSpotRecord, associations: Map<string, string[]>) 
 function dedupeMeetings(
   records: HubSpotRecord[],
   associations: Map<string, string[]>,
-  maritaCreatorId: string | undefined,
+  sdrs: BookingSdr[],
+  companies: Map<string, string[]>,
+  deals: Map<string, string[]>,
 ): MeetingGroup[] {
   const grouped = new Map<string, HubSpotRecord[]>();
   for (const record of records) {
-    const key = meetingKey(record, associations);
+    const key = meetingKey(record, associations, companies);
     grouped.set(key, [...(grouped.get(key) ?? []), record]);
   }
 
   return [...grouped.values()].map((group) => {
-    const markerRecord = group.find((record) => value(record, "hs_internal_meeting_notes").toLowerCase().includes(MARITA_BOOKING_MARKER));
-    const creatorRecord = maritaCreatorId
-      ? group.find((record) => value(record, "hs_created_by_user_id") === maritaCreatorId)
-      : undefined;
-    const primary = markerRecord ?? creatorRecord ?? group[0];
+    const attributedSdr = bookingSdr(group, sdrs);
+    const primary = group.find(record => attributedSdr && bookingSdr([record], sdrs)?.id === attributedSdr.id) ?? group[0];
     const startAt = meetingTimestamp(primary);
     const outcome = OUTCOME_PRIORITY.find((candidate) => group.some((record) => value(record, "hs_meeting_outcome") === candidate))
       ?? value(primary, "hs_meeting_outcome")
@@ -265,7 +266,9 @@ function dedupeMeetings(
       startAt,
       endAt: meetingEnd(primary, startAt),
       contactIds,
-      maritaCreated: Boolean(markerRecord || creatorRecord),
+      companyIds: [...new Set(group.flatMap(record => companies.get(record.id) || []))],
+      dealIds: [...new Set(group.flatMap(record => deals.get(record.id) || []))],
+      bookedBy: attributedSdr,
     };
   }).filter((meeting) => Boolean(meeting.startAt));
 }
@@ -277,19 +280,21 @@ function addActivity(
   type: FollowUpType,
   at: string,
   detail: string,
+  outcome = "",
+  connected = false,
 ) {
   if (!validDate(at)) return;
   for (const contactId of associations.get(record.id) ?? []) {
     const items = index.get(contactId) ?? [];
-    items.push({ id: record.id, type, at, detail });
+    items.push({ id: record.id, type, at, detail, outcome, connected, url: hubspotRecordUrl("contact", contactId) });
     index.set(contactId, items);
   }
 }
 
 function firstFollowUp(events: ActivityEvent[], after: string) {
-  const cutoff = validDate(after) + 60_000;
+  const cutoff = validDate(after);
   const candidates = events
-    .filter((event) => validDate(event.at) > cutoff)
+    .filter((event) => validDate(event.at) > cutoff && validDate(event.at) <= Date.now())
     .sort((a, b) => validDate(a.at) - validDate(b.at));
   const first = candidates[0];
   if (!first) {
@@ -376,12 +381,21 @@ function pruneCache() {
 
 async function buildHandoff(from: string, to: string, salesRepId: string): Promise<HandoffPayload> {
   const today = new Date().toISOString().slice(0, 10);
-  const followUpTo = addDays(to, FOLLOW_UP_DAYS) < today ? addDays(to, FOLLOW_UP_DAYS) : today;
+  const followUpTo = today;
 
   const [owners, stageLabels, meetingsRaw, callsRaw, emailsRaw, communicationsRaw] = await Promise.all([
     listOwners(),
     listDealStages(),
-    searchAll("meetings", HANDOFF_MEETING_PROPERTIES, activityFilters(salesRepId, from, followUpTo), ["hs_timestamp"]),
+    Promise.all([
+      searchAll("meetings", HANDOFF_MEETING_PROPERTIES, activityFilters(salesRepId, from, to, "hs_meeting_start_time"), ["hs_meeting_start_time"]),
+      searchAll("meetings", HANDOFF_MEETING_PROPERTIES, [
+        ...activityFilters(salesRepId, from, followUpTo),
+        { propertyName: "hs_meeting_start_time", operator: "NOT_HAS_PROPERTY" },
+      ], ["hs_timestamp"]),
+      // Later completed meetings are follow-up evidence, not new cohort rows.
+      ...(to < followUpTo ? [searchAll("meetings", HANDOFF_MEETING_PROPERTIES,
+        activityFilters(salesRepId, to, followUpTo, "hs_meeting_start_time"), ["hs_meeting_start_time"])] : []),
+    ]).then(groups => [...new Map(groups.flat().map(record => [record.id, record])).values()]),
     searchAll("calls", CALL_PROPERTIES, activityFilters(salesRepId, from, followUpTo), ["hs_timestamp"]),
     searchAll("emails", EMAIL_PROPERTIES, activityFilters(salesRepId, from, followUpTo), ["hs_timestamp"]),
     searchAll("communications", COMMUNICATION_PROPERTIES, [
@@ -390,28 +404,43 @@ async function buildHandoff(from: string, to: string, salesRepId: string): Promi
     ], ["hs_timestamp"]),
   ]);
 
-  const maritaCreatorId = meetingCreatorId(owners, SDR_OWNERS.marita.ownerId);
-  const [meetingContacts, callContacts, emailContacts, communicationContacts] = await Promise.all([
+  const sdrs = [SDR_OWNERS.marita, SDR_OWNERS.daniel].map(sdr => ({
+    id: sdr.ownerId, name: sdr.name, creatorId: meetingCreatorId(owners, sdr.ownerId),
+  }));
+  const [meetingContacts, callContacts, emailContacts, communicationContacts, meetingCompanies, meetingDeals] = await Promise.all([
     readAssociations("meetings", "contacts", meetingsRaw.map((record) => record.id)),
     readAssociations("calls", "contacts", callsRaw.map((record) => record.id)),
     readAssociations("emails", "contacts", emailsRaw.map((record) => record.id)),
     readAssociations("communications", "contacts", communicationsRaw.map((record) => record.id)),
+    readAssociations("meetings", "companies", meetingsRaw.map(record => record.id)),
+    readAssociations("meetings", "deals", meetingsRaw.map(record => record.id)),
   ]);
 
-  const allMeetingGroups = dedupeMeetings(meetingsRaw, meetingContacts, maritaCreatorId);
+  const allMeetingGroups = dedupeMeetings(meetingsRaw, meetingContacts, sdrs, meetingCompanies, meetingDeals);
   const cohort = allMeetingGroups
-    .filter((meeting) => meeting.maritaCreated && localDay(meeting.startAt) >= from && localDay(meeting.startAt) <= to)
+    .filter((meeting) => meeting.bookedBy && localDay(meeting.startAt) >= from && localDay(meeting.startAt) <= to)
     .sort((a, b) => validDate(b.startAt) - validDate(a.startAt));
 
   const contactIds = [...new Set(cohort.flatMap((meeting) => meeting.contactIds))];
-  const [contacts, contactDeals] = await Promise.all([
+  const [contacts, contactDeals, tasksRaw] = await Promise.all([
     batchRead("contacts", contactIds, HANDOFF_CONTACT_PROPERTIES),
     readAssociations("contacts", "deals", contactIds),
+    // Open tasks are a current state, independent of the meeting-date cohort.
+    cohort.length ? searchAll("tasks", TASK_PROPERTIES, [
+      { propertyName: "hubspot_owner_id", operator: "EQ", value: salesRepId },
+      { propertyName: "hs_task_status", operator: "IN", values: ["NOT_STARTED", "IN_PROGRESS", "WAITING", "DEFERRED"] },
+    ], ["hs_timestamp"]) : Promise.resolve([]),
+  ]);
+  const taskIds = tasksRaw.map(task => task.id);
+  const [taskContacts, taskCompanies, taskDeals] = await Promise.all([
+    readAssociations("tasks", "contacts", taskIds),
+    readAssociations("tasks", "companies", taskIds),
+    readAssociations("tasks", "deals", taskIds),
   ]);
   const contactMap = new Map(contacts.map((contact) => [contact.id, contact]));
-  const dealIds = [...new Set([...contactDeals.values()].flat())];
+  const dealIds = [...new Set([...contactDeals.values()].flat().concat(cohort.flatMap(meeting => meeting.dealIds)))];
 
-  const companyIds = [...new Set(contacts.map((contact) => value(contact, "company_id")).filter(Boolean))];
+  const companyIds = [...new Set(contacts.map((contact) => value(contact, "company_id")).filter(Boolean).concat(cohort.flatMap(meeting => meeting.companyIds)))];
   const [dealRecords, companies] = await Promise.all([
     batchRead("deals", dealIds, DEAL_PROPERTIES),
     batchRead("companies", companyIds, HANDOFF_COMPANY_PROPERTIES),
@@ -438,6 +467,7 @@ async function buildHandoff(from: string, to: string, salesRepId: string): Promi
 
   const activityIndex = new Map<string, ActivityEvent[]>();
   for (const call of callsRaw) {
+    if (["QUEUED", "RINGING", "IN_PROGRESS", "CANCELED"].includes(value(call, "hs_call_status"))) continue;
     addActivity(
       activityIndex,
       callContacts,
@@ -445,11 +475,14 @@ async function buildHandoff(from: string, to: string, salesRepId: string): Promi
       "Call",
       value(call, "hs_timestamp"),
       value(call, "hs_call_title") || "Sales call",
+      CALL_DISPOSITION_LABELS[value(call, "hs_call_disposition")] || value(call, "hs_call_status"),
+      value(call, "hs_call_disposition") === CONNECTED_CALL_DISPOSITION,
     );
   }
   for (const email of emailsRaw) {
     const direction = value(email, "hs_email_direction");
     if (!(direction.includes("OUTGOING") || direction === "EMAIL")) continue;
+    if (["DRAFT", "SCHEDULED", "QUEUED"].includes(value(email, "hs_email_status"))) continue;
     addActivity(
       activityIndex,
       emailContacts,
@@ -472,8 +505,54 @@ async function buildHandoff(from: string, to: string, salesRepId: string): Promi
   for (const meeting of allMeetingGroups) {
     for (const contactId of meeting.contactIds) {
       const items = activityIndex.get(contactId) ?? [];
-      items.push({ id: meeting.id, type: "Meeting", at: meeting.startAt, detail: meeting.title });
+      items.push({ id: meeting.id, type: "Meeting", at: meeting.startAt, detail: meeting.title, outcome: meeting.outcome, connected: false, url: hubspotRecordUrl("contact", contactId) });
       activityIndex.set(contactId, items);
+    }
+  }
+
+  const extraIndex = new Map<string, ActivityEvent[]>();
+  for (const meeting of allMeetingGroups) {
+    const event: ActivityEvent = { id: meeting.id, type: "Meeting", at: meeting.startAt,
+      detail: meeting.title, outcome: meeting.outcome, connected: false, url: "" };
+    for (const id of meeting.companyIds) {
+      const key = `company:${id}`;
+      extraIndex.set(key, [...(extraIndex.get(key) || []), { ...event, url: hubspotRecordUrl("company", id) }]);
+    }
+    for (const id of meeting.dealIds) {
+      const key = `deal:${id}`;
+      extraIndex.set(key, [...(extraIndex.get(key) || []), { ...event, url: hubspotRecordUrl("deal", id) }]);
+    }
+  }
+  for (const [type, raw, kind] of [
+    ["calls", callsRaw, "Call"], ["emails", emailsRaw, "Email"], ["communications", communicationsRaw, "WhatsApp"],
+  ] as const) {
+    const [companyLinks, dealLinks] = await Promise.all([
+      readAssociations(type, "companies", raw.map(record => record.id)),
+      readAssociations(type, "deals", raw.map(record => record.id)),
+    ]);
+    for (const record of raw) {
+      if (kind === "Email") {
+        const direction = value(record, "hs_email_direction");
+        if (!(direction.includes("OUTGOING") || direction === "EMAIL")) continue;
+        if (["DRAFT", "SCHEDULED", "QUEUED"].includes(value(record, "hs_email_status"))) continue;
+      }
+      if (kind === "Call" && ["QUEUED", "RINGING", "IN_PROGRESS", "CANCELED"].includes(value(record, "hs_call_status"))) continue;
+      const event: ActivityEvent = {
+        id: record.id, type: kind, at: value(record, "hs_timestamp"),
+        detail: kind === "Call" ? value(record, "hs_call_title") || "Sales call"
+          : kind === "Email" ? value(record, "hs_email_subject") || "Sales email"
+          : (value(record, "hs_communication_body") || "WhatsApp").replace(/\s+/g, " ").slice(0, 140),
+        outcome: kind === "Call" ? CALL_DISPOSITION_LABELS[value(record, "hs_call_disposition")] || value(record, "hs_call_status") : "",
+        connected: kind === "Call" && value(record, "hs_call_disposition") === CONNECTED_CALL_DISPOSITION, url: "",
+      };
+      for (const id of companyLinks.get(record.id) || []) {
+        const key = `company:${id}`;
+        extraIndex.set(key, [...(extraIndex.get(key) || []), { ...event, url: hubspotRecordUrl("company", id) }]);
+      }
+      for (const id of dealLinks.get(record.id) || []) {
+        const key = `deal:${id}`;
+        extraIndex.set(key, [...(extraIndex.get(key) || []), { ...event, url: hubspotRecordUrl("deal", id) }]);
+      }
     }
   }
 
@@ -491,7 +570,7 @@ async function buildHandoff(from: string, to: string, salesRepId: string): Promi
       url: hubspotRecordUrl("contact", contact.id),
     }));
 
-    const companyId = meetingContactsRecords.map((contact) => value(contact, "company_id")).find(Boolean) || "";
+    const companyId = meeting.companyIds[0] || meetingContactsRecords.map((contact) => value(contact, "company_id")).find(Boolean) || "";
     const companyRecord = companyMap.get(companyId);
     const companyName = value(companyRecord, "name") || meetingContactsRecords.map((contact) => value(contact, "company")).find(Boolean) || "Unknown company";
     const company = companyId ? {
@@ -501,23 +580,44 @@ async function buildHandoff(from: string, to: string, salesRepId: string): Promi
       url: hubspotRecordUrl("company", companyId),
     } : null;
 
+    const associatedDeals = [...new Set(
+      meeting.dealIds.concat(meeting.contactIds.flatMap((contactId) => contactDeals.get(contactId) ?? [])),
+    )].map((dealId) => dealMap.get(dealId)).filter(Boolean) as HandoffDeal[];
     const events = [...new Map(
       meeting.contactIds
         .flatMap((contactId) => activityIndex.get(contactId) ?? [])
+        .concat(extraIndex.get(`company:${companyId}`) || [])
+        .concat(associatedDeals.flatMap(deal => extraIndex.get(`deal:${deal.id}`) || []))
         .map((event) => [`${event.type}:${event.id}`, event]),
     ).values()];
-    const followUp = firstFollowUp(events, meeting.endAt);
 
-    const associatedDeals = [...new Set(
-      meeting.contactIds.flatMap((contactId) => contactDeals.get(contactId) ?? []),
-    )].map((dealId) => dealMap.get(dealId)).filter(Boolean) as HandoffDeal[];
-    const deal = chooseDeal(associatedDeals, meeting.startAt);
+
+    const directlyLinkedDeals = associatedDeals.filter(deal => meeting.dealIds.includes(deal.id));
+    const deal = chooseDeal(directlyLinkedDeals.length ? directlyLinkedDeals : associatedDeals, meeting.startAt);
     const dealCreatedAfterMeeting = Boolean(deal && validDate(deal.createdAt) >= validDate(meeting.startAt));
-    const nextActivity = deal?.nextActivity
+    const linkedTasks = tasksRaw.filter(task =>
+      validDate(value(task, "hs_timestamp")) > validDate(meeting.endAt)
+      && ((taskContacts.get(task.id) ?? []).some(id => meeting.contactIds.includes(id))
+        || (taskCompanies.get(task.id) ?? []).some(id => id === companyId)
+        || (taskDeals.get(task.id) ?? []).some(id => associatedDeals.some(deal => deal.id === id))))
+      .sort((a, b) => validDate(value(a, "hs_timestamp")) - validDate(value(b, "hs_timestamp")));
+    const taskSummary = (task: HubSpotRecord | undefined) => task ? {
+      id: task.id, subject: value(task, "hs_task_subject") || "Follow-up task",
+      dueAt: value(task, "hs_timestamp"), url: contactsForRow[0]?.url || company?.url || deal?.url || "",
+    } : null;
+    const nextTask = taskSummary(linkedTasks.find(task => validDate(value(task, "hs_timestamp")) >= Date.now()));
+    const overdueTask = taskSummary(linkedTasks.find(task => validDate(value(task, "hs_timestamp")) < Date.now()));
+    const review = reviewHandoff({
+      endAt: meeting.endAt, outcome: meeting.outcome, events,
+      linked: Boolean(meeting.contactIds.length || meeting.companyIds.length || meeting.dealIds.length), closed: Boolean(deal && !deal.isOpen),
+      nextTask: Boolean(nextTask), overdueTask: Boolean(overdueTask),
+    });
+    const followUp = firstFollowUp(review.events, meeting.endAt);
+    const nextActivity = nextTask?.dueAt || deal?.nextActivity
       || meetingContactsRecords.map((contact) => value(contact, "notes_next_activity_date")).filter(Boolean).sort()[0]
       || "";
     const lastSalesActivity = followUp.lastAt;
-    const attention = attentionFor({
+    let attention = attentionFor({
       meetingDate: meeting.startAt,
       outcome: meeting.outcome,
       followUpStatus: followUp.status,
@@ -526,7 +626,19 @@ async function buildHandoff(from: string, to: string, salesRepId: string): Promi
       nextActivity,
     });
 
+    if (!review.eligible) {
+      attention = { level: review.state === "outcome-missing" || review.state === "unlinked" ? "warning" : "ok",
+        reason: review.state === "outcome-missing" ? "Meeting outcome needs review"
+          : review.state === "unlinked" ? "Missing CRM associations"
+          : review.state === "within-sla" ? "Within 24h follow-up window"
+          : review.state === "closed" ? "Closed deal" : review.state === "upcoming" ? "Upcoming meeting" : "Canceled / rescheduled" };
+    } else if (review.noFollowUp) attention = { level: "critical", reason: "No logged Sales follow-up after SDR meeting" };
+    else if (review.overdueTask) attention = { level: "warning", reason: "Overdue Sales follow-up task" };
+    else if (review.noNextTask) attention = { level: "warning", reason: "No upcoming Sales follow-up task" };
     return {
+      bookedBy: { id: meeting.bookedBy!.id, name: meeting.bookedBy!.name },
+      nextTask, overdueTask, review,
+      salesRep: { id: salesRepId, name: ownerMap.get(salesRepId) || salesRepId },
       id: meeting.id,
       meetingId: meeting.id,
       meetingTitle: meeting.title,
@@ -564,10 +676,11 @@ async function buildHandoff(from: string, to: string, salesRepId: string): Promi
       from,
       to,
       timezone: HUBSPOT_TIMEZONE,
-      sdr: { id: SDR_OWNERS.marita.ownerId, name: SDR_OWNERS.marita.name },
+      sdrs: sdrs.map(({ id, name }) => ({ id, name })),
       salesRep: { id: salesRepId, name: salesRep?.name ?? (salesRepId === DEFAULT_SALES_REP_ID ? "Ursula Waked" : salesRepId) },
       salesReps,
-      followUpDays: FOLLOW_UP_DAYS,
+      followUpThrough: today,
+      excludedUnattributed: allMeetingGroups.filter(meeting => !meeting.bookedBy && localDay(meeting.startAt) >= from && localDay(meeting.startAt) <= to).length,
       cache: "miss",
     },
     kpis: {
@@ -596,10 +709,8 @@ async function getPayload(from: string, to: string, salesRepId: string, force: b
     };
   }
 
-  if (!force) {
-    const pending = inflight.get(key);
-    if (pending) return pending;
-  }
+  const pending = inflight.get(key);
+  if (pending) return pending;
 
   const promise = buildHandoff(from, to, salesRepId)
     .then((payload) => {
@@ -612,33 +723,31 @@ async function getPayload(from: string, to: string, salesRepId: string, force: b
   return promise;
 }
 
-function monthStart() {
-  const now = new Date();
-  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
-}
-
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const parsed = querySchema.safeParse({
-    from: params.get("from") ?? monthStart(),
+    from: params.get("from") ?? HANDOFF_START_DATE,
     to: params.get("to") ?? new Date().toISOString().slice(0, 10),
-    salesRepId: params.get("salesRepId") ?? DEFAULT_SALES_REP_ID,
+    salesRepId: params.get("salesRepId") ?? "all",
   });
 
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid sales handoff filters", details: parsed.error.flatten() }, { status: 400 });
   }
   const { from, to, salesRepId } = parsed.data;
+  if (from < HANDOFF_START_DATE) return NextResponse.json({ error: `SDR handoff tracking starts on ${HANDOFF_START_DATE}` }, { status: 400 });
   if (from > to) return NextResponse.json({ error: "The start date must be before the end date" }, { status: 400 });
   if (rangeDays(from, to) > MAX_REPORT_DAYS) {
     return NextResponse.json({ error: `Choose a reporting range of ${MAX_REPORT_DAYS} days or less` }, { status: 400 });
   }
-  if (!SALES_REP_OWNER_IDS.includes(salesRepId as (typeof SALES_REP_OWNER_IDS)[number])) {
+  if (salesRepId !== "all" && !SALES_REP_OWNER_IDS.includes(salesRepId as (typeof SALES_REP_OWNER_IDS)[number])) {
     return NextResponse.json({ error: "Choose a configured Talentera Sales Rep" }, { status: 400 });
   }
 
   try {
-    const payload = await getPayload(from, to, salesRepId, params.get("refresh") === "1");
+    const payload = salesRepId === "all"
+      ? await managementPayload(from, to, params.get("refresh") === "1")
+      : await getPayload(from, to, salesRepId, params.get("refresh") === "1");
     return compressedJsonResponse(request, payload, {
       "Cache-Control": "private, max-age=30, stale-while-revalidate=300",
       "X-Sales-Handoff-Cache": payload.meta.cache,
@@ -652,4 +761,27 @@ export async function GET(request: NextRequest) {
       details: error instanceof Error ? error.message : "Unknown error",
     }, { status: 500 });
   }
+}
+
+async function managementPayload(from: string, to: string, force: boolean): Promise<HandoffPayload> {
+  // Management overview requested for Ursula and Zein. Other configured reps
+  // remain available individually in the selector.
+  const reports = await Promise.all([SDR_OWNERS.ursula.ownerId, SDR_OWNERS.zein.ownerId]
+    .map(id => getPayload(from, to, id, force)));
+  const rows = reports.flatMap(report => report.rows);
+  const deals = [...new Map(rows.flatMap(row => row.deal ? [[row.deal.id, row.deal] as const] : [])).values()];
+  const followedUp = rows.filter(row => row.followUp.status !== "No follow-up").length;
+  return {
+    meta: { ...reports[0].meta,
+      generatedAt: reports.map(report => report.meta.generatedAt).sort()[0],
+      salesRep: { id: "all", name: "Ursula + Zein" },
+      excludedUnattributed: reports.reduce((sum, report) => sum + report.meta.excludedUnattributed, 0),
+      cache: reports.every(report => report.meta.cache === "hit") ? "hit" : "miss" },
+    kpis: { meetings: rows.length, completed: rows.filter(row => row.outcome === "COMPLETED").length,
+      followedUp, followUpRate: rows.length ? Math.round(followedUp / rows.length * 1000) / 10 : 0,
+      deals: deals.length, openDeals: deals.filter(deal => deal.isOpen).length,
+      closedWon: deals.filter(deal => deal.isClosedWon).length,
+      pipelineValue: deals.filter(deal => deal.isOpen).reduce((sum, deal) => sum + deal.amount, 0),
+      needsAttention: rows.filter(row => row.attention.level !== "ok").length }, rows,
+  };
 }

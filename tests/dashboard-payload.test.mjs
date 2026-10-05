@@ -136,3 +136,13 @@ test("instant dashboard keeps the highest-signal companies for ATS/account intel
   assert.ok(companyIds.has("250"), "company with the largest associated-contact count should be retained");
   assert.ok(!companyIds.has("1"), "low-signal company should be omitted from the initial browser payload");
 });
+
+test('full portfolio scoring evidence is bounded without changing KPI or alert counts', () => {
+  const source = dashboard();
+  source.intelligence = { accountEngagement: source.companies.map(company => ({ companyId: company.id, score: 80 })), highEngagementAccountsWithoutMeeting: { count: 250, ids: source.companies.map(company => company.id) } };
+  const projected = projectDashboardPayload(source);
+  assert.equal(projected.intelligence.accountEngagement.length, 80);
+  assert.equal(source.intelligence.accountEngagement.length, 250);
+  assert.equal(projected.intelligence.highEngagementAccountsWithoutMeeting, source.intelligence.highEngagementAccountsWithoutMeeting);
+  assert.ok(projected.intelligence.accountEngagement.every(account => projected.companies.some(company => company.id === account.companyId)));
+});

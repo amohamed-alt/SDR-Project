@@ -187,10 +187,10 @@ export function Dashboard({
               <span className={`${styles.toolIcon} ${styles.brainIcon}`}><BrainCircuit size={17}/></span>
               <span className={styles.toolCopy}><strong>Talentera Intelligence</strong><small>Account priority · target pool · call strategy</small></span>
             </button>
-            {sdr === "marita" ? <button className={`${styles.toolItem} ${view === "sales-handoff" ? styles.activeTool : ""}`} type="button" aria-current={view === "sales-handoff" ? "page" : undefined} onClick={() => changeView("sales-handoff")}>
+            <button className={`${styles.toolItem} ${view === "sales-handoff" ? styles.activeTool : ""}`} type="button" aria-current={view === "sales-handoff" ? "page" : undefined} onClick={() => changeView("sales-handoff")}>
               <span className={`${styles.toolIcon} ${styles.gtmIcon}`}><BriefcaseBusiness size={17}/></span>
-              <span className={styles.toolCopy}><strong>Sales Handoff</strong><small>Marita → Ursula · follow-up · deals · pipeline risk</small></span>
-            </button> : null}
+              <span className={styles.toolCopy}><strong>Sales Handoff</strong><small>Marita + Daniel → Sales · follow-up · deals</small></span>
+            </button>
             <button className={`${styles.toolItem} ${view === "inventory" ? styles.activeTool : ""}`} type="button" aria-current={view === "inventory" ? "page" : undefined} onClick={() => changeView("inventory")}>
               <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Building2 size={17}/></span>
               <span className={styles.toolCopy}><strong>Lead Inventory</strong><small>Company stock · sources · qualification · Marita & Daniel</small></span>

@@ -115,3 +115,16 @@ HubSpot currently contains calendar-sync meeting records plus separate CRM UI ou
 - Connected-call-to-meeting conversion: deduplicated meetings created in period / connected calls logged in period.
 - Lead response SLA: reporting-period contacts with populated `hs_time_to_first_engagement` of 24 hours or less / all reporting-period contacts. Missing timing is not treated as compliant.
 - Missing contact information: blank normalized phone, email, and LinkedIn values are reported separately, plus their union.
+
+## GTM / SDR handoff management review
+
+- Default meeting cohort: 13 July 2026 through today; subsequent Sales activities are checked through today even when the meeting-date filter ends earlier.
+- Included bookings have explicit Marita/Daniel booking notes or their verified HubSpot creator user IDs. Current contact ownership and meetings created by Sales are not booking attribution. Unverified meetings are excluded and disclosed.
+- Default management overview covers Ursula and Zein; other configured Sales reps can be selected individually.
+- Management cards count an account once per Sales rep, using its latest past non-canceled SDR meeting in the cohort. Individual SDR meetings remain available in the account-history drawer. A future or canceled meeting must not hide a previous actionable handoff.
+- Follow-up gap eligibility: linked completed/no-show meeting whose end time is at least 24h ago, without a closed associated deal. Upcoming, canceled, rescheduled, missing-outcome, and unlinked meetings are outside follow-up gap counts. Missing outcomes and associations remain visible as review states.
+- Logged follow-up: an associated Sales-owned call, outgoing sales email, WhatsApp communication, or completed meeting after the SDR meeting ends and no later than now. Scheduled/no-show later meetings are not completed follow-up. Calls count as logged effort; Connected uses the exact configured disposition ID.
+- No logged follow-up, no logged call attempt, no connected call, no upcoming Sales task, and overdue Sales task are separate signals. Lack of a connected call alone is not evidence of a lack of effort.
+- Open Sales tasks are matched through contact, company, or associated deal relationships. Overdue and upcoming tasks are shown separately. General contact/deal next-activity dates are not proof of a follow-up task owned by the Sales rep.
+- Stage table uses current HubSpot pipeline stage labels, including Proposal Shared when present, and groups eligible account/RM handoffs. Associated deals can predate the meeting and are explicitly labeled; association is not proof that GTM created the deal.
+- Risk counts depend on activities logged in HubSpot and their associations; unlogged activity cannot be inferred. Click a card or stage count to inspect account rows and click an account for booking history, activity evidence, and original CRM links.
