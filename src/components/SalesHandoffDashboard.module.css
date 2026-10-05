@@ -530,3 +530,15 @@
   .metrics { grid-template-columns: 1fr; }
   .tableToolbar { align-items: flex-start; flex-direction: column; }
 }
+
+.scopeNote { color: #64786f; font-size: 13px; line-height: 1.6; }
+.metricButton { text-align: left; cursor: pointer; font: inherit; width: 100%; }
+.metricButton:hover, .selectedMetric { outline: 2px solid #087a50; outline-offset: -2px; }
+.detailButton, .countButton { border: 0; border-radius: 6px; background: transparent; color: #087a50; font: inherit; font-weight: 700; cursor: pointer; min-height: 36px; padding: 4px 6px; text-align: left; }
+.countButton { min-width: 44px; text-align: center; background: #edf6f1; }
+.detailButton:hover, .countButton:hover { text-decoration: underline; background: #edf6f1; }
+.detailSection { border-bottom: 1px solid #dce7e2; padding: 12px 0 20px; line-height: 1.6; }
+.detailSection a { color: #087a50; }
+.evidenceList { padding-left: 20px; display: grid; gap: 14px; }
+.evidenceList a { display: grid; gap: 3px; }
+.metricButton:focus-visible, .detailButton:focus-visible, .countButton:focus-visible { outline: 3px solid #087a50; outline-offset: 2px; }

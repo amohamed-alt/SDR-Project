@@ -500,7 +500,7 @@ function RepKpiDashboard({
         <button className="refresh-button" type="button" onClick={() => setShowHandoff(current => !current)} aria-expanded={showHandoff}>
           <CalendarDays size={16}/>{showHandoff ? "Back to acquisition KPIs" : "SDR meetings & follow-up · Marita + Daniel"}
         </button>
-        {showHandoff ? <SalesHandoffDashboard salesRepId={owner.ownerId} from={handoffDates.from} to={handoffDates.to} onBack={() => setShowHandoff(false)}/> : <>
+        {showHandoff ? <SalesHandoffDashboard salesRepId={owner.ownerId} onBack={() => setShowHandoff(false)}/> : <>
         {data?.meta.warnings.length ? <div className="warning-banner"><AlertTriangle size={17}/><div><strong>{data.meta.isDemo ? "Demo mode" : "Some HubSpot data sources were unavailable"}</strong><span>{data.meta.warnings.join(" · ")}</span></div></div> : null}
         {error ? <div className="error-banner"><AlertTriangle size={20}/><div><strong>{data ? "Refresh failed — showing the last loaded data" : "KPI dashboard failed to load"}</strong><span>{error}</span></div><button type="button" onClick={() => void loadData(false)}>Try again</button></div> : null}
 
