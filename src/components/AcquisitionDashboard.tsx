@@ -25,6 +25,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import dynamic from "next/dynamic";
+const SalesHandoffDashboard = dynamic(() => import("@/components/SalesHandoffDashboard").then(module => module.SalesHandoffDashboard));
 const SdrComparison = dynamic(() => import("@/components/SdrComparison").then(module => module.SdrComparison));
 import { SDR_OWNERS, type SdrKey } from "@/lib/sdr-owners";
 import { AcquisitionDailyPulse } from "@/components/AcquisitionDailyPulse";
@@ -54,6 +55,7 @@ type MetricCard = {
 type RepClientCacheEntry = {
   data: DashboardData;
   loadedAt: number;
+  etag?: string;
 };
 
 const DEFAULT_START = process.env.NEXT_PUBLIC_DEFAULT_START_DATE ?? new Date().toISOString().slice(0, 7) + "-01";
@@ -76,12 +78,12 @@ function acquisitionOwnerFromUrl(): AcquisitionOwnerKey {
   return value === "ursula" || value === "zein" || value === "daniel" || value === "comparison" ? value : "marita";
 }
 
-function repClientCacheKey(ownerId: string) {
-  return `${ownerId}:${DEFAULT_START}:${TODAY}`;
+function repClientCacheKey(ownerId: string, from = DEFAULT_START, to = TODAY) {
+  return `${ownerId}:${from}:${to}`;
 }
 
-function cachedRepData(ownerId: string) {
-  return repClientCache.get(repClientCacheKey(ownerId));
+function cachedRepData(ownerId: string, from = DEFAULT_START, to = TODAY) {
+  return repClientCache.get(repClientCacheKey(ownerId, from, to));
 }
 
 function formatNumber(value: number) {
@@ -202,7 +204,12 @@ function RepKpiDashboard({
   onSelectOwner: (owner: AcquisitionOwnerKey) => void;
 }) {
   const owner = ACQUISITION_OWNERS[ownerKey];
-  const initialCache = cachedRepData(owner.ownerId);
+  const [showHandoff, setShowHandoff] = useState(false);
+  const [handoffDates] = useState(() => {
+    const params = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
+    return { from: params.get("from") || DEFAULT_START, to: params.get("to") || TODAY };
+  });
+  const initialCache = cachedRepData(owner.ownerId, handoffDates.from, handoffDates.to);
   const [data, setData] = useState<DashboardData | null>(() => initialCache?.data ?? null);
   const hasDataRef = useRef(Boolean(initialCache));
   const [loading, setLoading] = useState(() => !initialCache);
@@ -213,7 +220,7 @@ function RepKpiDashboard({
   const refreshStartedAtRef = useRef(0);
 
   const loadData = useCallback(async (forceRefresh = false, pollRefresh = false) => {
-    const cacheKey = repClientCacheKey(owner.ownerId);
+    const cacheKey = repClientCacheKey(owner.ownerId, handoffDates.from, handoffDates.to);
     const cached = repClientCache.get(cacheKey);
     const cacheIsFresh = cached && Date.now() - cached.loadedAt < REP_CLIENT_CACHE_TTL_MS;
 
@@ -232,8 +239,8 @@ function RepKpiDashboard({
     setError("");
 
     const query = new URLSearchParams({
-      from: DEFAULT_START,
-      to: TODAY,
+      from: handoffDates.from,
+      to: handoffDates.to,
       ownerId: owner.ownerId,
     });
     if (forceRefresh) query.set("refresh", "1");
@@ -241,15 +248,16 @@ function RepKpiDashboard({
     try {
       const response = await fetch(`/api/dashboard?${query.toString()}`, {
         cache: "no-store",
+        headers: cached?.etag ? { "If-None-Match": cached.etag } : {},
         signal: AbortSignal.timeout(60_000),
       });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.details || payload.error || "Dashboard request failed");
+      const payload = response.status === 304 && cached ? cached.data : await response.json();
+      if (response.status !== 304 && !response.ok) throw new Error(payload.details || payload.error || "Dashboard request failed");
       const nextData = payload as DashboardData;
       if (nextData.meta.ownerId !== owner.ownerId) {
         throw new Error(`Owner data mismatch: expected ${owner.ownerId}, received ${nextData.meta.ownerId || "unknown"}`);
       }
-      repClientCache.set(cacheKey, { data: nextData, loadedAt: Date.now() });
+      repClientCache.set(cacheKey, { data: nextData, loadedAt: Date.now(), etag: response.headers.get("etag") || cached?.etag });
       hasDataRef.current = true;
       setData(nextData);
       const serverRefreshing = response.headers.get("X-Dashboard-Refreshing") === "1";
@@ -264,7 +272,7 @@ function RepKpiDashboard({
       setLoading(false);
       setRequesting(false);
     }
-  }, [owner.ownerId]);
+  }, [owner.ownerId, handoffDates.from, handoffDates.to]);
 
   useEffect(() => {
     void loadData(false);
@@ -489,6 +497,10 @@ function RepKpiDashboard({
           </div>
         </div>
 
+        <button className="refresh-button" type="button" onClick={() => setShowHandoff(current => !current)} aria-expanded={showHandoff}>
+          <CalendarDays size={16}/>{showHandoff ? "Back to acquisition KPIs" : "SDR meetings & follow-up · Marita + Daniel"}
+        </button>
+        {showHandoff ? <SalesHandoffDashboard salesRepId={owner.ownerId} from={handoffDates.from} to={handoffDates.to} onBack={() => setShowHandoff(false)}/> : <>
         {data?.meta.warnings.length ? <div className="warning-banner"><AlertTriangle size={17}/><div><strong>{data.meta.isDemo ? "Demo mode" : "Some HubSpot data sources were unavailable"}</strong><span>{data.meta.warnings.join(" · ")}</span></div></div> : null}
         {error ? <div className="error-banner"><AlertTriangle size={20}/><div><strong>{data ? "Refresh failed — showing the last loaded data" : "KPI dashboard failed to load"}</strong><span>{error}</span></div><button type="button" onClick={() => void loadData(false)}>Try again</button></div> : null}
 
@@ -496,6 +508,7 @@ function RepKpiDashboard({
           ? <div className="kpi-grid">{cards.map((card) => <MetricButton key={card.label} {...card}/>)}</div>
           : (loading ? <KpiSkeleton/> : null)}
         {data ? <AcquisitionDailyPulse data={data} ownerName={owner.name} onOpen={setDrilldown}/> : null}
+        </>}
       </div>
     </div>
 

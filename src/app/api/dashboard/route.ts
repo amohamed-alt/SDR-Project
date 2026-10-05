@@ -60,12 +60,12 @@ export async function GET(request: NextRequest) {
         }
       : await getDashboardSnapshot(filters, params.get("refresh") === "1");
 
-    const payload = projectDashboardPayload(snapshot.data);
+    const data = snapshot.data;
     const etagSeed = JSON.stringify({
       filters,
-      generatedAt: payload.meta.generatedAt,
-      warnings: payload.meta.warnings,
-      payloadProfile: "instant-v2.1",
+      generatedAt: data.meta.generatedAt,
+      warnings: data.meta.warnings,
+      payloadProfile: "instant-v2.2",
     });
     const etag = `W/"${createHash("sha256").update(etagSeed).digest("hex").slice(0, 32)}"`;
     const headers = {
@@ -74,14 +74,18 @@ export async function GET(request: NextRequest) {
       "X-Dashboard-Cache": snapshot.cacheStatus,
       "X-Dashboard-Snapshot-Age": String(snapshot.ageSeconds),
       "X-Dashboard-Refreshing": snapshot.refreshing ? "1" : "0",
-      "X-Dashboard-Payload": "instant-v2.1",
-      "X-Dashboard-Contacts-Sent": String(payload.priorityContacts.length),
-      "X-Dashboard-Activities-Sent": String(payload.recentActivities.length),
-      "X-Dashboard-Companies-Sent": String(payload.companies.length),
+      "X-Dashboard-Payload": "instant-v2.2",
+      "X-Dashboard-Contacts-Sent": String(data.priorityContacts.length),
+      "X-Dashboard-Activities-Sent": String(data.recentActivities.length),
+      "X-Dashboard-Companies-Sent": String(data.companies.length),
       "ETag": etag,
       "Vary": "Accept-Encoding",
     };
     if (request.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
+    const payload = projectDashboardPayload(data);
+    headers["X-Dashboard-Contacts-Sent"] = String(payload.priorityContacts.length);
+    headers["X-Dashboard-Activities-Sent"] = String(payload.recentActivities.length);
+    headers["X-Dashboard-Companies-Sent"] = String(payload.companies.length);
     return compressedJsonResponse(request, payload, headers);
   } catch (error) {
     console.error("Dashboard load failed", error);

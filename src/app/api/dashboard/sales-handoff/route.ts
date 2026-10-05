@@ -7,6 +7,7 @@ import {
   EMAIL_PROPERTIES,
   HUBSPOT_TIMEZONE,
   MEETING_PROPERTIES,
+  TASK_PROPERTIES,
   hubspotRecordUrl,
 } from "@/lib/config";
 import { compressedJsonResponse } from "@/lib/compressed-json";
@@ -18,6 +19,7 @@ import {
   searchAll,
   type SearchFilter,
 } from "@/lib/hubspot";
+import { bookingSdr, type BookingSdr } from "@/lib/handoff-attribution";
 import { meetingCreatorId } from "@/lib/owner-attribution";
 import { SALES_REP_OWNER_IDS } from "@/lib/sales-reps";
 import { SDR_OWNERS } from "@/lib/sdr-owners";
@@ -32,7 +34,6 @@ const MAX_CACHE_ENTRIES = 12;
 const FOLLOW_UP_DAYS = 90;
 const MAX_REPORT_DAYS = 180;
 const OUTCOME_PRIORITY = ["COMPLETED", "NO_SHOW", "CANCELED", "RESCHEDULED", "SCHEDULED"];
-const MARITA_BOOKING_MARKER = "booked by marita";
 
 const HANDOFF_MEETING_PROPERTIES = [
   ...MEETING_PROPERTIES,
@@ -80,7 +81,7 @@ type MeetingGroup = {
   startAt: string;
   endAt: string;
   contactIds: string[];
-  maritaCreated: boolean;
+  bookedBy: BookingSdr | null;
 };
 
 type HandoffDeal = {
@@ -99,6 +100,8 @@ type HandoffDeal = {
 
 type HandoffRow = {
   id: string;
+  bookedBy: { id: string; name: string };
+  nextTask: { id: string; subject: string; dueAt: string; url: string } | null;
   meetingId: string;
   meetingTitle: string;
   meetingDate: string;
@@ -141,7 +144,7 @@ type HandoffPayload = {
     from: string;
     to: string;
     timezone: string;
-    sdr: { id: string; name: string };
+    sdrs: Array<{ id: string; name: string }>;
     salesRep: { id: string; name: string };
     salesReps: Array<{ id: string; name: string }>;
     followUpDays: number;
@@ -238,7 +241,7 @@ function meetingKey(record: HubSpotRecord, associations: Map<string, string[]>) 
 function dedupeMeetings(
   records: HubSpotRecord[],
   associations: Map<string, string[]>,
-  maritaCreatorId: string | undefined,
+  sdrs: BookingSdr[],
 ): MeetingGroup[] {
   const grouped = new Map<string, HubSpotRecord[]>();
   for (const record of records) {
@@ -247,11 +250,8 @@ function dedupeMeetings(
   }
 
   return [...grouped.values()].map((group) => {
-    const markerRecord = group.find((record) => value(record, "hs_internal_meeting_notes").toLowerCase().includes(MARITA_BOOKING_MARKER));
-    const creatorRecord = maritaCreatorId
-      ? group.find((record) => value(record, "hs_created_by_user_id") === maritaCreatorId)
-      : undefined;
-    const primary = markerRecord ?? creatorRecord ?? group[0];
+    const attributedSdr = bookingSdr(group, sdrs);
+    const primary = group.find(record => attributedSdr && bookingSdr([record], sdrs)?.id === attributedSdr.id) ?? group[0];
     const startAt = meetingTimestamp(primary);
     const outcome = OUTCOME_PRIORITY.find((candidate) => group.some((record) => value(record, "hs_meeting_outcome") === candidate))
       ?? value(primary, "hs_meeting_outcome")
@@ -265,7 +265,7 @@ function dedupeMeetings(
       startAt,
       endAt: meetingEnd(primary, startAt),
       contactIds,
-      maritaCreated: Boolean(markerRecord || creatorRecord),
+      bookedBy: attributedSdr,
     };
   }).filter((meeting) => Boolean(meeting.startAt));
 }
@@ -289,7 +289,7 @@ function addActivity(
 function firstFollowUp(events: ActivityEvent[], after: string) {
   const cutoff = validDate(after) + 60_000;
   const candidates = events
-    .filter((event) => validDate(event.at) > cutoff)
+    .filter((event) => validDate(event.at) > cutoff && validDate(event.at) <= Date.now())
     .sort((a, b) => validDate(a.at) - validDate(b.at));
   const first = candidates[0];
   if (!first) {
@@ -390,7 +390,9 @@ async function buildHandoff(from: string, to: string, salesRepId: string): Promi
     ], ["hs_timestamp"]),
   ]);
 
-  const maritaCreatorId = meetingCreatorId(owners, SDR_OWNERS.marita.ownerId);
+  const sdrs = [SDR_OWNERS.marita, SDR_OWNERS.daniel].map(sdr => ({
+    id: sdr.ownerId, name: sdr.name, creatorId: meetingCreatorId(owners, sdr.ownerId),
+  }));
   const [meetingContacts, callContacts, emailContacts, communicationContacts] = await Promise.all([
     readAssociations("meetings", "contacts", meetingsRaw.map((record) => record.id)),
     readAssociations("calls", "contacts", callsRaw.map((record) => record.id)),
@@ -398,15 +400,26 @@ async function buildHandoff(from: string, to: string, salesRepId: string): Promi
     readAssociations("communications", "contacts", communicationsRaw.map((record) => record.id)),
   ]);
 
-  const allMeetingGroups = dedupeMeetings(meetingsRaw, meetingContacts, maritaCreatorId);
+  const allMeetingGroups = dedupeMeetings(meetingsRaw, meetingContacts, sdrs);
   const cohort = allMeetingGroups
-    .filter((meeting) => meeting.maritaCreated && localDay(meeting.startAt) >= from && localDay(meeting.startAt) <= to)
+    .filter((meeting) => meeting.bookedBy && localDay(meeting.startAt) >= from && localDay(meeting.startAt) <= to)
     .sort((a, b) => validDate(b.startAt) - validDate(a.startAt));
 
   const contactIds = [...new Set(cohort.flatMap((meeting) => meeting.contactIds))];
-  const [contacts, contactDeals] = await Promise.all([
+  const [contacts, contactDeals, tasksRaw] = await Promise.all([
     batchRead("contacts", contactIds, HANDOFF_CONTACT_PROPERTIES),
     readAssociations("contacts", "deals", contactIds),
+    // Open tasks are a current state, independent of the meeting-date cohort.
+    contactIds.length ? searchAll("tasks", TASK_PROPERTIES, [
+      { propertyName: "hubspot_owner_id", operator: "EQ", value: salesRepId },
+      { propertyName: "hs_task_status", operator: "IN", values: ["NOT_STARTED", "IN_PROGRESS", "WAITING", "DEFERRED"] },
+    ], ["hs_timestamp"]) : Promise.resolve([]),
+  ]);
+  const taskIds = tasksRaw.map(task => task.id);
+  const [taskContacts, taskCompanies, taskDeals] = await Promise.all([
+    readAssociations("tasks", "contacts", taskIds),
+    readAssociations("tasks", "companies", taskIds),
+    readAssociations("tasks", "deals", taskIds),
   ]);
   const contactMap = new Map(contacts.map((contact) => [contact.id, contact]));
   const dealIds = [...new Set([...contactDeals.values()].flat())];
@@ -513,7 +526,18 @@ async function buildHandoff(from: string, to: string, salesRepId: string): Promi
     )].map((dealId) => dealMap.get(dealId)).filter(Boolean) as HandoffDeal[];
     const deal = chooseDeal(associatedDeals, meeting.startAt);
     const dealCreatedAfterMeeting = Boolean(deal && validDate(deal.createdAt) >= validDate(meeting.startAt));
-    const nextActivity = deal?.nextActivity
+    const nextTaskRecord = tasksRaw.filter(task =>
+      validDate(value(task, "hs_timestamp")) >= Date.now()
+      && validDate(value(task, "hs_timestamp")) > validDate(meeting.endAt)
+      && ((taskContacts.get(task.id) ?? []).some(id => meeting.contactIds.includes(id))
+        || (taskCompanies.get(task.id) ?? []).some(id => id === companyId)
+        || (taskDeals.get(task.id) ?? []).some(id => associatedDeals.some(deal => deal.id === id))))
+      .sort((a, b) => validDate(value(a, "hs_timestamp")) - validDate(value(b, "hs_timestamp")))[0];
+    const nextTask = nextTaskRecord ? {
+      id: nextTaskRecord.id, subject: value(nextTaskRecord, "hs_task_subject") || "Follow-up task",
+      dueAt: value(nextTaskRecord, "hs_timestamp"), url: contactsForRow[0]?.url || company?.url || "",
+    } : null;
+    const nextActivity = nextTask?.dueAt || deal?.nextActivity
       || meetingContactsRecords.map((contact) => value(contact, "notes_next_activity_date")).filter(Boolean).sort()[0]
       || "";
     const lastSalesActivity = followUp.lastAt;
@@ -526,7 +550,14 @@ async function buildHandoff(from: string, to: string, salesRepId: string): Promi
       nextActivity,
     });
 
+    if (attention.level === "ok" && ["COMPLETED", "NO_SHOW"].includes(meeting.outcome)
+        && Date.now() - validDate(meeting.endAt) > 24 * 3_600_000 && !nextTask && !deal?.isClosedWon) {
+      attention.level = "warning";
+      attention.reason = "No upcoming Sales follow-up task";
+    }
     return {
+      bookedBy: { id: meeting.bookedBy!.id, name: meeting.bookedBy!.name },
+      nextTask,
       id: meeting.id,
       meetingId: meeting.id,
       meetingTitle: meeting.title,
@@ -564,7 +595,7 @@ async function buildHandoff(from: string, to: string, salesRepId: string): Promi
       from,
       to,
       timezone: HUBSPOT_TIMEZONE,
-      sdr: { id: SDR_OWNERS.marita.ownerId, name: SDR_OWNERS.marita.name },
+      sdrs: sdrs.map(({ id, name }) => ({ id, name })),
       salesRep: { id: salesRepId, name: salesRep?.name ?? (salesRepId === DEFAULT_SALES_REP_ID ? "Ursula Waked" : salesRepId) },
       salesReps,
       followUpDays: FOLLOW_UP_DAYS,
@@ -596,10 +627,8 @@ async function getPayload(from: string, to: string, salesRepId: string, force: b
     };
   }
 
-  if (!force) {
-    const pending = inflight.get(key);
-    if (pending) return pending;
-  }
+  const pending = inflight.get(key);
+  if (pending) return pending;
 
   const promise = buildHandoff(from, to, salesRepId)
     .then((payload) => {

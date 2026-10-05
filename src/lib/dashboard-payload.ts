@@ -70,5 +70,13 @@ export function projectDashboardPayload(data: DashboardData): DashboardData {
     priorityContacts: data.priorityContacts.filter((contact) => contactIds.has(contact.id)),
     recentActivities: data.recentActivities.filter((activity) => activityIds.has(activity.id)),
     companies,
+    // Per-account scoring evidence is used to calculate server-side signals.
+    // No browser view reads this full-portfolio array; preserve summary counts
+    // and IDs, and only carry evidence for the companies sent to the browser.
+    ...(data.intelligence ? { intelligence: {
+      ...data.intelligence,
+      accountEngagement: data.intelligence.accountEngagement.filter(account =>
+        companies.some(company => company.id === account.companyId)),
+    } } : {}),
   };
 }
