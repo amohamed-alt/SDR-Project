@@ -92,7 +92,7 @@ export function SalesHandoffDashboard({ onBack, salesRepId = "all", from = HANDO
     }
     return [...groups].sort(([a], [b]) => a.localeCompare(b));
   }, [accounts]);
-  const scoped = accounts.filter(row => !stage || (row.deal?.stage || "No associated deal") === stage);
+  const scoped = accounts.filter(row => !stage || (row.review.eligible && (row.deal?.stage || "No associated deal") === stage));
   const visibleRows = scoped.filter(row => matchesReview(row, bucket));
   const selectedHistory = selected ? (data?.rows || []).filter(row => accountKey(row) === accountKey(selected)).sort((a, b) => Date.parse(b.meetingDate) - Date.parse(a.meetingDate)) : [];
   const closeDetails = useCallback(() => setSelected(null), []);
@@ -120,7 +120,7 @@ export function SalesHandoffDashboard({ onBack, salesRepId = "all", from = HANDO
     {error ? <div className={styles.error} role="alert"><AlertTriangle size={18}/><div><strong>{data ? "Refresh failed; showing the previous report" : "Report could not load"}</strong><div>{error}</div></div></div> : null}
     {loading && !data ? <div className={styles.loading} role="status"><RefreshCw className={styles.spinning}/><strong>Loading SDR handoff follow-up…</strong><span>Reading verified bookings and associated Sales activities.</span></div> : null}
     {data ? <>
-      <p className={styles.scopeNote}>Meeting cohort: {data.meta.from} to {data.meta.to}. Sales activities checked through {data.meta.followUpThrough}. Counts are accounts, once per Sales rep, based on their latest past SDR meeting. Risk cards cover completed / no-show meetings more than 24h old with no closed deal. Missing associations and outcomes need review; future and canceled meetings are excluded from follow-up gaps.</p>
+      <p className={styles.scopeNote}>Meeting cohort: {data.meta.from} to {data.meta.to}. Sales activities checked through {data.meta.followUpThrough}. Counts are accounts, once per Sales rep, based on their latest past SDR meeting. An account may appear in multiple gap cards. Risk cards cover completed / no-show meetings more than 24h old with no closed deal. Missing associations and outcomes need review; future and canceled meetings are excluded from follow-up gaps.</p>
       <section className={styles.metrics} aria-label="Management follow-up cards">{BUCKETS.map(({ key, label, helper, icon: Icon }) => {
         const count = scoped.filter(row => matchesReview(row, key)).length;
         return <button type="button" aria-pressed={bucket === key} className={`${styles.metric} ${styles.metricButton} ${bucket === key ? styles.selectedMetric : ""}`} key={key} onClick={() => setBucket(key)}><div className={styles.metricTop}><span>{label}</span><Icon size={16}/></div><strong>{count}</strong><small>{helper} · View accounts</small></button>;
