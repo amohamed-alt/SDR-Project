@@ -7,6 +7,7 @@ import { openRouterCompletion, getOpenRouterStatus } from "@/lib/openrouter-low-
 import { SDR_OWNERS } from "@/lib/sdr-owners";
 import { sdrEvidenceAnswer } from "@/lib/sdr-evidence-answer";
 import { getMarketNews } from "@/lib/market-news";
+import { originMatchesRequestHosts } from "@/lib/request-origin";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -19,7 +20,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const origin = request.headers.get("origin");
   const site = request.headers.get("sec-fetch-site");
-  if ((site && !["same-origin", "same-site", "none"].includes(site)) || (origin && origin !== request.nextUrl.origin)) return NextResponse.json({ error: "Cross-site requests are not allowed" }, { status: 403 });
+  if ((site && !["same-origin", "same-site", "none"].includes(site)) || !originMatchesRequestHosts({ origin, forwardedHost: request.headers.get("x-forwarded-host"), host: request.headers.get("host"), requestHost: request.nextUrl.host })) return NextResponse.json({ error: "Cross-site requests are not allowed" }, { status: 403 });
   if (process.env.DEMO_MODE === "true") return NextResponse.json({ error: "AI is disabled in demo mode. Evidence-based recommendations remain available." }, { status: 503 });
   if (Number(request.headers.get("content-length") || 0) > 5000) return NextResponse.json({ error: "Request is too large" }, { status: 413 });
   const parsed = schema.safeParse(await request.json().catch(() => null));
