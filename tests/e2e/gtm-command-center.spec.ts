@@ -173,3 +173,18 @@ test("summary and detail APIs support versioned records, global search and full 
   query.set("selection", JSON.stringify({ kind: "contacts", where: [{ field: "__proto__" }] }));
   expect((await page.request.get(`/api/dashboard/records?${query}`)).status()).toBe(400);
 });
+
+
+test("an expired export offers a dashboard reload instead of retrying the old version", async ({ page }) => {
+  await page.route("**/api/dashboard/records?**", async route => {
+    if (new URL(route.request().url()).searchParams.get("format") === "csv") {
+      await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "This snapshot has expired. Reload the dashboard to use the latest matching records.", code: "SNAPSHOT_EXPIRED" }) });
+    } else await route.continue();
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: /Companies.*Distinct associated accounts/i }).first().click();
+  const drawer = page.getByRole("dialog", { name: "Associated companies" });
+  await expect(drawer.getByRole("button", { name: "CSV", exact: true })).toBeEnabled();
+  await drawer.getByRole("button", { name: "CSV", exact: true }).click();
+  await expect(drawer.getByRole("button", { name: "Reload dashboard", exact: true })).toBeVisible();
+});
