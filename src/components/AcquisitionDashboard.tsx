@@ -472,6 +472,7 @@ export function AcquisitionDashboard({ initialOwner, initialSearch }: { initialO
   function selectOwner(owner: AcquisitionOwnerKey) {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     const url = new URL(window.location.href);
+    if (owner === "intelligence" && (activeOwner === "marita" || activeOwner === "daniel")) url.searchParams.set("analysisOwner", activeOwner);
     if (owner === "marita") url.searchParams.delete("acq");
     else url.searchParams.set("acq", owner);
     for (const parameter of ["tab", "workspace", "view"]) {

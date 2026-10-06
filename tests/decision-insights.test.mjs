@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildDecisionInsights, agentEvidence, wilsonLowerBound } from "../src/lib/decision-insights.ts";
 import { normalizeNewsItems } from "../src/lib/market-news.ts";
-import { bookedBySdr } from "../src/lib/handoff-attribution.ts";
+import { bookedBySdr, bookingEvidenceIndex } from "../src/lib/handoff-attribution.ts";
 import { sdrEvidenceAnswer } from "../src/lib/sdr-evidence-answer.ts";
 
 function fixture() {
@@ -54,6 +54,11 @@ test("SDR attribution requires explicit source evidence and isolates Marita and 
   assert.equal(bookedBySdr("Booked by MaritaX", "", undefined, "marita"), false);
   assert.equal(bookedBySdr("", "123", "123", "marita"), true);
   assert.equal(bookedBySdr("Owner Ursula", "", undefined, "marita"), false);
+  assert.equal(bookedBySdr("Booked by Daniel", "123", "123", "marita"), false);
+  const duplicated = [{ notes: "Booked by Daniel", creatorId: "123" }, { notes: "", creatorId: "123" }];
+  assert.equal(bookingEvidenceIndex(duplicated, "marita", "123"), -1);
+  assert.equal(bookingEvidenceIndex(duplicated, "daniel", "456"), 0);
+  assert.equal(bookingEvidenceIndex([...duplicated, { notes: "Booked by Marita", creatorId: "123" }], "daniel", "456"), -1);
 });
 test("news retains source/date evidence and rejects unsafe links, duplicates and stale/future items", () => {
   const now = Date.parse("2026-10-07T00:00:00Z");

@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
     });
     const json = JSON.parse(result.content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""));
     const answer = answerSchema.parse(json);
-    const citations = (news?.items ?? []).filter(item => answer.evidence.includes(item.id as "N1"));
+    const citations = (news?.items ?? []).filter(item => (answer.evidence as string[]).includes(item.id));
     if (answer.evidence.some(id => id.startsWith("N") && !citations.some(item => item.id === id))) throw new Error("Unknown source");
     return NextResponse.json({ ...answer, mode: "ai", citations, version: data.meta.generatedAt, model: result.model, cached: result.cached }, { headers: { "Cache-Control": "private, no-store" } });
   } catch {

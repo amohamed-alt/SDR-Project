@@ -21,7 +21,7 @@ import {
 import { meetingCreatorId } from "@/lib/owner-attribution";
 import { SALES_REP_OWNER_IDS } from "@/lib/sales-reps";
 import { dashboardDate } from "@/lib/dashboard-query";
-import { bookedBySdr } from "@/lib/handoff-attribution";
+import { bookingEvidenceIndex } from "@/lib/handoff-attribution";
 import { SDR_OWNERS } from "@/lib/sdr-owners";
 import type { HubSpotRecord } from "@/lib/types";
 
@@ -251,11 +251,8 @@ function dedupeMeetings(
   }
 
   return [...grouped.values()].map((group) => {
-    const markerRecord = group.find((record) => bookedBySdr(value(record, "hs_internal_meeting_notes"), "", undefined, sdr));
-    const creatorRecord = sdrCreatorId
-      ? group.find((record) => value(record, "hs_created_by_user_id") === sdrCreatorId)
-      : undefined;
-    const primary = markerRecord ?? creatorRecord ?? group[0];
+    const evidenceIndex = bookingEvidenceIndex(group.map(record => ({ notes: value(record, "hs_internal_meeting_notes"), creatorId: value(record, "hs_created_by_user_id") })), sdr, sdrCreatorId);
+    const primary = evidenceIndex >= 0 ? group[evidenceIndex] : group[0];
     const startAt = meetingTimestamp(primary);
     const outcome = OUTCOME_PRIORITY.find((candidate) => group.some((record) => value(record, "hs_meeting_outcome") === candidate))
       ?? value(primary, "hs_meeting_outcome")
@@ -269,7 +266,7 @@ function dedupeMeetings(
       startAt,
       endAt: meetingEnd(primary, startAt),
       contactIds,
-      sdrCreated: Boolean(markerRecord || creatorRecord),
+      sdrCreated: evidenceIndex >= 0,
     };
   }).filter((meeting) => Boolean(meeting.startAt));
 }

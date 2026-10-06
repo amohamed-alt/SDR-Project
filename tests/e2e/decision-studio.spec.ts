@@ -8,20 +8,28 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("RM charts expose source records and keep handoff scope isolated", async ({ page }) => {
-  await page.goto("/?acq=zein&from=2026-10-01&to=2026-10-04");
+  // The shared demo fixture's source activities are dated July 19.
+  await page.goto("/?acq=zein&from=2026-07-01&to=2026-07-19");
   await expect(page.getByRole("heading", { name: "Activity over time" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Deals by stage" })).toBeVisible();
   await page.getByText("Explore daily records", { exact: true }).click();
   const recordRequest = page.waitForResponse(response => response.url().includes("/api/dashboard/records"));
-  await page.getByRole("button", { name: /^2026-10-01/ }).click();
-  expect((await recordRequest).status()).toBe(200);
+  await page.getByRole("button", { name: /^2026-07-19/ }).click();
+  const records = await recordRequest;
+  expect(records.status()).toBe(200);
+  const recordUrl = new URL(records.url());
+  expect(recordUrl.searchParams.get("ownerId")).toBe("31558980");
+  expect(recordUrl.searchParams.get("from")).toBe("2026-07-01");
+  expect(JSON.parse(recordUrl.searchParams.get("selection")!)).toMatchObject({ kind: "activities", day: "2026-07-19" });
+  expect((await records.json()).rows).toEqual([expect.objectContaining({ id: "call-1", subject: "Discovery call" })]);
+  await expect(page.getByRole("dialog").getByText("Discovery call", { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   let handoffUrl = "";
   await page.route("**/api/dashboard/sales-handoff?**", route => { handoffUrl = route.request().url(); return route.fulfill({ status: 503, json: { error: "No live fixture" } }); });
   await page.getByRole("button", { name: "SDR meeting handoff", exact: true }).click();
   await expect(page.getByText("No live fixture")).toBeVisible();
   expect(new URL(handoffUrl).searchParams.get("salesRepId")).toBe("31558980");
-  expect(new URL(handoffUrl).searchParams.get("from")).toBe("2026-10-01");
+  expect(new URL(handoffUrl).searchParams.get("from")).toBe("2026-07-01");
   await page.getByLabel("Booking SDR").selectOption("daniel");
   await page.getByRole("button", { name: "Apply dates" }).click();
   await expect.poll(() => new URL(handoffUrl).searchParams.get("sdr")).toBe("daniel");
