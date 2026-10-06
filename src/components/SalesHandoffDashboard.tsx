@@ -28,6 +28,9 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { SDR_OWNERS } from "@/lib/sdr-owners";
+import { dashboardToday } from "@/lib/dashboard-values";
+import { readDashboardView } from "@/lib/dashboard-url-state";
 import styles from "@/components/SalesHandoffDashboard.module.css";
 
 type FollowUpStatus = "Within 24h" | "24–48h" | "48h+" | "No follow-up";
@@ -125,7 +128,7 @@ const COLORS = ["#087a50", "#3d7fd6", "#8b5fc7", "#d99b28", "#d85845", "#4b9e91"
 const EMPTY_FILTERS: ClientFilters = { outcome: "", followUp: "", dealStage: "", attention: "", search: "" };
 
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return dashboardToday();
 }
 
 function monthStart() {
@@ -178,8 +181,10 @@ function attentionClass(level: AttentionLevel) {
   return styles.good;
 }
 
-export function SalesHandoffDashboard({ onBack }: { onBack: () => void }) {
-  const initial = { from: monthStart(), to: today(), salesRepId: DEFAULT_SALES_REP_ID };
+export function SalesHandoffDashboard({ onBack, initialSearch = "", initialSalesRepId = DEFAULT_SALES_REP_ID, initialSdr = "marita", embedded = false }: { onBack: () => void; initialSearch?: string; initialSalesRepId?: string; initialSdr?: "marita" | "daniel"; embedded?: boolean }) {
+  const range = readDashboardView(initialSearch, { from: monthStart(), to: today(), ownerId: initialSalesRepId }).filters;
+  const initial = { from: range.from, to: range.to, salesRepId: initialSalesRepId, sdr: initialSdr };
+  const sourceName = (key: string) => key === "daniel" ? "Daniel" : "Marita";
   const [draft, setDraft] = useState(initial);
   const [applied, setApplied] = useState(initial);
   const [filters, setFilters] = useState<ClientFilters>(EMPTY_FILTERS);
@@ -192,10 +197,11 @@ export function SalesHandoffDashboard({ onBack }: { onBack: () => void }) {
     const sequence = ++requestSequence.current;
     setLoading(true);
     setError("");
+    setData(null);
     try {
       const query = new URLSearchParams(applied);
       if (force) query.set("refresh", "1");
-      const response = await fetch(`/api/dashboard/sales-handoff?${query.toString()}`, { cache: "no-store" });
+      const response = await fetch(`/api/dashboard/sales-handoff?${query.toString()}`, { cache: "no-store", signal: AbortSignal.timeout(60_000) });
       const payload = await response.json() as HandoffPayload & { error?: string; details?: string };
       if (!response.ok) throw new Error(payload.error || payload.details || "Unable to load Sales Handoff");
       if (sequence !== requestSequence.current) return;
@@ -210,7 +216,7 @@ export function SalesHandoffDashboard({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => void load(false), 0);
-    return () => window.clearTimeout(initialLoad);
+    return () => { window.clearTimeout(initialLoad); requestSequence.current += 1; };
   }, [load]);
 
   const options = useMemo(() => {
@@ -302,7 +308,7 @@ export function SalesHandoffDashboard({ onBack }: { onBack: () => void }) {
   }, [filteredRows]);
 
   const metrics = [
-    { label: "Marita meetings", value: formatNumber(computed.meetings), helper: `${computed.completed} completed`, icon: CalendarDays },
+    { label: `${sourceName(applied.sdr)} meetings`, value: formatNumber(computed.meetings), helper: `${computed.completed} completed`, icon: CalendarDays },
     { label: "Sales follow-up", value: `${computed.followUpRate}%`, helper: `${computed.followedUp} meetings followed up`, icon: Activity },
     { label: "Associated deals", value: formatNumber(computed.deals), helper: `${computed.openDeals} currently open`, icon: BriefcaseBusiness },
     { label: "Open pipeline", value: formatCurrency(computed.pipelineValue), helper: "Unique open deals", icon: CircleDollarSign },
@@ -316,9 +322,9 @@ export function SalesHandoffDashboard({ onBack }: { onBack: () => void }) {
         <div className={styles.headerLeft}>
           <button type="button" className={styles.back} onClick={onBack} aria-label="Back to SDR dashboard"><ArrowLeft size={18}/></button>
           <div>
-            <span className={styles.eyebrow}>MARITA → SALES · POST-MEETING INTELLIGENCE</span>
+            <span className={styles.eyebrow}>{sourceName(applied.sdr).toUpperCase()} → SALES · POST-MEETING INTELLIGENCE</span>
             <h1>Sales Handoff</h1>
-            <p>Track what happens after Marita books a meeting: Sales follow-up speed, deal creation, stage movement, pipeline and accounts that need action.</p>
+            <p>Track what happens after {sourceName(applied.sdr)} books a meeting: Sales follow-up speed, deal creation, stage movement, pipeline and accounts that need action.</p>
           </div>
         </div>
         <div className={styles.headerActions}>
@@ -328,10 +334,12 @@ export function SalesHandoffDashboard({ onBack }: { onBack: () => void }) {
         </div>
       </header>
 
+      <p className={styles.cacheBadge}>Meeting-date cohort · SDR booking attribution · follow-up observed up to 90 days after each meeting. Contact cohort filters from the main dashboard do not apply here.</p>
       <section className={styles.filters}>
+        <label className={styles.field}><span>Booking SDR</span><select value={draft.sdr} onChange={event => setDraft({ ...draft, sdr: event.target.value as "marita" | "daniel" })}><option value="marita">Marita · Talentera</option><option value="daniel">Daniel · Evalufy</option></select></label>
         <label className={styles.field}><span>From</span><input type="date" max={draft.to} value={draft.from} onChange={(event) => setDraft({ ...draft, from: event.target.value })}/></label>
         <label className={styles.field}><span>To</span><input type="date" min={draft.from} max={today()} value={draft.to} onChange={(event) => setDraft({ ...draft, to: event.target.value })}/></label>
-        <label className={`${styles.field} ${styles.fieldWide}`}><span>Sales Rep</span><select value={draft.salesRepId} onChange={(event) => setDraft({ ...draft, salesRepId: event.target.value })}>{(data?.meta.salesReps ?? [{ id: DEFAULT_SALES_REP_ID, name: "Ursula Waked · Orsla 1" }]).map((rep) => <option key={rep.id} value={rep.id}>{rep.id === DEFAULT_SALES_REP_ID ? `Orsla 1 · ${rep.name}` : rep.name}</option>)}</select></label>
+        <label className={`${styles.field} ${styles.fieldWide}`}><span>Sales Rep</span><select disabled={embedded} value={draft.salesRepId} onChange={(event) => setDraft({ ...draft, salesRepId: event.target.value })}>{(data?.meta.salesReps ?? [{ id: initialSalesRepId, name: Object.values(SDR_OWNERS).find(owner => owner.ownerId === initialSalesRepId)?.name || "Sales Rep" }]).map((rep) => <option key={rep.id} value={rep.id}>{rep.id === DEFAULT_SALES_REP_ID ? `Orsla 1 · ${rep.name}` : rep.name}</option>)}</select></label>
         <label className={styles.field}><span>Meeting outcome</span><select value={filters.outcome} onChange={(event) => setFilters({ ...filters, outcome: event.target.value })}><option value="">All</option>{options.outcomes.map((item) => <option key={item} value={item}>{pretty(item)}</option>)}</select></label>
         <label className={styles.field}><span>Follow-up SLA</span><select value={filters.followUp} onChange={(event) => setFilters({ ...filters, followUp: event.target.value })}><option value="">All</option>{options.followUps.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
         <label className={styles.field}><span>Deal stage</span><select value={filters.dealStage} onChange={(event) => setFilters({ ...filters, dealStage: event.target.value })}><option value="">All</option>{options.dealStages.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
@@ -373,7 +381,7 @@ export function SalesHandoffDashboard({ onBack }: { onBack: () => void }) {
         </div>
 
         <section className={`${styles.panel} ${styles.tablePanel}`}>
-          <div className={styles.tableToolbar}><div><h2>Post-meeting detail</h2><p>Every row is a Marita-booked meeting for the selected Sales Rep. Follow-up is measured after the meeting ends.</p></div><span className={styles.count}>{filteredRows.length} records</span></div>
+          <div className={styles.tableToolbar}><div><h2>Post-meeting detail</h2><p>Every row is a {sourceName(applied.sdr)}-booked meeting for the selected Sales Rep. Follow-up means a logged attempt after the meeting ends; it does not necessarily mean a connected conversation.</p></div><span className={styles.count}>{filteredRows.length} records</span></div>
           <div className={styles.tableWrap}>
             <table>
               <thead><tr><th>Company / Contact</th><th>Meeting</th><th>Outcome</th><th>First follow-up</th><th>Last Sales activity</th><th>Deal / Stage</th><th>Amount</th><th>Next activity</th><th>Attention</th></tr></thead>

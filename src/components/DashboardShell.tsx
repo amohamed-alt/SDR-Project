@@ -181,16 +181,16 @@ export function Dashboard({
 
   // Render inside both sidebar layouts; navigation must never depend on a popup.
   const sidebarTools = <section className={styles.sidebarTools} aria-label="SDR Tools">
-    <div className={styles.toolsTitle}>SDR TOOLS</div>
+    <div className={styles.toolsTitle}>SDR TOOLS · DAILY WORKFLOWS</div>
     <nav className={styles.toolList} aria-label="SDR tools navigation">
             <button className={`${styles.toolItem} ${view === "gtm-brain" ? styles.activeTool : ""}`} type="button" aria-current={view === "gtm-brain" ? "page" : undefined} onClick={() => changeView("gtm-brain")}>
               <span className={`${styles.toolIcon} ${styles.brainIcon}`}><BrainCircuit size={17}/></span>
               <span className={styles.toolCopy}><strong>Talentera Intelligence</strong><small>Account priority · target pool · call strategy</small></span>
             </button>
-            {sdr === "marita" ? <button className={`${styles.toolItem} ${view === "sales-handoff" ? styles.activeTool : ""}`} type="button" aria-current={view === "sales-handoff" ? "page" : undefined} onClick={() => changeView("sales-handoff")}>
+            <button className={`${styles.toolItem} ${view === "sales-handoff" ? styles.activeTool : ""}`} type="button" aria-current={view === "sales-handoff" ? "page" : undefined} onClick={() => changeView("sales-handoff")}>
               <span className={`${styles.toolIcon} ${styles.gtmIcon}`}><BriefcaseBusiness size={17}/></span>
-              <span className={styles.toolCopy}><strong>Sales Handoff</strong><small>Marita → Ursula · follow-up · deals · pipeline risk</small></span>
-            </button> : null}
+              <span className={styles.toolCopy}><strong>Sales Handoff</strong><small>Booking SDR → RM · follow-up · opportunities</small></span>
+            </button>
             <button className={`${styles.toolItem} ${view === "inventory" ? styles.activeTool : ""}`} type="button" aria-current={view === "inventory" ? "page" : undefined} onClick={() => changeView("inventory")}>
               <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Building2 size={17}/></span>
               <span className={styles.toolCopy}><strong>Lead Inventory</strong><small>Company stock · sources · qualification · Marita & Daniel</small></span>
@@ -278,7 +278,7 @@ export function Dashboard({
     case "inventory": toolContent = <LeadInventory inventory onBack={() => changeView("core")}/>; break;
     case "net-new": toolContent = <ProspectingCoverage onBack={() => changeView("core")}/>; break;
     case "gtm-brain": toolContent = <TalenteraIntelligenceWorkspace onBack={() => changeView("core")}/>; break;
-    case "sales-handoff": toolContent = <SalesHandoffDashboard onBack={() => changeView("core")}/>; break;
+    case "sales-handoff": toolContent = <SalesHandoffDashboard initialSearch={initialSearch} initialSdr={sdr === "daniel" ? "daniel" : "marita"} onBack={() => changeView("core")}/>; break;
   }
 
   return <div className={styles.shell}>
@@ -286,7 +286,7 @@ export function Dashboard({
       <div className="workspace">
         <aside className="sidebar">
           <div className="brand">
-            {sdr === "daniel" ? <><span className="evalufy-brand-mark"><Image src="/evalufy-logo.png" alt="Evalufy" width={1200} height={628} className="evalufy-logo" priority/></span><span className="brand-subtitle">SDR Intelligence</span></> : <><div className="brand-logo" role="img" aria-label="Talentera ATS"/><span className="brand-subtitle">SDR Intelligence</span></>}
+            {sdr === "daniel" ? <><span className="evalufy-brand-mark"><Image src="/evalufy-transparent.png" alt="Evalufy" width={2048} height={688} className="evalufy-logo" priority/></span><span className="brand-subtitle">SDR Intelligence</span></> : <><div className="brand-logo" role="img" aria-label="Talentera ATS"/><span className="brand-subtitle">SDR Intelligence</span></>}
           </div>
           <div className="nav-label">MAIN</div>
           <nav><button type="button" onClick={() => changeView("core")}><BadgeCheck size={18}/><span>Analytics Dashboard</span></button></nav>

@@ -20,6 +20,8 @@ import {
 } from "@/lib/hubspot";
 import { meetingCreatorId } from "@/lib/owner-attribution";
 import { SALES_REP_OWNER_IDS } from "@/lib/sales-reps";
+import { dashboardDate } from "@/lib/dashboard-query";
+import { bookedBySdr } from "@/lib/handoff-attribution";
 import { SDR_OWNERS } from "@/lib/sdr-owners";
 import type { HubSpotRecord } from "@/lib/types";
 
@@ -32,7 +34,7 @@ const MAX_CACHE_ENTRIES = 12;
 const FOLLOW_UP_DAYS = 90;
 const MAX_REPORT_DAYS = 180;
 const OUTCOME_PRIORITY = ["COMPLETED", "NO_SHOW", "CANCELED", "RESCHEDULED", "SCHEDULED"];
-const MARITA_BOOKING_MARKER = "booked by marita";
+type BookingSdr = "marita" | "daniel";
 
 const HANDOFF_MEETING_PROPERTIES = [
   ...MEETING_PROPERTIES,
@@ -57,9 +59,10 @@ const HANDOFF_CONTACT_PROPERTIES = [
 const HANDOFF_COMPANY_PROPERTIES = ["name", "domain", "country"] as const;
 
 const querySchema = z.object({
-  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  from: dashboardDate,
+  to: dashboardDate,
   salesRepId: z.string().regex(/^\d+$/),
+  sdr: z.enum(["marita", "daniel"]).default("marita"),
 });
 
 type FollowUpStatus = "Within 24h" | "24–48h" | "48h+" | "No follow-up";
@@ -80,7 +83,7 @@ type MeetingGroup = {
   startAt: string;
   endAt: string;
   contactIds: string[];
-  maritaCreated: boolean;
+  sdrCreated: boolean;
 };
 
 type HandoffDeal = {
@@ -238,7 +241,8 @@ function meetingKey(record: HubSpotRecord, associations: Map<string, string[]>) 
 function dedupeMeetings(
   records: HubSpotRecord[],
   associations: Map<string, string[]>,
-  maritaCreatorId: string | undefined,
+  sdrCreatorId: string | undefined,
+  sdr: BookingSdr,
 ): MeetingGroup[] {
   const grouped = new Map<string, HubSpotRecord[]>();
   for (const record of records) {
@@ -247,9 +251,9 @@ function dedupeMeetings(
   }
 
   return [...grouped.values()].map((group) => {
-    const markerRecord = group.find((record) => value(record, "hs_internal_meeting_notes").toLowerCase().includes(MARITA_BOOKING_MARKER));
-    const creatorRecord = maritaCreatorId
-      ? group.find((record) => value(record, "hs_created_by_user_id") === maritaCreatorId)
+    const markerRecord = group.find((record) => bookedBySdr(value(record, "hs_internal_meeting_notes"), "", undefined, sdr));
+    const creatorRecord = sdrCreatorId
+      ? group.find((record) => value(record, "hs_created_by_user_id") === sdrCreatorId)
       : undefined;
     const primary = markerRecord ?? creatorRecord ?? group[0];
     const startAt = meetingTimestamp(primary);
@@ -265,7 +269,7 @@ function dedupeMeetings(
       startAt,
       endAt: meetingEnd(primary, startAt),
       contactIds,
-      maritaCreated: Boolean(markerRecord || creatorRecord),
+      sdrCreated: Boolean(markerRecord || creatorRecord),
     };
   }).filter((meeting) => Boolean(meeting.startAt));
 }
@@ -362,8 +366,8 @@ function attentionFor(input: {
   return { level: "ok", reason: "On track" };
 }
 
-function cacheKey(from: string, to: string, salesRepId: string) {
-  return `${from}:${to}:${salesRepId}`;
+function cacheKey(from: string, to: string, salesRepId: string, sdr: BookingSdr) {
+  return `${from}:${to}:${salesRepId}:${sdr}`;
 }
 
 function pruneCache() {
@@ -374,7 +378,7 @@ function pruneCache() {
   }
 }
 
-async function buildHandoff(from: string, to: string, salesRepId: string): Promise<HandoffPayload> {
+async function buildHandoff(from: string, to: string, salesRepId: string, sdr: BookingSdr): Promise<HandoffPayload> {
   const today = new Date().toISOString().slice(0, 10);
   const followUpTo = addDays(to, FOLLOW_UP_DAYS) < today ? addDays(to, FOLLOW_UP_DAYS) : today;
 
@@ -390,7 +394,7 @@ async function buildHandoff(from: string, to: string, salesRepId: string): Promi
     ], ["hs_timestamp"]),
   ]);
 
-  const maritaCreatorId = meetingCreatorId(owners, SDR_OWNERS.marita.ownerId);
+  const sdrCreatorId = meetingCreatorId(owners, SDR_OWNERS[sdr].ownerId);
   const [meetingContacts, callContacts, emailContacts, communicationContacts] = await Promise.all([
     readAssociations("meetings", "contacts", meetingsRaw.map((record) => record.id)),
     readAssociations("calls", "contacts", callsRaw.map((record) => record.id)),
@@ -398,9 +402,9 @@ async function buildHandoff(from: string, to: string, salesRepId: string): Promi
     readAssociations("communications", "contacts", communicationsRaw.map((record) => record.id)),
   ]);
 
-  const allMeetingGroups = dedupeMeetings(meetingsRaw, meetingContacts, maritaCreatorId);
+  const allMeetingGroups = dedupeMeetings(meetingsRaw, meetingContacts, sdrCreatorId, sdr);
   const cohort = allMeetingGroups
-    .filter((meeting) => meeting.maritaCreated && localDay(meeting.startAt) >= from && localDay(meeting.startAt) <= to)
+    .filter((meeting) => meeting.sdrCreated && localDay(meeting.startAt) >= from && localDay(meeting.startAt) <= to)
     .sort((a, b) => validDate(b.startAt) - validDate(a.startAt));
 
   const contactIds = [...new Set(cohort.flatMap((meeting) => meeting.contactIds))];
@@ -564,7 +568,7 @@ async function buildHandoff(from: string, to: string, salesRepId: string): Promi
       from,
       to,
       timezone: HUBSPOT_TIMEZONE,
-      sdr: { id: SDR_OWNERS.marita.ownerId, name: SDR_OWNERS.marita.name },
+      sdr: { id: SDR_OWNERS[sdr].ownerId, name: SDR_OWNERS[sdr].name },
       salesRep: { id: salesRepId, name: salesRep?.name ?? (salesRepId === DEFAULT_SALES_REP_ID ? "Ursula Waked" : salesRepId) },
       salesReps,
       followUpDays: FOLLOW_UP_DAYS,
@@ -585,8 +589,8 @@ async function buildHandoff(from: string, to: string, salesRepId: string): Promi
   };
 }
 
-async function getPayload(from: string, to: string, salesRepId: string, force: boolean) {
-  const key = cacheKey(from, to, salesRepId);
+async function getPayload(from: string, to: string, salesRepId: string, sdr: BookingSdr, force: boolean) {
+  const key = cacheKey(from, to, salesRepId, sdr);
   const now = Date.now();
   const cached = cache.get(key);
   if (!force && cached && cached.expiresAt > now) {
@@ -596,12 +600,10 @@ async function getPayload(from: string, to: string, salesRepId: string, force: b
     };
   }
 
-  if (!force) {
-    const pending = inflight.get(key);
-    if (pending) return pending;
-  }
+  const pending = inflight.get(key);
+  if (pending) return pending;
 
-  const promise = buildHandoff(from, to, salesRepId)
+  const promise = buildHandoff(from, to, salesRepId, sdr)
     .then((payload) => {
       cache.set(key, { payload, expiresAt: Date.now() + CACHE_TTL_MS });
       pruneCache();
@@ -618,17 +620,19 @@ function monthStart() {
 }
 
 export async function GET(request: NextRequest) {
+  if (process.env.DEMO_MODE === "true") return NextResponse.json({ error: "Sales handoff requires live booking and follow-up evidence; no synthetic attribution is shown in demo mode." }, { status: 503 });
   const params = request.nextUrl.searchParams;
   const parsed = querySchema.safeParse({
     from: params.get("from") ?? monthStart(),
     to: params.get("to") ?? new Date().toISOString().slice(0, 10),
     salesRepId: params.get("salesRepId") ?? DEFAULT_SALES_REP_ID,
+    sdr: params.get("sdr") ?? "marita",
   });
 
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid sales handoff filters", details: parsed.error.flatten() }, { status: 400 });
   }
-  const { from, to, salesRepId } = parsed.data;
+  const { from, to, salesRepId, sdr } = parsed.data;
   if (from > to) return NextResponse.json({ error: "The start date must be before the end date" }, { status: 400 });
   if (rangeDays(from, to) > MAX_REPORT_DAYS) {
     return NextResponse.json({ error: `Choose a reporting range of ${MAX_REPORT_DAYS} days or less` }, { status: 400 });
@@ -638,7 +642,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const payload = await getPayload(from, to, salesRepId, params.get("refresh") === "1");
+    const payload = await getPayload(from, to, salesRepId, sdr, params.get("refresh") === "1");
     return compressedJsonResponse(request, payload, {
       "Cache-Control": "private, max-age=30, stale-while-revalidate=300",
       "X-Sales-Handoff-Cache": payload.meta.cache,
