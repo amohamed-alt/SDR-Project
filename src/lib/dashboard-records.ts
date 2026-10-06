@@ -1,10 +1,13 @@
 import type { ActivityRow, CompanyRow, ContactRow, DashboardData, DashboardFilters, DealRow } from "./types.ts";
 
+import { callSegmentValue, type CallSegment } from "./call-segment-values.ts";
+
 export type RecordKind = "contacts" | "activities" | "companies" | "deals";
 export type DashboardRecord = ContactRow | ActivityRow | CompanyRow | DealRow;
 export type RecordCondition = { field: string; op?: "eq" | "contains" | "missing" | "present" | "pretty"; value?: string | number | boolean };
 export type RecordSelection = {
   kind: RecordKind;
+  callSegment?: CallSegment;
   scope?: "source" | "created" | "activity-period" | "task-status";
   where?: RecordCondition[];
   signal?: string;
@@ -46,6 +49,11 @@ export function selectDashboardRecords(data: DashboardData, selection: RecordSel
   let rows: DashboardRecord[] = selection.kind === "contacts" ? data.priorityContacts
     : selection.kind === "activities" ? data.recentActivities
       : selection.kind === "companies" ? data.companies : data.deals;
+  if (selection.callSegment) {
+    const contacts = new Map(data.priorityContacts.map(contact => [contact.id, contact]));
+    const segment = selection.callSegment;
+    rows = rows.filter(row => "type" in row && row.type === "Call" && callSegmentValue(row, contacts.get(row.relatedContactId || ""), segment.field, data.meta.timezone || "Asia/Riyadh") === segment.value);
+  }
   if (selection.scope === "activity-period") rows = rows.filter(row => "metricAt" in row && inPeriod(row.metricAt, data));
   if (selection.scope === "task-status") rows = rows.filter(row => "metricAt" in row && (row.isOpen || inPeriod(row.metricAt, data)));
   if (selection.scope === "source" || selection.scope === "created") {

@@ -2,15 +2,16 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 export const NEWS_MARKETS = {
-  mena: { label: "MENA", query: "Saudi Arabia UAE Egypt companies hiring expansion funding new facilities" },
-  saudi: { label: "Saudi Arabia", query: "Saudi Arabia companies hiring expansion investment new facilities" },
-  uae: { label: "United Arab Emirates", query: "UAE companies hiring expansion funding new facilities" },
-  egypt: { label: "Egypt", query: "Egypt companies hiring expansion funding new facilities" },
+  mena: { label: "MENA", query: "MENA Saudi Arabia UAE Egypt recruitment talent acquisition hiring workforce HR technology news" },
+  saudi: { label: "Saudi Arabia", query: "Saudi Arabia recruitment hiring jobs Saudization workforce talent acquisition HR technology news" },
+  uae: { label: "United Arab Emirates", query: "United Arab Emirates Dubai Abu Dhabi recruitment hiring Emiratisation talent acquisition HR technology news" },
+  egypt: { label: "Egypt", query: "Egypt Cairo recruitment hiring jobs workforce talent acquisition HR technology news" },
 } as const;
 export type NewsMarket = keyof typeof NEWS_MARKETS;
 export type NewsItem = { id: string; title: string; url: string; source: string; publishedAt: string | null; excerpt: string; signal: string };
 export type MarketNews = { market: NewsMarket; fetchedAt: string | null; nextRefreshAt: string | null; status: "ready" | "unavailable" | "unconfigured" | "limited" | "demo"; message: string; items: NewsItem[] };
-type State = { day: string; requests: number; feeds: Partial<Record<NewsMarket, MarketNews>> };
+const NEWS_VERSION = "talent-v2";
+type State = { version?: string; day: string; requests: number; feeds: Partial<Record<NewsMarket, MarketNews>> };
 const file = process.env.SDR_NEWS_STATE_PATH || "/app/data/sdr-market-news.json";
 const TTL = 6 * 60 * 60 * 1000;
 let queue = Promise.resolve();
@@ -41,6 +42,14 @@ export function normalizeNewsItems(raw: unknown, now = Date.now()): NewsItem[] {
   return result;
 }
 
+export function isTalentNews(row: { title?: string; content?: string } | null, market: NewsMarket) {
+  if (!row) return false;
+  const text = `${row.title || ""} ${row.content || ""}`;
+  const talent = /\b(hiring|recruit\w*|talent|workforce|employment|jobs?|human resources|HR tech\w*|HR software|Saudization|Saudisation|Emiratisation|Emiratization|reskilling|upskilling)\b|توظيف|الموارد البشرية|العمالة|توطين/i.test(text);
+  const geography = { saudi: /Saudi|Riyadh|Jeddah|KSA|Saudization|Saudisation|السعودية/i, uae: /UAE|U\.A\.E|United Arab Emirates|Dubai|Abu Dhabi|Emirati|الإمارات/i, egypt: /Egypt|Cairo|Egyptian|مصر/i, mena: /MENA|Middle East|North Africa|GCC|Saudi|Riyadh|Jeddah|UAE|United Arab Emirates|Dubai|Abu Dhabi|Egypt|Cairo|Qatar|Kuwait|Bahrain|Oman|Jordan|Lebanon|Morocco|Tunisia|Algeria|السعودية|الإمارات|مصر/i };
+  return talent && geography[market].test(text);
+}
+
 async function locked<T>(fn: () => Promise<T>) {
   const previous = queue;
   let release!: () => void;
@@ -52,12 +61,12 @@ async function readState(): Promise<State> {
   const today = new Date().toISOString().slice(0, 10);
   try {
     const data = JSON.parse(await fs.readFile(/* turbopackIgnore: true */ file, "utf8")) as State;
-    return { day: today, requests: data.day === today ? Number(data.requests) || 0 : 0, feeds: data.feeds || {} };
+    return { day: today, requests: data.day === today ? Number(data.requests) || 0 : 0, feeds: data.version === NEWS_VERSION ? data.feeds || {} : {} };
   } catch { return { day: today, requests: 0, feeds: {} }; }
 }
 async function save(state: State) {
   await fs.mkdir(/* turbopackIgnore: true */ path.dirname(file), { recursive: true });
-  await fs.writeFile(/* turbopackIgnore: true */ `${file}.tmp`, JSON.stringify(state), { mode: 0o600 });
+  await fs.writeFile(/* turbopackIgnore: true */ `${file}.tmp`, JSON.stringify({ ...state, version: NEWS_VERSION }), { mode: 0o600 });
   await fs.rename(/* turbopackIgnore: true */ `${file}.tmp`, /* turbopackIgnore: true */ file);
 }
 function empty(market: NewsMarket, status: MarketNews["status"], message: string): MarketNews {
@@ -65,13 +74,13 @@ function empty(market: NewsMarket, status: MarketNews["status"], message: string
 }
 async function load(market: NewsMarket): Promise<MarketNews> {
   if (process.env.DEMO_MODE === "true") return empty(market, "demo", "News search is disabled for demo data.");
-  if (!process.env.TAVILY_API_KEY?.trim()) return empty(market, "unconfigured", "Live news is unavailable: the existing Tavily integration is not configured.");
+  if (!process.env.TAVILY_API_KEY?.trim()) return empty(market, "unconfigured", "Live news is not available right now.");
   const reservation = await locked(async () => {
     const state = await readState();
     const cached = state.feeds[market];
     if (cached?.nextRefreshAt && Date.parse(cached.nextRefreshAt) > Date.now()) return { result: cached };
     // A small shared budget across every browser and market; persistent across restarts.
-    if (state.requests >= 8) return { result: { ...(cached ?? empty(market, "limited", "")), status: "limited" as const, message: "Today's news search budget has been reached. Showing the last available sources." } };
+    if (state.requests >= 8) return { result: { ...(cached ?? empty(market, "limited", "")), status: "limited" as const, message: "New sources will be available after the next daily refresh. Showing available recent coverage." } };
     state.requests += 1;
     await save(state);
     return { cached };
@@ -86,8 +95,8 @@ async function load(market: NewsMarket): Promise<MarketNews> {
     });
     if (!response.ok) throw new Error("Search unavailable");
     const payload = await response.json();
-    const items = normalizeNewsItems(payload.results);
-    result = { market, status: "ready", fetchedAt: new Date().toISOString(), nextRefreshAt: new Date(Date.now() + TTL).toISOString(), items, message: items.length ? "Public news signals, not confirmed buying intent. Validate company identity and the original source before outreach." : "No usable recent sources were returned for this market." };
+    const items = normalizeNewsItems(Array.isArray(payload.results) ? payload.results.filter((row: { title?: string; content?: string }) => isTalentNews(row, market)) : []);
+    result = { market, status: "ready", fetchedAt: new Date().toISOString(), nextRefreshAt: new Date(Date.now() + TTL).toISOString(), items, message: items.length ? "Hiring and talent developments to investigate. Open each source for the full context." : "No recent recruitment or talent sources matched this market." };
   } catch {
     result = { ...(reservation.cached ?? empty(market, "unavailable", "")), status: "unavailable", nextRefreshAt: new Date(Date.now() + 15 * 60_000).toISOString(), message: "News search is temporarily unavailable. Any sources below are from the last successful scan." };
   }

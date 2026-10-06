@@ -16,7 +16,7 @@ test("news deduplicates concurrent scans, persists its cache and caps searches a
     assert.equal(url, "https://api.tavily.com/search");
     assert.equal(JSON.parse(options.body).search_depth, "basic");
     requests += 1;
-    return new Response(JSON.stringify({ results: [{ title: "New hiring", url: "https://example.com/source", published_date: new Date().toISOString() }] }));
+    return new Response(JSON.stringify({ results: [{ title: "Saudi Arabia new hiring", url: "https://example.com/source", published_date: new Date().toISOString() }] }));
   };
   try {
     const { getMarketNews } = await import("../src/lib/market-news.ts");
@@ -32,6 +32,13 @@ test("news deduplicates concurrent scans, persists its cache and caps searches a
     const limited = await getMarketNews("mena");
     assert.equal(limited.status, "limited");
     assert.equal(limited.items.length, 1);
+    assert.equal(requests, 1);
+    // Query migrations must discard old finance feeds without resetting spend.
+    state.version = "legacy";
+    await fs.writeFile(statePath, JSON.stringify(state));
+    const migrated = await getMarketNews("mena");
+    assert.equal(migrated.status, "limited");
+    assert.equal(migrated.items.length, 0);
     assert.equal(requests, 1);
     const freshMarket = await getMarketNews("egypt");
     assert.equal(freshMarket.status, "limited");

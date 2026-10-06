@@ -571,3 +571,7 @@ button:focus-visible,a:focus-visible{outline:3px solid #8f80c9;outline-offset:3p
   .intelligence-shell .sidebar nav button small, .rm-analytics-shell .sidebar nav button small { display: none; }
   .intelligence-shell .content, .rm-analytics-shell .content { padding: 18px 12px; }
 }
+
+.evalufy-brand-mark { position:relative; }
+.evalufy-brand-mark .evalufy-symbol { position:absolute; left:0; top:50%; transform:translateY(-50%); filter:none; clip-path:inset(0 77.5% 0 0); }
+@media (min-width:641px) and (max-width:900px) { .evalufy-brand-mark .evalufy-symbol { left:5px; transform:translate(-2px,-50%); } }

@@ -2,7 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { ArrowUpRight, BarChart3, BrainCircuit, Compass, RefreshCw, Target, Wrench } from "lucide-react";
+import { ArrowUpRight, BarChart3, Newspaper, Compass, RefreshCw, Target, Wrench } from "lucide-react";
 import { CartesianGrid, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis } from "recharts";
 import { SDR_OWNERS } from "@/lib/sdr-owners";
 import { readDashboardView } from "@/lib/dashboard-url-state";
@@ -13,7 +13,8 @@ import type { RecordSelection } from "@/lib/dashboard-records";
 import type { Drilldown } from "@/components/DrilldownDrawer";
 import { PerformanceCharts } from "./PerformanceCharts";
 import { ReportingRange } from "./ReportingRange";
-import { SdrDecisionAgent } from "./SdrDecisionAgent";
+import { TalentMarketWatch } from "./TalentMarketWatch";
+import { CallIntelligencePanel, CallSegmentTable } from "./CallIntelligencePanel";
 import { ToolStudio } from "./ToolStudio";
 import styles from "./DecisionStudio.module.css";
 
@@ -40,7 +41,7 @@ export function DecisionStudio({ initialSearch }: { initialSearch: string }) {
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const forceRef = useRef(false);
-  const showAnalytics = active !== "tools";
+  const showAnalytics = active === "executive" || active === "markets";
   function refreshData() { forceRef.current = true; setRefresh(value => value + 1); }
   const [drilldown, setDrilldown] = useState<Drilldown | null>(null);
   const payload = loaded?.key === query ? loaded.data : null;
@@ -89,14 +90,14 @@ export function DecisionStudio({ initialSearch }: { initialSearch: string }) {
   return <div className={styles.studio}>
     <header className={styles.hero}><div><span className={styles.kicker}>SDR Intelligence Studio</span><h1>From activity to decisions.</h1><p>See what is working, where momentum is fading, and which markets deserve the next conversation.</p></div><label className={styles.scope}>Reporting portfolio<select value={ownerKey} onChange={event => navigate("analysisOwner", event.target.value)}><option value="marita">Marita · Talentera</option><option value="daniel">Daniel · Evalufy</option></select></label></header>
     <nav className={styles.tabs} aria-label="Intelligence sections">{[
-      ["executive", "Executive review", BarChart3], ["markets", "ICP & markets", Target], ["agent", "AI SDR Agent", BrainCircuit], ["tools", "Tool studio", Wrench],
+      ["executive", "Executive review", BarChart3], ["markets", "ICP & markets", Target], ["agent", "Talent market watch", Newspaper], ["tools", "Tool studio", Wrench],
     ].map(([key, label, Icon]) => { const Component = Icon as typeof BarChart3; return <button type="button" key={String(key)} aria-pressed={active === key} onClick={() => navigate("studio", String(key))}><Component size={16}/>{String(label)}</button>; })}</nav>
-    {active === "tools" ? <ToolStudio ownerKey={ownerKey}/> : <>
+    {active === "tools" ? <ToolStudio ownerKey={ownerKey}/> : active === "agent" ? <TalentMarketWatch/> : <>
       <ReportingRange key={`${filters.from}:${filters.to}`} filters={filters}/>
       {error ? <div role="alert" className={styles.error}>{error} <button type="button" onClick={refreshData}>Retry</button></div> : null}
       {!data ? <div className={styles.loading} role="status"><BarChart3 size={30}/><strong>Preparing your decision workspace…</strong><span>Reading the existing HubSpot snapshot.</span></div> : null}
       {data && insights ? <>
-        <div className={styles.freshness}><span>{data.meta.isDemo ? "DEMO DATA" : "HUBSPOT SNAPSHOT"} · {owner.brand} · {data.meta.timezone}</span><span>Updated {new Date(data.meta.generatedAt).toLocaleString("en-GB")}</span><button type="button" disabled={busy || payload?.refreshing} onClick={refreshData}><RefreshCw size={12}/> {busy || payload?.refreshing ? "Updating…" : "Refresh data"}</button></div>
+        <div className={styles.freshness}><span>{data.meta.isDemo ? "DEMO DATA" : "HUBSPOT SNAPSHOT"} · {owner.brand} · {data.meta.timezone}</span><span>Updated {new Date(data.meta.generatedAt).toLocaleString("en-GB", { timeZone: data.meta.timezone })}</span><button type="button" disabled={busy || payload?.refreshing} onClick={refreshData}><RefreshCw size={12}/> {busy || payload?.refreshing ? "Updating…" : "Refresh data"}</button></div>
         {data.meta.warnings.length ? <div role="status" className={styles.notice}>Some sources are incomplete: {data.meta.warnings.join(" · ")}</div> : null}
         {active === "executive" ? <>
           <section className={styles.stats} aria-label="Executive metrics">{[
@@ -105,14 +106,16 @@ export function DecisionStudio({ initialSearch }: { initialSearch: string }) {
             ["Open opportunities", number(data.kpis.openDeals), "Associated deals · current state"],
             ["Response data coverage", `${data.kpis.leadResponseCoverage}%`, "Coverage, not response performance"],
           ].map(([label, value, helper]) => <article className={styles.stat} key={label}><span>{label}</span><strong>{value}</strong><small>{helper}</small></article>)}</section>
-          <section className={styles.panel}><header><div><span className={styles.kicker}>Management brief</span><h2>Where to focus next</h2></div><Compass size={20}/></header><p>{insights.bestMarket ? `${insights.bestMarket.name} has the strongest eligible observed meeting reach: ${insights.bestMarket.meetings} contacts with meetings out of ${insights.bestMarket.contacts}. Treat this as a testable prioritization signal.` : "There is not enough evidence to name a winning market yet. Build a larger observed sample before shifting targeting."}</p><p>{insights.bestIcp ? `${insights.bestIcp.name} is the leading measurable ICP segment in this scope.` : "A winning ICP is not established in this scope. Complete persona and ICP-tier fields and compare like-for-like cohorts."}</p></section>
+          <section className={styles.panel}><header><div><span className={styles.kicker}>Management brief</span><h2>Where to focus next</h2></div><Compass size={20}/></header><p>{insights.bestMarket ? `${insights.bestMarket.name} has the strongest eligible observed meeting reach: ${insights.bestMarket.meetings} contacts with meetings out of ${insights.bestMarket.contacts}. Treat this as a testable prioritization signal.` : "There is not enough evidence to name a winning market yet. Build a larger observed sample before shifting targeting."}</p><p>{insights.bestIcp ? `${insights.bestIcp.name} is the leading measurable ICP segment in this scope.` : `The calling audience below uses actual job titles and contact associations. ${insights.calling.titleKnownCalls} of ${insights.calling.calls} calls have a known job title; use these observed conversations to test your next ICP.`}</p></section>
           <div className={styles.actions}>{insights.actions.map((action, index) => <button key={action.id} type="button" onClick={() => inspect(action.title, action.selection)}><span>0{index + 1}</span><span><strong>{action.title}</strong><small>{action.reason}</small></span><b>{number(action.count)} <ArrowUpRight size={15}/></b></button>)}</div>
+          <CallIntelligencePanel calling={insights.calling} timezone={data.meta.timezone} onInspect={inspect}/>
           <PerformanceCharts data={data} onInspect={inspect}/>
         </> : active === "markets" ? <>
+          <CallSegmentTable title="Markets we actually call" rows={insights.calling.markets} onInspect={inspect}/>
           <div className={styles.chartGrid}><section className={styles.panel}><header><div><span className={styles.kicker}>Market opportunity map</span><h2>Scale × observed meeting reach</h2><p>Each point is a market. Larger bubbles mean more contacts with meetings.</p></div></header><div className={styles.chart}><ResponsiveContainer width="100%" height="100%"><ScatterChart margin={{ top: 10, left: 0, bottom: 20, right: 15 }}><CartesianGrid stroke="var(--border)" strokeDasharray="4 4"/><XAxis type="number" dataKey="contacts" name="Contacts" tick={{ fontSize: 10 }} label={{ value: "Portfolio contacts", position: "bottom", fontSize: 11 }}/><YAxis type="number" dataKey="meetingReach" name="Meeting reach" unit="%" tick={{ fontSize: 10 }}/><ZAxis type="number" dataKey="meetings" range={[45, 300]} name="Contacts with meetings"/><Tooltip cursor={{ strokeDasharray: "3 3" }} content={({ active: show, payload: point }) => { const row = point?.[0]?.payload as SegmentInsight | undefined; return show && row ? <div className={styles.panel}><strong>{row.name}</strong><p>{row.meetings} / {row.contacts} contacts · {row.meetingReach}%</p><small>{row.evidence}</small></div> : null; }}/><Scatter isAnimationActive={false} data={insights.markets} fill="var(--green)"/></ScatterChart></ResponsiveContainer></div></section><section className={styles.panel}><span className={styles.kicker}>Can we trust the segments?</span><h2>Profile coverage</h2><p>Missing fields limit what the agent can conclude.</p><div className={styles.barList}>{[["Country", insights.quality.countryKnown], ["Persona", insights.quality.personaKnown], ["ICP tier", insights.quality.tierKnown]].map(([label, count]) => <div key={label}><p>{label}: <strong>{number(Number(count))} / {number(insights.quality.total)}</strong></p><meter min={0} max={Math.max(1, insights.quality.total)} value={Number(count)}/></div>)}</div><div className={styles.notice}>{insights.ranking}</div></section></div>
           <Ranking title="Target markets" rows={insights.markets} onInspect={inspect}/>
           <div className={styles.chartGrid}><Ranking title="ICP combinations" rows={insights.icps} onInspect={inspect}/><Ranking title="Buyer personas" rows={insights.personas} onInspect={inspect}/></div>
-        </> : <SdrDecisionAgent key={`${query}:${data.meta.generatedAt}`} filters={filters} data={data} insights={insights} onInspect={inspect}/>}
+        </> : null}
         <details className={styles.evidence}><summary>Metric definitions & evidence boundaries</summary><p>{insights.definition}</p><p>{insights.ranking}</p><p>Pipeline is associated through the current owner portfolio. It is not incremental revenue attributed to the SDR.</p></details>
       </> : null}
     </>}
