@@ -84,3 +84,15 @@
 @media (max-width: 640px) { .hero { align-items: stretch; flex-direction: column; } .panel, .agent { padding: 16px; } .hero h1 { font-size: 28px; } .stat { padding: 14px; } .stat strong { font-size: 24px; } .range > span { width: 100%; margin-left: 0; } .panel header { flex-wrap: wrap; } .range input { max-width: 140px; } .tabs { gap: 6px; } .tabs button { flex: 1 1 42%; justify-content: center; } }
 @media (prefers-reduced-motion: reduce) { .studio *, .chartGrid * { animation: none !important; transition: none !important; } }
 @media print { .tabs, .range, .freshness button, .agent form { display: none; } .panel { break-inside: avoid; } }
+.callHeading { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:end; gap:12px; margin:28px 0 12px; }
+.callHeading h2 { margin:6px 0; font-size:22px; letter-spacing:-.03em; }
+.callHeading p, .callHeading > span { color:var(--muted); font-size:12px; line-height:1.6; }
+.contactContext { display:block; color:var(--muted); font-size:11px; max-width:40ch; line-height:1.5; }
+.hourGrid { display:grid; grid-template-columns:repeat(24,minmax(0,1fr)); gap:3px; height:160px; margin-top:24px; }
+.hourGrid button { padding:0; border:0; background:transparent; color:var(--muted); cursor:pointer; min-width:0; }
+.hourTrack { display:block; height:125px; position:relative; border-bottom:1px solid var(--border); }
+.hourTrack i, .hourTrack b { position:absolute; bottom:0; left:0; width:100%; background:#b7d8cb; border-radius:3px 3px 0 0; }
+.hourTrack b { background:var(--green); }
+.hourGrid small { display:block; margin-top:6px; font-size:9px; }
+.studio .hourGrid button:disabled { opacity:.65; cursor:default; }
+@media(max-width:640px) { .hourGrid { gap:2px; } .hourGrid small { font-size:8px; } .callHeading h2 { font-size:20px; } }

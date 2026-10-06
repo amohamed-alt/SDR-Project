@@ -57,9 +57,9 @@ test("studio deep links restore owner, dates, cohort and usable segment evidence
   const body = await response.json();
   expect(body.dashboard.priorityContacts).toHaveLength(0);
   expect(body.insights.quality.total).toBeGreaterThan(0);
-  await page.getByRole("button", { name: "AI SDR Agent", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Ask the data. Choose the next move." })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Ask SDR Agent", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "Talent market watch", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Market news watch" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ask SDR Agent", exact: true })).toHaveCount(0);
   await expect(page.getByText("News search is disabled for demo data.")).toBeVisible();
 });
 
@@ -75,4 +75,22 @@ test("narrow analytics has accessible navigation and no page overflow", async ({
   await page.getByRole("button", { name: "Open Call intelligence" }).click();
   await expect(page).toHaveURL(/view=maqsam/);
   await expect(page).toHaveURL(/from=2026-10-01/);
+});
+
+ test("call audience drilldowns preserve exact source scope and date shortcuts", async ({ page }) => {
+  await page.goto("/?acq=intelligence&studio=executive&from=2026-07-01&to=2026-07-19");
+  await expect(page.getByRole("heading", { name: "Who are we actually calling?" })).toBeVisible();
+  await page.getByRole("button", { name: "People", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "People we call most" })).toBeVisible();
+  const table = page.getByRole("table").filter({ has: page.getByRole("columnheader", { name: "With meeting", exact: true }) });
+  const response = page.waitForResponse(r => r.url().includes("/api/dashboard/records"));
+  await table.getByRole("button").first().click();
+  const records = await response;
+  expect(records.status()).toBe(200);
+  expect((await records.json()).rows.map((row: { id: string }) => row.id)).toEqual(["call-1"]);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Today", exact: true }).click();
+  const from = await page.getByLabel("From", { exact: true }).inputValue();
+  expect(await page.getByLabel("To", { exact: true }).inputValue()).toBe(from);
+  await expect(page).toHaveURL(new RegExp(`from=${from}`));
 });

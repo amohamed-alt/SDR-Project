@@ -1,3 +1,4 @@
+import { buildCallIntelligence } from "./call-intelligence.ts";
 import type { ContactRow, DashboardData } from "./types.ts";
 import type { RecordSelection } from "./dashboard-records.ts";
 
@@ -66,6 +67,7 @@ export function buildDecisionInsights(data: DashboardData) {
     { id: "stale", title: "Review stalled opportunities", reason: "Open deals with no known contact activity for at least 21 days.", count: data.intelligence.staleDeals.count, selection: { kind: "deals", signal: "staleDeals" } },
   ];
   return {
+    calling: buildCallIntelligence(data),
     markets, personas, icps, quality, actions: actions.filter(action => action.count > 0),
     bestMarket: bestMarket ?? null, bestIcp: bestIcp ?? null,
     definition: "Current owner contact portfolio, including active contact filters. Connected / meeting counts are distinct contacts with associated activity in the selected period; they are not closed-won conversion or proof of causation.",

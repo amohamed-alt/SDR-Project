@@ -286,7 +286,7 @@ export function Dashboard({
       <div className="workspace">
         <aside className="sidebar">
           <div className="brand">
-            {sdr === "daniel" ? <><span className="evalufy-brand-mark"><Image src="/evalufy-transparent.png" alt="Evalufy" width={2048} height={688} className="evalufy-logo" priority/></span><span className="brand-subtitle">SDR Intelligence</span></> : <><div className="brand-logo" role="img" aria-label="Talentera ATS"/><span className="brand-subtitle">SDR Intelligence</span></>}
+            {sdr === "daniel" ? <><span className="evalufy-brand-mark"><Image src="/evalufy-transparent.png" sizes="176px" alt="Evalufy" width={2048} height={688} className="evalufy-logo" priority/><Image src="/evalufy-transparent.png" sizes="176px" alt="" aria-hidden="true" width={2048} height={688} className="evalufy-logo evalufy-symbol" priority/></span><span className="brand-subtitle">SDR Intelligence</span></> : <><div className="brand-logo" role="img" aria-label="Talentera ATS"/><span className="brand-subtitle">SDR Intelligence</span></>}
           </div>
           <div className="nav-label">MAIN</div>
           <nav><button type="button" onClick={() => changeView("core")}><BadgeCheck size={18}/><span>Analytics Dashboard</span></button></nav>

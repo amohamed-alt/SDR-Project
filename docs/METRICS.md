@@ -115,3 +115,11 @@ HubSpot currently contains calendar-sync meeting records plus separate CRM UI ou
 - Connected-call-to-meeting conversion: deduplicated meetings created in period / connected calls logged in period.
 - Lead response SLA: reporting-period contacts with populated `hs_time_to_first_engagement` of 24 hours or less / all reporting-period contacts. Missing timing is not treated as compliant.
 - Missing contact information: blank normalized phone, email, and LinkedIn values are reported separately, plus their union.
+
+## Intelligence Studio call audience
+
+Call audience groups use the full cached activity snapshot filtered by `metricAt` (call `hs_timestamp`) in `meta.timezone`. One call contributes once, through its selected `relatedContactId`, to each title, company-label, market, person and hour breakdown. Profiles come from the current filtered owner portfolio; out-of-portfolio and missing fields remain Unknown. Company labels are not deduplicated legal entities. Calls, connected calls and distinct called people have separate denominators. With meeting counts called people with an associated booked meeting in the reporting period; it is not call-caused conversion. Top title/company/person lists are bounded, while market/hour distributions retain all groups. Every group selects the same snapshot records server-side.
+
+Historical date ranges remain unchanged until the user chooses Today, Last 7 days or This month. Snapshot freshness and latest-call timestamps explicitly use the reporting timezone. Call timing is unrelated to lead response SLA coverage.
+
+Talent market watch now filters both recruitment/workforce relevance and geography (MENA, Saudi Arabia, UAE, Egypt). Feed schema invalidation preserves the persistent daily search counter. The unconfigured chat interface is removed; no generated answers are presented without a working model.
