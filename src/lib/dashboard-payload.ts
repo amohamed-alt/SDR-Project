@@ -1,5 +1,34 @@
 import type { ActivityRow, CompanyRow, ContactRow, DashboardData } from "./types.ts";
 
+/** Aggregates only. Record evidence is queried separately against this version. */
+export function projectDashboardSummary(data: DashboardData): DashboardData {
+  const withoutIds = <T extends { ids: string[] }>(metric: T): T => ({ ...metric, ids: [] });
+  const signals = data.intelligence;
+  return {
+    ...data,
+    priorityContacts: [], recentActivities: [], companies: [], deals: [],
+    intelligence: {
+      ...signals,
+      staleDeals: withoutIds(signals.staleDeals),
+      dealsWithoutFutureActivity: withoutIds(signals.dealsWithoutFutureActivity),
+      dealsWithOverdueCloseDate: withoutIds(signals.dealsWithOverdueCloseDate),
+      meetingsWithoutFollowUp: withoutIds(signals.meetingsWithoutFollowUp),
+      completedMeetingsWithoutProgression: withoutIds(signals.completedMeetingsWithoutProgression),
+      noShowMeetings: withoutIds(signals.noShowMeetings),
+      highEngagementAccountsWithoutMeeting: withoutIds(signals.highEngagementAccountsWithoutMeeting),
+      contactsWithConnectedCallsWithoutMeeting: withoutIds(signals.contactsWithConnectedCallsWithoutMeeting),
+      accountEngagement: [],
+      leadResponseSla: { ...signals.leadResponseSla, overdueIds: [] },
+      missingContactInfo: {
+        missingPhone: withoutIds(signals.missingContactInfo.missingPhone),
+        missingEmail: withoutIds(signals.missingContactInfo.missingEmail),
+        missingLinkedIn: withoutIds(signals.missingContactInfo.missingLinkedIn),
+        missingAny: withoutIds(signals.missingContactInfo.missingAny),
+      },
+    },
+  };
+}
+
 const PRIORITY_CONTACT_LIMIT = 60;
 const NEWEST_ONLINE_CONTACT_LIMIT = 60;
 const RECENT_ACTIVITY_LIMIT = 80;

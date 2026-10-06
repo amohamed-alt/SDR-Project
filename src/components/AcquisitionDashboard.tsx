@@ -2,7 +2,7 @@
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "motion/react";
 import {
   AlertTriangle,
@@ -29,8 +29,13 @@ const SdrComparison = dynamic(() => import("@/components/SdrComparison").then(mo
 import { SDR_OWNERS, type SdrKey } from "@/lib/sdr-owners";
 import { AcquisitionDailyPulse } from "@/components/AcquisitionDailyPulse";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardShell";
-import { DrilldownDrawer, type Drilldown } from "@/components/DrilldownDrawer";
-import type { ActivityRow, CompanyRow, ContactRow, DealRow, DashboardData } from "@/lib/types";
+import type { Drilldown } from "@/components/DrilldownDrawer";
+const DrilldownDrawer = dynamic(() => import("@/components/DrilldownDrawer").then(module => module.DrilldownDrawer));
+import { useDashboard } from "@/hooks/use-dashboard";
+import { readDashboardView } from "@/lib/dashboard-url-state";
+import { dashboardToday } from "@/lib/dashboard-values";
+import type { RecordSelection, RecordCondition } from "@/lib/dashboard-records";
+import type { ActivityRow } from "@/lib/types";
 
 type AcquisitionOwnerKey = SdrKey | "comparison";
 type RepOwnerKey = "ursula" | "zein";
@@ -51,17 +56,6 @@ type MetricCard = {
   onClick: () => void;
 };
 
-type RepClientCacheEntry = {
-  data: DashboardData;
-  loadedAt: number;
-};
-
-const DEFAULT_START = process.env.NEXT_PUBLIC_DEFAULT_START_DATE ?? new Date().toISOString().slice(0, 7) + "-01";
-const TODAY = new Date().toISOString().slice(0, 10);
-const REP_CLIENT_CACHE_TTL_MS = 5 * 60 * 1000;
-const REP_MAX_REFRESH_WAIT_MS = 90_000;
-const repClientCache = new Map<string, RepClientCacheEntry>();
-
 const ACQUISITION_OWNERS: Record<AcquisitionOwnerKey, AcquisitionOwner> = {
   marita: { ...SDR_OWNERS.marita },
   daniel: { ...SDR_OWNERS.daniel },
@@ -76,13 +70,6 @@ function acquisitionOwnerFromUrl(): AcquisitionOwnerKey {
   return value === "ursula" || value === "zein" || value === "daniel" || value === "comparison" ? value : "marita";
 }
 
-function repClientCacheKey(ownerId: string) {
-  return `${ownerId}:${DEFAULT_START}:${TODAY}`;
-}
-
-function cachedRepData(ownerId: string) {
-  return repClientCache.get(repClientCacheKey(ownerId));
-}
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(value);
@@ -119,7 +106,7 @@ function AcquisitionNav({
   </>;
 }
 
-function ComparisonWorkspace({ onSelect }: { onSelect: (owner: AcquisitionOwnerKey) => void }) {
+function ComparisonWorkspace({ onSelect, initialSearch }: { onSelect: (owner: AcquisitionOwnerKey) => void; initialSearch: string }) {
   return <main className="app-shell">
     <header className="topbar">
       <div className="top-title"><strong>SDR Command Center</strong><span>Team performance comparison</span></div>
@@ -129,7 +116,7 @@ function ComparisonWorkspace({ onSelect }: { onSelect: (owner: AcquisitionOwnerK
         <div className="brand"><div className="brand-logo" role="img" aria-label="Talentera ATS"/><span className="brand-subtitle">SDR Intelligence</span></div>
         <AcquisitionNav activeOwner="comparison" onSelect={onSelect}/>
       </aside>
-      <div className="content"><SdrComparison onSelect={onSelect}/></div>
+      <div className="content"><SdrComparison onSelect={onSelect} initialSearch={initialSearch}/></div>
     </div>
   </main>;
 }
@@ -196,111 +183,43 @@ function KpiSkeleton({ count = 17 }: { count?: number }) {
 
 function RepKpiDashboard({
   ownerKey,
+  initialSearch,
   onSelectOwner,
 }: {
   ownerKey: RepOwnerKey;
+  initialSearch: string;
   onSelectOwner: (owner: AcquisitionOwnerKey) => void;
 }) {
   const owner = ACQUISITION_OWNERS[ownerKey];
-  const initialCache = cachedRepData(owner.ownerId);
-  const [data, setData] = useState<DashboardData | null>(() => initialCache?.data ?? null);
-  const hasDataRef = useRef(Boolean(initialCache));
-  const [loading, setLoading] = useState(() => !initialCache);
-  const [refreshing, setRefreshing] = useState(false);
-  const [requesting, setRequesting] = useState(false);
-  const [error, setError] = useState("");
+  const today = dashboardToday();
+  const filters = readDashboardView(initialSearch, { from: process.env.NEXT_PUBLIC_DEFAULT_START_DATE ?? today.slice(0, 7) + "-01", to: today, ownerId: owner.ownerId }).filters;
+  const [refreshKey, setRefreshKey] = useState(0);
+  const { data, loading, refreshing, requesting, error } = useDashboard(filters, refreshKey, true, "summary");
   const [drilldown, setDrilldown] = useState<Drilldown | null>(null);
-  const refreshStartedAtRef = useRef(0);
-
-  const loadData = useCallback(async (forceRefresh = false, pollRefresh = false) => {
-    const cacheKey = repClientCacheKey(owner.ownerId);
-    const cached = repClientCache.get(cacheKey);
-    const cacheIsFresh = cached && Date.now() - cached.loadedAt < REP_CLIENT_CACHE_TTL_MS;
-
-    if (!forceRefresh && !pollRefresh && cacheIsFresh) {
-      setData(cached.data);
-      setLoading(false);
-      return;
-    }
-
-    if (!hasDataRef.current) setLoading(true);
-    setRequesting(true);
-    if (forceRefresh) {
-      refreshStartedAtRef.current = Date.now();
-      setRefreshing(true);
-    }
-    setError("");
-
-    const query = new URLSearchParams({
-      from: DEFAULT_START,
-      to: TODAY,
-      ownerId: owner.ownerId,
-    });
-    if (forceRefresh) query.set("refresh", "1");
-
-    try {
-      const response = await fetch(`/api/dashboard?${query.toString()}`, {
-        cache: "no-store",
-        signal: AbortSignal.timeout(60_000),
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.details || payload.error || "Dashboard request failed");
-      const nextData = payload as DashboardData;
-      if (nextData.meta.ownerId !== owner.ownerId) {
-        throw new Error(`Owner data mismatch: expected ${owner.ownerId}, received ${nextData.meta.ownerId || "unknown"}`);
-      }
-      repClientCache.set(cacheKey, { data: nextData, loadedAt: Date.now() });
-      hasDataRef.current = true;
-      setData(nextData);
-      const serverRefreshing = response.headers.get("X-Dashboard-Refreshing") === "1";
-      if (serverRefreshing && !refreshStartedAtRef.current) refreshStartedAtRef.current = Date.now();
-      const timedOut = serverRefreshing && Date.now() - refreshStartedAtRef.current >= REP_MAX_REFRESH_WAIT_MS;
-      setRefreshing(serverRefreshing && !timedOut);
-      if (timedOut) setError("The live refresh is taking longer than expected. The last complete snapshot remains visible; you can retry.");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to load KPI data");
-      setRefreshing(false);
-    } finally {
-      setLoading(false);
-      setRequesting(false);
-    }
-  }, [owner.ownerId]);
-
-  useEffect(() => {
-    void loadData(false);
-  }, [loadData]);
-
-  useEffect(() => {
-    if (!refreshing || requesting) return;
-    const timer = window.setTimeout(() => void loadData(false, true), 3_000);
-    return () => window.clearTimeout(timer);
-  }, [loadData, refreshing, requesting]);
-
-  const activities = useCallback((type: ActivityRow["type"]) => {
-    return data?.recentActivities.filter((row) => row.type === type) ?? [];
-  }, [data]);
+  function activities(type: ActivityRow["type"], where: RecordCondition[] = [], extra: Omit<RecordSelection, "kind" | "where"> = {}): Omit<RecordSelection, "kind"> {
+    return { where: [{ field: "type", value: type }, ...where], ...extra };
+  }
 
   const whatsAppCount = useMemo(() => {
     return data?.dailyActivities.reduce((sum, item) => sum + item.whatsAppMessages, 0) ?? 0;
   }, [data]);
 
-  function showActivities(title: string, description: string, rows: ActivityRow[], hubspotUrl: string) {
-    setDrilldown({ kind: "activities", title, description, rows, hubspotUrl });
-  }
-
-  function showDeals(title: string, description: string, rows: DealRow[]) {
+  function recordSource(selection: RecordSelection) { return { filters, version: data!.meta.generatedAt, selection }; }
+  function showActivities(title: string, description: string, selection: Omit<RecordSelection, "kind">, hubspotUrl: string) {
     if (!data) return;
-    setDrilldown({ kind: "deals", title, description, rows, hubspotUrl: data.meta.hubspotUrls.deals });
+    setDrilldown({ kind: "activities", title, description, rows: [], source: recordSource({ kind: "activities", ...selection }), hubspotUrl });
   }
-
-  function showCompanies(title: string, description: string, rows: CompanyRow[]) {
+  function showDeals(title: string, description: string, selection: Omit<RecordSelection, "kind">) {
     if (!data) return;
-    setDrilldown({ kind: "companies", title, description, rows, hubspotUrl: data.meta.hubspotUrls.companies });
+    setDrilldown({ kind: "deals", title, description, rows: [], source: recordSource({ kind: "deals", ...selection }), hubspotUrl: data.meta.hubspotUrls.deals });
   }
-
-  function showContacts(title: string, description: string, rows: ContactRow[]) {
+  function showCompanies(title: string, description: string, selection: Omit<RecordSelection, "kind">) {
     if (!data) return;
-    setDrilldown({ kind: "contacts", title, description, rows, hubspotUrl: data.meta.hubspotUrls.contacts });
+    setDrilldown({ kind: "companies", title, description, rows: [], source: recordSource({ kind: "companies", ...selection }), hubspotUrl: data.meta.hubspotUrls.companies });
+  }
+  function showContacts(title: string, description: string, selection: Omit<RecordSelection, "kind">) {
+    if (!data) return;
+    setDrilldown({ kind: "contacts", title, description, rows: [], source: recordSource({ kind: "contacts", ...selection }), hubspotUrl: data.meta.hubspotUrls.contacts });
   }
 
   const cards: MetricCard[] = data ? [
@@ -326,7 +245,7 @@ function RepKpiDashboard({
       onClick: () => showActivities(
         `${owner.name} · Connected calls`,
         "Connected call records available in the current HubSpot dashboard snapshot.",
-        activities("Call").filter((row) => /connect|answer|complete/i.test(`${row.status} ${row.detail}`)),
+        activities("Call", [{ field: "status", value: "Connected" }]),
         data.meta.hubspotUrls.calls,
       ),
     },
@@ -365,7 +284,7 @@ function RepKpiDashboard({
       onClick: () => showActivities(
         `${owner.name} · Open tasks`,
         "Current open HubSpot tasks assigned to this acquisition owner.",
-        activities("Task").filter((row) => row.isOpen),
+        activities("Task", [{ field: "isOpen", value: true }]),
         data.meta.hubspotUrls.tasks,
       ),
     },
@@ -378,7 +297,7 @@ function RepKpiDashboard({
       onClick: () => showActivities(
         `${owner.name} · Overdue tasks`,
         "Open tasks with a due date earlier than now.",
-        activities("Task").filter((row) => row.isOpen && row.dueAt && new Date(row.dueAt).getTime() < Date.now()),
+        { alert: "overdue" },
         data.meta.hubspotUrls.tasks,
       ),
     },
@@ -388,7 +307,7 @@ function RepKpiDashboard({
       helper: "Open deals inactive 21+ days",
       icon: BriefcaseBusiness,
       tone: "red",
-      onClick: () => showDeals(`${owner.name} · Stale deals`, "Open deals whose latest known contact activity is at least 21 days old.", data.deals.filter((row) => data.intelligence.staleDeals.ids.includes(row.id))),
+      onClick: () => showDeals(`${owner.name} · Stale deals`, "Open deals whose latest known contact activity is at least 21 days old.", { signal: "staleDeals" }),
     },
     {
       label: "No future deal activity",
@@ -396,7 +315,7 @@ function RepKpiDashboard({
       helper: "Open deals without a next date",
       icon: CalendarDays,
       tone: "amber",
-      onClick: () => showDeals(`${owner.name} · No future activity`, "Open deals with no deal-level next activity scheduled.", data.deals.filter((row) => data.intelligence.dealsWithoutFutureActivity.ids.includes(row.id))),
+      onClick: () => showDeals(`${owner.name} · No future activity`, "Open deals with no deal-level next activity scheduled.", { signal: "dealsWithoutFutureActivity" }),
     },
     {
       label: "Overdue close dates",
@@ -404,7 +323,7 @@ function RepKpiDashboard({
       helper: "Open deals past close date",
       icon: AlertTriangle,
       tone: "red",
-      onClick: () => showDeals(`${owner.name} · Overdue close date`, "Open deals with a close date in the past.", data.deals.filter((row) => data.intelligence.dealsWithOverdueCloseDate.ids.includes(row.id))),
+      onClick: () => showDeals(`${owner.name} · Overdue close date`, "Open deals with a close date in the past.", { signal: "dealsWithOverdueCloseDate" }),
     },
     {
       label: "Meetings without follow-up",
@@ -412,7 +331,7 @@ function RepKpiDashboard({
       helper: "Completed / no-show past 24h",
       icon: Clock3,
       tone: "amber",
-      onClick: () => showActivities(`${owner.name} · No follow-up`, "Meetings past the follow-up SLA with no later logged contact activity.", activities("Meeting").filter((row) => data.intelligence.meetingsWithoutFollowUp.ids.includes(row.id)), data.meta.hubspotUrls.meetings),
+      onClick: () => showActivities(`${owner.name} · No follow-up`, "Meetings past the follow-up SLA with no later logged contact activity.", activities("Meeting", [], { signal: "meetingsWithoutFollowUp" }), data.meta.hubspotUrls.meetings),
     },
     {
       label: "High engagement, no meeting",
@@ -420,7 +339,7 @@ function RepKpiDashboard({
       helper: "Account score 60+",
       icon: Gauge,
       tone: "teal",
-      onClick: () => showCompanies(`${owner.name} · High engagement, no meeting`, "Accounts with an explicit engagement score of 60 or above and no associated meeting.", data.companies.filter((row) => data.intelligence.highEngagementAccountsWithoutMeeting.ids.includes(row.id))),
+      onClick: () => showCompanies(`${owner.name} · High engagement, no meeting`, "Accounts with an explicit engagement score of 60 or above and no associated meeting.", { signal: "highEngagementAccountsWithoutMeeting" }),
     },
     {
       label: "Connected, no meeting",
@@ -428,7 +347,7 @@ function RepKpiDashboard({
       helper: "Contacts ready for a next step",
       icon: Phone,
       tone: "green",
-      onClick: () => showContacts(`${owner.name} · Connected, no meeting`, "Contacts with a connected call and no associated deduplicated meeting.", data.priorityContacts.filter((row) => data.intelligence.contactsWithConnectedCallsWithoutMeeting.ids.includes(row.id))),
+      onClick: () => showContacts(`${owner.name} · Connected, no meeting`, "Contacts with a connected call and no associated deduplicated meeting.", { signal: "contactsWithConnectedCallsWithoutMeeting" }),
     },
     {
       label: "Response SLA met",
@@ -436,7 +355,7 @@ function RepKpiDashboard({
       helper: `${data.intelligence.leadResponseSla.met} of ${data.intelligence.leadResponseSla.eligible} within 24h`,
       icon: ShieldCheck,
       tone: "blue",
-      onClick: () => showContacts(`${owner.name} · SLA not met`, "Reporting-period contacts missing first-response timing or above the 24-hour SLA.", data.priorityContacts.filter((row) => data.intelligence.leadResponseSla.overdueIds.includes(row.id))),
+      onClick: () => showContacts(`${owner.name} · SLA not met`, "Reporting-period contacts missing first-response timing or above the 24-hour SLA.", { signal: "response-overdue" }),
     },
     {
       label: "Missing contact info",
@@ -444,7 +363,7 @@ function RepKpiDashboard({
       helper: `${data.intelligence.missingContactInfo.missingPhone.count} phone · ${data.intelligence.missingContactInfo.missingEmail.count} email`,
       icon: ShieldCheck,
       tone: "purple",
-      onClick: () => showContacts(`${owner.name} · Missing info`, "Contacts missing phone, email, or LinkedIn information.", data.priorityContacts.filter((row) => data.intelligence.missingContactInfo.missingAny.ids.includes(row.id))),
+      onClick: () => showContacts(`${owner.name} · Missing info`, "Contacts missing phone, email, or LinkedIn information.", { signal: "missing-contact-info" }),
     },
     {
       label: "Meeting → deal",
@@ -452,7 +371,7 @@ function RepKpiDashboard({
       helper: `${data.intelligence.meetingToDealConversion.numerator} deals / ${data.intelligence.meetingToDealConversion.denominator} meetings`,
       icon: ArrowUpRight,
       tone: "green",
-      onClick: () => showDeals(`${owner.name} · Meeting to deal`, "Deals created in the selected reporting period.", data.deals),
+      onClick: () => showDeals(`${owner.name} · Meeting to deal`, "Deals created in the selected reporting period.", { scope: "created" }),
     },
   ] : [];
 
@@ -461,7 +380,7 @@ function RepKpiDashboard({
       <div className="top-title"><strong>Acquisition KPIs</strong><span>Live HubSpot performance</span></div>
       <div className="top-actions">
         <span className={`status-pill ${data?.meta.isDemo ? "demo" : "live"}`}><i/>{data?.meta.isDemo ? "Demo data" : refreshing || requesting ? "UPDATING · HUBSPOT" : "HUBSPOT SNAPSHOT"}</span>
-        <button className="refresh-button" type="button" onClick={() => void loadData(true)} disabled={loading || refreshing || requesting}>
+        <button className="refresh-button" type="button" onClick={() => setRefreshKey(value => value + 1)} disabled={loading || refreshing || requesting}>
           <RefreshCw size={16} className={refreshing || requesting ? "spin" : ""}/>{refreshing || requesting ? "Refreshing…" : "Refresh data"}
         </button>
       </div>
@@ -490,12 +409,12 @@ function RepKpiDashboard({
         </div>
 
         {data?.meta.warnings.length ? <div className="warning-banner"><AlertTriangle size={17}/><div><strong>{data.meta.isDemo ? "Demo mode" : "Some HubSpot data sources were unavailable"}</strong><span>{data.meta.warnings.join(" · ")}</span></div></div> : null}
-        {error ? <div className="error-banner"><AlertTriangle size={20}/><div><strong>{data ? "Refresh failed — showing the last loaded data" : "KPI dashboard failed to load"}</strong><span>{error}</span></div><button type="button" onClick={() => void loadData(false)}>Try again</button></div> : null}
+        {error ? <div className="error-banner"><AlertTriangle size={20}/><div><strong>{data ? "Refresh failed — showing the last loaded data" : "KPI dashboard failed to load"}</strong><span>{error}</span></div><button type="button" onClick={() => setRefreshKey(value => value + 1)}>Try again</button></div> : null}
 
         {data
           ? <div className="kpi-grid">{cards.map((card) => <MetricButton key={card.label} {...card}/>)}</div>
           : (loading ? <KpiSkeleton/> : null)}
-        {data ? <AcquisitionDailyPulse data={data} ownerName={owner.name} onOpen={setDrilldown}/> : null}
+        {data ? <AcquisitionDailyPulse filters={filters} data={data} ownerName={owner.name} onOpen={setDrilldown}/> : null}
       </div>
     </div>
 
@@ -541,7 +460,7 @@ export function AcquisitionDashboard({ initialOwner, initialSearch }: { initialO
     const url = new URL(window.location.href);
     if (owner === "marita") url.searchParams.delete("acq");
     else url.searchParams.set("acq", owner);
-    for (const parameter of ["tab", "workspace", "view", "country", "originalSource", "latestSource", "tier", "persona"]) {
+    for (const parameter of ["tab", "workspace", "view"]) {
       url.searchParams.delete(parameter);
     }
     window.history.pushState({}, "", url);
@@ -558,13 +477,13 @@ export function AcquisitionDashboard({ initialOwner, initialSearch }: { initialO
       <ExistingDashboard key="daniel" sdr="daniel" active initialSearch={activeSearch} workspaceNavigation={<AcquisitionNav activeOwner="daniel" onSelect={selectOwner}/>}/>
     </div>;
 
-  if (activeOwner === "comparison") return <div className="sdr-tab-panel"><ComparisonWorkspace onSelect={selectOwner}/></div>;
+  if (activeOwner === "comparison") return <div className="sdr-tab-panel"><ComparisonWorkspace onSelect={selectOwner} initialSearch={activeSearch}/></div>;
 
   if (activeOwner === "ursula") return <div className="sdr-tab-panel">
-      <RepKpiDashboard key="ursula" ownerKey="ursula" onSelectOwner={selectOwner}/>
+      <RepKpiDashboard key="ursula" ownerKey="ursula" initialSearch={activeSearch} onSelectOwner={selectOwner}/>
     </div>;
 
   return <div className="sdr-tab-panel">
-      <RepKpiDashboard key="zein" ownerKey="zein" onSelectOwner={selectOwner}/>
+      <RepKpiDashboard key="zein" ownerKey="zein" initialSearch={activeSearch} onSelectOwner={selectOwner}/>
     </div>;
 }

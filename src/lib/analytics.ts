@@ -1,3 +1,4 @@
+import { responseMilliseconds } from "./dashboard-values.ts";
 import { meetingCreatorId } from "@/lib/owner-attribution";
 import {
   BOOKING_MEETING_SOURCES,
@@ -406,10 +407,8 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   const noNextActivity = selectedContacts.length - nextActivityCount;
   const responseCohort = newContacts.length ? newContacts : selectedContacts;
   const leadResponseTimes = responseCohort
-    .map((contact) => value(contact, "hs_time_to_first_engagement"))
-    .filter(Boolean)
-    .map(Number)
-    .filter((item) => Number.isFinite(item) && item >= 0)
+    .map((contact) => responseMilliseconds(value(contact, "hs_time_to_first_engagement")))
+    .filter((item): item is number => item !== null)
     .sort((a, b) => a - b);
   const leadResponseCoverage = responseCohort.length ? Math.round((leadResponseTimes.length / responseCohort.length) * 1000) / 10 : 0;
   const medianResponseMilliseconds = leadResponseTimes.length
@@ -457,7 +456,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     completeness("hs_analytics_source", "Original source coverage", selectedContacts),
     completeness("gtm_icp_tier", "ICP tier coverage", selectedContacts),
     completeness("signalhire_match_status", "SignalHire enrichment", selectedContacts),
-    completeness("hs_time_to_first_engagement", "Lead response time coverage", responseCohort),
+    completeness("hs_time_to_first_engagement", "Lead response time coverage", responseCohort, (contact) => responseMilliseconds(value(contact, "hs_time_to_first_engagement")) !== null),
   ];
 
   const connectedContactIds = new Set(connectedCalls.flatMap((call) => callContacts.get(call.id) ?? []).filter((id) => selectedIds.has(id)));
@@ -472,14 +471,14 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   }
   const intelligence = calculateGtmIntelligenceSignals({
     contacts: selectedContacts.map((contact) => {
-      const response = Number(value(contact, "hs_time_to_first_engagement"));
+      const response = responseMilliseconds(value(contact, "hs_time_to_first_engagement"));
       return {
         id: contact.id,
         companyId: value(contact, "company_id"),
         createdAt: value(contact, "createdate"),
         lastSalesActivityAt: value(contact, "hs_last_sales_activity_timestamp"),
         nextActivityAt: value(contact, "notes_next_activity_date"),
-        firstEngagementMs: Number.isFinite(response) && response >= 0 ? response : null,
+        firstEngagementMs: response,
         hasPhone: Boolean(contactPhone(contact)),
         hasEmail: Boolean(value(contact, "email")),
         hasLinkedIn: Boolean(value(contact, "gtm_linkedin_url")),
@@ -553,8 +552,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     if (/valid|verified|deliverable/i.test(emailStatus)) priorityScore += 3;
     if (/correct|valid|verified/i.test(phoneStatus)) priorityScore += 2;
     const associatedDealIds = contactDeals.get(contact.id) ?? [];
-    const responseRaw = value(contact, "hs_time_to_first_engagement");
-    const responseMilliseconds = Number(responseRaw);
+    const responseMs = responseMilliseconds(value(contact, "hs_time_to_first_engagement"));
     return {
       id: contact.id,
       name: [value(contact, "firstname"), value(contact, "lastname")].filter(Boolean).join(" ") || "Unnamed contact",
@@ -575,8 +573,8 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       persona: displayValue(value(contact, "gtm_persona"), personaLabels),
       emailStatus: displayValue(emailStatus, emailStatusLabels), phoneStatus: displayValue(phoneStatus, phoneStatusLabels),
       createdAt: value(contact, "createdate"), lastContacted, nextActivity,
-      leadResponseTimeHours: responseRaw && Number.isFinite(responseMilliseconds) && responseMilliseconds >= 0
-        ? Math.round((responseMilliseconds / 3_600_000) * 10) / 10
+      leadResponseTimeHours: responseMs !== null
+        ? Math.round((responseMs / 3_600_000) * 10) / 10
         : null,
       hasConnectedCall: connectedContactIds.has(contact.id), hasMeeting: meetingContactIds.has(contact.id),
       hasDeal: associatedDealIds.length > 0, hasOpenDeal: associatedDealIds.some((dealId) => openDealIds.has(dealId)),
@@ -591,7 +589,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
         !value(contact, "hs_analytics_source") && "hs_analytics_source",
         !value(contact, "gtm_icp_tier") && "gtm_icp_tier",
         !value(contact, "signalhire_match_status") && "signalhire_match_status",
-        !responseRaw && "hs_time_to_first_engagement",
+        responseMs === null && "hs_time_to_first_engagement",
       ].filter((item): item is string => Boolean(item)),
       priorityScore: Math.max(0, Math.round(priorityScore)), url: hubspotRecordUrl("contact", contact.id),
       companyUrl: value(contact, "company_id") ? hubspotRecordUrl("company", value(contact, "company_id")) : undefined,
@@ -719,7 +717,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
 
   return {
     meta: {
-      generatedAt: new Date().toISOString(), from: filters.from, to: filters.to, timezone: HUBSPOT_TIMEZONE,
+      generatedAt: now.toISOString(), from: filters.from, to: filters.to, timezone: HUBSPOT_TIMEZONE,
       ownerId: filters.ownerId, ownerName, portalId: HUBSPOT_PORTAL_ID, isDemo: false, warnings,
       hubspotUrls: {
         contacts: hubspotListUrl("contact"), companies: hubspotListUrl("company"), calls: hubspotListUrl("call"),

@@ -125,3 +125,51 @@ test("comparison remains inside the shared dashboard shell", async ({ page }) =>
     await expect(page.getByRole("columnheader", { name: owner, exact: true })).toBeVisible();
   }
 });
+
+test("reporting dates and cohort survive every owner and comparison navigation", async ({ page }) => {
+  await page.goto("/?from=2026-10-01&to=2026-10-04&country=Saudi+Arabia&tier=Tier+1");
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  for (const owner of ["Ursula", "Zein", "Daniel"]) {
+    const loaded = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/dashboard" && url.searchParams.get("profile") === "summary";
+    });
+    await page.locator(".sidebar").getByRole("button", { name: new RegExp(owner) }).click();
+    const response = await loaded;
+    const url = new URL(response.url());
+    expect(url.searchParams.get("from")).toBe("2026-10-01");
+    expect(url.searchParams.get("to")).toBe("2026-10-04");
+    expect(url.searchParams.get("country")).toBe("Saudi Arabia");
+    expect(url.searchParams.get("tier")).toBe("Tier 1");
+    await expect(page).toHaveURL(/to=2026-10-04/);
+  }
+  const teamLoaded = page.waitForResponse(response => new URL(response.url()).pathname === "/api/dashboard/team");
+  await page.locator(".sidebar").getByRole("button", { name: "SDR Comparison", exact: true }).click();
+  const teamUrl = new URL((await teamLoaded).url());
+  expect(teamUrl.searchParams.get("country")).toBe("Saudi Arabia");
+  await expect(page.getByLabel("Reporting start")).toHaveValue("2026-10-01");
+  await expect(page.getByLabel("Reporting end")).toHaveValue("2026-10-04");
+});
+
+test("summary and detail APIs support versioned records, global search and full export", async ({ page }) => {
+  const summaryResponse = await page.request.get("/api/dashboard?from=2026-10-01&to=2026-10-04&profile=summary");
+  expect(summaryResponse.ok()).toBeTruthy();
+  const summary = await summaryResponse.json();
+  expect(summary.priorityContacts).toEqual([]);
+  expect(summary.intelligence.accountEngagement).toEqual([]);
+  const query = new URLSearchParams({ from: "2026-10-01", to: "2026-10-04", ownerId: summary.meta.ownerId, version: summary.meta.generatedAt, selection: JSON.stringify({ kind: "contacts" }), limit: "25" });
+  const records = await page.request.get(`/api/dashboard/records?${query}`);
+  expect(records.ok()).toBeTruthy();
+  const result = await records.json();
+  expect(result.total).toBeGreaterThan(0);
+  expect(result.version).toBe(summary.meta.generatedAt);
+  query.set("q", result.rows[0].name);
+  const found = await page.request.get(`/api/dashboard/records?${query}`);
+  expect((await found.json()).rows.some((row: { id: string }) => row.id === result.rows[0].id)).toBeTruthy();
+  query.set("format", "csv");
+  const csv = await page.request.get(`/api/dashboard/records?${query}`);
+  expect(csv.headers()["content-type"]).toContain("text/csv");
+  expect(await csv.text()).toContain(result.rows[0].name);
+  query.set("selection", JSON.stringify({ kind: "contacts", where: [{ field: "__proto__" }] }));
+  expect((await page.request.get(`/api/dashboard/records?${query}`)).status()).toBe(400);
+});

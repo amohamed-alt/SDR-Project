@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
+import { parseDashboardFilters } from "@/lib/dashboard-query";
 import { SDR_OWNERS, SDR_COMPARISON_KEYS } from "@/lib/sdr-owners";
 import { summarizeSdr } from "@/lib/sdr-comparison";
 import { getDashboardSnapshot } from "@/lib/dashboard-snapshot";
@@ -7,15 +7,10 @@ import { createMockDashboard } from "@/lib/mock-data";
 import { compressedJsonResponse } from "@/lib/compressed-json";
 
 export const runtime = "nodejs";
-const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
-  const parsed = new Date(`${value}T00:00:00Z`);
-  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
-});
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
-  const today = new Date().toISOString().slice(0, 10);
-  const parsed = z.object({ from: date, to: date }).safeParse({ from: params.get("from") || today.slice(0, 7) + "-01", to: params.get("to") || today });
-  if (!parsed.success || parsed.data.from > parsed.data.to) return NextResponse.json({ error: "Choose a valid reporting period" }, { status: 400 });
+  const parsed = parseDashboardFilters(params, SDR_OWNERS.marita.ownerId);
+  if (!parsed.success) return NextResponse.json({ error: "Choose a valid reporting period" }, { status: 400 });
   const results = await Promise.all(SDR_COMPARISON_KEYS.map(async key => {
     const owner = SDR_OWNERS[key];
     try {

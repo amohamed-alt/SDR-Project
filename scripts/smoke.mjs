@@ -90,6 +90,15 @@ try {
   const invalidRange = await fetch(`http://127.0.0.1:${port}/api/dashboard/team?from=2026-02-31&to=2026-09-08`);
   if (invalidRange.status !== 400) throw new Error("Team range validation failed");
   if (!dashboardResponse.headers.get("etag")) throw new Error("Dashboard conditional response tag is missing");
+  const summaryResponse = await fetch(`http://127.0.0.1:${port}/api/dashboard?from=2026-10-01&to=2026-10-04&profile=summary`);
+  const summary = await summaryResponse.json();
+  if (!summaryResponse.ok || summaryResponse.headers.get("x-dashboard-payload") !== "summary-v1" || summary.priorityContacts.length || summary.recentActivities.length || summary.intelligence.accountEngagement.length) throw new Error("Summary response includes detail payloads");
+  if (!summaryResponse.headers.get("server-timing")?.includes("snapshot;dur=")) throw new Error("Dashboard timing is missing");
+  const recordsQuery = new URLSearchParams({ from: summary.meta.from, to: summary.meta.to, ownerId: summary.meta.ownerId, version: summary.meta.generatedAt, selection: JSON.stringify({ kind: "contacts" }), limit: "25" });
+  const recordsResponse = await fetch(`http://127.0.0.1:${port}/api/dashboard/records?${recordsQuery}`);
+  const records = await recordsResponse.json();
+  if (!recordsResponse.ok || !records.total || records.version !== summary.meta.generatedAt || records.rows.length > 25) throw new Error("Versioned records endpoint failed");
+
   const health = await healthResponse.json();
   const dashboard = await dashboardResponse.json();
   const cacheHealth = await cacheHealthResponse.json();
@@ -104,7 +113,7 @@ try {
   const maritaCallsPage = await maritaCallsPageResponse.text();
   if (health.status !== "ok") throw new Error("Health response is invalid");
   if (!dashboard.kpis || dashboard.meta?.isDemo !== true) throw new Error("Dashboard response is invalid");
-  if (dashboardResponse.headers.get("x-dashboard-cache-version") !== "v8-dual-sdr") throw new Error("Dashboard snapshot cache headers are missing");
+  if (dashboardResponse.headers.get("x-dashboard-cache-version") !== "v9-complete-records") throw new Error("Dashboard snapshot cache headers are missing");
   if (cacheHealth.status !== "disabled" || cacheHealth.configured !== false) throw new Error("Dashboard cache health fallback is invalid in smoke mode");
   if (!Array.isArray(maqsamCalls.calls) || typeof maqsamCalls.meta?.totalStored !== "number") throw new Error("Maqsam calls response is invalid");
   if (rejectedMaqsamIngestResponse.status !== 401) throw new Error("Maqsam ingest secret protection is invalid");

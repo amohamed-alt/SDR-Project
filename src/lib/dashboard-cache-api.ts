@@ -1,5 +1,10 @@
+import { gzip, gunzip } from "node:zlib";
+import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 import type { DashboardData, DashboardFilters } from "@/lib/types";
+
+const gzipAsync = promisify(gzip);
+const gunzipAsync = promisify(gunzip);
 
 const CACHE_API_URL = (process.env.DASHBOARD_CACHE_API_URL || "").replace(/\/$/, "");
 const READ_TIMEOUT_MS = Number(process.env.DASHBOARD_CACHE_READ_TIMEOUT_MS || 2_500);
@@ -13,7 +18,7 @@ export type PersistedDashboardSnapshot = {
 
 function canonicalFilters(filters: DashboardFilters) {
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     from: filters.from,
     to: filters.to,
     ownerId: filters.ownerId,
@@ -45,13 +50,17 @@ export async function readPersistedDashboardSnapshot(filters: DashboardFilters):
     if (response.status === 404) return null;
     if (!response.ok) throw new Error(`FastAPI cache returned HTTP ${response.status}`);
     const payload = await response.json() as {
-      data?: DashboardData;
+      data?: DashboardData | { format: "gzip-v1"; body: string };
       refreshedAt?: number;
       ageSeconds?: number;
     };
     if (!payload.data || !Number.isFinite(payload.refreshedAt)) return null;
+    const data = "format" in payload.data && payload.data.format === "gzip-v1"
+      ? JSON.parse((await gunzipAsync(Buffer.from(payload.data.body, "base64"), { maxOutputLength: 64 * 1024 * 1024 })).toString("utf8")) as DashboardData
+      : payload.data as DashboardData;
+    if (!data.meta?.generatedAt || !Array.isArray(data.priorityContacts) || !Array.isArray(data.recentActivities)) return null;
     return {
-      data: payload.data,
+      data,
       refreshedAt: Number(payload.refreshedAt),
       ageSeconds: Math.max(0, Number(payload.ageSeconds || 0)),
     };
@@ -69,7 +78,7 @@ export async function writePersistedDashboardSnapshot(filters: DashboardFilters,
     const response = await fetch(`${CACHE_API_URL}/v1/dashboard/${key}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key, refreshedAt, data }),
+      body: JSON.stringify({ key, refreshedAt, data: { format: "gzip-v1", body: (await gzipAsync(Buffer.from(JSON.stringify(data)), { level: 6 })).toString("base64") } }),
       cache: "no-store",
       signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
     });

@@ -1,7 +1,8 @@
 import { unstable_cache } from "next/cache";
 import { SDR_OWNERS } from "@/lib/sdr-owners";
 import { buildDashboard } from "@/lib/analytics";
-import { projectDashboardPayload } from "@/lib/dashboard-payload";
+import { DashboardSnapshotHistory } from "@/lib/dashboard-snapshot-history";
+import { dashboardToday } from "@/lib/dashboard-values";
 import {
   readPersistedDashboardSnapshot,
   writePersistedDashboardSnapshot,
@@ -26,7 +27,7 @@ const cachedDashboard = unstable_cache(
     }
     return data;
   },
-  ["sdr-dashboard-live-v9-last-known-good"],
+  ["sdr-dashboard-live-v10-complete-records"],
   { revalidate: 120, tags: ["sdr-dashboard"] },
 );
 
@@ -55,11 +56,12 @@ type DashboardStore = {
   inflightRefreshes: Map<string, Promise<DashboardData>>;
   coldLoads: Map<string, Promise<DashboardData>>;
   buildTail: Promise<unknown>;
+  history: DashboardSnapshotHistory;
 };
-const processState = globalThis as typeof globalThis & { __sdrDashboardStoreV9?: DashboardStore };
-const dashboardStore: DashboardStore = processState.__sdrDashboardStoreV9 ??= {
+const processState = globalThis as typeof globalThis & { __sdrDashboardStoreV10?: DashboardStore };
+const dashboardStore: DashboardStore = processState.__sdrDashboardStoreV10 ??= {
   snapshots: new Map(), activeFilters: new Map(), inflightRefreshes: new Map(),
-  coldLoads: new Map(), buildTail: Promise.resolve(),
+  coldLoads: new Map(), buildTail: Promise.resolve(), history: new DashboardSnapshotHistory(),
 };
 const { snapshots, activeFilters, inflightRefreshes, coldLoads } = dashboardStore;
 
@@ -82,11 +84,8 @@ function generatedAtMs(data: DashboardData) {
 }
 
 function persistSnapshot(filters: DashboardFilters, data: DashboardData, refreshedAt: number) {
-  // Persist the browser-ready projection rather than the multi-megabyte full
-  // in-memory snapshot. After a restart this gives the dashboard an immediate
-  // first paint while the full HubSpot model refreshes in the background.
-  const persistedData = projectDashboardPayload(data);
-  void writePersistedDashboardSnapshot(filters, persistedData, refreshedAt).catch((error) => {
+  // Complete records are compressed at the persistence boundary, never truncated.
+  void writePersistedDashboardSnapshot(filters, data, refreshedAt).catch((error) => {
     console.warn("Unable to persist dashboard snapshot", error);
   });
 }
@@ -112,6 +111,8 @@ function startRefresh(key: string, filters: DashboardFilters) {
         return fallback;
       }
 
+      const previous = snapshots.get(key);
+      if (previous) dashboardStore.history.remember(key, previous.data);
       const refreshedAt = generatedAtMs(data);
       trimSnapshots(key);
       snapshots.set(key, {
@@ -231,6 +232,7 @@ export async function getDashboardSnapshot(
     });
   }
 
+  dashboardStore.history.remember(key, snapshot.data);
   return {
     data: snapshot.data,
     refreshing: inflightRefreshes.has(key),
@@ -269,7 +271,7 @@ export function startDashboardWarmup() {
     if (running) return;
     running = true;
     try {
-      const to = new Date().toISOString().slice(0, 10);
+      const to = dashboardToday();
       const from = process.env.NEXT_PUBLIC_DEFAULT_START_DATE || `${to.slice(0, 7)}-01`;
       for (const owner of Object.values(SDR_OWNERS)) {
         try { await getDashboardSnapshot({ from, to, ownerId: owner.ownerId }); }
@@ -281,4 +283,16 @@ export function startDashboardWarmup() {
   start.unref?.();
   state.__sdrWarmup = setInterval(() => void warm(), 60_000);
   state.__sdrWarmup.unref?.();
+}
+
+/** Never silently substitute a newer/partial dataset for an open KPI drawer. */
+export async function getDashboardRecordSnapshot(filters: DashboardFilters, version: string) {
+  const key = snapshotKey(filters);
+  const current = snapshots.get(key)?.data;
+  if (current?.meta.generatedAt === version) return current;
+  const previous = dashboardStore.history.get(key, version);
+  if (previous) return previous;
+  if (current) return null;
+  const result = await getDashboardSnapshot(filters);
+  return result.data.meta.generatedAt === version ? result.data : null;
 }

@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import type { Drilldown } from "@/components/DrilldownDrawer";
-import type { ActivityRow, DailyActivityDatum, DashboardData } from "@/lib/types";
+import type { DailyActivityDatum, DashboardData, DashboardFilters } from "@/lib/types";
 import styles from "@/components/AcquisitionDashboard.module.css";
 
 type Pace = {
@@ -31,16 +31,6 @@ function shortDate(value: string) {
   }).format(new Date(`${value}T12:00:00Z`));
 }
 
-function zonedDay(value: string, timezone: string) {
-  if (!value) return "";
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date(value));
-}
-
 function touchesFor(day: DailyActivityDatum) {
   return day.calls + day.emailsSent + day.whatsAppMessages + day.tasksCompleted;
 }
@@ -59,19 +49,14 @@ function paceFor(touches: number, baselineAverage: number): Pace {
   return { label: "Light", className: styles.light };
 }
 
-function activityRowsForDay(data: DashboardData, date: string) {
-  return data.recentActivities.filter((row: ActivityRow) => {
-    const metricDate = zonedDay(row.metricAt || row.occurredAt || row.dueAt, data.meta.timezone);
-    return metricDate === date;
-  });
-}
-
 export function AcquisitionDailyPulse({
   data,
+  filters,
   ownerName,
   onOpen,
 }: {
   data: DashboardData;
+  filters: DashboardFilters;
   ownerName: string;
   onOpen: (drilldown: Drilldown) => void;
 }) {
@@ -109,12 +94,12 @@ export function AcquisitionDailyPulse({
     : null;
 
   function openDay(day: PulseDay) {
-    const rows = activityRowsForDay(data, day.datum.date);
     onOpen({
       kind: "activities",
       title: `${ownerName} · ${shortDate(day.datum.date)}`,
       description: `Daily activity detail: ${day.touches} touches, ${day.outcomes} outcomes, ${day.connectionRate}% connection rate.`,
-      rows,
+      rows: [],
+      source: { filters, version: data.meta.generatedAt, selection: { kind: "activities", day: day.datum.date } },
       hubspotUrl: "#",
     });
   }
