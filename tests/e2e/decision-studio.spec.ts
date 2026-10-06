@@ -7,6 +7,18 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test("agent accepts the proxy's public origin and rejects external origins", async ({ request }) => {
+  const headers = { origin: "https://sdr.dashboardtalentera.tech", "x-forwarded-host": "sdr.dashboardtalentera.tech", "sec-fetch-site": "same-origin" };
+  const allowed = await request.post("/api/ai/sdr-agent", { headers, data: {} });
+  // The demo guard is reached only after origin validation succeeds.
+  expect(allowed.status()).toBe(503);
+  expect((await allowed.json()).error).toContain("disabled in demo mode");
+  const mismatched = await request.post("/api/ai/sdr-agent", { headers: { ...headers, origin: "https://unrelated.example" }, data: {} });
+  expect(mismatched.status()).toBe(403);
+  const crossSite = await request.post("/api/ai/sdr-agent", { headers: { ...headers, "sec-fetch-site": "cross-site" }, data: {} });
+  expect(crossSite.status()).toBe(403);
+});
+
 test("RM charts expose source records and keep handoff scope isolated", async ({ page }) => {
   // The shared demo fixture's source activities are dated July 19.
   await page.goto("/?acq=zein&from=2026-07-01&to=2026-07-19");
