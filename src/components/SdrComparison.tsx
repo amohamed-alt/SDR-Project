@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowUpRight, CalendarDays, RefreshCw, UsersRound } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { SDR_OWNERS, SDR_COMPARISON_KEYS, type SdrKey } from "@/lib/sdr-owners";
 import type { SdrSummary } from "@/lib/sdr-comparison";
 import type { DashboardKpis } from "@/lib/types";
+import { readDashboardView } from "@/lib/dashboard-url-state";
+import { dashboardToday } from "@/lib/dashboard-values";
 import styles from "./SdrComparison.module.css";
 
 type Entry = { key: SdrKey; data: SdrSummary | null; refreshing: boolean; ageSeconds: number | null; error: string | null };
@@ -19,15 +21,17 @@ const metrics: { label: string; key: keyof DashboardKpis; percent?: boolean }[] 
 ];
 const owners = SDR_COMPARISON_KEYS.map(key => SDR_OWNERS[key]);
 
-export function SdrComparison({ onSelect }: { onSelect: (key: SdrKey) => void }) {
-  const today = new Date().toISOString().slice(0, 10);
-  const [draft, setDraft] = useState({ from: today.slice(0, 7) + "-01", to: today });
+export function SdrComparison({ onSelect, initialSearch = "" }: { onSelect: (key: SdrKey) => void; initialSearch?: string }) {
+  const today = dashboardToday();
+  const initial = readDashboardView(initialSearch, { from: today.slice(0, 7) + "-01", to: today, ownerId: SDR_OWNERS.marita.ownerId }).filters;
+  const [draft, setDraft] = useState(initial);
   const [range, setRange] = useState(draft);
-  const key = `${range.from}:${range.to}`;
+  const key = JSON.stringify(range);
   const [state, setState] = useState<{ key: string; entries: Entry[] }>({ key, entries: previous.get(key) || [] });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
+  const consumedRefresh = useRef(0);
   useEffect(() => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
@@ -36,7 +40,7 @@ export function SdrComparison({ onSelect }: { onSelect: (key: SdrKey) => void })
       setBusy(true);
       let delay = 30_000;
       try {
-        const query = new URLSearchParams(range);
+        const query = new URLSearchParams(Object.entries(range).filter((entry): entry is [string, string] => Boolean(entry[1])));
         if (force) query.set("refresh", "1");
         const response = await fetch(`/api/dashboard/team?${query}`, { signal: controller.signal, cache: "no-store" });
         const payload = await response.json();
@@ -53,7 +57,9 @@ export function SdrComparison({ onSelect }: { onSelect: (key: SdrKey) => void })
         if (!controller.signal.aborted) { setBusy(false); timer = setTimeout(() => void load(), delay); }
       }
     }
-    void load(refresh > 0);
+    const force = refresh > consumedRefresh.current;
+    consumedRefresh.current = refresh;
+    void load(force);
     return () => { controller.abort(); clearTimeout(timer); };
   }, [range, key, refresh]);
   const entries = state.key === key ? state.entries : previous.get(key) || [];
@@ -66,7 +72,7 @@ export function SdrComparison({ onSelect }: { onSelect: (key: SdrKey) => void })
   });
   return <div className={styles.page}>
     <header className={styles.header}><button onClick={() => onSelect("marita")}><ArrowLeft size={16}/>Workspaces</button><span><UsersRound size={16}/>SDR TEAM</span><button disabled={busy} onClick={() => setRefresh(value => value + 1)}><RefreshCw size={16} className={busy ? "spin" : ""}/>{busy ? "Updating" : "Refresh"}</button></header>
-    <section className={styles.title}><div><p>MANAGEMENT OVERVIEW</p><h1>SDR performance</h1><span>{owners.map(owner => `${owner.shortName} · ${owner.brand}`).join("  /  ")}</span></div><form onSubmit={event => { event.preventDefault(); setRange({ ...draft }); }}><CalendarDays size={18}/><label>From<input aria-label="Reporting start" type="date" required value={draft.from} max={draft.to} onChange={event => setDraft({ ...draft, from: event.target.value })}/></label><label>To<input aria-label="Reporting end" type="date" required min={draft.from} value={draft.to} onChange={event => setDraft({ ...draft, to: event.target.value })}/></label><button>Apply</button></form></section>
+    <section className={styles.title}><div><p>MANAGEMENT OVERVIEW</p><h1>SDR performance</h1><span>{owners.map(owner => `${owner.shortName} · ${owner.brand}`).join("  /  ")}</span></div><form onSubmit={event => { event.preventDefault(); setRange({ ...draft }); const url = new URL(window.location.href); url.searchParams.set("from", draft.from); url.searchParams.set("to", draft.to); window.history.replaceState({}, "", url); }}><CalendarDays size={18}/><label>From<input aria-label="Reporting start" type="date" required value={draft.from} max={draft.to} onChange={event => setDraft({ ...draft, from: event.target.value })}/></label><label>To<input aria-label="Reporting end" type="date" required min={draft.from} value={draft.to} onChange={event => setDraft({ ...draft, to: event.target.value })}/></label><button>Apply</button></form></section>
     {error && <p className={styles.error} role="alert">{error}</p>}
     <div className={styles.owners}>{owners.map(owner => {
       const entry = dataFor(owner.key);

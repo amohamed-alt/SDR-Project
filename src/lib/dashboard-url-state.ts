@@ -14,7 +14,7 @@ function safeDate(value: string | null, fallback: string) {
   const candidate = clean(value, 10);
   if (!DATE_PATTERN.test(candidate)) return fallback;
   const parsed = new Date(`${candidate}T12:00:00Z`);
-  return Number.isNaN(parsed.getTime()) ? fallback : candidate;
+  return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== candidate ? fallback : candidate;
 }
 
 export function readDashboardView(search: string, defaults: DashboardFilters) {

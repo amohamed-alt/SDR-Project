@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DashboardData, DashboardFilters } from "@/lib/types";
 
 type Result = { data: DashboardData; refreshing: boolean; etag?: string };
@@ -55,8 +55,9 @@ async function readDashboard(key: string, force: boolean): Promise<Result> {
   return promise;
 }
 
-export function useDashboard(filters: DashboardFilters, refreshKey: number, active = true) {
-  const key = dashboardQuery(filters);
+export function useDashboard(filters: DashboardFilters, refreshKey: number, active = true, profile: "summary" | "instant" = "instant") {
+  const key = `${dashboardQuery(filters)}&profile=${profile}`;
+  const consumedRefresh = useRef(0);
   const [state, setState] = useState<{ key: string; result?: Result; error: string; requesting: boolean }>(() => ({
     key, result: cache.get(key), error: "", requesting: !cache.has(key),
   }));
@@ -94,7 +95,9 @@ export function useDashboard(filters: DashboardFilters, refreshKey: number, acti
         if (alive) timer = setTimeout(() => void update(), delay);
       }
     }
-    void update(refreshKey > 0);
+    const force = refreshKey > consumedRefresh.current;
+    consumedRefresh.current = refreshKey;
+    void update(force);
     const onVisible = () => { if (!document.hidden) void update(); };
     document.addEventListener("visibilitychange", onVisible);
     return () => { alive = false; clearTimeout(timer); document.removeEventListener("visibilitychange", onVisible); };

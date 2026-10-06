@@ -132,7 +132,7 @@ test("acquisition bootstrap retries transient people-scan gateway failures", asy
 
 test("today task queue and full task drawer expose WhatsApp for associated contacts", async () => {
   const workspace = await read("src/components/MaritaWorkspace.tsx");
-  const drawer = await read("src/components/DrilldownDrawer.tsx");
+  const drawer = await read("src/components/DashboardRecordColumns.tsx");
 
   assert.match(workspace, /function TaskQueueItem/);
   assert.match(workspace, /row\.relatedContactId && row\.relatedContactHasPhone && <WhatsAppQuickAction contactId=\{row\.relatedContactId\}/);
