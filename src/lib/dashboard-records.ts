@@ -65,7 +65,11 @@ export function selectDashboardRecords(data: DashboardData, selection: RecordSel
     const field = { Opened: "opened", Clicked: "clicked", Replied: "replied" }[selection.emailEngagement];
     if (field) rows = rows.filter(row => Boolean((row as unknown as Record<string, unknown>)[field]));
   }
-  if (selection.outcome) rows = rows.filter(row => "status" in row && (row.status === selection.outcome || row.detail === selection.outcome || (selection.outcome === "Unknown" && row.type === "Call" && row.detail === "No disposition")));
+  if (selection.outcome) rows = rows.filter(row => {
+    if (!("status" in row)) return false;
+    if (row.type === "Call" && row.detail) return row.detail === selection.outcome || (selection.outcome === "Unknown" && row.detail === "No disposition");
+    return row.status === selection.outcome || row.detail === selection.outcome;
+  });
   if (selection.alert) {
     const alert = selection.alert;
     rows = rows.filter(row => {

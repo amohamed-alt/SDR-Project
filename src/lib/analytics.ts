@@ -622,7 +622,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       type: "Call",
       subject: value(call, "hs_call_title") || "Logged call",
       status: CALL_DISPOSITION_LABELS[value(call, "hs_call_disposition")] ?? pretty(value(call, "hs_call_status")),
-      detail: CALL_DISPOSITION_LABELS[value(call, "hs_call_disposition")] ?? "No disposition",
+      detail: CALL_DISPOSITION_LABELS[value(call, "hs_call_disposition")] ?? (value(call, "hs_call_disposition") ? pretty(value(call, "hs_call_disposition")) : "No disposition"),
       assignedTo: ownerMap.get(value(call, "hubspot_owner_id")) ?? ownerName,
       occurredAt: value(call, "hs_timestamp"), metricAt: value(call, "hs_timestamp"), dueAt: "", dueBucket: "", isOpen: false, isHighPriority: false,
       opened: false, clicked: false, replied: false,

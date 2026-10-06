@@ -64,6 +64,22 @@ test("summary retains aggregate truth while removing all evidence arrays without
   assert.ok(gzipSync(JSON.stringify(summary)).length < gzipSync(JSON.stringify(data)).length / 2);
 });
 
+test("call outcome evidence distinguishes custom dispositions, missing outcomes and call execution status", () => {
+  const data = fixture();
+  const custom = "2e7360c1 6b71 40e9 Ab2b 30ae98a4678c";
+  data.recentActivities = [
+    { id: "custom", type: "Call", status: "Unknown", detail: custom },
+    { id: "missing", type: "Call", status: "Completed", detail: "No disposition" },
+    { id: "connected", type: "Call", status: "Connected", detail: "Connected" },
+    { id: "meeting", type: "Meeting", status: "Unknown", detail: "Meetings Public" },
+  ];
+  const calls = outcome => selectDashboardRecords(data, { kind: "activities", outcome, where: [{ field: "type", value: "Call" }] }).map(row => row.id);
+  assert.deepEqual(calls(custom), ["custom"]);
+  assert.deepEqual(calls("Unknown"), ["missing"]);
+  assert.deepEqual(calls("Connected"), ["connected"]);
+  assert.deepEqual(selectDashboardRecords(data, { kind: "activities", outcome: "Unknown", where: [{ field: "type", value: "Meeting" }] }).map(row => row.id), ["meeting"]);
+});
+
 test("blank response timing remains missing, including a date at the reporting timezone boundary", () => {
   for (const value of [null, undefined, "", "   ", "NaN", "-1", "Infinity"]) assert.equal(responseMilliseconds(value), null);
   assert.equal(responseMilliseconds("0"), 0);
