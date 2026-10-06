@@ -1,10 +1,10 @@
 import { AcquisitionDashboard } from "@/components/AcquisitionDashboard";
 
-type AcquisitionOwnerKey = "marita" | "daniel" | "comparison" | "ursula" | "zein";
+type AcquisitionOwnerKey = "marita" | "daniel" | "comparison" | "ursula" | "zein" | "intelligence";
 
 function initialOwner(value: string | string[] | undefined): AcquisitionOwnerKey {
   const candidate = Array.isArray(value) ? value[0] : value;
-  return candidate === "daniel" || candidate === "comparison" || candidate === "ursula" || candidate === "zein"
+  return candidate === "daniel" || candidate === "comparison" || candidate === "ursula" || candidate === "zein" || candidate === "intelligence"
     ? candidate
     : "marita";
 }

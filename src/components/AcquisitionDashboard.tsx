@@ -27,6 +27,11 @@ import {
 import dynamic from "next/dynamic";
 const SdrComparison = dynamic(() => import("@/components/SdrComparison").then(module => module.SdrComparison));
 import { SDR_OWNERS, type SdrKey } from "@/lib/sdr-owners";
+import { ReportingRange } from "./ReportingRange";
+import studioStyles from "./DecisionStudio.module.css";
+const PerformanceCharts = dynamic(() => import("./PerformanceCharts").then(module => module.PerformanceCharts));
+const DecisionStudio = dynamic(() => import("./DecisionStudio").then(module => module.DecisionStudio));
+const SalesHandoffDashboard = dynamic(() => import("./SalesHandoffDashboard").then(module => module.SalesHandoffDashboard));
 import { AcquisitionDailyPulse } from "@/components/AcquisitionDailyPulse";
 import { Dashboard as ExistingDashboard } from "@/components/DashboardShell";
 import type { Drilldown } from "@/components/DrilldownDrawer";
@@ -37,7 +42,7 @@ import { dashboardToday } from "@/lib/dashboard-values";
 import type { RecordSelection, RecordCondition } from "@/lib/dashboard-records";
 import type { ActivityRow } from "@/lib/types";
 
-type AcquisitionOwnerKey = SdrKey | "comparison";
+type AcquisitionOwnerKey = SdrKey | "comparison" | "intelligence";
 type RepOwnerKey = "ursula" | "zein";
 
 type AcquisitionOwner = {
@@ -57,6 +62,7 @@ type MetricCard = {
 };
 
 const ACQUISITION_OWNERS: Record<AcquisitionOwnerKey, AcquisitionOwner> = {
+  intelligence: { key: "intelligence", name: "Intelligence Studio", ownerId: "", initials: "IS" },
   marita: { ...SDR_OWNERS.marita },
   daniel: { ...SDR_OWNERS.daniel },
   comparison: { key: "comparison", name: "SDR Comparison", ownerId: "", initials: "SDR" },
@@ -67,7 +73,7 @@ const ACQUISITION_OWNERS: Record<AcquisitionOwnerKey, AcquisitionOwner> = {
 function acquisitionOwnerFromUrl(): AcquisitionOwnerKey {
   if (typeof window === "undefined") return "marita";
   const value = new URLSearchParams(window.location.search).get("acq");
-  return value === "ursula" || value === "zein" || value === "daniel" || value === "comparison" ? value : "marita";
+  return value === "ursula" || value === "zein" || value === "daniel" || value === "comparison" || value === "intelligence" ? value : "marita";
 }
 
 
@@ -95,10 +101,12 @@ function AcquisitionNav({
           key={owner.key}
           type="button"
           className={activeOwner === owner.key ? "active" : ""}
+          aria-label={owner.key === "comparison" || owner.key === "intelligence" ? owner.name : `${owner.name.split(" ")[0]} ${SDR_OWNERS[owner.key].brand}`}
+          title={owner.name}
           onClick={() => onSelect(owner.key)}
         >
           <UsersRound size={17}/>
-          <span>{owner.key === "comparison" ? "SDR Comparison" : owner.name.split(" ")[0]}{owner.key !== "comparison" ? <small className="sdr-nav-brand">{SDR_OWNERS[owner.key].brand}</small> : null}</span>
+          <span>{owner.key === "comparison" || owner.key === "intelligence" ? owner.name : owner.name.split(" ")[0]}{owner.key !== "comparison" && owner.key !== "intelligence" ? <small className="sdr-nav-brand">{SDR_OWNERS[owner.key].brand}</small> : null}</span>
           {activeOwner === owner.key && <ChevronRight size={15}/>} 
         </button>
       ))}
@@ -191,10 +199,11 @@ function RepKpiDashboard({
   onSelectOwner: (owner: AcquisitionOwnerKey) => void;
 }) {
   const owner = ACQUISITION_OWNERS[ownerKey];
+  const [repView, setRepView] = useState<"performance" | "handoff">("performance");
   const today = dashboardToday();
   const filters = readDashboardView(initialSearch, { from: process.env.NEXT_PUBLIC_DEFAULT_START_DATE ?? today.slice(0, 7) + "-01", to: today, ownerId: owner.ownerId }).filters;
   const [refreshKey, setRefreshKey] = useState(0);
-  const { data, loading, refreshing, requesting, error } = useDashboard(filters, refreshKey, true, "summary");
+  const { data, loading, refreshing, requesting, error } = useDashboard(filters, refreshKey, repView === "performance", "summary");
   const [drilldown, setDrilldown] = useState<Drilldown | null>(null);
   function activities(type: ActivityRow["type"], where: RecordCondition[] = [], extra: Omit<RecordSelection, "kind" | "where"> = {}): Omit<RecordSelection, "kind"> {
     return { where: [{ field: "type", value: type }, ...where], ...extra };
@@ -375,9 +384,9 @@ function RepKpiDashboard({
     },
   ] : [];
 
-  return <main className="app-shell">
+  return <main className="app-shell rm-analytics-shell">
     <header className="topbar">
-      <div className="top-title"><strong>Acquisition KPIs</strong><span>Live HubSpot performance</span></div>
+      <div className="top-title"><strong>Acquisition intelligence</strong><span>Live HubSpot performance</span></div>
       <div className="top-actions">
         <span className={`status-pill ${data?.meta.isDemo ? "demo" : "live"}`}><i/>{data?.meta.isDemo ? "Demo data" : refreshing || requesting ? "UPDATING · HUBSPOT" : "HUBSPOT SNAPSHOT"}</span>
         <button className="refresh-button" type="button" onClick={() => setRefreshKey(value => value + 1)} disabled={loading || refreshing || requesting}>
@@ -408,13 +417,18 @@ function RepKpiDashboard({
           </div>
         </div>
 
+        <nav className={studioStyles.tabs} aria-label="RM analytics sections"><button type="button" aria-pressed={repView === "performance"} onClick={() => setRepView("performance")}>Performance & trends</button><button type="button" aria-pressed={repView === "handoff"} onClick={() => setRepView("handoff")}>SDR meeting handoff</button></nav>
+        {repView === "handoff" ? <SalesHandoffDashboard key={ownerKey} initialSearch={initialSearch} initialSalesRepId={owner.ownerId} embedded onBack={() => setRepView("performance")}/> : <>
+        <ReportingRange key={`${filters.from}:${filters.to}`} filters={filters}/>
+        <p className={studioStyles.freshness}>Owner activity scope · use SDR meeting handoff for meetings booked by Marita or Daniel.</p>
         {data?.meta.warnings.length ? <div className="warning-banner"><AlertTriangle size={17}/><div><strong>{data.meta.isDemo ? "Demo mode" : "Some HubSpot data sources were unavailable"}</strong><span>{data.meta.warnings.join(" · ")}</span></div></div> : null}
         {error ? <div className="error-banner"><AlertTriangle size={20}/><div><strong>{data ? "Refresh failed — showing the last loaded data" : "KPI dashboard failed to load"}</strong><span>{error}</span></div><button type="button" onClick={() => setRefreshKey(value => value + 1)}>Try again</button></div> : null}
 
         {data
-          ? <div className="kpi-grid">{cards.map((card) => <MetricButton key={card.label} {...card}/>)}</div>
+          ? <><div className="kpi-grid">{cards.slice(0, 6).map((card) => <MetricButton key={card.label} {...card}/>)}</div><PerformanceCharts data={data} onInspect={(title, selection) => { setDrilldown({ kind: selection.kind, title, description: "Records from the selected owner snapshot.", rows: [], source: recordSource(selection), hubspotUrl: data.meta.hubspotUrls[selection.kind === "activities" ? "calls" : selection.kind] } as Drilldown); }}/><details className={studioStyles.evidence}><summary>More risk, conversion and data-quality metrics</summary><div className="kpi-grid">{cards.slice(6).map(card => <MetricButton key={card.label} {...card}/>)}</div></details></>
           : (loading ? <KpiSkeleton/> : null)}
         {data ? <AcquisitionDailyPulse filters={filters} data={data} ownerName={owner.name} onOpen={setDrilldown}/> : null}
+        </>}
       </div>
     </div>
 
@@ -458,6 +472,7 @@ export function AcquisitionDashboard({ initialOwner, initialSearch }: { initialO
   function selectOwner(owner: AcquisitionOwnerKey) {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     const url = new URL(window.location.href);
+    if (owner === "intelligence" && (activeOwner === "marita" || activeOwner === "daniel")) url.searchParams.set("analysisOwner", activeOwner);
     if (owner === "marita") url.searchParams.delete("acq");
     else url.searchParams.set("acq", owner);
     for (const parameter of ["tab", "workspace", "view"]) {
@@ -476,6 +491,8 @@ export function AcquisitionDashboard({ initialOwner, initialSearch }: { initialO
   if (activeOwner === "daniel") return <div className="sdr-tab-panel" data-sdr-host="daniel" data-brand="evalufy">
       <ExistingDashboard key="daniel" sdr="daniel" active initialSearch={activeSearch} workspaceNavigation={<AcquisitionNav activeOwner="daniel" onSelect={selectOwner}/>}/>
     </div>;
+
+  if (activeOwner === "intelligence") return <main className="app-shell intelligence-shell"><header className="topbar"><div className="top-title"><strong>SDR Command Center</strong><span>Intelligence & decision workspace</span></div></header><div className="workspace"><aside className="sidebar"><div className="brand"><div className="brand-logo" role="img" aria-label="Talentera ATS"/><span className="brand-subtitle">SDR Intelligence</span></div><AcquisitionNav activeOwner="intelligence" onSelect={selectOwner}/></aside><div className="content"><DecisionStudio initialSearch={activeSearch}/></div></div></main>;
 
   if (activeOwner === "comparison") return <div className="sdr-tab-panel"><ComparisonWorkspace onSelect={selectOwner} initialSearch={activeSearch}/></div>;
 

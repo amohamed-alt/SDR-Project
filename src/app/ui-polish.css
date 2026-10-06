@@ -487,7 +487,7 @@ textarea:focus-visible {
 [data-brand="evalufy"] .brand-subtitle { color: #cfbff2; }
 [data-brand="evalufy"] .refresh-button,
 [data-brand="evalufy"] .primary-button { background: var(--green); border-color: var(--green); }
-.evalufy-logo{width:100%;height:auto;background:#fff}
+.evalufy-logo{width:100%;height:auto;background:transparent;filter:brightness(0) invert(1)}
 .sdr-nav-brand{display:block;font-size:11px;opacity:.78;margin-top:3px;font-weight:400}
 .sdr-tools-count{margin-left:auto;min-width:20px;height:20px;display:grid;place-items:center;border-radius:999px;background:rgba(255,255,255,.12);font-size:9px;font-weight:800}
 .sidebar{overflow-y:auto;scrollbar-width:thin}
@@ -536,7 +536,7 @@ button:focus-visible,a:focus-visible{outline:3px solid #8f80c9;outline-offset:3p
 [data-brand="evalufy"] .status-pill.live i { background: var(--brand-bright); box-shadow: 0 0 0 4px rgba(139,92,246,.12); }
 /* Present the Evalufy PNG at true brand color inside the dark sidebar,
    sized to match the space the wordmark occupies. */
-.evalufy-brand-mark { display: flex; width: 176px; min-height: 48px; align-items: center; overflow: hidden; border-radius: 8px; background: #fff; padding: 4px 6px; box-sizing: border-box; }
+.evalufy-brand-mark { display: flex; width: 176px; min-height: 48px; align-items: center; overflow: hidden; border-radius: 0; background: transparent; padding: 0; box-sizing: border-box; }
 .evalufy-brand-mark .evalufy-logo { display: block; width: 100%; height: auto; border-radius: 0; object-fit: contain; }
 @media (min-width: 641px) and (max-width: 900px) { .evalufy-brand-mark { width: 46px; height: 46px; padding: 5px; } .evalufy-brand-mark .evalufy-logo { width: 132px; max-width: none; transform: translateX(-2px); } }
 
@@ -559,3 +559,15 @@ button:focus-visible,a:focus-visible{outline:3px solid #8f80c9;outline-offset:3p
   color: var(--text);
 }
 .sdr-tab-panel { overflow-anchor: none; }
+
+/* Analytics navigation remains available at small widths. */
+@media (max-width: 640px) {
+  .intelligence-shell .workspace, .rm-analytics-shell .workspace { display: block; }
+  .intelligence-shell .sidebar, .rm-analytics-shell .sidebar { position: relative; inset: auto; width: 100%; height: auto; padding: 14px; display: block; overflow: visible; }
+  .intelligence-shell .sidebar .brand, .rm-analytics-shell .sidebar .brand { display: none; }
+  .intelligence-shell .sidebar nav, .rm-analytics-shell .sidebar nav { display: flex; flex-wrap: wrap; gap: 6px; }
+  .intelligence-shell .sidebar nav button, .rm-analytics-shell .sidebar nav button { display: flex; width: auto; min-height: 44px; flex: 1 1 28%; padding: 9px; gap: 5px; }
+  .intelligence-shell .sidebar nav button span, .rm-analytics-shell .sidebar nav button span { display: block; font-size: 11px; }
+  .intelligence-shell .sidebar nav button small, .rm-analytics-shell .sidebar nav button small { display: none; }
+  .intelligence-shell .content, .rm-analytics-shell .content { padding: 18px 12px; }
+}
