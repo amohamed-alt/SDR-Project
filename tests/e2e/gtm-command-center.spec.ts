@@ -52,7 +52,9 @@ test("Daniel deep links render the Evalufy workspace on the server", async ({ pa
 
   await page.goto("/?acq=daniel");
   await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
-  await expect(page.locator(".evalufy-logo")).toHaveAttribute("src", /evalufy-transparent\.png/);
+  await expect(page.getByRole("img", { name: "Evalufy", exact: true })).toHaveAttribute("src", /evalufy-transparent\.png/);
+  await expect(page.locator(".evalufy-symbol")).toHaveCSS("filter", "none");
+  await expect(page.getByRole("img", { name: "Evalufy", exact: true })).toHaveCSS("filter", "brightness(0) invert(1)");
   await expect(page.locator(".sidebar").getByRole("button", { name: /Inbound vs Outbound/i })).toBeVisible();
   await expect(page.locator(".sidebar").getByRole("region", { name: "SDR Tools", exact: true })).toBeVisible();
 });
