@@ -70,7 +70,11 @@ export function DashboardRecordsTable({ source, lazy = false, variant }: { sourc
       const exportParams = new URLSearchParams(key);
       exportParams.set("format", "csv");
       const response = await fetch(`/api/dashboard/records?${exportParams}`, { cache: "no-store", signal: AbortSignal.timeout(60_000) });
-      if (!response.ok) throw new Error((await response.json()).error || "Export failed");
+      if (!response.ok) {
+        const result = await response.json();
+        setState(current => ({ ...current, key, error: result.error || "Export failed", expired: response.status === 409 }));
+        return;
+      }
       const url = URL.createObjectURL(await response.blob());
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -87,7 +91,7 @@ export function DashboardRecordsTable({ source, lazy = false, variant }: { sourc
       <label className="gtm-data-search"><Search size={15}/><input aria-label="Search records" placeholder="Search all matching records…" value={search} onChange={event => setSearch(event.target.value)}/></label>
       <label className="gtm-page-size"><span>Rows</span><select aria-label="Rows" value={limit} onChange={event => { setLimit(Number(event.target.value)); setPageIndex(0); }}>{[25, 50, 100].map(size => <option key={size} value={size}>{size}</option>)}</select></label>
       <div className="gtm-data-count" aria-live="polite"><strong>{page ? page.total.toLocaleString("en-US") : "—"}</strong><span>{query ? "matching records" : "records"}</span></div>
-      <button className="gtm-data-export" type="button" disabled={exporting || !page?.total || Boolean(error)} onClick={() => void exportCsv()}><Download size={14}/>{exporting ? "Exporting…" : "CSV"}</button>
+      <button className="gtm-data-export" type="button" disabled={exporting || search !== query || !page?.total || Boolean(error)} onClick={() => void exportCsv()}><Download size={14}/>{exporting ? "Exporting…" : "CSV"}</button>
     </div>
     {error ? <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => { if (state.expired) window.location.reload(); else { setState({ key: "" }); setRetry(value => value + 1); } }}>{state.expired ? "Reload dashboard" : "Retry"}</button></div> : null}
     <div className="gtm-table-scroll"><table className="gtm-table"><thead><tr>{columns.map(column => <th key={column.id} style={{ width: column.width }} aria-sort={sort === column.id ? direction === "asc" ? "ascending" : "descending" : "none"}>{column.sortable === false ? column.header : <button className="gtm-sort-header" onClick={() => { setSort(column.id); setDirection(sort === column.id && direction === "asc" ? "desc" : "asc"); setPageIndex(0); }}>{column.header}<ChevronsUpDown size={12}/></button>}</th>)}</tr></thead><tbody>{page?.rows.map(row => <tr key={`${"type" in row ? row.type : source.selection.kind}-${row.id}`}>{columns.map(column => <td key={column.id}>{column.render ? column.render(row) : String(column.accessor(row) ?? "—")}</td>)}</tr>)}</tbody></table></div>
