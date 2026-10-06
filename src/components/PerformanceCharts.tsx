@@ -5,10 +5,12 @@ import type { DashboardData } from "@/lib/types";
 import type { RecordSelection } from "@/lib/dashboard-records";
 import styles from "./DecisionStudio.module.css";
 
+const outcomeLabel = (name: string) => /^[a-f\d]{32}$/i.test(name.replace(/[\s-]/g, "")) ? "Unmapped outcome" : name;
+
 export function PerformanceCharts({ data, onInspect }: { data: DashboardData; onInspect: (title: string, selection: RecordSelection) => void }) {
   const [series, setSeries] = useState<"calls" | "meetingsBooked">("calls");
   const [outcome, setOutcome] = useState<"Call" | "Meeting">("Call");
-  const outcomes = outcome === "Call" ? data.callOutcomes : data.meetingOutcomes;
+  const outcomes = (outcome === "Call" ? data.callOutcomes : data.meetingOutcomes).map(row => ({ ...row, displayName: outcomeLabel(row.name) }));
   const days = data.dailyActivities;
   return <div className={styles.chartGrid}>
     <section className={`${styles.panel} ${styles.trend}`} aria-label="Activity trend">
@@ -18,7 +20,7 @@ export function PerformanceCharts({ data, onInspect }: { data: DashboardData; on
     </section>
     <section className={styles.panel} aria-label="Outcome mix">
       <header><div><span className={styles.kicker}>Quality of activity</span><h2>Outcome mix</h2></div><select aria-label="Outcome activity" value={outcome} onChange={event => setOutcome(event.target.value as "Call" | "Meeting")}><option>Call</option><option>Meeting</option></select></header>
-      {outcomes.length ? <><div className={styles.chart}><ResponsiveContainer width="100%" height="100%"><BarChart data={outcomes.slice(0, 6)} layout="vertical" margin={{ left: 0, right: 18 }}><CartesianGrid horizontal={false} stroke="var(--border)"/><XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }}/><YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 11 }} axisLine={false} tickLine={false}/><Tooltip/><Bar isAnimationActive={false} dataKey="value" name="Records" fill="var(--green)" radius={[0, 4, 4, 0]}/></BarChart></ResponsiveContainer></div><div className={styles.outcomes}>{outcomes.map(row => <button key={row.name} onClick={() => onInspect(`${outcome} · ${row.name}`, { kind: "activities", where: [{ field: "type", value: outcome }, { field: "status", value: row.name }] })}>{row.name}<b>{row.value}</b></button>)}</div></> : <p className={styles.empty}>No {outcome.toLowerCase()} outcomes for these filters.</p>}
+      {outcomes.length ? <><div className={styles.chart}><ResponsiveContainer width="100%" height="100%"><BarChart data={outcomes.slice(0, 6)} layout="vertical" margin={{ left: 0, right: 18 }}><CartesianGrid horizontal={false} stroke="var(--border)"/><XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }}/><YAxis type="category" dataKey="displayName" width={100} tick={{ fontSize: 11 }} axisLine={false} tickLine={false}/><Tooltip/><Bar isAnimationActive={false} dataKey="value" name="Records" fill="var(--green)" radius={[0, 4, 4, 0]}/></BarChart></ResponsiveContainer></div><div className={styles.outcomes}>{outcomes.map(row => <button key={row.name} onClick={() => onInspect(`${outcome} · ${row.displayName}`, { kind: "activities", where: [{ field: "type", value: outcome }, { field: "status", value: row.name }] })} title={row.name !== row.displayName ? "The source outcome has no readable label; inspect its records." : undefined}>{row.displayName}<b>{row.value}</b></button>)}</div></> : <p className={styles.empty}>No {outcome.toLowerCase()} outcomes for these filters.</p>}
     </section>
     <section className={styles.panel} aria-label="Pipeline distribution">
       <header><div><span className={styles.kicker}>Opportunity mix</span><h2>Deals by stage</h2><p>Associated deal counts · current snapshot</p></div></header>
