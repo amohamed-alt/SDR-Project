@@ -16,7 +16,10 @@ test("direct tool URLs redirect before rendering and retain filters without trus
   const path = "/?view=team-activity&from=2026-07-15&to=2026-10-07";
   const response = toolAccessResponse(request(path));
   assert.equal(response.status, 307);
-  assert.equal(response.headers.get("Location"), `/tools-unlock?returnTo=${encodeURIComponent(path)}`);
+  const redirect = new URL(response.headers.get("Location"));
+  assert.equal(redirect.origin, "https://sdr.dashboardtalentera.tech");
+  assert.equal(redirect.pathname, "/tools-unlock");
+  assert.equal(redirect.searchParams.get("returnTo"), path);
   for (const path of ["/lead-inventory", "/system-health", "/salesnav-prospecting", "/company-enrichment"]) assert.equal(toolAccessResponse(request(path))?.status, 307);
   assert.equal(isProtectedToolPage("/", new URLSearchParams("acq=intelligence&studio=tools")), true);
   assert.equal(isProtectedToolPage("/", new URLSearchParams("acq=marita")), false);

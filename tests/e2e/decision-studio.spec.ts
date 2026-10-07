@@ -8,8 +8,8 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("agent accepts the proxy's public origin and rejects external origins", async ({ request }) => {
-  await request.post("/api/sdr-admin", { data: { password: "playwright-tools-only-password" } });
-  const headers = { origin: "https://sdr.dashboardtalentera.tech", "x-forwarded-host": "sdr.dashboardtalentera.tech", "sec-fetch-site": "same-origin" };
+  const login = await request.post("/api/sdr-admin", { data: { password: "playwright-tools-only-password" } });
+  const headers = { cookie: login.headers()["set-cookie"].split(";")[0], origin: "https://sdr.dashboardtalentera.tech", "x-forwarded-host": "sdr.dashboardtalentera.tech", "sec-fetch-site": "same-origin" };
   const allowed = await request.post("/api/ai/sdr-agent", { headers, data: {} });
   // The demo guard is reached only after origin validation succeeds.
   expect(allowed.status()).toBe(503);

@@ -45,7 +45,12 @@ export function toolAccessResponse(request: NextRequest) {
   if (sdrAdminAuthorized(request) || (api && machineRoute(request, path))) return null;
   const headers = { "Cache-Control": "private, no-store" };
   if (api) return Response.json({ error: "Unlock SDR tools to continue.", code: "TOOLS_LOCKED" }, { status: 401, headers });
-  // Relative redirect stays on the public origin behind Traefik.
-  const returnTo = request.nextUrl.pathname + request.nextUrl.search;
-  return new Response(null, { status: 307, headers: { ...headers, Location: `/tools-unlock?returnTo=${encodeURIComponent(returnTo)}` } });
+  // Next's proxy adapter requires an absolute Location. Pin production to the
+  // public host instead of the internal container URL supplied by Traefik.
+  const requestHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim() || request.headers.get("host") || request.nextUrl.host;
+  const loopback = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(requestHost);
+  const origin = loopback ? `${request.nextUrl.protocol}//${requestHost}` : "https://sdr.dashboardtalentera.tech";
+  const target = new URL("/tools-unlock", origin);
+  target.searchParams.set("returnTo", request.nextUrl.pathname + request.nextUrl.search);
+  return new Response(null, { status: 307, headers: { ...headers, Location: target.href } });
 }
