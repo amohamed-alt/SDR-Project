@@ -1,4 +1,5 @@
 "use client";
+import { ToolAccessGate } from "./ToolAccessGate";
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
@@ -418,7 +419,7 @@ function RepKpiDashboard({
         </div>
 
         <nav className={studioStyles.tabs} aria-label="RM analytics sections"><button type="button" aria-pressed={repView === "performance"} onClick={() => setRepView("performance")}>Performance & trends</button><button type="button" aria-pressed={repView === "handoff"} onClick={() => setRepView("handoff")}>SDR meeting handoff</button></nav>
-        {repView === "handoff" ? <SalesHandoffDashboard key={ownerKey} initialSearch={initialSearch} initialSalesRepId={owner.ownerId} embedded onBack={() => setRepView("performance")}/> : <>
+        {repView === "handoff" ? <ToolAccessGate><SalesHandoffDashboard key={ownerKey} initialSearch={initialSearch} initialSalesRepId={owner.ownerId} embedded onBack={() => setRepView("performance")}/></ToolAccessGate> : <>
         <ReportingRange key={`${filters.from}:${filters.to}`} filters={filters}/>
         <p className={studioStyles.freshness}>Owner activity scope · use SDR meeting handoff for meetings booked by Marita or Daniel.</p>
         {data?.meta.warnings.length ? <div className="warning-banner"><AlertTriangle size={17}/><div><strong>{data.meta.isDemo ? "Demo mode" : "Some HubSpot data sources were unavailable"}</strong><span>{data.meta.warnings.join(" · ")}</span></div></div> : null}

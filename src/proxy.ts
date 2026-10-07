@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { dashboardAuthResponse } from "@/lib/dashboard-auth";
 
+import { toolAccessResponse } from "@/lib/tool-access";
+
 export function proxy(request: NextRequest) {
   const authResponse = dashboardAuthResponse(request);
   if (authResponse) return authResponse;
+
+  const toolResponse = toolAccessResponse(request);
+  if (toolResponse) return toolResponse;
 
   //
   // Traefik/Hostinger can expose the public Origin header while Next.js resolves

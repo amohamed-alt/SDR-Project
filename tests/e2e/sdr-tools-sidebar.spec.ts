@@ -47,8 +47,10 @@ for (const owner of ["marita", "daniel"]) {
     await expect(tools.getByRole("button", { name: /^Team Activity\b/ })).toHaveAttribute("aria-current", "page");
 
     await page.reload();
+    await expect(page).toHaveURL(/tools-unlock/);
+    await expect(page.getByRole("heading", { name: "SDR tools are locked" })).toBeVisible();
+    await page.goto(`/?acq=${owner}`);
     await expect(tools).toBeVisible();
-    await expect(tools.getByRole("button", { name: /^Team Activity\b/ })).toHaveAttribute("aria-current", "page");
 
     const companyRepair = tools.getByRole("button", { name: /^Company Repair\b/ });
     await companyRepair.scrollIntoViewIfNeeded();

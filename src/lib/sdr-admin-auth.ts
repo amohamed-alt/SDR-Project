@@ -15,7 +15,7 @@ function safeEqual(left: string, right: string) {
 }
 
 export function sdrAdminSecret() {
-  return clean(process.env.DASHBOARD_PASSWORD || process.env.SDR_ADMIN_PASSWORD, 500);
+  return clean(process.env.SDR_ADMIN_PASSWORD || process.env.DASHBOARD_PASSWORD, 500);
 }
 
 export function sdrAdminConfigured() {
@@ -46,7 +46,7 @@ export function sdrAdminAuthorized(request: NextRequest) {
 
   // Keep trusted automation calls working without exposing a browser key field.
   const suppliedAutomationToken = clean(request.headers.get("x-acquisition-owner-token"), 500);
-  const configuredAutomationToken = clean(process.env.ACQUISITION_OWNER_TOKEN || sdrAdminSecret(), 500);
+  const configuredAutomationToken = clean(process.env.ACQUISITION_OWNER_TOKEN || process.env.DASHBOARD_PASSWORD || process.env.SDR_ADMIN_PASSWORD, 500);
   return Boolean(
     suppliedAutomationToken
       && configuredAutomationToken

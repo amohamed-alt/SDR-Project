@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
+  await page.request.post("/api/sdr-admin", { data: { password: "playwright-tools-only-password" } });
   await page.route("**/api/lead-inventory/engine", (route) => route.fulfill({ json: {
     coverage: { checked: 12, attempted: 9, connected: 6, meetingsHeld: 3, both: 2, futureTask: 5, lastCheckedAt: "2026-10-01T08:00:00Z" },
     model: { mode: "collecting", matureCompanies: 12, segments: [] }, operations: [],

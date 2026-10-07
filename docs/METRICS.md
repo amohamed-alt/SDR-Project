@@ -123,3 +123,9 @@ Call audience groups use the full cached activity snapshot filtered by `metricAt
 Historical date ranges remain unchanged until the user chooses Today, Last 7 days or This month. Snapshot freshness and latest-call timestamps explicitly use the reporting timezone. Call timing is unrelated to lead response SLA coverage.
 
 Talent market watch now filters both recruitment/workforce relevance and geography (MENA, Saudi Arabia, UAE, Egypt). Feed schema invalidation preserves the persistent daily search counter. The unconfigured chat interface is removed; no generated answers are presented without a working model.
+
+## SDR tools access
+
+Team Activity and operational tools require the existing signed HttpOnly admin session. Direct page links redirect to `/tools-unlock` with their original filters; client tool navigation shows the same lock form without mounting the tool. Their APIs return 401 before any source reads. Main dashboard analytics and usage-event ingestion remain public. Maqsam ingest, acquisition workers and companion pairing retain their explicitly authenticated machine paths.
+
+The tools password comes from the deployment secret `SDR_ADMIN_PASSWORD`, with `DASHBOARD_PASSWORD` as a legacy fallback. It is never embedded in the repository or browser bundle. The automation owner-token fallback retains its existing precedence. Password login/logout reject cross-site requests. Use **Lock tools** to remove the current browser's cookie.

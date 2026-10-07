@@ -60,6 +60,7 @@ test("Daniel deep links render the Evalufy workspace on the server", async ({ pa
 });
 
 test("sidebar and owner workspaces remain mounted across tool navigation and reload", async ({ page }) => {
+  await page.request.post("/api/sdr-admin", { data: { password: "playwright-tools-only-password" } });
   await page.goto("/");
   const sidebar = page.locator(".sidebar");
   await expect(sidebar.getByText("TEAM WORKSPACES")).toBeVisible();

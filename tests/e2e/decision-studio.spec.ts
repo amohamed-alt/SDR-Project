@@ -8,6 +8,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("agent accepts the proxy's public origin and rejects external origins", async ({ request }) => {
+  await request.post("/api/sdr-admin", { data: { password: "playwright-tools-only-password" } });
   const headers = { origin: "https://sdr.dashboardtalentera.tech", "x-forwarded-host": "sdr.dashboardtalentera.tech", "sec-fetch-site": "same-origin" };
   const allowed = await request.post("/api/ai/sdr-agent", { headers, data: {} });
   // The demo guard is reached only after origin validation succeeds.
@@ -20,6 +21,7 @@ test("agent accepts the proxy's public origin and rejects external origins", asy
 });
 
 test("RM charts expose source records and keep handoff scope isolated", async ({ page }) => {
+  await page.request.post("/api/sdr-admin", { data: { password: "playwright-tools-only-password" } });
   // The shared demo fixture's source activities are dated July 19.
   await page.goto("/?acq=zein&from=2026-07-01&to=2026-07-19");
   await expect(page.getByRole("heading", { name: "Activity over time" })).toBeVisible();
@@ -71,6 +73,9 @@ test("narrow analytics has accessible navigation and no page overflow", async ({
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   await page.screenshot({ path: "test-results/studio-mobile.png", fullPage: true });
   await page.getByRole("button", { name: "Tool studio", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "SDR tools are locked" })).toBeVisible();
+  await page.getByLabel("Tools password", { exact: true }).fill("playwright-tools-only-password");
+  await page.getByRole("button", { name: "Unlock tools", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Choose the outcome you need." })).toBeVisible();
   await page.getByRole("button", { name: "Open Call intelligence" }).click();
   await expect(page).toHaveURL(/view=maqsam/);
