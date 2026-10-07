@@ -12,9 +12,10 @@ test("direct tools and their APIs require a password and re-lock after logout", 
   await expect(page.getByRole("alert").filter({ hasText: "Incorrect admin password" })).toBeVisible();
   expect((await page.request.get("/api/usage")).status()).toBe(401);
   await page.getByLabel("Tools password", { exact: true }).fill("playwright-tools-only-password");
+  const unlockedUsage = page.waitForResponse(response => new URL(response.url()).pathname === "/api/usage" && response.request().method() === "GET" && response.status() === 200);
   await page.getByRole("button", { name: "Unlock tools", exact: true }).click();
   await expect(page).toHaveURL(new RegExp("view=team-activity&from=2026-07-15&to=2026-10-07"));
-  expect((await page.request.get("/api/usage")).status()).toBe(200);
+  expect((await unlockedUsage).status()).toBe(200);
   const cookie = (await page.context().cookies()).find(row => row.name === "sdr_admin_access")!;
   expect(cookie.httpOnly).toBe(true); expect(cookie.sameSite).toBe("Lax");
   await page.getByRole("button", { name: "Lock tools", exact: true }).click();
