@@ -9,7 +9,7 @@ test("direct tools and their APIs require a password and re-lock after logout", 
   await expect(page.getByRole("heading", { name: "SDR tools are locked" })).toBeVisible();
   await page.getByLabel("Tools password", { exact: true }).fill("incorrect");
   await page.getByRole("button", { name: "Unlock tools", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("Incorrect admin password");
+  await expect(page.getByRole("alert").filter({ hasText: "Incorrect admin password" })).toBeVisible();
   expect((await page.request.get("/api/usage")).status()).toBe(401);
   await page.getByLabel("Tools password", { exact: true }).fill("playwright-tools-only-password");
   await page.getByRole("button", { name: "Unlock tools", exact: true }).click();
