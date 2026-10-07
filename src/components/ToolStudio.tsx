@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { ToolAccessGate } from "./ToolAccessGate";
 import { ArrowUpRight } from "lucide-react";
 import styles from "./DecisionStudio.module.css";
 
@@ -11,7 +12,7 @@ const tools = [
   { name: "Prospecting coverage", goal: "Find gaps in approved target markets", detail: "Market coverage and deduplication before enrichment.", feature: "net-new", view: "net-new" },
   { name: "Team adoption", goal: "See which tools are actually being used", detail: "Usage events and workspace adoption; usage is not sales impact.", feature: "team-activity", view: "team-activity" },
 ];
-export function ToolStudio({ ownerKey }: { ownerKey: "marita" | "daniel" }) {
+function ToolStudioContent({ ownerKey }: { ownerKey: "marita" | "daniel" }) {
   const [usage, setUsage] = useState<Array<{ feature: string; events: number; users: number }> | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   useEffect(() => {
@@ -32,3 +33,5 @@ export function ToolStudio({ ownerKey }: { ownerKey: "marita" | "daniel" }) {
     return <article key={tool.name}><div><span className={styles.kicker}>{tool.name}</span><h3>{tool.goal}</h3><p>{tool.detail}</p><small>{metric ? `${metric.events} recorded events · ${metric.users} users in the usage service summary` : unavailable ? "Usage data unavailable" : usage ? "No recorded usage in the current summary" : "Loading recorded usage…"}</small></div><button type="button" onClick={() => open(tool.view)} aria-label={`Open ${tool.name}`}>Open <ArrowUpRight size={14}/></button></article>;
   })}</div><div className={styles.notice}>Usage counts describe adoption, not ROI. Validate meetings, qualified opportunities and time saved before retiring or expanding a tool.</div></section>;
 }
+
+export function ToolStudio({ ownerKey }: { ownerKey: "marita" | "daniel" }) { return <ToolAccessGate><ToolStudioContent ownerKey={ownerKey}/></ToolAccessGate>; }

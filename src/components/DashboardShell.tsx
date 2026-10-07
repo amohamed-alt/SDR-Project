@@ -23,6 +23,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { Dashboard as ExistingDashboard } from "./Dashboard";
+import { ToolAccessGate } from "./ToolAccessGate";
 import { WorkspaceErrorBoundary } from "./WorkspaceErrorBoundary";
 import styles from "@/components/DashboardShell.module.css";
 
@@ -108,15 +109,17 @@ export function Dashboard({
 
   useEffect(() => {
     let active = true;
-    fetch("/api/sdr-admin", { cache: "no-store" })
+    const check = () => { void fetch("/api/sdr-admin", { cache: "no-store" })
       .then((response) => response.json())
       .then((data: { unlocked?: boolean }) => {
         if (!active) return;
         setAdminUnlocked(Boolean(data.unlocked));
         setAdminChecked(true);
       })
-      .catch(() => { if (active) setAdminChecked(true); });
-    return () => { active = false; };
+      .catch(() => { if (active) { setAdminUnlocked(false); setAdminChecked(true); } }); };
+    check();
+    window.addEventListener("sdr:admin-auth-changed", check);
+    return () => { active = false; window.removeEventListener("sdr:admin-auth-changed", check); };
   }, []);
 
   useEffect(() => {
@@ -181,7 +184,7 @@ export function Dashboard({
 
   // Render inside both sidebar layouts; navigation must never depend on a popup.
   const sidebarTools = <section className={styles.sidebarTools} aria-label="SDR Tools">
-    <div className={styles.toolsTitle}>SDR TOOLS · DAILY WORKFLOWS</div>
+    <div className={styles.toolsTitle}>SDR TOOLS · {adminUnlocked ? "UNLOCKED" : "PASSWORD PROTECTED"}</div>
     <nav className={styles.toolList} aria-label="SDR tools navigation">
             <button className={`${styles.toolItem} ${view === "gtm-brain" ? styles.activeTool : ""}`} type="button" aria-current={view === "gtm-brain" ? "page" : undefined} onClick={() => changeView("gtm-brain")}>
               <span className={`${styles.toolIcon} ${styles.brainIcon}`}><BrainCircuit size={17}/></span>
@@ -205,7 +208,7 @@ export function Dashboard({
             </button>
             <button className={`${styles.toolItem} ${view === "team-activity" ? styles.activeTool : ""}`} type="button" aria-current={view === "team-activity" ? "page" : undefined} onClick={() => changeView("team-activity")}>
               <span className={`${styles.toolIcon} ${styles.gtmIcon}`}><Activity size={17}/></span>
-              <span className={styles.toolCopy}><strong>Team Activity</strong><small>Usage · adoption · workspace health</small></span>
+              <span className={styles.toolCopy}><strong>Team Activity {!adminUnlocked ? <LockKeyhole size={12}/> : null}</strong><small>Usage · adoption · workspace health</small></span>
             </button>
 
             <div className={styles.adminHeading}>
@@ -299,7 +302,7 @@ export function Dashboard({
         </aside>
         <div className={`content ${styles.toolContent}`}>
           <WorkspaceErrorBoundary key={view} onBack={() => changeView("core")}>
-            {toolContent}
+            <ToolAccessGate>{toolContent}</ToolAccessGate>
           </WorkspaceErrorBoundary>
         </div>
       </div>

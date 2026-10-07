@@ -11,6 +11,8 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+import { originMatchesRequestHosts } from "@/lib/request-origin";
+
 const passwordSchema = z.object({ password: z.string().min(1).max(500) });
 const WINDOW_MS = 10 * 60 * 1000;
 const MAX_ATTEMPTS = 5;
@@ -29,10 +31,16 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     configured: sdrAdminConfigured(),
     unlocked: sdrAdminAuthorized(request),
-  });
+  }, { headers: { "Cache-Control": "private, no-store" } });
+}
+
+function sameOrigin(request: NextRequest) {
+  const site = request.headers.get("sec-fetch-site");
+  return (!site || ["same-origin", "same-site", "none"].includes(site)) && originMatchesRequestHosts({ origin: request.headers.get("origin"), forwardedHost: request.headers.get("x-forwarded-host"), host: request.headers.get("host"), requestHost: request.nextUrl.host });
 }
 
 export async function POST(request: NextRequest) {
+  if (!sameOrigin(request)) return NextResponse.json({ error: "Cross-site access is not allowed." }, { status: 403 });
   if (!sdrAdminConfigured()) {
     return NextResponse.json({ error: "SDR admin password is not configured." }, { status: 503 });
   }
@@ -54,7 +62,7 @@ export async function POST(request: NextRequest) {
   }
 
   attempts.delete(key);
-  const response = NextResponse.json({ unlocked: true });
+  const response = NextResponse.json({ unlocked: true }, { headers: { "Cache-Control": "private, no-store" } });
   response.cookies.set(sdrAdminCookieName(), sdrAdminCookieToken(), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -65,8 +73,9 @@ export async function POST(request: NextRequest) {
   return response;
 }
 
-export async function DELETE() {
-  const response = NextResponse.json({ unlocked: false });
+export async function DELETE(request: NextRequest) {
+  if (!sameOrigin(request)) return NextResponse.json({ error: "Cross-site access is not allowed." }, { status: 403 });
+  const response = NextResponse.json({ unlocked: false }, { headers: { "Cache-Control": "private, no-store" } });
   response.cookies.set(sdrAdminCookieName(), "", {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",

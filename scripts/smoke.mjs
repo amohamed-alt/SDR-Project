@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 
 const port = "3111";
 const server = spawn(process.execPath, [".next/standalone/server.js"], {
-  env: { ...process.env, PORT: port, HOSTNAME: "127.0.0.1", DEMO_MODE: "true", DISABLE_AUTH: "true" },
+  env: { ...process.env, PORT: port, HOSTNAME: "127.0.0.1", DEMO_MODE: "true", DISABLE_AUTH: "true", SDR_ADMIN_PASSWORD: "smoke-tools-only-password" },
   stdio: ["ignore", "pipe", "pipe"],
 });
 
@@ -22,6 +22,10 @@ function waitForReady() {
 
 try {
   await waitForReady();
+  const login = await fetch(`http://127.0.0.1:${port}/api/sdr-admin`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: "smoke-tools-only-password" }) });
+  if (!login.ok) throw new Error("Smoke tools login failed");
+  const cookie = login.headers.get("set-cookie")?.split(";")[0];
+  const authenticated = { headers: { Cookie: cookie } };
   const oversizedTaskIds = Array.from({ length: 501 }, (_, index) => String(index + 1));
   const [
     healthResponse,
@@ -43,7 +47,7 @@ try {
     fetch(`http://127.0.0.1:${port}/api/health`),
     fetch(`http://127.0.0.1:${port}/api/dashboard?from=2026-07-01&to=2026-07-19&ownerId=31644369`),
     fetch(`http://127.0.0.1:${port}/api/dashboard/cache-health`),
-    fetch(`http://127.0.0.1:${port}/api/maqsam/calls?from=2026-07-01&to=2026-07-19`),
+    fetch(`http://127.0.0.1:${port}/api/maqsam/calls?from=2026-07-01&to=2026-07-19`, authenticated),
     fetch(`http://127.0.0.1:${port}/api/maqsam/calls`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -71,14 +75,14 @@ try {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tasks: [] }),
     }),
-    fetch(`http://127.0.0.1:${port}/api/usage`),
+    fetch(`http://127.0.0.1:${port}/api/usage`, authenticated),
     fetch(`http://127.0.0.1:${port}/api/acquisition`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "discover", pages: 1, confirmCredits: true }),
     }),
     fetch(`http://127.0.0.1:${port}/`),
-    fetch(`http://127.0.0.1:${port}/marita-calls`),
+    fetch(`http://127.0.0.1:${port}/marita-calls`, authenticated),
   ]);
   if (!healthResponse.ok || !dashboardResponse.ok || !cacheHealthResponse.ok || !maqsamCallsResponse.ok || !calendarStatusResponse.ok || !abdullahCalendarStatusResponse.ok || !emptyCountryBatchResponse.ok || !usageResponse.ok || !pageResponse.ok || !maritaCallsPageResponse.ok) throw new Error("One or more smoke-test routes returned an error");
   const teamResponse = await fetch(`http://127.0.0.1:${port}/api/dashboard/team?from=2026-09-01&to=2026-09-08`);
@@ -127,7 +131,7 @@ try {
   if (invalidCountryBatchResponse.status !== 400 || typeof invalidCountryBatch.details !== "string") throw new Error("Task country batch validation is invalid");
   if (!Array.isArray(emptyCountryBatch.tasks) || emptyCountryBatch.tasks.length !== 0) throw new Error("Incremental task country payload is invalid");
   if (usage.tracking !== false || !Array.isArray(usage.users) || !Array.isArray(usage.topFeatures)) throw new Error("Usage analytics smoke fallback is invalid");
-  if (acquisitionOwnerGateResponse.status !== 401 || !String(acquisitionOwnerGate.error || "").includes("Admin password")) throw new Error("Net-new acquisition admin password gate is not fail-closed when admin access is missing");
+  if (acquisitionOwnerGateResponse.status !== 401 || acquisitionOwnerGate.code !== "TOOLS_LOCKED") throw new Error("Net-new acquisition admin password gate is not fail-closed when admin access is missing");
   if (!page.includes("SDR Command Center") || !page.includes("Inbound vs Outbound") || !page.includes("SDR Tools")) throw new Error("Dashboard analytics entries or compact tools launcher are missing");
   if (!maritaCallsPage.includes("Maqsam Call Intelligence")) throw new Error("Marita calls page is missing");
   console.log("Smoke tests passed: dashboard snapshots/cache health, Dashboard V2 usage endpoint, acquisition admin password gate, compact SDR tools launcher, Marita calls route, Maqsam API, separate organizer status, inbound/outbound entry, task-country caching, WhatsApp data, and protected routes are operational.");

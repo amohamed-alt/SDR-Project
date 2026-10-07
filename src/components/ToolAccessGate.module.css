@@ -1,0 +1,13 @@
+.gate { max-width:440px; margin:48px auto; padding:30px; border:1px solid var(--border); border-radius:16px; background:var(--surface,#fff); color:var(--text); }
+.gate h1 { font-size:24px; margin:16px 0 10px; }
+.gate p { color:var(--muted); line-height:1.6; font-size:13px; }
+.gate form { display:grid; gap:12px; margin:24px 0; }
+.gate label { font-size:12px; font-weight:700; }
+.gate input { width:100%; box-sizing:border-box; padding:12px; border:1px solid var(--border); border-radius:8px; color:var(--text); background:var(--surface,#fff); font:inherit; }
+.gate button,.toolbar button { min-height:40px; border:0; border-radius:8px; background:var(--green); color:white; padding:10px 16px; font:inherit; cursor:pointer; }
+.gate a { color:var(--green); font-size:13px; }
+.gate [role=alert],.toolbar [role=alert] { color:#a33326; }
+.toolbar { display:flex; justify-content:flex-end; align-items:center; gap:12px; margin:8px 0 16px; }
+.toolbar button { display:flex; align-items:center; gap:7px; font-size:12px; }
+.gate :is(input,button,a):focus-visible,.toolbar button:focus-visible { outline:3px solid #6caa95; outline-offset:3px; }
+@media(max-width:600px) { .gate { margin:24px 12px; padding:22px; } }

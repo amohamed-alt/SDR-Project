@@ -35,6 +35,7 @@ export default defineConfig({
     env: {
       ...process.env,
       DEMO_MODE: "true",
+      SDR_ADMIN_PASSWORD: "playwright-tools-only-password",
       DISABLE_AUTH: "true",
       DASHBOARD_ACCESS_MODE: "public",
       SDR_BUILD_REF: "playwright-e2e",
