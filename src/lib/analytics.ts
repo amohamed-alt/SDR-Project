@@ -1,3 +1,4 @@
+import { acquisitionMotion, meetingPerformance, verifiedEmailStatus, testedPhoneStatus } from "./meeting-performance.ts";
 import { responseMilliseconds } from "./dashboard-values.ts";
 import { meetingCreatorId } from "@/lib/owner-attribution";
 import {
@@ -267,7 +268,11 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   ] = await Promise.all([
     searchAll("contacts", CONTACT_PROPERTIES, [{ propertyName: "sdr_owner", operator: "EQ", value: filters.ownerId }], ["createdate"]),
     optional("Calls", warnings, () => searchAll("calls", CALL_PROPERTIES, activityFilters(filters.ownerId, "hs_timestamp", filters.from, filters.to), ["hs_timestamp"]), []),
-    optional("Meetings", warnings, () => creatorId ? searchAll("meetings", MEETING_PROPERTIES, activityFilters(creatorId, "hs_createdate", filters.from, filters.to, "hs_created_by_user_id"), ["hs_createdate"]) : Promise.resolve([]), []),
+    optional("Meetings", warnings, async () => {
+      if (!creatorId) return [];
+      const groups = await Promise.all(["hs_createdate", "hs_meeting_start_time"].map(dateProperty => searchAll("meetings", MEETING_PROPERTIES, activityFilters(creatorId, dateProperty, filters.from, filters.to, "hs_created_by_user_id"), [dateProperty])));
+      return [...new Map(groups.flat().map(record => [record.id, record])).values()];
+    }, []),
     optional("Tasks due", warnings, () => searchAll("tasks", TASK_PROPERTIES, activityFilters(filters.ownerId, "hs_timestamp", filters.from, filters.to), ["hs_timestamp"]), []),
     optional("Tasks completed", warnings, () => searchAll("tasks", TASK_PROPERTIES, activityFilters(filters.ownerId, "hs_task_completion_date", filters.from, filters.to), ["hs_task_completion_date"]), []),
     optional("Emails", warnings, () => searchAll("emails", EMAIL_PROPERTIES, activityFilters(filters.ownerId, "hs_timestamp", filters.from, filters.to), ["hs_timestamp"]), []),
@@ -375,7 +380,17 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       url: contactUrl,
     };
   };
-  const meetingGroups = dedupeMeetings(meetings, meetingContacts);
+  const allMeetingGroups = dedupeMeetings(meetings, meetingContacts);
+  const meetingContactRecords = new Map(allContacts.map(contact => [contact.id, contact]));
+  const missingMeetingContactIds = [...new Set(allMeetingGroups.flatMap(meeting => meeting.contactIds))].filter(id => !meetingContactRecords.has(id));
+  const extraMeetingContacts = await optional("Meeting classification", warnings, () => batchRead("contacts", missingMeetingContactIds, ["contact_source", "lead_source"]), []);
+  for (const contact of extraMeetingContacts) meetingContactRecords.set(contact.id, contact);
+  const meetingFacts = allMeetingGroups.map(meeting => {
+    const motions = [...new Set(meeting.contactIds.map(id => { const contact = meetingContactRecords.get(id); return contact ? acquisitionMotion(value(contact, "contact_source"), value(contact, "lead_source")) : "Unknown"; }))];
+    return { ...meeting, motion: motions.length === 1 ? motions[0] : "Unknown" as const };
+  });
+  const meetingSummary = meetingPerformance(meetingFacts, filters.from, filters.to, new Date(), HUBSPOT_TIMEZONE);
+  const meetingGroups = allMeetingGroups.filter(meeting => isBetween(meeting.createdAt, filters.from, filters.to) && new Date(meeting.createdAt).getTime() <= Date.now() && (!meeting.startAt || new Date(meeting.createdAt) <= new Date(meeting.startAt)));
   const connectedCalls = calls.filter((call) => value(call, "hs_call_disposition") === CONNECTED_CALL_DISPOSITION);
   const outgoingEmails = emails.filter((email) => value(email, "hs_email_direction").includes("OUTGOING") || value(email, "hs_email_direction") === "EMAIL");
   const emailReplies = outgoingEmails.filter((email) => number(value(email, "hs_email_reply_count")) > 0).length;
@@ -394,7 +409,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   const dueToday = openTasks.filter((task) => localDay(value(task, "hs_timestamp")) === todayDay).length;
   const dueTomorrow = openTasks.filter((task) => localDay(value(task, "hs_timestamp")) === tomorrowDay).length;
   const highPriorityOpenTasks = openTasks.filter((task) => value(task, "hs_task_priority") === "HIGH").length;
-  const completedMeetings = meetingGroups.filter((meeting) => meeting.outcome === "COMPLETED").length;
+  const completedMeetings = meetingSummary.held;
   const openDeals = dealsRaw.filter((deal) => value(deal, "hs_is_closed") !== "true");
   const openDealIds = new Set(openDeals.map((deal) => deal.id));
   const dealsCreated = dealsRaw.filter((deal) => isBetween(value(deal, "createdate"), filters.from, filters.to));
@@ -405,14 +420,14 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   ).length;
   const nextActivityCount = selectedContacts.filter((contact) => Boolean(value(contact, "notes_next_activity_date"))).length;
   const noNextActivity = selectedContacts.length - nextActivityCount;
-  const responseCohort = newContacts.length ? newContacts : selectedContacts;
+  const responseCohort = newContacts.filter(contact => acquisitionMotion(value(contact, "contact_source"), value(contact, "lead_source")) === "Inbound");
   const leadResponseTimes = responseCohort
     .map((contact) => responseMilliseconds(value(contact, "hs_time_to_first_engagement")))
     .filter((item): item is number => item !== null)
     .sort((a, b) => a - b);
   const leadResponseCoverage = responseCohort.length ? Math.round((leadResponseTimes.length / responseCohort.length) * 1000) / 10 : 0;
   const medianResponseMilliseconds = leadResponseTimes.length
-    ? leadResponseTimes[Math.floor((leadResponseTimes.length - 1) / 2)]
+    ? (leadResponseTimes[Math.floor((leadResponseTimes.length - 1) / 2)] + leadResponseTimes[Math.floor(leadResponseTimes.length / 2)]) / 2
     : 0;
   const medianLeadResponseHours = Math.round((medianResponseMilliseconds / 3_600_000) * 10) / 10;
   const taskDueBucket = (task: HubSpotRecord) => {
@@ -447,9 +462,9 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
 
   const quality: QualityMetric[] = [
     completeness("email", "Email coverage", selectedContacts),
-    completeness("gtm_email_status", "Verified email", selectedContacts, (contact) => /valid|verified|deliverable/i.test(value(contact, "gtm_email_status"))),
+    completeness("gtm_email_status", "Verified email", selectedContacts, (contact) => verifiedEmailStatus(value(contact, "gtm_email_status"))),
     completeness("phone", "Phone coverage", selectedContacts, (contact) => Boolean(contactPhone(contact))),
-    completeness("phone_number_status", "Tested phone", selectedContacts, (contact) => /correct|valid|verified/i.test(value(contact, "phone_number_status"))),
+    completeness("phone_number_status", "Tested phone", selectedContacts, (contact) => testedPhoneStatus(value(contact, "phone_number_status"))),
     completeness("gtm_linkedin_url", "LinkedIn coverage", selectedContacts),
     completeness("company_id", "Company association", selectedContacts),
     completeness("country", "Country coverage", selectedContacts),
@@ -474,6 +489,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       const response = responseMilliseconds(value(contact, "hs_time_to_first_engagement"));
       return {
         id: contact.id,
+        acquisitionMotion: acquisitionMotion(value(contact, "contact_source"), value(contact, "lead_source")),
         companyId: value(contact, "company_id"),
         createdAt: value(contact, "createdate"),
         lastSalesActivityAt: value(contact, "hs_last_sales_activity_timestamp"),
@@ -492,7 +508,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       nextActivityAt: value(deal, "notes_next_activity_date"),
       isOpen: value(deal, "hs_is_closed") !== "true",
     })),
-    meetings: meetingGroups.map((meeting) => ({
+    meetings: allMeetingGroups.map((meeting) => ({
       id: meeting.booking.id,
       contactIds: meeting.contactIds.filter((contactId) => selectedIds.has(contactId)),
       createdAt: meeting.createdAt,
@@ -549,8 +565,8 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     if (contactPriority === "skip") priorityScore -= 30;
     if (!lastContacted) priorityScore += 25;
     if (!nextActivity) priorityScore += 10;
-    if (/valid|verified|deliverable/i.test(emailStatus)) priorityScore += 3;
-    if (/correct|valid|verified/i.test(phoneStatus)) priorityScore += 2;
+    if (verifiedEmailStatus(emailStatus)) priorityScore += 3;
+    if (testedPhoneStatus(phoneStatus)) priorityScore += 2;
     const associatedDealIds = contactDeals.get(contact.id) ?? [];
     const responseMs = responseMilliseconds(value(contact, "hs_time_to_first_engagement"));
     return {
@@ -580,9 +596,9 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       hasDeal: associatedDealIds.length > 0, hasOpenDeal: associatedDealIds.some((dealId) => openDealIds.has(dealId)),
       qualityIssues: [
         !value(contact, "email") && "email",
-        !/valid|verified|deliverable/i.test(emailStatus) && "gtm_email_status",
+        !verifiedEmailStatus(emailStatus) && "gtm_email_status",
         !contactPhone(contact) && "phone",
-        !/correct|valid|verified/i.test(phoneStatus) && "phone_number_status",
+        !testedPhoneStatus(phoneStatus) && "phone_number_status",
         !value(contact, "gtm_linkedin_url") && "gtm_linkedin_url",
         !value(contact, "company_id") && "company_id",
         !value(contact, "country") && "country",
@@ -628,8 +644,10 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       opened: false, clicked: false, replied: false,
       ...activityContact(callContacts.get(call.id) ?? [], "call"),
     })),
-    ...meetingGroups.map((meeting): ActivityRow => ({
+    ...allMeetingGroups.map((meeting): ActivityRow => ({
       id: meeting.booking.id,
+      bookedInPeriod: meetingGroups.some(group => group.booking.id === meeting.booking.id),
+      heldInPeriod: isBetween(meeting.startAt, filters.from, filters.to) && new Date(meeting.startAt) <= now && meeting.outcome === "COMPLETED",
       type: "Meeting",
       subject: value(meeting.booking, "hs_meeting_title") || "Meeting",
       status: displayValue(meeting.outcome, meetingOutcomeLabels),
@@ -685,7 +703,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   const highIcpUntouched = selectedContacts.filter((contact) => /^a$|tier a|tier_1|tier 1|high/i.test(value(contact, "gtm_icp_tier")) && !value(contact, "notes_last_contacted")).length;
   const highPriorityUntouched = selectedContacts.filter((contact) => value(contact, "gtm_contact_priority") === "high" && !value(contact, "notes_last_contacted")).length;
   const wrongPhones = selectedContacts.filter((contact) => /wrong/i.test(value(contact, "phone_number_status"))).length;
-  const missingMeetingOutcomes = meetingGroups.filter((meeting) => meeting.outcome === "UNKNOWN").length;
+  const missingMeetingOutcomes = meetingSummary.missingOutcomes;
   const alertCandidates: AlertItem[] = [
     { id: "due-today", severity: dueToday > 75 ? "critical" : "warning", title: "Tasks due today", detail: "Today’s execution queue needs immediate capacity.", count: dueToday, action: "Open today’s tasks" },
     { id: "high-priority-tasks", severity: highPriorityOpenTasks > 75 ? "critical" : "warning", title: "High-priority open tasks", detail: "Open tasks marked High priority in HubSpot.", count: highPriorityOpenTasks, action: "Open priority queue" },
@@ -716,6 +734,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   const contactedCount = selectedContacts.filter((contact) => Boolean(value(contact, "notes_last_contacted"))).length;
 
   return {
+    meetingPerformance: meetingSummary,
     meta: {
       generatedAt: now.toISOString(), from: filters.from, to: filters.to, timezone: HUBSPOT_TIMEZONE,
       ownerId: filters.ownerId, ownerName, portalId: HUBSPOT_PORTAL_ID, isDemo: false, warnings,
@@ -728,7 +747,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     kpis: {
       portfolioContacts: selectedContacts.length, newContacts: newContacts.length, companies: companiesRaw.length,
       calls: calls.length, connectedCalls: connectedCalls.length, connectionRate: calls.length ? Math.round((connectedCalls.length / calls.length) * 1000) / 10 : 0,
-      bookedMeetings: meetingGroups.length, completedMeetings, meetingCompletionRate: meetingGroups.length ? Math.round((completedMeetings / meetingGroups.length) * 1000) / 10 : 0,
+      bookedMeetings: meetingGroups.length, completedMeetings, meetingCompletionRate: meetingSummary.attendanceRate,
       openTasks: openTasks.length, overdueTasks, dueToday, dueTomorrow, highPriorityOpenTasks, completedTasks: tasksCompleted.length,
       emailsSent: outgoingEmails.length, emailReplies, emailReplyRate: outgoingEmails.length ? Math.round((emailReplies / outgoingEmails.length) * 1000) / 10 : 0,
       dealsCreated: dealsCreated.length, openDeals: openDeals.length, pipelineValue: openDeals.reduce((sum, deal) => sum + number(value(deal, "amount_in_home_currency") || value(deal, "amount")), 0),
@@ -740,7 +759,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     funnel: [
       { name: "Portfolio", value: selectedContacts.length }, { name: "Contacted", value: contactedCount },
       { name: "Connected", value: connectedContactIds.size }, { name: "Meeting", value: meetingContactIds.size },
-      { name: "Deal", value: dealsRaw.length }, { name: "Open Deal", value: openDeals.length },
+      { name: "Deal", value: selectedContacts.filter(contact => (contactDeals.get(contact.id) ?? []).length > 0).length }, { name: "Open Deal", value: selectedContacts.filter(contact => (contactDeals.get(contact.id) ?? []).some(id => openDealIds.has(id))).length },
     ],
     originalSources: countBy(sourceContacts, (record) => value(record, "hs_analytics_source"), originalSourceLabels),
     latestSources: countBy(sourceContacts, (record) => value(record, "hs_latest_source"), latestSourceLabels),

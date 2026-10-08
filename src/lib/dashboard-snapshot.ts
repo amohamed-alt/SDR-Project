@@ -27,7 +27,7 @@ const cachedDashboard = unstable_cache(
     }
     return data;
   },
-  ["sdr-dashboard-live-v10-complete-records"],
+  ["sdr-dashboard-live-v11-meeting-performance"],
   { revalidate: 120, tags: ["sdr-dashboard"] },
 );
 

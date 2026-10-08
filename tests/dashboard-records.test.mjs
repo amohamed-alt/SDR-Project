@@ -83,9 +83,9 @@ test("call outcome evidence distinguishes custom dispositions, missing outcomes 
 test("blank response timing remains missing, including a date at the reporting timezone boundary", () => {
   for (const value of [null, undefined, "", "   ", "NaN", "-1", "Infinity"]) assert.equal(responseMilliseconds(value), null);
   assert.equal(responseMilliseconds("0"), 0);
-  const contacts = ["", "0", "3600000", "90000000"].map((raw, i) => ({ id: String(i), companyId: "", createdAt: "2026-09-30T22:00:00Z", firstEngagementMs: responseMilliseconds(raw), lastSalesActivityAt: "", nextActivityAt: "", hasPhone: true, hasEmail: true, hasLinkedIn: true }));
+  const contacts = ["", "0", "3600000", "90000000"].map((raw, i) => ({ id: String(i), acquisitionMotion: "Inbound", companyId: "", createdAt: "2026-09-30T22:00:00Z", firstEngagementMs: responseMilliseconds(raw), lastSalesActivityAt: "", nextActivityAt: "", hasPhone: true, hasEmail: true, hasLinkedIn: true }));
   const signals = calculateGtmIntelligenceSignals({ contacts, deals: [], meetings: [], activities: [], from: "2026-10-01", to: "2026-10-04" });
-  assert.deepEqual(signals.leadResponseSla, { eligible: 4, met: 2, missing: 1, rate: 50, overdueIds: ["0", "3"] });
+  assert.deepEqual(signals.leadResponseSla, { eligible: 4, met: 2, missing: 1, rate: 66.7, overdueIds: ["3"] });
 });
 
 test("snapshot history isolates owner/filter keys, preserves exact versions and expires with bounded memory", () => {
