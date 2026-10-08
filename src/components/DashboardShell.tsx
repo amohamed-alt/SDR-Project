@@ -174,6 +174,7 @@ export function Dashboard({
 
   const owner = SDR_OWNERS[sdr];
   const adminToolLabels = [
+    ["AI SDR Agent", "ChatGPT Companion · Saudi lead review"],
     ["Sales Nav Source", "Chrome companion · net-new people"],
     ["Sales Nav Full Run", "Live capture pipeline · resumable full search"],
     ["SignalHire Source", "List → HubSpot precheck → controlled enrich"],
@@ -225,6 +226,10 @@ export function Dashboard({
             </form> : null}
 
             {adminUnlocked ? <div className={styles.advancedList}>
+              <Link className={styles.toolItem} href="/ai-sdr-agent" onClick={() => trackFeature("ai-sdr-agent")}>
+                <span className={`${styles.toolIcon} ${styles.brainIcon}`}><BrainCircuit size={17}/></span>
+                <span className={styles.toolCopy}><strong>AI SDR Agent</strong><small>ChatGPT · Saudi leads · zero-credit checks</small></span>
+              </Link>
               <Link className={styles.toolItem} href="/salesnav-prospecting" onClick={() => trackFeature("sales-nav")}>
                 <span className={`${styles.toolIcon} ${styles.salesIcon}`}><Radar size={17}/></span>
                 <span className={styles.toolCopy}><strong>Sales Nav Source</strong><small>Chrome companion · net-new people</small></span>
