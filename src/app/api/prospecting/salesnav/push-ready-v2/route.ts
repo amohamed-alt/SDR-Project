@@ -126,9 +126,16 @@ export async function POST(request: NextRequest) {
     if (!String(prospect.detectedAts || "").trim() && safety.company.detectedAts) prospect.detectedAts = safety.company.detectedAts;
     if (!String(prospect.careerPageUrl || "").trim() && safety.company.careerPageUrl) prospect.careerPageUrl = safety.company.careerPageUrl;
 
+    // Forward only the caller's authentication, not arbitrary incoming headers.
+    // The downstream acquisition owner gate validates this credential before writing.
+    const pushHeaders: Record<string, string> = { "Content-Type": "application/json" };
+    const adminCookie = request.headers.get("cookie");
+    if (adminCookie) pushHeaders.cookie = adminCookie;
+    const ownerToken = request.headers.get("x-acquisition-owner-token");
+    if (ownerToken) pushHeaders["x-acquisition-owner-token"] = ownerToken;
     const pushRequest = new Request(new URL("/api/prospecting/push", request.url), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: pushHeaders,
       body: JSON.stringify(prospect),
     });
     const pushResponse = await pushProspect(pushRequest);
