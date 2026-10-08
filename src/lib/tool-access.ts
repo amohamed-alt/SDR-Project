@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { sdrAdminAuthorized } from "./sdr-admin-auth.ts";
 
 const API_PREFIXES = ["/api/usage", "/api/acquisition", "/api/prospecting", "/api/lead-inventory", "/api/account-intelligence", "/api/best-accounts", "/api/target-account-pool", "/api/company-enrichment", "/api/maqsam", "/api/marita-priority", "/api/daniel-evalufy", "/api/daniel-transfer-plan", "/api/system-health", "/api/hubspot", "/api/ai", "/api/dashboard/sales-handoff"];
-const PAGES = new Set(["/best-accounts", "/salesnav-prospecting", "/salesnav-full-run", "/signalhire-companion", "/signalhire-queue", "/lead-import", "/prospecting", "/system-health", "/marita-calls", "/account-intelligence", "/net-new-accounts", "/lead-inventory", "/company-enrichment"]);
+const PAGES = new Set(["/best-accounts", "/ai-sdr-agent", "/salesnav-prospecting", "/salesnav-full-run", "/signalhire-companion", "/signalhire-queue", "/lead-import", "/prospecting", "/system-health", "/marita-calls", "/account-intelligence", "/net-new-accounts", "/lead-inventory", "/company-enrichment"]);
 export function normalizedToolPath(path: string) {
   try { return decodeURIComponent(path).replace(/\/$/, "") || "/"; } catch { return path; }
 }
