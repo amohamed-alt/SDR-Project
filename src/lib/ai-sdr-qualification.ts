@@ -145,6 +145,8 @@ export function assessAiSdrLead(lead: AiLead, check?: AiCrmCheck): AiAssessment 
   if (company.protected) return blocked(company.protectedReason || "HubSpot protected account.");
   if (company.engagementChecked === false) return review(company.engagementError || "Engagement check is incomplete.");
   if (isGovernment(lead)) return blocked("Government/public-sector account is out of scope.");
+  if (!normalizePersonUrl(lead.linkedinUrl)) return review("A verified public LinkedIn profile URL is required.");
+  if (!company.inHubSpot && !lead.companyDomain) return review("Verify company domain before creating a new company.");
   if (!lead.companyCountry) return review("Verify the company's country. A contact location is not enough.");
   if (!isSaudiCountry(lead.companyCountry)) return blocked("Outside the Saudi company target market.");
   if (lead.employeeCount === null) return review("Verify company headcount (250+).");
