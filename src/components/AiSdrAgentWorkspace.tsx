@@ -343,7 +343,7 @@ export function AiSdrAgentWorkspace() {
             <a href="https://chatgpt.com/" target="_blank" rel="noopener noreferrer" className={styles.secondary}>Open ChatGPT<ExternalLink size={14}/></a>
             <button type="button" className={styles.secondary} onClick={prepareReviewPrompt} disabled={!checked}>Prepare review brief</button>
           </div>
-          <small>ChatGPT isn't embedded or silently logged in. This companion mode uses no paid OpenAI API and doesn't share CRM data automatically.</small>
+          <small>ChatGPT is not embedded or silently logged in. Companion mode uses no paid OpenAI API and never shares CRM data automatically.</small>
         </section>
         <section className={styles.panel}>
           <div className={styles.panelHead}><div><span>02 · Candidate intake</span><h2>Import vetted people</h2></div><Radar size={20}/></div>
