@@ -7,6 +7,7 @@ import "./command-palette.css";
 import "./data-surface.css";
 import "./gtm-table.css";
 import "./share-view.css";
+import "./presentation.css";
 import { GtmCommandPalette } from "@/components/GtmCommandPalette";
 import { UsageTracker } from "@/components/UsageTracker";
 import { MotionConfig } from "motion/react";

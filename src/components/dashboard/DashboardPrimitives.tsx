@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedMetric } from "../AnimatedMetric";
 import { useEffect, useId, type ButtonHTMLAttributes, type ReactNode } from "react";
 import {
   BarChart3,
@@ -139,7 +140,7 @@ export function HorizontalBars({ data, color = "var(--green)", amount = false, o
 }
 
 export function KpiCard({ label, value, helper, icon: Icon, tone, onClick }: { label: string; value: string; helper: string; icon: LucideIcon; tone: string; onClick: () => void }) {
-  return <button className={"kpi-card tone-" + tone} onClick={onClick}><div className="kpi-top"><span>{label}</span><Icon size={18}/></div><strong>{value}</strong><small>{helper}<ListFilter size={13}/></small></button>;
+  return <button className={"kpi-card tone-" + tone} onClick={onClick}><div className="kpi-top"><span>{label}</span><Icon size={18}/></div><strong><AnimatedMetric value={value}/></strong><small>{helper}<ListFilter size={13}/></small></button>;
 }
 
 export function FilterSelect({ label, value, options, onChange }: { label: string; value: string; options: LabelOption[]; onChange: (value: string) => void }) {

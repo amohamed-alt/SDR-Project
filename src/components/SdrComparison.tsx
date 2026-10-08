@@ -7,6 +7,7 @@ import { SDR_OWNERS, SDR_COMPARISON_KEYS, type SdrKey } from "@/lib/sdr-owners";
 import type { SdrSummary } from "@/lib/sdr-comparison";
 import type { DashboardKpis } from "@/lib/types";
 import { readDashboardView } from "@/lib/dashboard-url-state";
+import { MonthlyMission } from "./MonthlyMission";
 import { dashboardToday } from "@/lib/dashboard-values";
 import styles from "./SdrComparison.module.css";
 
@@ -15,7 +16,7 @@ const previous = new Map<string, Entry[]>();
 const metrics: { label: string; key: keyof DashboardKpis; percent?: boolean }[] = [
   { label: "Calls", key: "calls" }, { label: "Connected calls", key: "connectedCalls" },
   { label: "Connection rate", key: "connectionRate", percent: true },
-  { label: "Meetings booked", key: "bookedMeetings" }, { label: "Completed meetings", key: "completedMeetings" },
+  { label: "Meetings booked", key: "bookedMeetings" }, { label: "Meetings held", key: "completedMeetings" },
   { label: "Tasks completed", key: "completedTasks" }, { label: "Open tasks · current", key: "openTasks" },
   { label: "Overdue tasks · current", key: "overdueTasks" }, { label: "Contacts · current", key: "portfolioContacts" },
 ];
@@ -79,10 +80,11 @@ export function SdrComparison({ onSelect, initialSearch = "" }: { onSelect: (key
       return <section className={styles.owner} key={owner.key} style={{ borderTopColor: owner.color }}><div className={styles.identity}><span style={{ background: owner.color }}>{owner.initials}</span><div><h2>{owner.name}</h2><p>{owner.brand}</p></div><button aria-label={`Open ${owner.shortName} workspace`} onClick={() => onSelect(owner.key)}><ArrowUpRight size={20}/></button></div>
         <div className={styles.numbers}><div><span>Meetings booked</span><strong>{entry?.data ? format(entry.data.kpis.bookedMeetings) : "—"}</strong></div><div><span>Connection rate</span><strong>{entry?.data ? `${format(entry.data.kpis.connectionRate)}%` : "—"}</strong></div><div><span>Tasks completed</span><strong>{entry?.data ? format(entry.data.kpis.completedTasks) : "—"}</strong></div></div>
         <p className={styles.freshness}>{entry?.error || (entry?.data ? `${entry.data.meta.isDemo ? "Demo · " : ""}Synced ${new Date(entry.data.meta.generatedAt).toLocaleString("en-GB")}${entry.refreshing ? " · Updating in background" : ""}` : "Loading HubSpot snapshot…")}</p>
+        {entry?.data ? <MonthlyMission compact sdr={owner.key} data={entry.data} refreshKey={refresh}/> : null}
         {entry?.data?.meta.warnings.map(warning => <p key={warning} className={styles.error}>{warning}</p>)}
       </section>;
     })}</div>
-    <div className={styles.detail}><section className={styles.panel}><h2>Activity comparison</h2><p>Same reporting period · recorded HubSpot activity</p><ResponsiveContainer width="100%" height={320}><BarChart data={chart} margin={{ top: 20, right: 12, left: -15, bottom: 0 }}><CartesianGrid vertical={false} stroke="#e8ebef"/><XAxis dataKey="name" tick={{ fontSize: 12 }} interval={0} height={55}/><YAxis allowDecimals={false}/><Tooltip/><Legend/>{owners.map(owner => <Bar key={owner.key} dataKey={owner.shortName} fill={owner.color} radius={[4,4,0,0]} isAnimationActive={false}/>)}</BarChart></ResponsiveContainer></section>
+    <div className={styles.detail}><section className={styles.panel}><h2>Activity comparison</h2><p>Same reporting period · recorded HubSpot activity</p><ResponsiveContainer width="100%" height={320}><BarChart data={chart} margin={{ top: 20, right: 12, left: -15, bottom: 0 }}><CartesianGrid vertical={false} stroke="#e8ebef"/><XAxis dataKey="name" tick={{ fontSize: 12 }} interval={0} height={55}/><YAxis allowDecimals={false}/><Tooltip/><Legend/>{owners.map(owner => <Bar key={owner.key} dataKey={owner.shortName} fill={owner.color} radius={[4,4,0,0]} isAnimationActive={true} animationDuration={650}/>)}</BarChart></ResponsiveContainer></section>
     <section className={styles.panel}><h2>Numbers at a glance</h2><div className={styles.tableWrap}><table><caption className={styles.caption}>Activity dates: {range.from} – {range.to}. Workload and portfolio are current snapshots.</caption><thead><tr><th scope="col">Metric</th>{owners.map(owner => <th scope="col" key={owner.key}>{owner.shortName}</th>)}</tr></thead><tbody>{metrics.map(metric => <tr key={metric.key}><th scope="row">{metric.label}</th>{owners.map(owner => <td key={owner.key}>{dataFor(owner.key)?.data ? `${format(dataFor(owner.key)!.data!.kpis[metric.key])}${metric.percent ? "%" : ""}` : "—"}</td>)}</tr>)}</tbody></table></div></section></div>
     <p className={styles.note}>Performance is grouped by SDR ownership. Talentera and Evalufy labels identify each workspace; these are not product-filtered revenue totals. Compare activity alongside portfolio size and time in role.</p>
   </div>;

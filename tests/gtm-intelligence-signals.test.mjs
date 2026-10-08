@@ -7,6 +7,7 @@ const now = new Date("2026-09-10T12:00:00.000Z");
 function contact(id, overrides = {}) {
   return {
     id,
+    acquisitionMotion: "Inbound",
     companyId: "",
     createdAt: "2026-09-01T08:00:00.000Z",
     lastSalesActivityAt: "",
@@ -105,8 +106,8 @@ test("calculates conservative GTM risk, conversion, engagement, SLA, and data-co
     eligible: 3,
     met: 1,
     missing: 1,
-    rate: 33.3,
-    overdueIds: ["c1", "c3"],
+    rate: 50,
+    overdueIds: ["c1"],
   });
   assert.deepEqual(result.missingContactInfo, {
     missingPhone: { count: 1, ids: ["c1"] },
@@ -131,4 +132,9 @@ test("does not infer a future activity, an SLA result, or a conversion from miss
   assert.deepEqual(result.meetingToDealConversion, { numerator: 0, denominator: 0, rate: 0 });
   assert.deepEqual(result.connectedCallToMeetingConversion, { numerator: 0, denominator: 0, rate: 0 });
   assert.deepEqual(result.leadResponseSla, { eligible: 0, met: 0, missing: 0, rate: 0, overdueIds: [] });
+});
+
+test("inbound SLA excludes outbound imports and reports unknown timing separately", () => {
+  const result = calculateGtmIntelligenceSignals({now, from:"2026-09-01",to:"2026-09-30",contacts:[contact("inbound",{firstEngagementMs:600000}),contact("missing",{firstEngagementMs:null}),contact("outbound",{acquisitionMotion:"Outbound",firstEngagementMs:99000000})],deals:[],meetings:[],activities:[]});
+  assert.deepEqual(result.leadResponseSla,{eligible:2,met:1,missing:1,rate:100,overdueIds:[]});
 });

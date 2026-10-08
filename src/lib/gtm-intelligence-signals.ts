@@ -1,4 +1,5 @@
 export type IntelligenceContact = {
+  acquisitionMotion?: "Inbound" | "Outbound" | "Unknown";
   id: string;
   companyId: string;
   createdAt: string;
@@ -317,7 +318,7 @@ export function calculateGtmIntelligenceSignals(input: GtmIntelligenceInput): Gt
   const contactsWithConnectedCallsWithoutMeeting = signalMetric([...connectedContactIds]
     .filter((contactId) => contactsById.has(contactId) && !meetingContactIds.has(contactId)));
 
-  const periodMeetings = input.meetings.filter((meeting) => inPeriod(meeting.createdAt, input.from, input.to));
+  const periodMeetings = input.meetings.filter((meeting) => inPeriod(meeting.createdAt, input.from, input.to) && timestamp(meeting.createdAt) <= now && (!timestamp(meeting.startAt) || timestamp(meeting.createdAt) <= timestamp(meeting.startAt)));
   const periodDealIds = new Set(input.deals.filter((deal) => inPeriod(deal.createdAt, input.from, input.to)).map((deal) => deal.id));
 
   /**
@@ -344,22 +345,22 @@ export function calculateGtmIntelligenceSignals(input: GtmIntelligenceInput): Gt
     rate: rate(periodMeetings.length, connectedCallsInPeriod.length),
   };
 
-  const responseContacts = input.contacts.filter((contact) => inPeriod(contact.createdAt, input.from, input.to));
+  const responseContacts = input.contacts.filter((contact) => contact.acquisitionMotion === "Inbound" && inPeriod(contact.createdAt, input.from, input.to) && timestamp(contact.createdAt) <= now);
   const overdueResponseIds = responseContacts
-    .filter((contact) => contact.firstEngagementMs === null || contact.firstEngagementMs > followUpSlaHours * HOUR_MS)
+    .filter((contact) => contact.firstEngagementMs !== null && contact.firstEngagementMs > followUpSlaHours * HOUR_MS)
     .map((contact) => contact.id);
   const metResponseCount = responseContacts.filter((contact) => contact.firstEngagementMs !== null && contact.firstEngagementMs <= followUpSlaHours * HOUR_MS).length;
 
   /**
    * Lead response SLA definition: contacts created in the reporting period meet
    * SLA only when HubSpot's `hs_time_to_first_engagement` is populated and is at
-   * most 24 hours. Missing timing is treated as not met rather than estimated.
+   * most 24 hours. Only explicitly inbound contacts are eligible. Missing timing is reported separately, not classified as a failure; the rate uses known timings only.
    */
   const leadResponseSla: LeadResponseSla = {
     eligible: responseContacts.length,
     met: metResponseCount,
     missing: responseContacts.filter((contact) => contact.firstEngagementMs === null).length,
-    rate: rate(metResponseCount, responseContacts.length),
+    rate: rate(metResponseCount, responseContacts.filter(contact => contact.firstEngagementMs !== null).length),
     overdueIds: overdueResponseIds,
   };
 

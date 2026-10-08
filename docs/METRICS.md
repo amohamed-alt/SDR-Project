@@ -129,3 +129,13 @@ Talent market watch now filters both recruitment/workforce relevance and geograp
 Team Activity and operational tools require the existing signed HttpOnly admin session. Direct page links redirect to `/tools-unlock` with their original filters; client tool navigation shows the same lock form without mounting the tool. Their APIs return 401 before any source reads. Main dashboard analytics and usage-event ingestion remain public. Maqsam ingest, acquisition workers and companion pairing retain their explicitly authenticated machine paths.
 
 The tools password comes from the deployment secret `SDR_ADMIN_PASSWORD`, with `DASHBOARD_PASSWORD` as a legacy fallback. It is never embedded in the repository or browser bundle. The automation owner-token fallback retains its existing precedence. Password login/logout reject cross-site requests. Use **Lock tools** to remove the current browser's cookie.
+
+## October 2026 presentation corrections
+
+- Booked meetings use creator + creation date, deduplicated; records entered after their meeting start are labelled backfill and excluded from booking targets. Held meetings use the meeting start date and Completed outcome. Both creation-date and start-date records are fetched. Attendance excludes future, canceled and rescheduled meetings; pending past outcomes remain in the denominator and appear as missing outcomes.
+- Monthly mission: Marita 20 inbound + 20 outbound; Daniel 50 outbound. These are monthly bookings, independent of report filters. Classification uses explicit Contact Source/Lead Source; mixed or missing values remain Unknown. Pacing assumes Sun–Thu and excludes no public holidays.
+- Response timing/SLA uses explicitly inbound contacts created in the report period and the known CRM timing property. Missing timing is unknown, not failed. SLA is 24 clock hours, not business hours. Actual earliest activity reconstruction and configurable business-hours SLA are not implemented.
+- Deals/bookings and bookings/connected calls remain volume ratios, not attributed conversions. Portfolio & activity coverage uses distinct contacts, visibly separates current portfolio/deal coverage from period activity, and is not presented as a sequential funnel.
+- Portfolio pipeline includes associated deals and is not an SDR-sourced revenue claim.
+- Verified email and tested phone use exact accepted status values; invalid/unverified never match valid/verified.
+- Presentation button (also `present=1`) hides navigation and operational panels; Escape returns to normal. Reduced-motion preferences are respected.

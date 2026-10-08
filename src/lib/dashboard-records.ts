@@ -1,3 +1,4 @@
+import { acquisitionMotion } from "./meeting-performance.ts";
 import type { ActivityRow, CompanyRow, ContactRow, DashboardData, DashboardFilters, DealRow } from "./types.ts";
 
 import { callSegmentValue, type CallSegment } from "./call-segment-values.ts";
@@ -82,7 +83,7 @@ export function selectDashboardRecords(data: DashboardData, selection: RecordSel
     const alert = selection.alert;
     rows = rows.filter(row => {
       if ("type" in row) {
-        if (alert === "meeting-outcomes" || alert === "outcomes") return row.type === "Meeting" && row.status === "Unknown";
+        if (alert === "meeting-outcomes" || alert === "outcomes") return row.type === "Meeting" && ["Unknown", "Scheduled"].includes(row.status) && Date.parse(row.occurredAt) <= now && inPeriod(row.occurredAt, data);
         if (row.type !== "Task" || !row.isOpen) return false;
         if (alert === "due-today") return row.dueBucket === "Due today";
         if (alert === "due-tomorrow" || alert === "due") return row.dueBucket === "Due tomorrow";
@@ -92,8 +93,8 @@ export function selectDashboardRecords(data: DashboardData, selection: RecordSel
       if ("lastContacted" in row) {
         if (alert === "untouched-24h") return !row.lastContacted && new Date(row.createdAt).getTime() < now - 86_400_000;
         if (alert === "no-next-activity") return !row.nextActivity;
-        if (alert === "response-time-missing") return row.leadResponseTimeHours === null;
-        if (alert === "response-time-known") return row.leadResponseTimeHours !== null;
+        if (alert === "response-time-missing") return inPeriod(row.createdAt, data) && acquisitionMotion(row.contactSource, row.leadSource) === "Inbound" && row.leadResponseTimeHours === null;
+        if (alert === "response-time-known") return inPeriod(row.createdAt, data) && acquisitionMotion(row.contactSource, row.leadSource) === "Inbound" && row.leadResponseTimeHours !== null;
         if (alert === "high-icp" || alert === "tier-a") return /^(a|tier a|tier[ _]1|high)$/i.test(row.tier) && !row.lastContacted;
         if (alert === "high-priority-untouched") return row.contactPriority === "High" && !row.lastContacted;
         if (alert === "wrong-phone" || alert === "phones") return /wrong/i.test(row.phoneStatus);

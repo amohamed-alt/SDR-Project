@@ -165,6 +165,8 @@ export interface ContactRow {
 }
 
 export interface ActivityRow {
+  bookedInPeriod?: boolean;
+  heldInPeriod?: boolean;
   id: string;
   type: "Call" | "Meeting" | "Task" | "Email" | "WhatsApp";
   subject: string;
@@ -224,6 +226,7 @@ export interface FilterOptions {
 }
 
 export interface DashboardData {
+  meetingPerformance?: import("./meeting-performance.ts").MeetingPerformance;
   meta: {
     generatedAt: string;
     from: string;
