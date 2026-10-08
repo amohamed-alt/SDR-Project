@@ -158,8 +158,15 @@ export function AiSdrAgentWorkspace() {
   }
 
   function updateLead(key: string, patch: Partial<AiLead>) {
-    setRows(current => current.map(row => row.key === key
-      ? { ...row, lead: { ...row.lead, ...patch } } : row));
+    setRows(current => current.map(row => {
+      if (row.key !== key) return row;
+      // A changed company domain invalidates the previous CRM match.
+      const changedIdentity = patch.companyDomain !== undefined && patch.companyDomain !== row.lead.companyDomain;
+      return {
+        ...row, lead: { ...row.lead, ...patch },
+        ...(changedIdentity ? { stage: "pending" as const, check: undefined, prospect: undefined, error: undefined } : {}),
+      };
+    }));
     setSelected(current => { const next = new Set(current); next.delete(key); return next; });
   }
 
