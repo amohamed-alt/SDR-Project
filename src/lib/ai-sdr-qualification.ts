@@ -126,7 +126,7 @@ function isGovernment(lead: AiLead): boolean {
 
 function trustedCrmAts(value: unknown): boolean {
   const ats = clean(value).toLowerCase();
-  return Boolean(ats && !["none", "no ats", "not detected", "unknown", "not found", "n/a", "no", "-"].includes(ats));
+  return Boolean(ats && !["none", "no ats", "not detected", "unknown", "not found", "n/a", "no", "-", "direct application form", "no ats observed", "not available", "not applicable"].includes(ats));
 }
 
 export function assessAiSdrLead(lead: AiLead, check?: AiCrmCheck): AiAssessment {
