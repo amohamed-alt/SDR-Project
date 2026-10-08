@@ -46,6 +46,7 @@ test("research intake enforces valid public profiles, batch limit and zero-trust
 test("CRM review is mandatory and unknown ATS never routes to Marita by assumption", () => {
   assert.equal(assessAiSdrLead(lead).status, "review");
   assert.match(assessAiSdrLead(lead, check).reason, /Verify ATS/);
+  assert.match(assessAiSdrLead(lead, { ...check, company: { ...check.company, detectedAts: "Direct Application Form" } }).reason, /Verify ATS/);
   assert.equal(assessAiSdrLead({ ...lead, employeeCount: 120, atsStatus: "verified_no_ats", atsEvidence: "Checked career page" }, check).status, "blocked");
   assert.equal(assessAiSdrLead({ ...lead, companyCountry: "" }, check).status, "review");
   assert.equal(assessAiSdrLead({ ...lead, companyCountry: "United Arab Emirates" }, check).status, "blocked");
@@ -73,6 +74,9 @@ test("confirmed ATS routes Daniel, evidenced no ATS routes Marita", () => {
   assert.equal(noAts.status, "eligible");
   assert.equal(noAts.ownerId, AI_SDR_MARITA_ID);
   assert.equal(assessAiSdrLead({ ...lead, atsStatus: "verified_no_ats", atsEvidence: "" }, check).status, "review");
+  assert.equal(assessAiSdrLead({ ...lead, atsStatus: "verified_with_ats", atsEvidence: "Confirmed ATS URL" }, {
+    ...check, company: { ...check.company, ownerId: AI_SDR_MARITA_ID },
+  }).status, "review");
 });
 
 test("the AI SDR route is protected and paid reveals never run during precheck", () => {
@@ -86,4 +90,6 @@ test("the AI SDR route is protected and paid reveals never run during precheck",
   assert.match(page, /\/api\/prospecting\/salesnav\/precheck-v2/);
   assert.match(push, /sdrAdminAuthorized/);
   assert.match(push, /existingPush/);
+  assert.match(push, /findOpenAccountTask/);
+  assert.match(push, /assignmentMode: "acquisition"/);
 });
