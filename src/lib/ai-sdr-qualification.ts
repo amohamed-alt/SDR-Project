@@ -156,6 +156,7 @@ export function assessAiSdrLead(lead: AiLead, check?: AiCrmCheck): AiAssessment 
   if (!hasAts && lead.atsStatus === "unknown") return review("Verify ATS usage before assigning the SDR.");
   if (!hasAts && lead.atsEvidence.trim().length < 6) return review("Add ATS evidence/verification notes before routing.");
   const ownerId = hasAts || lead.atsStatus === "verified_with_ats" ? AI_SDR_DANIEL_ID : AI_SDR_MARITA_ID;
+  if (company.ownerId && company.ownerId !== ownerId) return review("Existing SDR ownership conflicts with ATS routing. Manual review required.");
   const ownerName = ownerId === AI_SDR_DANIEL_ID ? "Daniel Beaini" : "Marita Chedid";
   return { status: "eligible", reason: hasAts ? "ATS verified from HubSpot." : "ATS manually reviewed.", ownerId, ownerName, score: 100 };
 }
