@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { POST as crmPrecheck } from "@/app/api/prospecting/salesnav/precheck-v2/route";
 import { POST as existingPush } from "@/app/api/prospecting/salesnav/push-ready-v2/route";
-import { assessAiSdrLead, normalizePersonUrl, type AiCrmCheck, type AiLead } from "@/lib/ai-sdr-qualification";
+import { assessAiSdrLead, normalizePersonUrl, type AiCrmCheck, type AiLead, AI_SDR_DANIEL_ID } from "@/lib/ai-sdr-qualification";
+import { batchRead, readAssociations } from "@/lib/hubspot";
 import { sdrAdminAuthorized } from "@/lib/sdr-admin-auth";
 import { originMatchesRequestHosts } from "@/lib/request-origin";
 
@@ -38,16 +39,38 @@ async function parseReply(response: Response): Promise<ApiReply> {
 }
 
 function makeInternalRequest(request: NextRequest, path: string, payload: unknown) {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const cookie = request.headers.get("cookie");
+  if (cookie) headers.cookie = cookie;
+  const workerToken = request.headers.get("x-acquisition-owner-token");
+  if (workerToken) headers["x-acquisition-owner-token"] = workerToken;
   return new NextRequest(new URL(path, request.url), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    method: "POST", headers, body: JSON.stringify(payload),
   });
 }
 
 function phoneAvailable(prospect: Record<string, unknown>) {
   return Boolean(String(prospect.phone || "").trim()
     || (Array.isArray(prospect.phones) && prospect.phones.some(p => String(p || "").trim())));
+}
+
+async function findOpenAccountTask(companyId: string): Promise<string | null> {
+  const [companyTasks, companyContacts] = await Promise.all([
+    readAssociations("companies", "tasks", [companyId]),
+    readAssociations("companies", "contacts", [companyId]),
+  ]);
+  const contactIds = [...new Set(companyContacts.get(companyId) || [])];
+  if (contactIds.length > 100) return "Company has more than 100 contacts. Manual task review required.";
+  const contactTasks = contactIds.length ? await readAssociations("contacts", "tasks", contactIds) : new Map<string, string[]>();
+  const taskIds = new Set(companyTasks.get(companyId) || []);
+  for (const ids of contactTasks.values()) for (const id of ids) taskIds.add(id);
+  if (taskIds.size > 200) return "Company has more than 200 tasks. Manual task review required.";
+  if (!taskIds.size) return null;
+  const tasks = await batchRead("tasks", [...taskIds], ["hs_task_status"]);
+  if (tasks.length !== taskIds.size) return "Task associations could not be fully verified.";
+  return tasks.some(task => String(task.properties.hs_task_status || "").toUpperCase() !== "COMPLETED")
+    ? "Existing open HubSpot task on the account or one of its contacts; preserve follow-up."
+    : null;
 }
 
 export async function POST(request: NextRequest) {
@@ -94,6 +117,17 @@ export async function POST(request: NextRequest) {
   const verdict = assessAiSdrLead(lead as AiLead, checked as unknown as AiCrmCheck);
   if (verdict.status !== "eligible") return NextResponse.json({ error: verdict.reason, policyStatus: verdict.status }, { status: 409 });
 
+  const crmCompany = (checked.company || {}) as Record<string, unknown>;
+  if (crmCompany.inHubSpot && crmCompany.id) {
+    try {
+      const taskBlock = await findOpenAccountTask(String(crmCompany.id));
+      if (taskBlock) return NextResponse.json({ error: taskBlock, policyStatus: "blocked" }, { status: 409 });
+    } catch (error) {
+      console.error("AI SDR outstanding task check failed", error);
+      return NextResponse.json({ error: "Could not verify existing HubSpot tasks. No CRM write performed." }, { status: 503 });
+    }
+  }
+
   // The legacy Ready route performs a second server-side CRM recheck and is
   // responsible for idempotent contact creation, task creation and ledger writes.
   const result = await existingPush(makeInternalRequest(request, "/api/prospecting/salesnav/push-ready-v2", {
@@ -104,7 +138,21 @@ export async function POST(request: NextRequest) {
       name: lead.name, title: lead.title, company: lead.company,
       location: lead.location, linkedinUrl: lead.linkedinUrl, salesLeadUrl: lead.salesLeadUrl,
     },
-    prospect: { ...prospect, linkedinUrl: lead.linkedinUrl, company: lead.company },
+    prospect: {
+      ...prospect,
+      linkedinUrl: lead.linkedinUrl,
+      company: lead.company,
+      companyDomain: lead.companyDomain || String(prospect.companyDomain || ""),
+      companyCountry: lead.companyCountry,
+      companyEmployeeCount: lead.employeeCount || 0,
+      assignmentMode: "acquisition",
+      inventoryBusinessLine: verdict.ownerId === AI_SDR_DANIEL_ID ? "Evalufy" : "Talentera",
+      ownerId: verdict.ownerId,
+      ownerName: verdict.ownerName,
+      priority: "high",
+      source: "Qualified SDR prospect",
+      score: 100,
+    },
   }));
   const answer = await parseReply(result);
   return NextResponse.json(result.ok
