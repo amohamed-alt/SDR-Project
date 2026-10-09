@@ -34,3 +34,15 @@ test('unavailable sheet never yields fake sheet zero totals',()=>{
   const out=applyMeetingSheet(data,{rows:[],status:'unavailable',syncedAt:'',warnings:[],url:'x',error:'403'},{from:'2026-10-01',to:'2026-10-09',ownerId:'37624223'},'2026-10-09');
   assert.equal(out.meetingPerformance,undefined);assert.equal(out.kpis.bookedMeetings,data.kpis.bookedMeetings);assert.match(out.meta.warnings.at(-1),/falls back to HubSpot/);
 });
+
+test('independent sheet refresh retains original CRM evidence and clears resolved sync errors',()=>{
+  const data=createMockDashboard('2026-10-01','2026-10-09','37624223');
+  const filters={from:'2026-10-01',to:'2026-10-09',ownerId:'37624223'};
+  const denied=applyMeetingSheet(data,{rows:[],status:'unavailable',syncedAt:'',warnings:[],url:'x',error:'403'},filters,'2026-10-09');
+  const rows=parseMeetingTab([header,row('05-Oct-2026','Attended')],'abc',12,'Daniel').rows;
+  const ready=applyMeetingSheet(denied,{rows,status:'ready',syncedAt:'first',warnings:[],url:'x'},filters,'2026-10-09');
+  const refreshed=applyMeetingSheet(ready,{rows:[...rows,{...rows[0],id:'second'}],status:'ready',syncedAt:'second',warnings:[],url:'x'},filters,'2026-10-09');
+  assert.equal(refreshed.kpis.bookedMeetings,2);
+  assert.deepEqual(refreshed.hubspotMeetingEvidence,[{id:'crm-meeting',type:'Meeting'}]);
+  assert.equal(refreshed.meta.warnings.some(w=>w.includes('403')),false);
+});

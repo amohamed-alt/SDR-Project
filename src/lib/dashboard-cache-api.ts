@@ -18,7 +18,7 @@ export type PersistedDashboardSnapshot = {
 
 function canonicalFilters(filters: DashboardFilters) {
   return {
-    schemaVersion: 11,
+    schemaVersion: 12,
     from: filters.from,
     to: filters.to,
     ownerId: filters.ownerId,

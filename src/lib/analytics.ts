@@ -1,6 +1,7 @@
 import { acquisitionMotion, meetingPerformance, verifiedEmailStatus, testedPhoneStatus } from "./meeting-performance.ts";
 import { responseMilliseconds } from "./dashboard-values.ts";
 import { meetingCreatorId } from "@/lib/owner-attribution";
+import { reportingOwnerScope } from "@/lib/reporting-owner-scope";
 import {
   BOOKING_MEETING_SOURCES,
   CALL_DISPOSITION_LABELS,
@@ -248,7 +249,8 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   const warnings: string[] = [];
   const reportingOwners = await optional("Owners", warnings, () => listOwners(), [] as HubSpotOwner[]);
   const creatorId = meetingCreatorId(reportingOwners, filters.ownerId);
-  if (!creatorId) warnings.push("Meeting creator mapping unavailable; meeting totals are incomplete.");
+  const ownerScope = reportingOwnerScope(filters.ownerId, creatorId);
+  if (!ownerScope.meetingOwner) warnings.push("Meeting creator mapping unavailable; meeting totals are incomplete.");
   const cohortFilterEnabled = Boolean(filters.country || filters.originalSource || filters.latestSource || filters.tier || filters.persona);
 
   const [
@@ -266,11 +268,11 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     taskDefinitions,
     ...openTaskGroups
   ] = await Promise.all([
-    searchAll("contacts", CONTACT_PROPERTIES, [{ propertyName: "sdr_owner", operator: "EQ", value: filters.ownerId }], ["createdate"]),
+    searchAll("contacts", CONTACT_PROPERTIES, [{ propertyName: ownerScope.contactProperty, operator: "EQ", value: filters.ownerId }], ["createdate"]),
     optional("Calls", warnings, () => searchAll("calls", CALL_PROPERTIES, activityFilters(filters.ownerId, "hs_timestamp", filters.from, filters.to), ["hs_timestamp"]), []),
     optional("Meetings", warnings, async () => {
-      if (!creatorId) return [];
-      const groups = await Promise.all(["hs_createdate", "hs_meeting_start_time"].map(dateProperty => searchAll("meetings", MEETING_PROPERTIES, activityFilters(creatorId, dateProperty, filters.from, filters.to, "hs_created_by_user_id"), [dateProperty])));
+      if (!ownerScope.meetingOwner) return [];
+      const groups = await Promise.all(["hs_createdate", "hs_meeting_start_time"].map(dateProperty => searchAll("meetings", MEETING_PROPERTIES, activityFilters(ownerScope.meetingOwner!, dateProperty, filters.from, filters.to, ownerScope.meetingProperty), [dateProperty])));
       return [...new Map(groups.flat().map(record => [record.id, record])).values()];
     }, []),
     optional("Tasks due", warnings, () => searchAll("tasks", TASK_PROPERTIES, activityFilters(filters.ownerId, "hs_timestamp", filters.from, filters.to), ["hs_timestamp"]), []),
@@ -351,7 +353,11 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   const dealIds = [...new Set([...contactDeals.values()].flat())];
   const [companiesRaw, dealsRaw] = await Promise.all([
     optional("Companies", warnings, () => batchRead("companies", companyIds, COMPANY_PROPERTIES), []),
-    optional("Deals", warnings, () => batchRead("deals", dealIds, DEAL_PROPERTIES), []),
+    optional("Deals", warnings, async () => {
+      if (!ownerScope.isRm) return batchRead("deals", dealIds, DEAL_PROPERTIES);
+      const owned = await searchAll("deals", DEAL_PROPERTIES, [{ propertyName: "hubspot_owner_id", operator: "EQ", value: filters.ownerId }]);
+      return cohortFilterEnabled ? owned.filter(deal => dealIds.includes(deal.id)) : owned;
+    }, []),
   ]);
 
   const ownerMap = new Map(owners.map((owner) => [owner.id, owner.name]));

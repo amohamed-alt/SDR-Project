@@ -17,7 +17,7 @@ import {
 } from "@/lib/dashboard-source-health";
 import type { DashboardData, DashboardFilters } from "@/lib/types";
 
-const SNAPSHOT_FRESH_MS = 2 * 60 * 1000;
+const SNAPSHOT_FRESH_MS = 5 * 60 * 1000;
 const BACKGROUND_REFRESH_INTERVAL_MS = 60 * 1000;
 const ACTIVE_FILTER_TTL_MS = 60 * 60 * 1000;
 
@@ -29,8 +29,8 @@ const cachedDashboard = unstable_cache(
     }
     return data;
   },
-  ["sdr-dashboard-live-v12-sheet-truth"],
-  { revalidate: 120, tags: ["sdr-dashboard"] },
+  ["sdr-dashboard-live-v13-rm-ownership"],
+  { revalidate: 300, tags: ["sdr-dashboard"] },
 );
 
 type SnapshotEntry = {
@@ -235,6 +235,21 @@ export async function getDashboardSnapshot(
   }
 
   dashboardStore.history.remember(key, snapshot.data);
+  // Sheet reads have their own short cache and must not wait behind a full CRM
+  // rebuild. Reuse this exact overlay until the source changes, so ETags and
+  // record-drawer versions remain stable between identical reads.
+  const sheet = await readMeetingSheet(filters.ownerId);
+  const previousSheet = snapshot.data.meetingSheet;
+  if (sheet && (previousSheet?.syncedAt !== sheet.syncedAt
+    || previousSheet?.status !== sheet.status
+    || previousSheet?.error !== sheet.error
+    || JSON.stringify(previousSheet?.warnings) !== JSON.stringify(sheet.warnings))) {
+    dashboardStore.history.remember(key, snapshot.data);
+    const data = applyMeetingSheet(snapshot.data, sheet, filters, dashboardToday());
+    data.meta = { ...data.meta, generatedAt: new Date().toISOString() };
+    snapshot.data = data;
+    dashboardStore.history.remember(key, data);
+  }
   return {
     data: snapshot.data,
     refreshing: inflightRefreshes.has(key),
