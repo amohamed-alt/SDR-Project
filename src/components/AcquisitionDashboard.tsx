@@ -260,17 +260,25 @@ function RepKpiDashboard({
       ),
     },
     {
-      label: "Meetings",
+      label: "Meetings booked",
       value: formatNumber(data.kpis.bookedMeetings),
       helper: `${data.kpis.completedMeetings} completed`,
       icon: CalendarDays,
       tone: "amber",
       onClick: () => showActivities(
         `${owner.name} · Meetings`,
-        "Meetings attributed to this acquisition owner in the selected reporting period.",
-        activities("Meeting"),
+        "Meetings assigned to this RM and created in the selected period. Attendance uses meeting dates separately.",
+        activities("Meeting", [{ field: "bookedInPeriod", value: true }]),
         data.meta.hubspotUrls.meetings,
       ),
+    },
+    {
+      label: "Meetings held",
+      value: formatNumber(data.kpis.completedMeetings),
+      helper: `${data.kpis.meetingCompletionRate}% attendance · meeting dates`,
+      icon: CalendarDays,
+      tone: "green",
+      onClick: () => showActivities(`${owner.name} · Meetings held`, "Completed meetings assigned to this RM whose meeting date is within the selected period.", activities("Meeting", [{ field: "heldInPeriod", value: true }]), data.meta.hubspotUrls.meetings),
     },
     {
       label: "WhatsApp",
@@ -376,12 +384,12 @@ function RepKpiDashboard({
       onClick: () => showContacts(`${owner.name} · Missing info`, "Contacts missing phone, email, or LinkedIn information.", { signal: "missing-contact-info" }),
     },
     {
-      label: "Meeting → deal",
+      label: "Deals / bookings",
       value: data.intelligence.meetingToDealConversion.rate + "%",
       helper: `${data.intelligence.meetingToDealConversion.numerator} deals / ${data.intelligence.meetingToDealConversion.denominator} meetings`,
       icon: ArrowUpRight,
       tone: "green",
-      onClick: () => showDeals(`${owner.name} · Meeting to deal`, "Deals created in the selected reporting period.", { scope: "created" }),
+      onClick: () => showDeals(`${owner.name} · Meeting to deal`, "Period deal count divided by period bookings; this is not a matched meeting-to-deal conversion cohort.", { scope: "created" }),
     },
   ] : [];
 
@@ -400,7 +408,7 @@ function RepKpiDashboard({
       <aside className="sidebar">
         <div className="brand"><div className="brand-logo" role="img" aria-label="Talentera ATS"/><span className="brand-subtitle">SDR Intelligence</span></div>
         <AcquisitionNav activeOwner={ownerKey} onSelect={onSelectOwner}/>
-        <div className="nav-label owner-label">SDR OWNER</div>
+        <div className="nav-label owner-label">RM OWNER</div>
         <div className="owner-card">
           <div className="avatar">{owner.initials}</div>
           <div><span>Reporting for</span><strong>{data?.meta.ownerName || owner.name}</strong></div>
@@ -421,12 +429,12 @@ function RepKpiDashboard({
         <nav className={studioStyles.tabs} aria-label="RM analytics sections"><button type="button" aria-pressed={repView === "performance"} onClick={() => setRepView("performance")}>Performance & trends</button><button type="button" aria-pressed={repView === "handoff"} onClick={() => setRepView("handoff")}>SDR meeting handoff</button></nav>
         {repView === "handoff" ? <ToolAccessGate><SalesHandoffDashboard key={ownerKey} initialSearch={initialSearch} initialSalesRepId={owner.ownerId} embedded onBack={() => setRepView("performance")}/></ToolAccessGate> : <>
         <ReportingRange key={`${filters.from}:${filters.to}`} filters={filters}/>
-        <p className={studioStyles.freshness}>Owner activity scope · use SDR meeting handoff for meetings booked by Marita or Daniel.</p>
+        <p className={studioStyles.freshness}>RM-owned contacts, meetings and deals · booked counts use creation dates; held counts use meeting dates. Use SDR meeting handoff for Marita / Daniel booking attribution.</p>
         {data?.meta.warnings.length ? <div className="warning-banner"><AlertTriangle size={17}/><div><strong>{data.meta.isDemo ? "Demo mode" : "Some HubSpot data sources were unavailable"}</strong><span>{data.meta.warnings.join(" · ")}</span></div></div> : null}
         {error ? <div className="error-banner"><AlertTriangle size={20}/><div><strong>{data ? "Refresh failed — showing the last loaded data" : "KPI dashboard failed to load"}</strong><span>{error}</span></div><button type="button" onClick={() => setRefreshKey(value => value + 1)}>Try again</button></div> : null}
 
         {data
-          ? <><div className="kpi-grid">{cards.slice(0, 6).map((card) => <MetricButton key={card.label} {...card}/>)}</div><PerformanceCharts data={data} onInspect={(title, selection) => { setDrilldown({ kind: selection.kind, title, description: "Records from the selected owner snapshot.", rows: [], source: recordSource(selection), hubspotUrl: data.meta.hubspotUrls[selection.kind === "activities" ? "calls" : selection.kind] } as Drilldown); }}/><details className={studioStyles.evidence}><summary>More risk, conversion and data-quality metrics</summary><div className="kpi-grid">{cards.slice(6).map(card => <MetricButton key={card.label} {...card}/>)}</div></details></>
+          ? <><div className="kpi-grid">{cards.slice(0, 7).map((card) => <MetricButton key={card.label} {...card}/>)}</div><PerformanceCharts data={data} onInspect={(title, selection) => { setDrilldown({ kind: selection.kind, title, description: "Records from the selected owner snapshot.", rows: [], source: recordSource(selection), hubspotUrl: data.meta.hubspotUrls[selection.kind === "activities" ? "calls" : selection.kind] } as Drilldown); }}/><details className={studioStyles.evidence}><summary>More risk, conversion and data-quality metrics</summary><div className="kpi-grid">{cards.slice(7).map(card => <MetricButton key={card.label} {...card}/>)}</div></details></>
           : (loading ? <KpiSkeleton/> : null)}
         {data ? <AcquisitionDailyPulse filters={filters} data={data} ownerName={owner.name} onOpen={setDrilldown}/> : null}
         </>}

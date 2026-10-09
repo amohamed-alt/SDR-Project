@@ -32,6 +32,7 @@ export function SdrComparison({ onSelect, initialSearch = "" }: { onSelect: (key
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
+  const [chartMetric, setChartMetric] = useState<keyof DashboardKpis>("bookedMeetings");
   const consumedRefresh = useRef(0);
   useEffect(() => {
     const controller = new AbortController();
@@ -43,13 +44,14 @@ export function SdrComparison({ onSelect, initialSearch = "" }: { onSelect: (key
       try {
         const query = new URLSearchParams(Object.entries(range).filter((entry): entry is [string, string] => Boolean(entry[1])));
         if (force) query.set("refresh", "1");
-        const response = await fetch(`/api/dashboard/team?${query}`, { signal: controller.signal, cache: "no-store" });
+        const response = await fetch(`/api/dashboard/team?${query}`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]), cache: "no-store" });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error || "Unable to load comparison");
         if (controller.signal.aborted) return;
-        previous.set(key, payload.results);
+        const results: Entry[] = payload.results.map((entry: Entry) => entry.data ? entry : { ...entry, data: previous.get(key)?.find(old => old.key === entry.key)?.data ?? null });
+        previous.set(key, results);
         while (previous.size > 6) previous.delete(previous.keys().next().value!);
-        setState({ key, entries: payload.results });
+        setState({ key, entries: results });
         setError("");
         if (payload.results.some((entry: Entry) => entry.refreshing)) delay = 3_000;
       } catch (error) {
@@ -66,7 +68,7 @@ export function SdrComparison({ onSelect, initialSearch = "" }: { onSelect: (key
   const entries = state.key === key ? state.entries : previous.get(key) || [];
   const dataFor = (sdr: SdrKey) => entries.find(entry => entry.key === sdr);
   const format = (value: number) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(value);
-  const chart = metrics.filter(metric => ["calls", "connectedCalls", "bookedMeetings", "completedTasks"].includes(metric.key)).map(metric => {
+  const chart = metrics.filter(metric => metric.key === chartMetric).map(metric => {
     const row: Record<string, string | number | null> = { name: metric.label };
     owners.forEach(owner => { row[owner.shortName] = dataFor(owner.key)?.data?.kpis[metric.key] ?? null; });
     return row;
@@ -84,7 +86,7 @@ export function SdrComparison({ onSelect, initialSearch = "" }: { onSelect: (key
         {entry?.data?.meta.warnings.map(warning => <p key={warning} className={styles.error}>{warning}</p>)}
       </section>;
     })}</div>
-    <div className={styles.detail}><section className={styles.panel}><h2>Activity comparison</h2><p>Meeting dates from approved Google Sheets · other activity from HubSpot</p><ResponsiveContainer width="100%" height={320}><BarChart data={chart} margin={{ top: 20, right: 12, left: -15, bottom: 0 }}><CartesianGrid vertical={false} stroke="#e8ebef"/><XAxis dataKey="name" tick={{ fontSize: 12 }} interval={0} height={55}/><YAxis allowDecimals={false}/><Tooltip/><Legend/>{owners.map(owner => <Bar key={owner.key} dataKey={owner.shortName} fill={owner.color} radius={[4,4,0,0]} isAnimationActive={true} animationDuration={650}/>)}</BarChart></ResponsiveContainer></section>
+    <div className={styles.detail}><section className={styles.panel}><h2>Activity comparison</h2><label>Compare metric <select aria-label="Comparison metric" value={chartMetric} onChange={event => setChartMetric(event.target.value as keyof DashboardKpis)}>{metrics.filter(metric => ["calls", "connectedCalls", "bookedMeetings", "completedMeetings", "completedTasks"].includes(metric.key)).map(metric => <option key={metric.key} value={metric.key}>{metric.label}</option>)}</select></label><p>One metric per scale. Meetings use the approved sheet when available; otherwise the labelled HubSpot fallback. Other activity uses HubSpot.</p><ResponsiveContainer width="100%" height={320}><BarChart data={chart} margin={{ top: 20, right: 12, left: -15, bottom: 0 }}><CartesianGrid vertical={false} stroke="#e8ebef"/><XAxis dataKey="name" tick={{ fontSize: 12 }} interval={0} height={55}/><YAxis allowDecimals={false}/><Tooltip/><Legend/>{owners.map(owner => <Bar key={owner.key} dataKey={owner.shortName} fill={owner.color} radius={[4,4,0,0]} isAnimationActive={true} animationDuration={650}/>)}</BarChart></ResponsiveContainer></section>
     <section className={styles.panel}><h2>Numbers at a glance</h2><div className={styles.tableWrap}><table><caption className={styles.caption}>Meeting / activity dates: {range.from} – {range.to}. Workload and portfolio are current snapshots.</caption><thead><tr><th scope="col">Metric</th>{owners.map(owner => <th scope="col" key={owner.key}>{owner.shortName}</th>)}</tr></thead><tbody>{metrics.map(metric => <tr key={metric.key}><th scope="row">{metric.label}</th>{owners.map(owner => <td key={owner.key}>{dataFor(owner.key)?.data ? `${format(dataFor(owner.key)!.data!.kpis[metric.key])}${metric.percent ? "%" : ""}` : "—"}</td>)}</tr>)}</tbody></table></div></section></div>
     <p className={styles.note}>Performance is grouped by SDR ownership. Talentera and Evalufy labels identify each workspace; these are not product-filtered revenue totals. Compare activity alongside portfolio size and time in role.</p>
   </div>;

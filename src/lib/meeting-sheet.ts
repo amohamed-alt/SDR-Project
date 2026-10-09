@@ -2,8 +2,8 @@ import "server-only";
 import { createSign } from "node:crypto";
 import { MEETING_SHEETS, parseMeetingTab, type SheetSnapshot } from "./meeting-sheet-data";
 const TTL=120_000;
-const cached=new Map<string,{snapshot:SheetSnapshot;expires:number}>();
-const pending=new Map<string,Promise<SheetSnapshot>>();
+const state=globalThis as typeof globalThis & {__sdrMeetingSheets?: {cached:Map<string,{snapshot:SheetSnapshot;expires:number}>;pending:Map<string,Promise<SheetSnapshot>>}};
+const {cached,pending}=state.__sdrMeetingSheets ??= {cached:new Map(),pending:new Map()};
 let token:{value:string;expires:number}|undefined;
 function credentials() {
   const raw=process.env.GOOGLE_SHEETS_SERVICE_ACCOUNT_B64;
@@ -33,10 +33,10 @@ async function googleRead(path:string) {
   }
   return response.json();
 }
-export async function readMeetingSheet(ownerId:string): Promise<SheetSnapshot|null> {
+export async function readMeetingSheet(ownerId:string,force=false): Promise<SheetSnapshot|null> {
   const config=MEETING_SHEETS[ownerId as keyof typeof MEETING_SHEETS];if(!config)return null;
-  const previous=cached.get(ownerId);if(previous&&previous.expires>Date.now())return previous.snapshot;
-  const inflight=pending.get(ownerId);if(inflight)return inflight;
+  const previous=cached.get(ownerId);if(!force&&previous&&previous.expires>Date.now())return previous.snapshot;
+  const inflight=pending.get(ownerId);if(inflight)return previous?.snapshot ?? inflight;
   const url=`https://docs.google.com/spreadsheets/d/${config.id}/edit`;
   const job=(async():Promise<SheetSnapshot>=>{
     try {
@@ -56,5 +56,8 @@ export async function readMeetingSheet(ownerId:string): Promise<SheetSnapshot|nu
       const snapshot:SheetSnapshot=previous?.snapshot.status==="ready"?{...previous.snapshot,warnings:[...previous.snapshot.warnings,`Last successful sheet snapshot retained; sync failed: ${reason}`]}:{status:"unavailable",url,syncedAt:"",rows:[],warnings:[],error:reason};
       cached.set(ownerId,{snapshot,expires:Date.now()+30_000});return snapshot;
     }
-  })().finally(()=>pending.delete(ownerId));pending.set(ownerId,job);return job;
+  })().finally(()=>pending.delete(ownerId));pending.set(ownerId,job);
+  // A warm read never waits for Google. Keep the last labelled source visible
+  // while the deduplicated refresh updates it for the next poll.
+  return previous?.snapshot ?? job;
 }
