@@ -25,6 +25,7 @@ test("RM charts expose source records and keep handoff scope isolated", async ({
   // The shared demo fixture's source activities are dated July 19.
   await page.goto("/?acq=zein&from=2026-07-01&to=2026-07-19");
   await expect(page.getByRole("heading", { name: "Activity over time" })).toBeVisible();
+  await page.getByText("Pipeline & follow-up details", { exact: true }).click();
   await expect(page.getByRole("heading", { name: "Deals by stage" })).toBeVisible();
   await page.getByText("Explore daily records", { exact: true }).click();
   const recordRequest = page.waitForResponse(response => response.url().includes("/api/dashboard/records"));

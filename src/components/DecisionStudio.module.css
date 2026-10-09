@@ -96,3 +96,6 @@
 .hourGrid small { display:block; margin-top:6px; font-size:9px; }
 .studio .hourGrid button:disabled { opacity:.65; cursor:default; }
 @media(max-width:640px) { .hourGrid { gap:2px; } .hourGrid small { font-size:8px; } .callHeading h2 { font-size:20px; } }
+
+.chartDetails { grid-column: 1 / -1; min-width: 0; }
+.chartDetails > details { margin: 0; }

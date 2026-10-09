@@ -1,4 +1,5 @@
 "use client";
+import { DashboardDisclosure } from "./DashboardDisclosure";
 import { useState } from "react";
 import { Area, Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { DashboardData } from "@/lib/types";
@@ -22,6 +23,7 @@ export function PerformanceCharts({ data, onInspect }: { data: DashboardData; on
       <header><div><span className={styles.kicker}>Quality of activity</span><h2>Outcome mix</h2></div><select aria-label="Outcome activity" value={outcome} onChange={event => setOutcome(event.target.value as "Call" | "Meeting")}><option>Call</option><option>Meeting</option></select></header>
       {outcomes.length ? <><div className={styles.chart}><ResponsiveContainer width="100%" height="100%"><BarChart data={outcomes.slice(0, 6)} layout="vertical" margin={{ left: 0, right: 18 }}><CartesianGrid horizontal={false} stroke="var(--border)"/><XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }}/><YAxis type="category" dataKey="displayName" width={100} tick={{ fontSize: 11 }} axisLine={false} tickLine={false}/><Tooltip/><Bar isAnimationActive={false} dataKey="value" name="Records" fill="var(--green)" radius={[0, 4, 4, 0]}/></BarChart></ResponsiveContainer></div><div className={styles.outcomes}>{outcomes.map(row => <button key={row.name} onClick={() => onInspect(`${outcome} · ${row.displayName}`, { kind: "activities", outcome: row.name, where: [{ field: "type", value: outcome }] })} title={row.name !== row.displayName ? "The source outcome has no readable label; inspect its records." : undefined}>{row.displayName}<b>{row.value}</b></button>)}</div></> : <p className={styles.empty}>No {outcome.toLowerCase()} outcomes for these filters.</p>}
     </section>
+    <div className={styles.chartDetails}><DashboardDisclosure title="Pipeline & follow-up details"><div className={styles.chartGrid}>
     <section className={styles.panel} aria-label="Pipeline distribution">
       <header><div><span className={styles.kicker}>Opportunity mix</span><h2>Deals by stage</h2><p>Deal counts in selected ownership scope · current snapshot</p></div></header>
       {data.dealStages.length ? <div className={styles.barList}>{data.dealStages.map(stage => <button key={stage.name} type="button" onClick={() => onInspect(`Deals · ${stage.name}`, { kind: "deals", where: [{ field: "stage", value: stage.name }] })}><span>{stage.name}<b>{stage.value}</b></span><meter min={0} max={Math.max(1, ...data.dealStages.map(item => item.value))} value={stage.value}>{stage.value}</meter></button>)}</div> : <p className={styles.empty}>No associated deals in this scope.</p>}
@@ -35,5 +37,6 @@ export function PerformanceCharts({ data, onInspect }: { data: DashboardData; on
         { name: "Deals without a next date", value: data.intelligence.dealsWithoutFutureActivity.count, selection: { kind: "deals", signal: "dealsWithoutFutureActivity" } },
       ].map(item => <button key={item.name} type="button" onClick={() => onInspect(item.name, item.selection as RecordSelection)}><span>{item.name}<b>{item.value}</b></span><meter className={styles.riskMeter} min={0} max={Math.max(1, data.kpis.overdueTasks, data.intelligence.meetingsWithoutFollowUp.count, data.intelligence.staleDeals.count, data.intelligence.dealsWithoutFutureActivity.count)} value={item.value}>{item.value}</meter></button>)}</div>
     </section>
+    </div></DashboardDisclosure></div>
   </div>;
 }
