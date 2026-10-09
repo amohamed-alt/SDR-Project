@@ -32,6 +32,7 @@ test("shareable analytics URL restores the Pipeline view", async ({ page }) => {
 test("KPI drilldown exposes the operational table surface", async ({ page }) => {
   await page.goto("/");
 
+  await page.getByText("More portfolio, email & pipeline metrics", { exact: true }).click();
   const companiesKpi = page.getByRole("button", { name: /Companies.*Distinct associated accounts/i }).first();
   await expect(companiesKpi).toBeVisible();
   await companiesKpi.click();
