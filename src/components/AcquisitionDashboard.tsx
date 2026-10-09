@@ -1,4 +1,5 @@
 "use client";
+import { DashboardDisclosure } from "./DashboardDisclosure";
 import { ToolAccessGate } from "./ToolAccessGate";
 
 /* eslint-disable react-hooks/set-state-in-effect */
@@ -262,7 +263,7 @@ function RepKpiDashboard({
     {
       label: "Meetings booked",
       value: formatNumber(data.kpis.bookedMeetings),
-      helper: `${data.kpis.completedMeetings} completed`,
+      helper: "Created in selected period",
       icon: CalendarDays,
       tone: "amber",
       onClick: () => showActivities(
@@ -434,9 +435,9 @@ function RepKpiDashboard({
         {error ? <div className="error-banner"><AlertTriangle size={20}/><div><strong>{data ? "Refresh failed — showing the last loaded data" : "KPI dashboard failed to load"}</strong><span>{error}</span></div><button type="button" onClick={() => setRefreshKey(value => value + 1)}>Try again</button></div> : null}
 
         {data
-          ? <><div className="kpi-grid">{cards.slice(0, 7).map((card) => <MetricButton key={card.label} {...card}/>)}</div><PerformanceCharts data={data} onInspect={(title, selection) => { setDrilldown({ kind: selection.kind, title, description: "Records from the selected owner snapshot.", rows: [], source: recordSource(selection), hubspotUrl: data.meta.hubspotUrls[selection.kind === "activities" ? "calls" : selection.kind] } as Drilldown); }}/><details className={studioStyles.evidence}><summary>More risk, conversion and data-quality metrics</summary><div className="kpi-grid">{cards.slice(7).map(card => <MetricButton key={card.label} {...card}/>)}</div></details></>
-          : (loading ? <KpiSkeleton/> : null)}
-        {data ? <AcquisitionDailyPulse filters={filters} data={data} ownerName={owner.name} onOpen={setDrilldown}/> : null}
+          ? <><div className="kpi-grid">{cards.slice(0, 4).map((card) => <MetricButton key={card.label} {...card}/>)}</div><PerformanceCharts data={data} onInspect={(title, selection) => { setDrilldown({ kind: selection.kind, title, description: "Records from the selected owner snapshot.", rows: [], source: recordSource(selection), hubspotUrl: data.meta.hubspotUrls[selection.kind === "activities" ? "calls" : selection.kind] } as Drilldown); }}/><details className={studioStyles.evidence}><summary>More workload, risk & data-quality metrics</summary><div className="kpi-grid">{cards.slice(4).map(card => <MetricButton key={card.label} {...card}/>)}</div></details></>
+          : (loading ? <KpiSkeleton count={4}/> : null)}
+        {data ? <DashboardDisclosure title="Daily activity pulse · last 7 days"><AcquisitionDailyPulse filters={filters} data={data} ownerName={owner.name} onOpen={setDrilldown}/></DashboardDisclosure> : null}
         </>}
       </div>
     </div>

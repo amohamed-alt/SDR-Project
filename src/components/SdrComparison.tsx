@@ -7,6 +7,7 @@ import { SDR_OWNERS, SDR_COMPARISON_KEYS, type SdrKey } from "@/lib/sdr-owners";
 import type { SdrSummary } from "@/lib/sdr-comparison";
 import type { DashboardKpis } from "@/lib/types";
 import { readDashboardView } from "@/lib/dashboard-url-state";
+import { DashboardDisclosure } from "./DashboardDisclosure";
 import { MonthlyMission } from "./MonthlyMission";
 import { dashboardToday } from "@/lib/dashboard-values";
 import styles from "./SdrComparison.module.css";
@@ -83,7 +84,7 @@ export function SdrComparison({ onSelect, initialSearch = "" }: { onSelect: (key
         <div className={styles.numbers}><div><span>Meetings booked</span><strong>{entry?.data ? format(entry.data.kpis.bookedMeetings) : "—"}</strong></div><div><span>Connection rate</span><strong>{entry?.data ? `${format(entry.data.kpis.connectionRate)}%` : "—"}</strong></div><div><span>Tasks completed</span><strong>{entry?.data ? format(entry.data.kpis.completedTasks) : "—"}</strong></div></div>
         <p className={styles.freshness}>{entry?.error || (entry?.data ? `${entry.data.meta.isDemo ? "Demo · " : ""}Synced ${new Date(entry.data.meta.generatedAt).toLocaleString("en-GB")}${entry.refreshing ? " · Updating in background" : ""}` : "Loading HubSpot snapshot…")}</p>
         {entry?.data ? <MonthlyMission compact sdr={owner.key} data={entry.data} refreshKey={refresh}/> : null}
-        {entry?.data?.meta.warnings.map(warning => <p key={warning} className={styles.error}>{warning}</p>)}
+        {entry?.data?.meta.warnings.length ? <DashboardDisclosure title={`${entry.data.meta.warnings.length} data source notices`}><ul>{entry.data.meta.warnings.map((warning,index) => <li key={index}>{warning}</li>)}</ul></DashboardDisclosure> : null}
       </section>;
     })}</div>
     <div className={styles.detail}><section className={styles.panel}><h2>Activity comparison</h2><label>Compare metric <select aria-label="Comparison metric" value={chartMetric} onChange={event => setChartMetric(event.target.value as keyof DashboardKpis)}>{metrics.filter(metric => ["calls", "connectedCalls", "bookedMeetings", "completedMeetings", "completedTasks"].includes(metric.key)).map(metric => <option key={metric.key} value={metric.key}>{metric.label}</option>)}</select></label><p>One metric per scale. Meetings use the approved sheet when available; otherwise the labelled HubSpot fallback. Other activity uses HubSpot.</p><ResponsiveContainer width="100%" height={320}><BarChart data={chart} margin={{ top: 20, right: 12, left: -15, bottom: 0 }}><CartesianGrid vertical={false} stroke="#e8ebef"/><XAxis dataKey="name" tick={{ fontSize: 12 }} interval={0} height={55}/><YAxis allowDecimals={false}/><Tooltip/><Legend/>{owners.map(owner => <Bar key={owner.key} dataKey={owner.shortName} fill={owner.color} radius={[4,4,0,0]} isAnimationActive={true} animationDuration={650}/>)}</BarChart></ResponsiveContainer></section>

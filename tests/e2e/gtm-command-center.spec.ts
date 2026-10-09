@@ -32,6 +32,7 @@ test("shareable analytics URL restores the Pipeline view", async ({ page }) => {
 test("KPI drilldown exposes the operational table surface", async ({ page }) => {
   await page.goto("/");
 
+  await page.getByText("More portfolio, email & pipeline metrics", { exact: true }).click();
   const companiesKpi = page.getByRole("button", { name: /Companies.*Distinct associated accounts/i }).first();
   await expect(companiesKpi).toBeVisible();
   await companiesKpi.click();
@@ -185,6 +186,7 @@ test("an expired export offers a dashboard reload instead of retrying the old ve
     } else await route.continue();
   });
   await page.goto("/");
+  await page.getByText("More portfolio, email & pipeline metrics", { exact: true }).click();
   await page.getByRole("button", { name: /Companies.*Distinct associated accounts/i }).first().click();
   const drawer = page.getByRole("dialog", { name: "Associated companies" });
   await expect(drawer.getByRole("button", { name: "CSV", exact: true })).toBeEnabled();
