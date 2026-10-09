@@ -226,6 +226,8 @@ export interface FilterOptions {
 }
 
 export interface DashboardData {
+  hubspotMeetingEvidence?: ActivityRow[];
+  meetingSheet?: import("./meeting-sheet-data.ts").SheetSnapshot & { scope?: string };
   meetingPerformance?: import("./meeting-performance.ts").MeetingPerformance;
   meta: {
     generatedAt: string;

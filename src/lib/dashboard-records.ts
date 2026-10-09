@@ -50,6 +50,7 @@ export function selectDashboardRecords(data: DashboardData, selection: RecordSel
   let rows: DashboardRecord[] = selection.kind === "contacts" ? data.priorityContacts
     : selection.kind === "activities" ? data.recentActivities
       : selection.kind === "companies" ? data.companies : data.deals;
+  if (selection.kind === "activities" && selection.signal && ["meetingsWithoutFollowUp", "completedMeetingsWithoutProgression", "noShowMeetings"].includes(selection.signal) && data.hubspotMeetingEvidence) rows = data.hubspotMeetingEvidence;
   if (selection.callSegment) {
     const contacts = new Map(data.priorityContacts.map(contact => [contact.id, contact]));
     const segment = selection.callSegment;
