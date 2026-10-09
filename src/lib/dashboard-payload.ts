@@ -6,6 +6,7 @@ export function projectDashboardSummary(data: DashboardData): DashboardData {
   const signals = data.intelligence;
   return {
     ...data,
+    hubspotMeetingEvidence: [],
     priorityContacts: [], recentActivities: [], companies: [], deals: [],
     intelligence: {
       ...signals,
@@ -96,6 +97,7 @@ export function projectDashboardPayload(data: DashboardData): DashboardData {
 
   return {
     ...data,
+    hubspotMeetingEvidence: [],
     priorityContacts: data.priorityContacts.filter((contact) => contactIds.has(contact.id)),
     recentActivities: data.recentActivities.filter((activity) => activityIds.has(activity.id)),
     companies,

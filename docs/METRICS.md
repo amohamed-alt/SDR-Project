@@ -139,3 +139,13 @@ The tools password comes from the deployment secret `SDR_ADMIN_PASSWORD`, with `
 - Portfolio pipeline includes associated deals and is not an SDR-sourced revenue claim.
 - Verified email and tested phone use exact accepted status values; invalid/unverified never match valid/verified.
 - Presentation button (also `present=1`) hides navigation and operational panels; Escape returns to normal. Reduced-motion preferences are respected.
+
+## Approved meeting trackers (9 October 2026)
+
+Marita meetings use the monthly tracker `1Mkc2IEF3gxR1ld_36fAFzlidxOAD9YXIfI1dYmfsBCk`; Daniel uses `1OAub1dzDrSwTP02gQUdhEa4gwPIYiLGmNpr9ny5Nbp4`, Meetings Log. Sheets are read only with the existing Google service account using the Sheets readonly scope. Calendar organizer tokens remain separate. The application reads bounded provider row counts and caches reads for two minutes; active dashboard snapshots refresh in the existing scheduler.
+
+Meeting KPI/chart periods use **meeting date**, not CRM creation date. Booked counts include all logged rows, including canceled/rescheduled; these two statuses are excluded from goal progress and attendance denominators. Monthly goal progress includes meetings scheduled later in that month, with upcoming shown separately. Attended counts only records dated on/before today (Cairo/Riyadh business day); missing outcome remains Unknown. Source values come only from the Lead Source column, without inferring from free-text notes or contact acquisition source. Blank dates, unknown source and non-HubSpot link text are flagged, not silently repaired in the sheet. The known `0ct` month typo parses as October; other invalid dates are excluded with row warnings.
+
+Meetings use owner/date scope. Country, traffic source, ICP tier, and persona remain HubSpot cohort filters and do not filter sheet meeting counts because those fields are absent. Calls, tasks, contacts, deals and CRM follow-up signals remain HubSpot metrics; follow-up drilldowns retain separate CRM meeting evidence. Sheet row URLs and explicitly valid HubSpot meeting links are provided; email addresses and private notes are not copied into browser payloads.
+
+If Sheets fails after a successful read, the last successful sheet data remains visible with its original sync time and a warning. If no successful sheet snapshot exists, monthly goals are unavailable and activity KPIs explicitly label the HubSpot fallback. Never count failed reads as zero. Tracker corrections are one-way into reporting and do not write back to either the sheets or CRM.

@@ -108,6 +108,7 @@ jobs:
 
       - name: Deploy and verify Hostinger completion
         env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY || secrets.HOSTINGER_API_TOKEN }}
         run: |
           set -euo pipefail
@@ -199,6 +200,7 @@ jobs:
             exit 1
           }
 
+          SHEETS_SERVICE_ACCOUNT_B64=$(python3 -c 'import os,base64; print(base64.b64encode(os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").encode()).decode())')
           ENVIRONMENT=$(cat <<EOF
           SDR_BUILD_REF=${DEPLOY_SHA}
           DISABLE_AUTH=true
@@ -214,6 +216,7 @@ jobs:
           TAVILY_API_KEY=${{ secrets.TAVILY_API_KEY }}
           GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
           OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
+          GOOGLE_SHEETS_SERVICE_ACCOUNT_B64=${SHEETS_SERVICE_ACCOUNT_B64}
           GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
           GOOGLE_REDIRECT_URI=https://sdr.dashboardtalentera.tech/api/google/callback

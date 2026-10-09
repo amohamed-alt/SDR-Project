@@ -1,5 +1,7 @@
 import { unstable_cache } from "next/cache";
 import { SDR_OWNERS } from "@/lib/sdr-owners";
+import { readMeetingSheet } from "@/lib/meeting-sheet";
+import { applyMeetingSheet } from "@/lib/meeting-sheet-data";
 import { buildDashboard } from "@/lib/analytics";
 import { DashboardSnapshotHistory } from "@/lib/dashboard-snapshot-history";
 import { dashboardToday } from "@/lib/dashboard-values";
@@ -27,7 +29,7 @@ const cachedDashboard = unstable_cache(
     }
     return data;
   },
-  ["sdr-dashboard-live-v11-meeting-performance"],
+  ["sdr-dashboard-live-v12-sheet-truth"],
   { revalidate: 120, tags: ["sdr-dashboard"] },
 );
 
@@ -243,7 +245,10 @@ export async function getDashboardSnapshot(
 
 // One CRM build at a time avoids parallel full-portfolio scans on the VPS.
 function queuedBuild(filters: DashboardFilters): Promise<DashboardData> {
-  const next = dashboardStore.buildTail.then(() => buildDashboard(filters));
+  const next = dashboardStore.buildTail.then(async () => {
+    const [data, sheet] = await Promise.all([buildDashboard(filters), readMeetingSheet(filters.ownerId)]);
+    return sheet ? applyMeetingSheet(data, sheet, filters, dashboardToday()) : data;
+  });
   dashboardStore.buildTail = next.catch(() => undefined);
   return next;
 }
