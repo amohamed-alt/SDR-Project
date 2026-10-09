@@ -186,6 +186,7 @@ test("an expired export offers a dashboard reload instead of retrying the old ve
     } else await route.continue();
   });
   await page.goto("/");
+  await page.getByText("More portfolio, email & pipeline metrics", { exact: true }).click();
   await page.getByRole("button", { name: /Companies.*Distinct associated accounts/i }).first().click();
   const drawer = page.getByRole("dialog", { name: "Associated companies" });
   await expect(drawer.getByRole("button", { name: "CSV", exact: true })).toBeEnabled();

@@ -11,10 +11,10 @@ test.beforeEach(async ({ page }) => {
 for (const owner of ["marita", "daniel"]) {
   test(`${owner} summary keeps secondary metrics and evidence available on demand`, async ({ page }) => {
     await page.goto(`/?acq=${owner}&from=2026-07-01&to=2026-07-19`);
-    await expect(page.getByRole("button", { name: /^Calls\b/ }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: /^Companies\b/ })).toBeHidden();
+    await expect(page.getByRole("button", { name: /^Calls.*connected/i }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Companies.*Distinct associated accounts/i })).toBeHidden();
     await page.getByText("More portfolio, email & pipeline metrics", { exact: true }).click();
-    await expect(page.getByRole("button", { name: /^Companies\b/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Companies.*Distinct associated accounts/i })).toBeVisible();
     await page.getByText("GTM intelligence · risks & data quality", { exact: true }).click();
     await expect(page.getByRole("heading", { name: "GTM intelligence signals" })).toBeVisible();
     await page.getByText("GTM intelligence · risks & data quality", { exact: true }).click();
