@@ -4,6 +4,11 @@ const lead = (id: string, connectionDegree = '2nd') => ({ name: `Person ${id}`, 
 const run = { id: 'queue-test', startedAt: '2026-10-11T07:00:00Z', updatedAt: '2026-10-11T07:00:00Z', completedAt: '', complete: false, stopReason: '', sourceUrl: '', searchFingerprint: '', pagesRead: 1, total: 3, leads: [lead('first', '1st'), lead('resume'), lead('unknown')] };
 
 test('queue restores a saved phone/contact, excludes first-degree and preserves uncertain requests', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('sdr_v2_visitor_id', 'visitor_playwright_salesnav');
+    localStorage.setItem('sdr_v2_visitor_name', 'Playwright Sales Navigator');
+    sessionStorage.setItem('sdr_v2_session_id', 'session_playwright_salesnav');
+  });
   await page.request.post('/api/sdr-admin', { data: { password: 'playwright-tools-only-password' } });
   let paidCalls = 0;
   const checked: string[] = [];
