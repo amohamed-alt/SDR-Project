@@ -35,7 +35,6 @@ export async function POST(request: NextRequest) {
     const rawCompany = (payload.company && typeof payload.company === "object" ? payload.company : {}) as JsonObject;
     const company: JsonObject = { ...rawCompany };
 
-    const existingPerson = Boolean(contact.inHubSpot);
     const companyExists = Boolean(company.inHubSpot);
     const retention = normalize(company.accountType) === "retention" || company.hasRetentionDeal === true;
     const meetingCount = Math.max(0, Number(company.meetingCount || 0) || 0);
@@ -48,11 +47,7 @@ export async function POST(request: NextRequest) {
     // 3) Any meaningful meeting blocks the company.
     // 4) Any connected call on any associated contact blocks the company.
     // 5) Existing company with no call/meeting is eligible.
-    if (existingPerson) {
-      company.protected = true;
-      company.protectedReason = `Existing HubSpot person${contact.matchedBy ? ` · matched by ${String(contact.matchedBy)}` : ""} — Ready to Push is for net-new people only.`;
-      company.gateReason = "Existing person blocked";
-    } else if (retention) {
+    if (retention) {
       company.protected = true;
       company.protectedReason = "Retention account — excluded from acquisition / SDR prospecting.";
       company.gateReason = "Retention blocked";
@@ -64,6 +59,10 @@ export async function POST(request: NextRequest) {
       company.protected = true;
       company.protectedReason = `${connectedCallCount} connected calls across this company and its contacts — excluded from net-new prospecting.`;
       company.gateReason = "Connected call blocked";
+    } else if (company.protected === true || Number(company.openDeals || 0) > 0) {
+      company.protected = true;
+      company.protectedReason = String(company.protectedReason || "Active deal — review the company before acquisition.");
+      company.gateReason = "Company requires review";
     } else if (communicationUnknown) {
       company.protected = true;
       company.protectedReason = String(company.engagementError || company.protectedReason || "Company communication could not be verified. Review before Push.");

@@ -16,7 +16,7 @@ test('signalhire queue uses the net-new Sales Nav pipeline', () => {
 });
 
 test('Ready gate blocks existing people, Retention and meetings and every connected call', () => {
-  assert.match(gate, /Existing HubSpot person/);
+  assert.match(push, /Existing HubSpot person/);
   assert.match(gate, /Retention account/);
   assert.match(gate, /meetingCount > 0/);
   assert.match(gate, /Connected call blocked/);

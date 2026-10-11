@@ -28,7 +28,11 @@ export async function scanSalesNavCompany(companyId: string, reader: Reader) {
     read('deals', dealIds, ['pipeline']),
   ]);
   const connectedCalls = calls.filter((row) => CONNECTED.has(String(row.properties.hs_call_disposition || '')));
-  const meaningfulMeetings = meetings.filter((row) => MEETINGS.has(String(row.properties.hs_meeting_outcome || '').toUpperCase()));
+  const meaningfulMeetings = meetings.filter((row) => {
+    const outcome = String(row.properties.hs_meeting_outcome || '').toUpperCase();
+    // A real meeting with an unset outcome is evidence requiring review, not absence.
+    return MEETINGS.has(outcome) || !outcome;
+  });
   const latest = (values: unknown[]) => {
     const dates = values.map((value) => Date.parse(String(value || ''))).filter(Number.isFinite);
     return dates.length ? new Date(Math.max(...dates)).toISOString() : '';
@@ -50,6 +54,6 @@ export function salesNavSdrOwner(ats: string, status: string) {
   const vendor = ats.trim();
   const state = status.trim().toLowerCase();
   if (vendor && vendor !== 'Direct Application Form' && /^(detected|confirmed|verified)$/.test(state)) return '37624223';
-  if (/^(not_detected|not detected|no_ats|no ats|none)$/.test(state)) return '31644369';
+  if (/^(no_ats_observed|no_ats_verified)$/.test(state)) return '31644369';
   throw new Error('ATS status is unverified. Choose Marita or Daniel manually after review.');
 }

@@ -28,7 +28,7 @@ test('partial record read fails closed', async () => {
 test('empty graph is eligible and unknown ATS is never assumed absent', async () => {
   assert.equal((await scanSalesNavCompany('company', fixture())).engaged, false);
   assert.equal(salesNavSdrOwner('Workday', 'detected'), '37624223');
-  assert.equal(salesNavSdrOwner('', 'not_detected'), '31644369');
+  assert.equal(salesNavSdrOwner('', 'no_ats_observed'), '31644369');
   assert.throws(() => salesNavSdrOwner('', ''), /unverified/);
   assert.throws(() => salesNavSdrOwner('Workday', ''), /unverified/);
 });

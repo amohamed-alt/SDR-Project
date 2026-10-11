@@ -50,7 +50,7 @@ export function cairoMorning(day: string) {
   return new Date(Date.parse(`${day}T09:00:00Z`) - offset * 60_000).toISOString();
 }
 
-export function planMaritaTask(tasks: ScheduledTask[], reservations: Reservation[], elevatus: boolean, now = new Date(), policy = { ownerId: "31644369", dailyCap: MARITA_DAILY_CAP, elevatusTarget: ELEVATUS_DAILY_TARGET }) {
+export function planMaritaTask(tasks: ScheduledTask[], reservations: Reservation[], elevatus: boolean, now = new Date(), policy = { ownerId: "31644369", dailyCap: MARITA_DAILY_CAP, elevatusTarget: ELEVATUS_DAILY_TARGET }, notBefore = "") {
   const counts = new Map<string, { total: number; elevatus: number }>();
   const observed = new Set<string>();
   const today = cairoDate(now);
@@ -87,7 +87,11 @@ export function planMaritaTask(tasks: ScheduledTask[], reservations: Reservation
     const hasRoom = elevatus
       ? used.total < policy.dailyCap && used.elevatus < policy.elevatusTarget
       : used.total < policy.dailyCap - reservedForElevatus;
-    if (hasRoom) return cairoMorning(day);
+    if (hasRoom) {
+      const morning = cairoMorning(day);
+      if (!notBefore || Date.parse(morning) >= Date.parse(notBefore)) return morning;
+      if (cairoDate(notBefore) === day) return new Date(notBefore).toISOString();
+    }
   }
   throw new MaritaScheduleError("No Marita capacity is available in the next year.");
 }
@@ -124,6 +128,7 @@ export async function createScheduledMaritaTask<T extends { id: string }>(input:
   now?: Date;
   stateDirectory?: string;
   ownerId?: "31644369" | "37624223";
+  notBefore?: string;
 }) {
   const ownerId = input.ownerId || "31644369";
   const directory = input.stateDirectory || (ownerId === "37624223" ? "/app/data/daniel-task-schedule" : "/app/data/marita-task-schedule");
@@ -147,7 +152,7 @@ export async function createScheduledMaritaTask<T extends { id: string }>(input:
     const existing = journal.reservations.find((r) => r.contactId === input.contactId || (input.companyId && r.companyId === input.companyId));
     if (existing) throw new MaritaScheduleError(`A Marita task is already reserved for this contact/company${existing.taskId ? ` (task ${existing.taskId})` : "; reconcile the previous uncertain write"}.`);
     const tasks = await input.readTasks();
-    const dueAt = planMaritaTask(tasks, journal.reservations, input.elevatus, now, { ownerId, dailyCap: ownerId === "37624223" ? 50 : MARITA_DAILY_CAP, elevatusTarget: ownerId === "37624223" ? 0 : ELEVATUS_DAILY_TARGET });
+    const dueAt = planMaritaTask(tasks, journal.reservations, input.elevatus, now, { ownerId, dailyCap: ownerId === "37624223" ? 50 : MARITA_DAILY_CAP, elevatusTarget: ownerId === "37624223" ? 0 : ELEVATUS_DAILY_TARGET }, input.notBefore);
     const reservation: Reservation = { contactId: input.contactId, companyId: input.companyId, dueAt, elevatus: input.elevatus };
     journal.reservations.push(reservation);
     await saveJournal(file, journal);

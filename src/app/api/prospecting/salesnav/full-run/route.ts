@@ -1,3 +1,5 @@
+import { salesNavLeadId } from "@/lib/salesnav-identity";
+import { readOperationStates } from "@/lib/salesnav-operations";
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -46,7 +48,14 @@ export async function GET(request: NextRequest) {
   const run = requestedId ? await getCompanionFullRun(requestedId) : await migrateLegacyBatchIfNeeded();
   const history = await listCompanionFullRuns(100);
 
+  const keys = (run?.leads || []).flatMap((lead) => { const id = salesNavLeadId(lead); return id ? [`reveal:${id}`, `push:${id}`] : []; });
+  // Missing durable state is visible; the UI cannot assume a previous paid run was empty.
+  let operations: Record<string, { state: string; result: Record<string, unknown> }> = {};
+  let operationError = "";
+  try { if (keys.length) operations = (await readOperationStates(keys)).operations; }
+  catch { operationError = "Saved operation state is unavailable. Reveal/push paused; retry loading the run."; }
   return NextResponse.json({
+    operations, operationError,
     ok: true,
     run: run ? { ...run, total: run.leads.length } : null,
     history,

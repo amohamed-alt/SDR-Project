@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { salesNavAliases } from "./salesnav-identity";
+import { mkdir, readFile, rename, writeFile, rmdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
 const LEDGER_PATH = process.env.SALESNAV_LEAD_LEDGER_PATH || "/app/data/salesnav-lead-ledger.json";
@@ -39,49 +40,12 @@ function clean(value: unknown) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
-function normalizedText(value: unknown) {
-  return clean(value).toLowerCase().replace(/[^a-z0-9\u0600-\u06ff]+/g, " ").trim();
-}
-
-function normalizeLinkedIn(raw: unknown) {
-  try {
-    const url = new URL(clean(raw));
-    const host = url.hostname.toLowerCase().replace(/^www\./, "");
-    if (host !== "linkedin.com" && !host.endsWith(".linkedin.com")) return "";
-    if (!/^\/in\/[^/?#]+/i.test(url.pathname)) return "";
-    url.protocol = "https:";
-    url.hostname = "www.linkedin.com";
-    url.search = "";
-    url.hash = "";
-    return url.toString().replace(/\/$/, "").toLowerCase();
-  } catch { return ""; }
-}
-
-function normalizeSalesLead(raw: unknown) {
-  try {
-    const url = new URL(clean(raw));
-    const host = url.hostname.toLowerCase().replace(/^www\./, "");
-    if (host !== "linkedin.com" && !host.endsWith(".linkedin.com")) return "";
-    if (!/^\/sales\/lead\//i.test(url.pathname)) return "";
-    url.protocol = "https:";
-    url.hostname = "www.linkedin.com";
-    url.hash = "";
-    return `${url.origin}${url.pathname}${url.search}`.toLowerCase();
-  } catch { return ""; }
-}
-
 function aliasesFor(identity: SalesNavLeadIdentity, prospect?: UnknownRecord) {
-  const aliases = new Set<string>();
-  const linkedin = normalizeLinkedIn(identity.linkedinUrl || prospect?.linkedinUrl);
-  const salesLead = normalizeSalesLead(identity.salesLeadUrl);
-  const name = normalizedText(identity.name || prospect?.fullName);
-  const company = normalizedText(identity.company || prospect?.company);
+  const aliases = salesNavAliases({ ...identity, linkedinUrl: String(identity.linkedinUrl || prospect?.linkedinUrl || "") });
   const uid = clean(prospect?.uid || prospect?.signalHireUid);
-  if (linkedin) aliases.add(`li:${linkedin}`);
-  if (salesLead) aliases.add(`sales:${salesLead}`);
-  if (uid) aliases.add(`signalhire:${uid.toLowerCase()}`);
-  if (name && company) aliases.add(`name-company:${name}|${company}`);
-  return [...aliases];
+  if (uid) aliases.push(`signalhire:${uid}`);
+  if (!aliases.length) throw new Error("ID_WEAK: a verified person identity is required before reveal or push");
+  return aliases;
 }
 
 function emptyLedger(): Ledger {
@@ -91,8 +55,12 @@ function emptyLedger(): Ledger {
 async function readLedger(): Promise<Ledger> {
   try {
     const parsed = JSON.parse(await readFile(/* turbopackIgnore: true */ LEDGER_PATH, "utf8")) as Partial<Ledger>;
-    return { version: 1, records: parsed.records && typeof parsed.records === "object" ? parsed.records : {} };
-  } catch { return emptyLedger(); }
+    if (parsed.version !== 1 || !parsed.records || typeof parsed.records !== "object" || Array.isArray(parsed.records)) throw new Error("Invalid Sales Nav ledger; review before any spend or write.");
+    return parsed as Ledger;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyLedger();
+    throw error;
+  }
 }
 
 async function writeLedger(ledger: Ledger) {
@@ -104,7 +72,18 @@ async function writeLedger(ledger: Ledger) {
 
 function findRecord(ledger: Ledger, aliases: string[]) {
   const wanted = new Set(aliases);
-  return Object.values(ledger.records).find((record) => record.aliases.some((alias) => wanted.has(alias))) || null;
+  const matches = Object.values(ledger.records).filter((record) => {
+    // Upgrade old URL-shaped aliases without losing paid reveal history.
+    const strong = salesNavAliases(record);
+    for (const alias of record.aliases || []) {
+      if (/^sales:https:/.test(alias)) strong.push(...salesNavAliases({ salesLeadUrl: alias.slice(6) }));
+      else if (/^li:https:/.test(alias)) strong.push(...salesNavAliases({ linkedinUrl: alias.slice(3) }));
+      else if (!alias.startsWith("name-company:")) strong.push(alias);
+    }
+    return strong.some((alias) => wanted.has(alias));
+  });
+  if (matches.length > 1) throw new Error("Ambiguous lead ledger identity; reconcile before spend.");
+  return matches[0] || null;
 }
 
 function canonicalKey(aliases: string[]) {
@@ -116,19 +95,19 @@ function canonicalKey(aliases: string[]) {
 }
 
 async function mutate(action: (ledger: Ledger) => void | Promise<void>) {
-  let resultError: unknown;
-  writeQueue = writeQueue.then(async () => {
-    const ledger = await readLedger();
+  const pending = writeQueue.then(async () => {
+    await mkdir(dirname(LEDGER_PATH), { recursive: true });
+    const lock = `${LEDGER_PATH}.lock`;
+    try { await mkdir(lock); }
+    catch { throw new Error("Lead ledger is busy or needs reconciliation; no history overwritten."); }
     try {
+      const ledger = await readLedger();
       await action(ledger);
       await writeLedger(ledger);
-    } catch (error) {
-      resultError = error;
-      throw error;
-    }
-  }).catch(() => undefined);
-  await writeQueue;
-  if (resultError) throw resultError;
+    } finally { await rmdir(lock); }
+  });
+  writeQueue = pending.catch(() => undefined);
+  await pending;
 }
 
 export async function lookupSalesNavLead(identity: SalesNavLeadIdentity) {

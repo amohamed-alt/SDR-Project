@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 const source = fs.readFileSync('chrome-companion/background-v154.js', 'utf8');
-const fn = source.slice(source.indexOf('function clickNextSalesNavPageV154()'), source.indexOf('\nasync function extractPage'));
-function inspect(items) {
+const fn = source.slice(source.indexOf('function clickNextSalesNavPageV154('), source.indexOf('\nasync function extractPage'));
+function inspect(items, count = 25) {
   class Button {
     constructor(label, opts = {}) { this.label = label; Object.assign(this, opts); }
     getClientRects() { return this.hidden ? [] : [1]; }
@@ -12,7 +12,7 @@ function inspect(items) {
     click() { this.clicked = true; }
   }
   const buttons = items.map(([label, opts]) => new Button(label, opts));
-  const result = vm.runInNewContext(`${fn}; clickNextSalesNavPageV154()`, {
+  const result = vm.runInNewContext(`${fn}; clickNextSalesNavPageV154(${count})`, {
     HTMLButtonElement: Button, document: { querySelectorAll: () => buttons }, getComputedStyle: () => ({ visibility: 'visible' }),
   });
   return { result, buttons };
@@ -29,4 +29,10 @@ test('disabled pagination proves end; missing pagination does not', () => {
 test('ambiguous pagination never clicks', () => {
   const { result, buttons } = inspect([['Next', {}], ['Next page', {}]]);
   assert.equal(result.state, 'uncertain'); assert.ok(buttons.every((button) => !button.clicked));
+});
+
+test('short non-final page pauses without clicking while short final page can end', () => {
+  const partial = inspect([['Next', {}]], 12);
+  assert.equal(partial.result.state, 'uncertain'); assert.equal(partial.buttons[0].clicked, undefined);
+  assert.equal(inspect([['Next', {disabled:true}]], 12).result.state, 'end');
 });

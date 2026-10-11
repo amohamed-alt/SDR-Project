@@ -55,21 +55,9 @@ function normalizeLinkedIn(raw: string) {
 }
 
 function bestSearchMatch(profiles: SearchProfile[], name: string, company: string) {
-  const targetName = normalize(name);
-  const targetCompany = normalize(company);
-  return [...profiles].sort((a, b) => {
-    const score = (profile: SearchProfile) => {
-      let total = 0;
-      const profileName = normalize(profile.fullName || "");
-      if (profileName === targetName) total += 100;
-      else if (profileName.includes(targetName) || targetName.includes(profileName)) total += 55;
-      const currentCompany = normalize(profile.experience?.[0]?.company || "");
-      if (targetCompany && currentCompany === targetCompany) total += 70;
-      else if (targetCompany && (currentCompany.includes(targetCompany) || targetCompany.includes(currentCompany))) total += 35;
-      return total;
-    };
-    return score(b) - score(a);
-  })[0];
+  const matches = profiles.filter((profile) => normalize(profile.fullName || "") === normalize(name)
+    && Boolean(company) && normalize(profile.experience?.[0]?.company || "") === normalize(company));
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 function contacts(candidate: SignalHireCandidate, type: string, preferredSubtype?: string) {
@@ -107,11 +95,12 @@ function emptyHiring() {
 }
 
 export async function POST(request: NextRequest) {
+  let paidRequestSent = false;
   try {
     const parsed = requestSchema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: "Invalid companion prospect." }, { status: 400 });
     const apiKey = String(process.env.SIGNALHIRE_API_KEY || "").trim();
-    if (!apiKey) return NextResponse.json({ error: "SIGNALHIRE_API_KEY is not configured." }, { status: 503 });
+    if (!apiKey) return NextResponse.json({ error: "SIGNALHIRE_API_KEY is not configured.", paidRequestSent }, { status: 503 });
 
     let identifier = normalizeLinkedIn(parsed.data.linkedinUrl);
     let matchedBy = identifier ? "linkedin_url" : "signalhire_search";
@@ -128,13 +117,14 @@ export async function POST(request: NextRequest) {
       });
       const searchPayload = await searchResponse.json().catch(() => null) as { profiles?: SearchProfile[]; error?: string } | null;
       if (!searchResponse.ok) {
-        return NextResponse.json({ error: searchPayload?.error || `SignalHire Search API returned HTTP ${searchResponse.status}.` }, { status: searchResponse.status });
+        return NextResponse.json({ error: searchPayload?.error || `SignalHire Search API returned HTTP ${searchResponse.status}.`, paidRequestSent }, { status: searchResponse.status });
       }
       const match = bestSearchMatch(searchPayload?.profiles || [], parsed.data.name, parsed.data.company);
-      if (!match?.uid) return NextResponse.json({ error: "SignalHire could not match this Sales Nav person by name + company." }, { status: 404 });
+      if (!match?.uid) return NextResponse.json({ error: "No unique exact name and current company match; review the person before revealing.", paidRequestSent }, { status: 404 });
       identifier = match.uid;
     }
 
+    paidRequestSent = true;
     const response = await fetch("https://www.signalhire.com/api/v1/candidate/search", {
       method: "POST",
       headers: { apikey: apiKey, "Content-Type": "application/json" },
@@ -146,10 +136,10 @@ export async function POST(request: NextRequest) {
     const payload = await response.json().catch(() => null) as SignalHireResult[] | { error?: string } | null;
     if (!response.ok) {
       const message = payload && !Array.isArray(payload) && payload.error ? payload.error : `SignalHire returned HTTP ${response.status}.`;
-      return NextResponse.json({ error: message, creditsLeft }, { status: response.status });
+      return NextResponse.json({ error: message, creditsLeft, paidRequestSent }, { status: response.status });
     }
     const item = Array.isArray(payload) ? payload[0] : null;
-    if (!item || item.status !== "success" || !item.candidate) return NextResponse.json({ error: "SignalHire could not resolve this person." }, { status: 404 });
+    if (!item || item.status !== "success" || !item.candidate) return NextResponse.json({ error: "SignalHire could not resolve this person.", paidRequestSent, providerStatus: item?.status || "unknown" }, { status: 404 });
 
     const candidate = item.candidate;
     const experiences = candidate.experience || [];
@@ -166,7 +156,7 @@ export async function POST(request: NextRequest) {
     const companyName = currentRole?.company || parsed.data.company || "";
     const socialLinkedIn = normalizeLinkedIn((candidate.social || []).find((entry) => entry.type === "li")?.link || "");
     const linkedinUrl = socialLinkedIn || normalizeLinkedIn(parsed.data.linkedinUrl);
-    if (!linkedinUrl) return NextResponse.json({ error: "SignalHire matched the person but did not return a public LinkedIn profile URL." }, { status: 422 });
+    if (normalizeLinkedIn(parsed.data.linkedinUrl) && socialLinkedIn && normalizeLinkedIn(parsed.data.linkedinUrl) !== socialLinkedIn) return NextResponse.json({ error: "Provider returned a different LinkedIn person; reconcile before reuse.", paidRequestSent }, { status: 409 });
 
     const suppliedWebsite = currentRole?.website && currentRole.website !== "n/a" ? currentRole.website : "";
     const safeSuppliedWebsite = safeCompanyWebsite(suppliedWebsite, companyName);
@@ -221,10 +211,11 @@ export async function POST(request: NextRequest) {
         hubspot: { inHubSpot: false, id: "", matchedBy: "" },
         hubspotContact: { inHubSpot: false, id: "", matchedBy: "" },
       },
+      paidRequestSent,
       meta: { provider: "SignalHire companion resolve", matchedBy, creditsLeft: creditsLeft ? Number(creditsLeft) : null, intelligencePending: true },
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    if (error instanceof DOMException && error.name === "TimeoutError") return NextResponse.json({ error: "SignalHire timed out. Try this lead again." }, { status: 504 });
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Companion prospect resolution failed." }, { status: 500 });
+    if (error instanceof DOMException && error.name === "TimeoutError") return NextResponse.json({ error: "SignalHire timed out. Cost and result need reconciliation before another paid request.", paidRequestSent }, { status: 504 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Companion prospect resolution failed.", paidRequestSent }, { status: 500 });
   }
 }

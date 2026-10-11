@@ -13,9 +13,17 @@ const MAX_STALE_RETRIES = 8;
 let processing = false;
 
 function leadKey(lead) {
-  const identityUrl = lead.salesLeadUrl || lead.linkedinUrl;
-  if (identityUrl) { try { const url = new URL(identityUrl); return `${url.origin}${url.pathname.replace(/\/$/, '')}`; } catch {} }
-  return `${String(lead.name || '').toLowerCase()}:${String(lead.company || '').toLowerCase()}`;
+  for (const raw of [lead.salesLeadUrl, lead.linkedinUrl]) {
+    try {
+      const url = new URL(String(raw || ''));
+      if (url.protocol !== 'https:' || !/(^|\.)linkedin\.com$/i.test(url.hostname)) continue;
+      const sales = /^\/sales\/lead\/([^/,?#]+)/.exec(url.pathname);
+      const profile = /^\/in\/([^/?#]+)/i.exec(url.pathname);
+      if (sales) return `sales:${sales[1]}`;
+      if (profile) return `li:${profile[1].toLowerCase()}`;
+    } catch {}
+  }
+  return `weak:${String(lead.name || '').trim().toLowerCase()}:${String(lead.company || '').trim().toLowerCase()}`;
 }
 
 function pageSignature(leads) {
@@ -253,7 +261,7 @@ async function extractCurrentSalesNavPageV154() {
   return { ok: true, sourceUrl, leads: [...found.values()].slice(0, 25) };
 }
 
-function clickNextSalesNavPageV154() {
+function clickNextSalesNavPageV154(extractedCount = 25) {
   const visible = (node) => node.getClientRects().length > 0 && getComputedStyle(node).visibility !== 'hidden';
   const selectors = 'button[aria-label="Next" i], button[aria-label^="Next " i], button[data-control-name*="next" i], nav button, [class*="pagination"] button';
   const candidates = [...new Set(document.querySelectorAll(selectors))].filter((node) => {
@@ -265,6 +273,7 @@ function clickNextSalesNavPageV154() {
   if (candidates.length !== 1) return { state: 'uncertain', error: candidates.length ? 'Multiple Next buttons found; review pagination.' : 'Next button could not be identified. Progress saved; inspect the page and Resume.' };
   const node = candidates[0];
   if (node.disabled || node.getAttribute('aria-disabled') === 'true') return { state: 'end' };
+  if (extractedCount < 25) return { state: 'uncertain', error: `Only ${extractedCount}/25 cards extracted while more pages exist. Inspect loading and Resume; no page skipped.` };
   node.click();
   return { state: 'clicked' };
 }
@@ -274,8 +283,8 @@ async function extractPage(tabId) {
   return result?.[0]?.result || { ok: false, error: 'Could not read this Sales Navigator page.', leads: [] };
 }
 
-async function clickNext(tabId) {
-  const result = await chrome.scripting.executeScript({ target: { tabId }, func: clickNextSalesNavPageV154 });
+async function clickNext(tabId, extractedCount) {
+  const result = await chrome.scripting.executeScript({ target: { tabId }, func: clickNextSalesNavPageV154, args: [extractedCount] });
   return result?.[0]?.result || { state: 'uncertain', error: 'Could not inspect pagination.' };
 }
 
@@ -308,12 +317,15 @@ async function markComplete(run, stopReason) {
 
 async function persistCurrentPage(run, current) {
   const signature = pageSignature(current.leads || []);
-  const clean = dedupe((current.leads || []).filter((lead) => String(lead.connectionDegree || '').toLowerCase() !== '1st'), 25);
+  const clean = dedupe(current.leads || [], 25);
   const nextPageNumber = Number(run.pagesRead || 0) + 1;
+  const observedPage = Number(new URL(current.sourceUrl).searchParams.get('page') || '1');
+  if (observedPage !== nextPageNumber) throw new Error(`Expected page ${nextPageNumber}, observed ${observedPage}. Progress kept; no skipped pages accepted.`);
   const payload = await savePage(run, nextPageNumber, clean);
   const updated = {
     ...run,
     pagesRead: nextPageNumber,
+    lastPageCount: clean.length,
     total: Number(payload.total || run.total || 0),
     signatures: [...(run.signatures || []), signature].slice(-MAX_PAGES),
     lastSignature: signature,
@@ -330,7 +342,7 @@ async function persistCurrentPage(run, current) {
 async function advance(run, tabId) {
   if (Number(run.pagesRead || 0) >= MAX_PAGES) return markComplete(run, `Reached ${MAX_PAGES}-page safety cap`);
   if (Number(run.total || 0) >= MAX_LEADS) return markComplete(run, `Reached ${MAX_LEADS}-lead safety cap`);
-  const moved = await clickNext(tabId);
+  const moved = await clickNext(tabId, run.lastPageCount);
   if (moved.state === 'end') return markComplete(run, 'Next page disabled · end of results');
   if (moved.state !== 'clicked') {
     await setRun({ ...run, paused: true, backgroundError: moved.error, backgroundStatus: 'Paused for pagination review' });
@@ -349,6 +361,9 @@ async function advance(run, tabId) {
 }
 
 async function startOrResume(tabId) {
+  if (processing) throw new Error("Capture is currently processing; wait before resuming.");
+  processing = true;
+  try {
   if (!await verifySalesNavTab(tabId)) throw new Error('Open a Sales Navigator People Search tab first.');
   const current = await extractPage(tabId);
   if (!current.ok) throw new Error(current.error || 'Could not read Sales Navigator.');
@@ -390,6 +405,7 @@ async function startOrResume(tabId) {
   await chrome.storage.local.set({ [CONTINUATION_TAB_KEY]: tabId });
   await advance(run, tabId);
   return run;
+  } finally { processing = false; }
 }
 
 async function processContinuation(tabId) {

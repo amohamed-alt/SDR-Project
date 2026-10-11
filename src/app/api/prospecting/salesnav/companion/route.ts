@@ -1,3 +1,4 @@
+import { captureLeadKey } from "@/lib/salesnav-identity";
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -103,8 +104,7 @@ function validSalesNavSource(raw: string) {
 function uniqueCleanLeads(leads: z.infer<typeof leadSchema>[], limit: number) {
   const unique = new Map<string, z.infer<typeof leadSchema>>();
   for (const lead of leads) {
-    if (lead.connectionDegree.toLowerCase() === "1st") continue;
-    const key = lead.salesLeadUrl || lead.linkedinUrl || `${lead.name.toLowerCase()}:${lead.company.toLowerCase()}`;
+    const key = captureLeadKey(lead);
     if (!key || unique.has(key)) continue;
     unique.set(key, lead);
     if (unique.size >= limit) break;
@@ -251,7 +251,7 @@ export async function POST(request: NextRequest) {
 
   const leads = uniqueCleanLeads(parsed.data.leads, 50);
   if (!leads.length) {
-    return NextResponse.json({ error: "All extracted people were 1st-degree or duplicates." }, { status: 422, headers: corsHeaders() });
+    return NextResponse.json({ error: "No distinct people were extracted." }, { status: 422, headers: corsHeaders() });
   }
 
   const batch = {

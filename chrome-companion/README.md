@@ -8,7 +8,7 @@ This is the Talentera SDR Chrome companion for user-triggered prospecting workfl
 2. Open `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Click **Load unpacked** and select the `chrome-companion` folder.
-5. Confirm the extension shows version **1.5.6** or newer.
+5. Confirm the extension shows version **1.5.7** or newer.
 6. In the SDR Dashboard, open **Sales Nav → Companion setup**.
 7. Unlock admin settings and click **Generate / rotate token**.
 8. Paste that token into the extension and click **Test connection**.
@@ -72,3 +72,10 @@ This is not an anti-detection tool. Websites can observe normal page loads and n
 - Push requires SDR admin access, rechecks the full company graph without the preview cache, requires a usable phone, and reads back task owner/date/type before marking success.
 - LinkedIn prohibits third-party extensions that scrape or automate its site. Running this companion may restrict the account. Official CRM Sync requires Sales Navigator Advanced Plus.
 - Selectors are tested against fixtures; actual Sales Navigator UI and a live end-to-end capture must be verified in the user's Chrome before rollout.
+
+
+## Version 1.5.7 capture integrity
+
+First-degree people are captured and counted, then excluded before reveal. Lead IDs ignore tracking parameters and preserve opaque Sales Navigator IDs. Capture pauses when a non-final page yields fewer than 25 distinct cards, when the observed page skips an expected page, or when pagination is uncertain. Repeated Start/Resume cannot run alongside a processing continuation.
+
+The Ready queue restores saved reveal/push results from Postgres. Task date/time is a lower bound: the existing SDR capacity and workday scheduler chooses the actual date. Unknown provider/CRM request outcomes require reconciliation before another request. No automatic paid reveal or automatic CRM push is added.

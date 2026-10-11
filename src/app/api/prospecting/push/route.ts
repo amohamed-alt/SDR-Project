@@ -1,3 +1,4 @@
+import { checkpointOperation, lookupOperation, type Operation } from "@/lib/salesnav-operations";
 import { atsProduct, SAUDI_DAILY_LIMIT, usablePhone, type InventoryAts } from "@/lib/saudi-ats-policy";
 import { createScheduledMaritaTask, MaritaScheduleError } from "@/lib/marita-task-scheduler";
 import { timingSafeEqual } from "node:crypto";
@@ -19,6 +20,8 @@ const MARITA_OWNER_NAME = "Marita Chedid";
 const DIRECT_APPLICATION_LABEL = "Direct Application Form";
 
 const prospectSchema = z.object({
+  salesNavOperation: z.object({ key: z.string().max(500), lease: z.string().max(100) }).optional(),
+  requestedTaskDueAt: z.string().max(100).default(""),
   linkedinUrl: z.string().trim().max(1000).default(""),
   inventoryBusinessLine: z.enum(["Talentera", "Evalufy"]).optional(),
   source: z.string().trim().max(120).default("Sales Navigator"),
@@ -376,11 +379,21 @@ async function logAcquisitionPush(prospect: Prospect, result: {
 export async function POST(request: Request) {
   const clickedAt = new Date().toISOString();
   let inventoryOperationKey = "";
+  let salesOperation: Operation | undefined;
   try {
     const parsed = prospectSchema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: "Invalid prospect payload.", details: parsed.error.flatten() }, { status: 400 });
     const prospect = parsed.data;
     const requestedOwner = requestedAssignment(prospect, request);
+    if (prospect.salesNavOperation) {
+      if (!acquisitionAuthorized(request) || prospect.assignmentMode !== "acquisition") return NextResponse.json({ error: "Sales Nav push requires admin authorization" }, { status: 401 });
+      const previous = await lookupOperation(prospect.salesNavOperation.key);
+      salesOperation = { ...prospect.salesNavOperation, result: previous.result };
+      await checkpointOperation(salesOperation, {}); // Fence expired/stale callers before any CRM action.
+      if (salesOperation.result.pending) throw new Error("Previous CRM request is uncertain; reconcile before retry.");
+      if (!["31644369", "37624223"].includes(requestedOwner.id)) throw new Error("Choose Marita or Daniel");
+      if (!allPhones(prospect).some(usablePhone)) throw new Error("A usable phone is required before a Sales Nav CRM write.");
+    }
     if (prospect.inventoryBusinessLine) {
       if (!allPhones(prospect).some(usablePhone)) return NextResponse.json({ error: "Inventory SDR call tasks require a phone number." }, { status: 409 });
       if (prospect.assignmentMode !== "acquisition") return NextResponse.json({ error: "Inventory pushes require authorized SDR assignment." }, { status: 403 });
@@ -409,22 +422,56 @@ export async function POST(request: Request) {
       if (existingCompanyId && existingCompanyId !== storedAccount.hubspotCompanyId) return NextResponse.json({ error: "Company now exists in HubSpot. Recheck ownership before pushing new contacts." }, { status: 409 });
     }
 
-    const company = await ensureCompany(prospect, requestedOwner.id);
+    let company: Awaited<ReturnType<typeof ensureCompany>>;
+    if (salesOperation?.result.companyId) {
+      company = { companyId: String(salesOperation.result.companyId), created: false, fieldsUpdated: [], existingOwnerId: "" };
+      const current = (await batchRead("companies", [company.companyId], ["domain", "hubspot_owner_id"]))[0];
+      if (!current) throw new Error("Saved company cannot be verified; review before retry.");
+      company.existingOwnerId = String(current.properties.hubspot_owner_id || "");
+    } else {
+      // An identity must be resolved before creating a person. No orphan contacts.
+      if (salesOperation && !companyDomain(prospect) && !await findCompanyId(prospect)) throw new Error("CO_UNRESOLVED: verify company domain before writing.");
+      if (salesOperation) await checkpointOperation(salesOperation, { pending: "company" });
+      company = await ensureCompany(prospect, requestedOwner.id);
+      if (salesOperation) {
+        if (!company.companyId) throw new Error("CO_UNRESOLVED: company creation returned no identity.");
+        await checkpointOperation(salesOperation, { pending: "", companyId: company.companyId });
+      }
+    }
     const owner = finalAssignment(requestedOwner, company.existingOwnerId);
+    if (salesOperation && owner.id !== requestedOwner.id) throw new Error("OWNER_CONFLICT: preserve the company owner and review assignment.");
 
-    let contactId = await findContact(allEmails(prospect), prospect.linkedinUrl);
+    let contactId = String(salesOperation?.result.contactId || "");
     let contactCreated = false;
     let contactFieldsUpdated: string[] = [];
-    if (!contactId) {
-      contactId = await createContact(prospect, owner.id);
-      contactCreated = true;
+    if (contactId) {
+      const current = (await batchRead("contacts", [contactId], ["hubspot_owner_id", "phone"]))[0];
+      if (!current || String(current.properties.hubspot_owner_id || "") !== owner.id) throw new Error("Saved contact could not be verified; review ownership before resume.");
     } else {
-      contactFieldsUpdated = await syncMissingContactDetails(contactId, prospect, owner.id);
+      contactId = await findContact(allEmails(prospect), prospect.linkedinUrl);
+      if (salesOperation && contactId) throw new Error("PERSON_EXISTS: contact appeared before creation; recheck the company.");
+      if (!contactId) {
+        if (salesOperation) await checkpointOperation(salesOperation, { pending: "contact" });
+        contactId = await createContact(prospect, owner.id);
+        contactCreated = true;
+        if (salesOperation) await checkpointOperation(salesOperation, { pending: "", contactId });
+      } else {
+        contactFieldsUpdated = await syncMissingContactDetails(contactId, prospect, owner.id);
+      }
     }
 
+    // PUT is idempotent: replaying the same association does not create another person.
     if (company.companyId) await associateContactCompany(contactId, company.companyId);
+    if (salesOperation) await checkpointOperation(salesOperation, { associated: true });
+
+    if (salesOperation?.result.taskId) {
+      const task = (await batchRead("tasks", [String(salesOperation.result.taskId)], ["hubspot_owner_id", "hs_timestamp", "hs_task_type"]))[0];
+      if (!task || task.properties.hubspot_owner_id !== owner.id || task.properties.hs_task_type !== "CALL") throw new Error("Saved task could not be verified; review before resume.");
+      return NextResponse.json({ pushed: false, duplicate: true, resumed: true, contactId, companyId: company.companyId, taskId: task.id, ownerId: owner.id, ownerName: owner.name, scheduledAt: task.properties.hs_timestamp });
+    }
 
     const duplicateTask = await existingOpenProspectingTask(contactId, prospect.fullName);
+    if (salesOperation && duplicateTask) throw new Error("TASK_CONFLICT: an existing task is not recorded in this operation; review before retry.");
     if (duplicateTask) {
       const taskId = String(duplicateTask.id);
       await logAcquisitionPush(prospect, { companyId: company.companyId, contactId, taskId, owner, status: "pushed" });
@@ -453,7 +500,9 @@ export async function POST(request: Request) {
     if (company.companyId) associations.push({ to: { id: company.companyId }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 192 }] });
 
     const elevatus = /\belevatus\b/i.test(prospect.source);
-    const createTask = (dueAt: string) => hubspotRequest<{ id: string }>("/crm/objects/2026-03/tasks", {
+    const createTask = async (dueAt: string) => {
+      if (salesOperation) await checkpointOperation(salesOperation, { pending: "task", dueAt });
+      const created = await hubspotRequest<{ id: string }>("/crm/objects/2026-03/tasks", {
       method: "POST",
       body: JSON.stringify({
         properties: {
@@ -469,12 +518,17 @@ export async function POST(request: Request) {
       }),
     });
 
-    const scheduled = owner.id === MARITA_OWNER_ID || (Boolean(prospect.inventoryBusinessLine) && owner.id === "37624223")
+      if (salesOperation) await checkpointOperation(salesOperation, { pending: "", taskId: String(created.id), dueAt });
+      return created;
+    };
+
+    const scheduled = owner.id === MARITA_OWNER_ID || ((Boolean(prospect.inventoryBusinessLine) || Boolean(salesOperation)) && owner.id === "37624223")
       ? await createScheduledMaritaTask({
         contactId,
         companyId: company.companyId,
         ownerId: owner.id as "31644369" | "37624223",
         elevatus,
+        notBefore: salesOperation ? prospect.requestedTaskDueAt : undefined,
         readTasks: () => searchAll("tasks", ["hubspot_owner_id", "hs_task_status", "hs_timestamp", "hs_task_subject"], [
           { propertyName: "hubspot_owner_id", operator: "EQ", value: owner.id },
           { propertyName: "hs_task_status", operator: "NEQ", value: "COMPLETED" },
@@ -484,6 +538,11 @@ export async function POST(request: Request) {
       : { task: await createTask(clickedAt), dueAt: clickedAt };
     const task = scheduled.task;
 
+    if (salesOperation) {
+      const verified = (await batchRead("tasks", [String(task.id)], ["hubspot_owner_id", "hs_timestamp", "hs_task_type"]))[0];
+      if (!verified || verified.properties.hubspot_owner_id !== owner.id || Date.parse(String(verified.properties.hs_timestamp)) !== Date.parse(scheduled.dueAt) || verified.properties.hs_task_type !== "CALL") throw new Error("Task readback failed; resume verification before declaring success.");
+      await checkpointOperation(salesOperation, { taskVerified: true });
+    }
     await logAcquisitionPush(prospect, { companyId: company.companyId, contactId, taskId: String(task.id), owner });
 
     if (inventoryOperationKey) await finishInventoryOperation(inventoryOperationKey, "completed", { contactId, companyId: company.companyId, taskId: String(task.id), ownerId: owner.id, ownerName: owner.name });

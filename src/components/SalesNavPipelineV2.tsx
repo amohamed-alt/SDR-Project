@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { usablePhone } from "@/lib/saudi-ats-policy";
+import { captureLeadKey, salesNavLeadId } from "@/lib/salesnav-identity";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft, CalendarClock, CheckCircle2, CircleAlert, ExternalLink, History,
@@ -16,7 +18,7 @@ type CompanyCheck = {
   inHubSpot: boolean; id: string; matchedBy: string; name: string; domain: string; accountType: string; accountStatus: string;
   detectedAts: string; careerPageUrl: string; protected: boolean; protectedReason: string; gateReason?: string;
   connectedCallCount: number; meetingCount: number; latestConnectedCallAt: string; connectedCallAgeDays?: number | null;
-  engagementChecked: boolean; engagementError: string;
+  hasRetentionDeal?: boolean; engagementChecked: boolean; engagementError: string;
 };
 type Precheck = { contact: ContactCheck; company: CompanyCheck; checkedAt?: string };
 type Prospect = Record<string, unknown> & {
@@ -24,11 +26,11 @@ type Prospect = Record<string, unknown> & {
   phone?: string; phones?: string[]; email?: string; emails?: string[]; detectedAts?: string; careerPageUrl?: string; companyDomain?: string;
 };
 type Stage = "pending" | "checking" | "blocked" | "needs-reveal" | "revealing" | "ready" | "no-phone" | "pushed" | "error";
-type Row = { key: string; lead: Lead; stage: Stage; precheck?: Precheck; prospect?: Prospect; error?: string; message?: string; cachedReveal?: boolean };
+type Row = { key: string; lead: Lead; stage: Stage; precheck?: Precheck; prospect?: Prospect; error?: string; message?: string; cachedReveal?: boolean; recoveryContactId?: string };
 type Owner = { id: string; name: string };
 type View = "ready" | "needs-reveal" | "blocked" | "pushed" | "review" | "all";
 
-function keyFor(lead: Lead) { return lead.linkedinUrl || lead.salesLeadUrl || `${lead.name}:${lead.company}`; }
+function keyFor(lead: Lead) { return captureLeadKey(lead); }
 function unique(values: unknown[]) {
   const seen = new Set<string>();
   return values.map((value) => String(value || "").trim()).filter((value) => {
@@ -36,10 +38,10 @@ function unique(values: unknown[]) {
   });
 }
 function prospectPhones(row: Row) { return unique([row.prospect?.phone, ...(Array.isArray(row.prospect?.phones) ? row.prospect?.phones || [] : [])]); }
-function readyPhone(row: Row) { return prospectPhones(row)[0] || ""; }
+function readyPhone(row: Row) { return prospectPhones(row).find(usablePhone) || ""; }
 function existingEmail(row: Row) { return String(row.precheck?.contact.properties?.email || "").trim(); }
-function isRetention(row: Row) { return String(row.precheck?.company.accountType || "").trim().toLowerCase() === "retention"; }
-function isExistingPerson(row: Row) { return Boolean(row.precheck?.contact.inHubSpot); }
+function isRetention(row: Row) { return Boolean(row.precheck?.company.hasRetentionDeal) || String(row.precheck?.company.accountType || "").trim().toLowerCase() === "retention"; }
+function isExistingPerson(row: Row) { return Boolean(row.precheck?.contact.inHubSpot && row.precheck.contact.id !== row.recoveryContactId); }
 function tomorrowLocal() {
   const date = new Date(); date.setDate(date.getDate() + 1);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -53,10 +55,10 @@ async function readJson<T>(response: Response): Promise<T> {
   const text = await response.text(); if (!text.trim()) return {} as T;
   try { return JSON.parse(text) as T; } catch { throw new Error(`Server returned non-JSON: ${text.slice(0, 160)}`); }
 }
-async function precheckLead(lead: Lead) {
+async function precheckLead(lead: Lead, runId: string) {
   const response = await fetch("/api/prospecting/salesnav/precheck-v2", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: lead.name, company: lead.company, linkedinUrl: lead.linkedinUrl, email: "", emails: [], phone: "", phones: [] }),
+    body: JSON.stringify({ runId, freshCompanyGate: false, name: lead.name, company: lead.company, linkedinUrl: lead.linkedinUrl, email: "", emails: [], phone: "", phones: [] }),
   });
   const payload = await readJson<Precheck & { error?: string }>(response);
   if (!response.ok) throw new Error(payload.error || "HubSpot precheck failed.");
@@ -82,16 +84,31 @@ export function SalesNavPipelineV2() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [unauthorized, setUnauthorized] = useState(false);
+  const [stateUnavailable, setStateUnavailable] = useState(false);
 
   async function loadRun(id = "") {
     setLoading(true); setError("");
     try {
       const response = await fetch(`/api/prospecting/salesnav/full-run${id ? `?id=${encodeURIComponent(id)}` : ""}`, { cache: "no-store" });
       if (response.status === 401) { setUnauthorized(true); setRun(null); setRows([]); return; }
-      const payload = await readJson<{ run?: Run | null; history?: RunSummary[]; error?: string }>(response);
+      const payload = await readJson<{ run?: Run | null; history?: RunSummary[]; operations?: Record<string, { state: string; result: Record<string, unknown> }>; operationError?: string; error?: string }>(response);
       if (!response.ok) throw new Error(payload.error || "Could not load Sales Nav runs.");
       setUnauthorized(false); setRun(payload.run || null); setHistory(payload.history || []);
-      setRows((payload.run?.leads || []).map((lead) => ({ key: keyFor(lead), lead, stage: "pending" })));
+      setStateUnavailable(Boolean(payload.operationError));
+      if (payload.operationError) setError(payload.operationError);
+      setRows((payload.run?.leads || []).map((lead): Row => {
+        const id = salesNavLeadId(lead);
+        const reveal = payload.operations?.[`reveal:${id}`];
+        const push = payload.operations?.[`push:${id}`];
+        const prospect = reveal?.result.prospect as Prospect | undefined;
+        const uncertain = Boolean(reveal?.result.pending || reveal?.result.identityReview || push?.result.pending);
+        return { key: keyFor(lead), lead, prospect, recoveryContactId: String(push?.result.contactId || ""),
+          stage: push?.state === "completed" ? "pushed" : uncertain ? "error" : "pending",
+          error: uncertain ? "Saved request is uncertain. Reconcile before another reveal or write." : undefined,
+          message: push?.state === "completed" ? `Saved task ${(push.result.response as Record<string, unknown>)?.taskId || ""}` : undefined,
+          cachedReveal: Boolean(prospect),
+        };
+      }));
       setSelected(new Set()); setView("ready");
       setMessage(payload.run ? `${payload.run.total} leads loaded. HubSpot Check will keep Ready strictly net-new people.` : "No Sales Navigator full-search run found yet.");
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not load Sales Nav runs."); }
@@ -108,18 +125,24 @@ export function SalesNavPipelineV2() {
   }, []);
 
   async function runPrecheck() {
-    if (!rows.length || processing) return;
+    if (!rows.length || processing || revealing || pushing || stateUnavailable) return;
     setProcessing(true); setError(""); setSelected(new Set()); setProgress({ done: 0, total: rows.length, label: "HubSpot check" });
-    setRows((current) => current.map((row) => ({ ...row, stage: "pending", precheck: undefined, prospect: undefined, error: undefined, message: undefined })));
-    const pending = [...rows];
+    setRows((current) => current.map((row) => row.stage === "pushed" || row.error?.startsWith("Saved request") ? row : { ...row, stage: "pending", precheck: undefined, error: undefined, message: undefined }));
+    const pending = rows.filter((row) => row.stage !== "pushed" && !row.error?.startsWith("Saved request"));
+    setProgress({ done: 0, total: pending.length, label: "HubSpot check" });
     const workers = Array.from({ length: Math.min(4, pending.length) }, async () => {
       while (pending.length) {
         const source = pending.shift(); if (!source) return;
         setRows((current) => current.map((row) => row.key === source.key ? { ...row, stage: "checking" } : row));
         try {
-          const checked = await precheckLead(source.lead);
-          const blocked = checked.company.protected || checked.contact.inHubSpot;
-          const stage: Stage = blocked ? "blocked" : "needs-reveal";
+          if (source.lead.connectionDegree.toLowerCase() === "1st") {
+            setRows((current) => current.map((row) => row.key === source.key ? { ...row, stage: "blocked", message: "DEGREE_1ST: captured and excluded before reveal." } : row));
+            continue;
+          }
+          if (!salesNavLeadId(source.lead)) throw new Error("ID_WEAK: verify the LinkedIn person before reveal.");
+          const checked = await precheckLead(source.lead, run?.id || "");
+          const blocked = checked.company.protected || (checked.contact.inHubSpot && checked.contact.id !== source.recoveryContactId);
+          const stage: Stage = blocked ? "blocked" : source.prospect ? readyPhone(source) ? "ready" : "no-phone" : "needs-reveal";
           setRows((current) => current.map((row) => row.key === source.key ? { ...row, precheck: checked, stage } : row));
         } catch (requestError) {
           setRows((current) => current.map((row) => row.key === source.key ? { ...row, stage: "error", error: requestError instanceof Error ? requestError.message : "HubSpot check failed." } : row));
@@ -132,7 +155,7 @@ export function SalesNavPipelineV2() {
 
   async function revealSelected() {
     const queue = rows.filter((row) => selected.has(row.key) && row.stage === "needs-reveal" && !isExistingPerson(row) && !row.precheck?.company.protected);
-    if (!queue.length || revealing) return;
+    if (!queue.length || revealing || processing || pushing || stateUnavailable) return;
     if (!window.confirm(`Reveal ${queue.length} eligible net-new person${queue.length === 1 ? "" : "s"}? First-time successful reveals can consume SignalHire Contact Credits; cached reveals cost 0.`)) return;
     setRevealing(true); setError(""); setProgress({ done: 0, total: queue.length, label: "SignalHire reveal" });
     const pending = [...queue]; const autoReady = new Set<string>();
@@ -148,7 +171,7 @@ export function SalesNavPipelineV2() {
           if (!response.ok) throw new Error(payload.error || "SignalHire reveal failed.");
           const checked = payload.postRevealCheck || source.precheck;
           const nextRow: Row = { ...source, precheck: checked, prospect: payload.prospect || undefined, cachedReveal: Boolean(payload.cached), message: payload.message };
-          const blocked = Boolean(checked?.contact.inHubSpot || checked?.company.protected);
+          const blocked = Boolean((checked?.contact.inHubSpot && checked.contact.id !== source.recoveryContactId) || checked?.company.protected);
           const stage: Stage = blocked ? "blocked" : readyPhone(nextRow) ? "ready" : "no-phone";
           if (stage === "ready") autoReady.add(source.key);
           setRows((current) => current.map((row) => row.key === source.key ? { ...row, ...nextRow, stage } : row));
@@ -165,11 +188,11 @@ export function SalesNavPipelineV2() {
 
   async function pushSelected() {
     const queue = rows.filter((row) => selected.has(row.key) && row.stage === "ready" && readyPhone(row) && !isExistingPerson(row) && !row.precheck?.company.protected);
-    if (!queue.length || pushing) return;
+    if (!queue.length || pushing || processing || revealing || stateUnavailable) return;
     if (!ownerId) { setError("Choose the task owner first."); return; }
     const dueAt = taskDueIso(); if (!dueAt) { setError("Choose a valid task date and time."); return; }
     const ownerName = ownerId === "auto" ? "ATS routing (Marita / Daniel)" : owners.find((owner) => owner.id === ownerId)?.name || "selected owner";
-    if (!window.confirm(`Push ${queue.length} NEW phone-ready person${queue.length === 1 ? "" : "s"} and create CALL tasks for ${ownerName} on ${dueDate} at ${dueTime}?`)) return;
+    if (!window.confirm(`Push ${queue.length} NEW phone-ready person${queue.length === 1 ? "" : "s"} and create CALL tasks for ${ownerName} at the next available workday slot, no earlier than ${dueDate} ${dueTime}?`)) return;
     setPushing(true); setError(""); setProgress({ done: 0, total: queue.length, label: "Push + Tasks" });
     const pending = [...queue];
     const workers = Array.from({ length: Math.min(3, pending.length) }, async () => {
@@ -180,9 +203,9 @@ export function SalesNavPipelineV2() {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ runId: run?.id || "", taskOwnerId: ownerId, taskDueAt: dueAt, lead: source.lead, prospect: source.prospect }),
           });
-          const payload = await readJson<{ duplicate?: boolean; taskId?: string; ownerName?: string; error?: string }>(response);
+          const payload = await readJson<{ duplicate?: boolean; taskId?: string; ownerName?: string; dueAt?: string; error?: string }>(response);
           if (!response.ok) throw new Error(payload.error || "Push + Task failed.");
-          setRows((current) => current.map((row) => row.key === source.key ? { ...row, stage: "pushed", message: payload.duplicate ? `Existing task kept · ${payload.taskId || "found"}` : `Task ${payload.taskId || "created"} → ${payload.ownerName || ownerName}` } : row));
+          setRows((current) => current.map((row) => row.key === source.key ? { ...row, stage: "pushed", message: payload.duplicate ? `Existing task kept · ${payload.taskId || "found"}` : `Task ${payload.taskId || "created"} → ${payload.ownerName || ownerName} · ${payload.dueAt ? new Date(payload.dueAt).toLocaleString() : "scheduled"}` } : row));
         } catch (requestError) {
           setRows((current) => current.map((row) => row.key === source.key ? { ...row, stage: "error", error: requestError instanceof Error ? requestError.message : "Push failed." } : row));
         } finally { setProgress((current) => ({ ...current, done: current.done + 1 })); }
@@ -234,7 +257,7 @@ export function SalesNavPipelineV2() {
 
     <section className={styles.metrics}><article><UsersRound size={16}/><span>Saved</span><strong>{counts.total}</strong></article><article><Phone size={16}/><span>Ready · NEW + phone</span><strong>{counts.ready}</strong></article><article><Sparkles size={16}/><span>Needs reveal</span><strong>{counts.reveal}</strong></article><article><ShieldCheck size={16}/><span>Blocked</span><strong>{counts.blocked}</strong></article><article><UserRoundCheck size={16}/><span>Retention</span><strong>{counts.retention}</strong></article><article><UserRoundCheck size={16}/><span>Existing people</span><strong>{counts.existingPeople}</strong></article><article><CheckCircle2 size={16}/><span>Connected · blocked</span><strong>{counts.callsBlocked}</strong></article><article><Send size={16}/><span>Pushed</span><strong>{counts.pushed}</strong></article></section>
 
-    <section className={styles.dispatch}><div><label>Task owner</label><select value={ownerId} onChange={(event) => setOwnerId(event.target.value)}><option value="auto">Auto · verified ATS → Daniel / no ATS → Marita</option>{owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}</select></div><div><label>Due date</label><input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)}/></div><div><label>Time</label><input type="time" value={dueTime} onChange={(event) => setDueTime(event.target.value)}/></div><div className={styles.dispatchSummary}><CalendarClock size={15}/><span>CALL tasks → <b>{ownerName}</b> → {dueDate} {dueTime}</span></div><button className={styles.revealButton} disabled={!selectedReveal || revealing} onClick={() => void revealSelected()}><Sparkles size={14}/>Reveal selected ({selectedReveal})</button><button className={styles.pushButton} disabled={!selectedPush || pushing} onClick={() => void pushSelected()}><Send size={14}/>Push NEW Ready + Tasks ({selectedPush})</button></section>
+    <section className={styles.dispatch}><div><label>Task owner</label><select value={ownerId} onChange={(event) => setOwnerId(event.target.value)}><option value="auto">Auto · verified ATS → Daniel / no ATS → Marita</option>{owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}</select></div><div><label>Earliest date</label><input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)}/></div><div><label>Earliest time</label><input type="time" value={dueTime} onChange={(event) => setDueTime(event.target.value)}/></div><div className={styles.dispatchSummary}><CalendarClock size={15}/><span>CALL tasks → <b>{ownerName}</b> · capacity-checked from {dueDate} {dueTime}</span></div><button className={styles.revealButton} disabled={!selectedReveal || revealing || pushing || processing || stateUnavailable} onClick={() => void revealSelected()}><Sparkles size={14}/>Reveal selected ({selectedReveal})</button><button className={styles.pushButton} disabled={!selectedPush || pushing || revealing || processing || stateUnavailable} onClick={() => void pushSelected()}><Send size={14}/>Push NEW Ready + Tasks ({selectedPush})</button></section>
 
     <section className={styles.toolbar}><div className={styles.tabs}><button data-active={view === "ready"} onClick={() => setView("ready")}>Ready NEW <b>{counts.ready}</b></button><button data-active={view === "needs-reveal"} onClick={() => setView("needs-reveal")}>Need reveal <b>{counts.reveal}</b></button><button data-active={view === "blocked"} onClick={() => setView("blocked")}>Blocked <b>{counts.blocked}</b></button><button data-active={view === "pushed"} onClick={() => setView("pushed")}>Pushed <b>{counts.pushed}</b></button><button data-active={view === "review"} onClick={() => setView("review")}>Review <b>{counts.review}</b></button><button data-active={view === "all"} onClick={() => setView("all")}>All <b>{counts.total}</b></button></div><label className={styles.search}><Search size={14}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search person, company, status, ATS…"/></label></section>
     <section className={styles.selection}><button onClick={toggleVisible}>{allSelected ? "Unselect visible" : "Select visible"}</button><span><b>{selected.size}</b> selected · {selectedReveal} reveal · {selectedPush} NEW push-ready</span></section>
