@@ -328,6 +328,31 @@ export async function readAssociations(
   return associationMap;
 }
 
+// Eligibility checks must exhaust pagination and fail closed on upstream errors.
+// Keep reporting's existing batch adapter unchanged.
+export async function readCompleteAssociations(from: string, to: string, ids: string[]) {
+  const entries = await mapConcurrent([...new Set(ids)], 4, async (id) => {
+    const found = new Set<string>();
+    const cursors = new Set<string>();
+    let after: string | undefined;
+    do {
+      const query = new URLSearchParams({ limit: "500" });
+      if (after) query.set("after", after);
+      const page = await hubspotRequest<{
+        results: Array<{ toObjectId: string | number }>;
+        paging?: { next?: { after?: string } };
+      }>(`/crm/v4/objects/${encodeURIComponent(from)}/${encodeURIComponent(id)}/associations/${encodeURIComponent(to)}?${query}`);
+      if (!Array.isArray(page.results)) throw new Error("Incomplete HubSpot association response.");
+      for (const item of page.results) found.add(String(item.toObjectId));
+      after = page.paging?.next?.after;
+      if (after && cursors.has(after)) throw new Error("HubSpot association pagination repeated a cursor.");
+      if (after) cursors.add(after);
+    } while (after);
+    return [id, [...found]] as [string, string[]];
+  });
+  return new Map(entries);
+}
+
 export async function listOwners(): Promise<HubSpotOwner[]> {
   return cachedReference("owners", async () => {
     const owners: HubSpotOwner[] = [];
