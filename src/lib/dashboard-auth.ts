@@ -23,7 +23,7 @@ export function dashboardAuthConfig(env: NodeJS.ProcessEnv = process.env): Dashb
   }
 
   const username = clean(env.DASHBOARD_USERNAME, 200) || "talentera";
-  const password = clean(env.DASHBOARD_PASSWORD, 1_000) || clean(env.ACQUISITION_OWNER_TOKEN, 1_000);
+  const password = clean(env.SDR_ADMIN_PASSWORD, 500) || clean(env.DASHBOARD_PASSWORD, 1_000) || clean(env.ACQUISITION_OWNER_TOKEN, 1_000);
   return password
     ? { mode: "basic", username, password }
     : { mode: "missing", username, password: "" };
