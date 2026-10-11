@@ -318,8 +318,9 @@ async function markComplete(run, stopReason) {
 async function persistCurrentPage(run, current) {
   const signature = pageSignature(current.leads || []);
   const clean = dedupe(current.leads || [], 25);
-  const nextPageNumber = Number(run.pagesRead || 0) + 1;
   const observedPage = Number(new URL(current.sourceUrl).searchParams.get('page') || '1');
+  const replacingPartial = observedPage === Number(run.pagesRead) && Number(run.lastPageCount ?? 25) < 25;
+  const nextPageNumber = replacingPartial ? observedPage : Number(run.pagesRead || 0) + 1;
   if (observedPage !== nextPageNumber) throw new Error(`Expected page ${nextPageNumber}, observed ${observedPage}. Progress kept; no skipped pages accepted.`);
   const payload = await savePage(run, nextPageNumber, clean);
   const updated = {
@@ -327,7 +328,7 @@ async function persistCurrentPage(run, current) {
     pagesRead: nextPageNumber,
     lastPageCount: clean.length,
     total: Number(payload.total || run.total || 0),
-    signatures: [...(run.signatures || []), signature].slice(-MAX_PAGES),
+    signatures: [...(replacingPartial ? (run.signatures || []).slice(0, -1) : run.signatures || []), signature].slice(-MAX_PAGES),
     lastSignature: signature,
     lastPageUrl: cleanUrl(current.sourceUrl),
     staleRetries: 0,

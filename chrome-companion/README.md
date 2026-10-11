@@ -24,15 +24,15 @@ This is the Talentera SDR Chrome companion for user-triggered prospecting workfl
 
 1. Open the Sales Navigator **People Search** you want to work.
 2. Click **Capture full search · up to 2,500**.
-3. The companion reads the current result page, removes 1st-degree connections, saves that page to the SDR server, then clicks **Next** and repeats.
-4. Every page is persisted before the companion moves forward. The server globally deduplicates the run by Sales Nav URL, public LinkedIn URL, or name + company.
+3. The companion reads the current result page, counts 1st-degree connections for later exclusion, saves that page to the SDR server, then clicks **Next** and repeats.
+4. Every page is persisted before the companion moves forward. The server globally deduplicates the run by stable Sales Nav entity ID or public LinkedIn slug. Weak name/company hints can be captured but cannot reveal or push.
 5. Full capture stops at whichever happens first: no Next page, 100 pages, or 2,500 unique leads.
 6. If the popup closes or the browser interrupts the run, progress is also kept in `chrome.storage.local`. Reopen the extension on the same search and press **Resume full search**.
 7. Click **Open full-run queue** to review the saved run in the dashboard.
 8. In the queue, run **HubSpot precheck** first. An existing person, Retention account/deal, meaningful meeting or any connected call across all company contacts blocks the lead. Partial HubSpot reads require review.
-9. Existing HubSpot contacts that already have a phone are marked **0-credit**. Only leads still needing contact details can be selected for **Reveal selected**.
+9. Existing HubSpot contacts are blocked in this net-new queue. Eligible cached reveals are reused with **0 new credits**.
 10. SignalHire reveal is never automatic in the full-search workflow. The UI shows the selected count and asks for confirmation before any contact credits can be used.
-11. Revealed rows can then run ATS / career-page intelligence and be reviewed before **Push + Tasks**.
+11. Revealed rows must pass a fresh HubSpot check and have a usable phone before **Push + Tasks**. ATS evidence is reviewed separately; missing evidence requires manual routing.
 
 ## SignalHire Lead List workflow
 
@@ -52,7 +52,7 @@ This is the Talentera SDR Chrome companion for user-triggered prospecting workfl
 - Only the Talentera SDR dashboard is allow-listed as a remote host.
 - Pairing token is stored locally in Chrome; the server stores only its SHA-256 hash.
 - Full Sales Nav capture is user-triggered, capped at 100 pages / 2,500 unique leads, and persists every page before clicking Next.
-- 1st-degree Sales Navigator connections are removed before import.
+- 1st-degree Sales Navigator connections are captured and counted, then excluded before reveal or push.
 - Full capture itself spends **zero SignalHire contact credits**.
 - HubSpot is checked before any manual SignalHire reveal in the full-run queue.
 - Meeting history and every connected call are hard blocks for the net-new full-run queue. All company contacts and associated Retention deals are checked.

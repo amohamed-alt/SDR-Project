@@ -36,3 +36,14 @@ test('short non-final page pauses without clicking while short final page can en
   assert.equal(partial.result.state, 'uncertain'); assert.equal(partial.buttons[0].clicked, undefined);
   assert.equal(inspect([['Next', {disabled:true}]], 12).result.state, 'end');
 });
+test('resume fills a partial saved page without incrementing the page or dropping earlier leads', async () => {
+  const body = source.slice(source.indexOf('async function persistCurrentPage('), source.indexOf('\nasync function advance('));
+  const writes = [];
+  const run = { pagesRead: 1, lastPageCount: 12, signatures: ['partial'], total: 12 };
+  const current = { sourceUrl: 'https://www.linkedin.com/sales/search/people?page=1', leads: Array.from({length:25},(_,i)=>({name:String(i)})) };
+  const result = await vm.runInNewContext(`${body}; persistCurrentPage(run, current)`, {
+    run, current, URL, MAX_PAGES:100, pageSignature:()=> 'full',dedupe:values=>values, cleanUrl:value=>value,
+    savePage:async(_run,page,leads)=>{writes.push({page,leads});return {total:25};},setRun:async()=>{},
+  });
+  assert.equal(result.pagesRead,1);assert.equal(result.lastPageCount,25);assert.equal(writes[0].page,1);assert.deepEqual(Array.from(result.signatures),['full']);
+});
