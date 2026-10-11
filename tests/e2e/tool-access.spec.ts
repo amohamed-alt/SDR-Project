@@ -1,4 +1,22 @@
 import { test, expect } from "@playwright/test";
+test("companion setup unlocks with the tools password and shares its signed session", async ({ page }) => {
+  await page.addInitScript(() => { localStorage.setItem("sdr_v2_visitor_id", "visitor_companion_gate"); localStorage.setItem("sdr_v2_visitor_name", "Companion QA"); });
+  expect((await page.request.get("/api/prospecting/salesnav/full-run")).status()).toBe(401);
+  await page.goto("/signalhire-companion");
+  await page.getByPlaceholder("Enter SDR admin setup key").fill("short");
+  await page.getByRole("button", { name: "Unlock", exact: true }).click();
+  await expect(page.getByText("Incorrect admin password.", { exact: true })).toBeVisible();
+  await page.getByPlaceholder("Enter SDR admin setup key").fill("playwright-tools-only-password");
+  await page.getByRole("button", { name: "Unlock", exact: true }).click();
+  await expect(page.getByText("Admin setup unlocked on this browser.", { exact: true })).toBeVisible();
+  expect((await (await page.request.get("/api/prospecting/salesnav/companion")).json()).unlocked).toBe(true);
+  expect((await page.request.get("/api/prospecting/salesnav/task-options")).status()).toBe(200);
+  expect((await page.request.get("/api/prospecting/salesnav/full-run")).status()).toBe(200);
+  expect((await page.context().cookies()).some(row => row.name === "salesnav_setup")).toBe(false);
+  await page.request.delete("/api/sdr-admin");
+  expect((await (await page.request.get("/api/prospecting/salesnav/companion")).json()).unlocked).toBe(false);
+  expect((await page.request.get("/api/prospecting/salesnav/full-run")).status()).toBe(401);
+});
 test("direct tools and their APIs require a password and re-lock after logout", async ({ page }) => {
   await page.addInitScript(() => { localStorage.setItem("sdr_v2_visitor_id", "visitor_tools_gate"); localStorage.setItem("sdr_v2_visitor_name", "Tool gate QA"); sessionStorage.setItem("sdr_v2_session_id", "session_tools_gate"); });
   const protectedUrl = "/?view=team-activity&from=2026-07-15&to=2026-10-07";

@@ -39,10 +39,10 @@ export function SalesNavCompanionSetup() {
     if (!setupKey.trim()) return;
     setBusy(true); setMessage("");
     try {
-      const response = await fetch("/api/prospecting/salesnav/session", {
+      const response = await fetch("/api/sdr-admin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "unlock", setupKey: setupKey.trim() }),
+        body: JSON.stringify({ password: setupKey.trim() }),
       });
       const payload = await response.json() as { error?: string };
       if (!response.ok) throw new Error(payload.error || "Could not unlock setup.");
