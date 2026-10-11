@@ -2,7 +2,17 @@ import { test, expect } from "@playwright/test";
 test("companion setup unlocks with the tools password and shares its signed session", async ({ page }) => {
   await page.addInitScript(() => { localStorage.setItem("sdr_v2_visitor_id", "visitor_companion_gate"); localStorage.setItem("sdr_v2_visitor_name", "Companion QA"); });
   expect((await page.request.get("/api/prospecting/salesnav/full-run")).status()).toBe(401);
-  await page.goto("/signalhire-companion");
+  // Open the protected setup page, then exercise its stale/expired-session unlock form.
+  await page.request.post("/api/sdr-admin", { data: { password: "playwright-tools-only-password" } });
+  let initialStatus = true;
+  await page.route("**/api/prospecting/salesnav/companion", async route => {
+    if (initialStatus && route.request().method() === "GET") {
+      initialStatus = false;
+      return route.fulfill({ json: { ok: true, paired: false, unlocked: false, signalHireConfigured: false } });
+    }
+    return route.continue();
+  });
+  await page.goto("/salesnav-prospecting");
   await page.getByPlaceholder("Enter SDR admin setup key").fill("short");
   await page.getByRole("button", { name: "Unlock", exact: true }).click();
   await expect(page.getByText("Incorrect admin password.", { exact: true })).toBeVisible();
