@@ -15,12 +15,12 @@ test('signalhire queue uses the net-new Sales Nav pipeline', () => {
   assert.match(pipeline, /isExistingPerson\(row\)/);
 });
 
-test('Ready gate blocks existing people, Retention and meetings but allows connected calls without meetings', () => {
-  assert.match(gate, /Existing HubSpot person/);
+test('Ready gate blocks existing people, Retention and meetings and every connected call', () => {
+  assert.match(push, /Existing HubSpot person/);
   assert.match(gate, /Retention account/);
   assert.match(gate, /meetingCount > 0/);
-  assert.match(gate, /Connected call allowed · no meeting/);
-  assert.match(gate, /connectedCallWithoutMeeting: "eligible"/);
+  assert.match(gate, /Connected call blocked/);
+  assert.match(gate, /connectedCallWithoutMeeting: "blocked"/);
   assert.doesNotMatch(gate, /recentConnectedCall\).*protected/);
 });
 

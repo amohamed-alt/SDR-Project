@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     const forwarded = new NextRequest(new URL("/api/prospecting/signalhire/precheck", request.url), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, strictCompanyGate: true }),
     });
     const response = await basePrecheck(forwarded);
     const payload = await jsonFrom(response);
@@ -35,24 +35,19 @@ export async function POST(request: NextRequest) {
     const rawCompany = (payload.company && typeof payload.company === "object" ? payload.company : {}) as JsonObject;
     const company: JsonObject = { ...rawCompany };
 
-    const existingPerson = Boolean(contact.inHubSpot);
     const companyExists = Boolean(company.inHubSpot);
-    const retention = normalize(company.accountType) === "retention";
+    const retention = normalize(company.accountType) === "retention" || company.hasRetentionDeal === true;
     const meetingCount = Math.max(0, Number(company.meetingCount || 0) || 0);
     const connectedCallCount = Math.max(0, Number(company.connectedCallCount || 0) || 0);
-    const communicationUnknown = companyExists && company.engagementChecked === false;
+    const communicationUnknown = companyExists && company.engagementChecked !== true;
 
     // Ready-to-Push policy requested by Abdullah:
     // 1) Person must be net-new in HubSpot.
     // 2) Retention companies are always excluded.
     // 3) Any meaningful meeting blocks the company.
-    // 4) Connected calls WITHOUT a meeting remain eligible, regardless of age.
+    // 4) Any connected call on any associated contact blocks the company.
     // 5) Existing company with no call/meeting is eligible.
-    if (existingPerson) {
-      company.protected = true;
-      company.protectedReason = `Existing HubSpot person${contact.matchedBy ? ` · matched by ${String(contact.matchedBy)}` : ""} — Ready to Push is for net-new people only.`;
-      company.gateReason = "Existing person blocked";
-    } else if (retention) {
+    if (retention) {
       company.protected = true;
       company.protectedReason = "Retention account — excluded from acquisition / SDR prospecting.";
       company.gateReason = "Retention blocked";
@@ -60,6 +55,14 @@ export async function POST(request: NextRequest) {
       company.protected = true;
       company.protectedReason = `${meetingCount} existing meeting${meetingCount === 1 ? "" : "s"} — do not push another SDR prospect from this search.`;
       company.gateReason = "Meeting blocked";
+    } else if (connectedCallCount > 0) {
+      company.protected = true;
+      company.protectedReason = `${connectedCallCount} connected calls across this company and its contacts — excluded from net-new prospecting.`;
+      company.gateReason = "Connected call blocked";
+    } else if (company.protected === true || Number(company.openDeals || 0) > 0) {
+      company.protected = true;
+      company.protectedReason = String(company.protectedReason || "Active deal — review the company before acquisition.");
+      company.gateReason = "Company requires review";
     } else if (communicationUnknown) {
       company.protected = true;
       company.protectedReason = String(company.engagementError || company.protectedReason || "Company communication could not be verified. Review before Push.");
@@ -69,9 +72,6 @@ export async function POST(request: NextRequest) {
       company.protectedReason = "";
       if (!companyExists) {
         company.gateReason = "Net-new company";
-      } else if (connectedCallCount > 0) {
-        const age = company.connectedCallAgeDays === null || company.connectedCallAgeDays === undefined ? "" : ` · latest ${String(company.connectedCallAgeDays)}d ago`;
-        company.gateReason = `Connected call allowed · no meeting${age}`;
       } else {
         company.gateReason = "Existing company · no connected call or meeting";
       }
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
         readyPerson: "net-new-only",
         retention: "blocked",
         meeting: "blocked",
-        connectedCallWithoutMeeting: "eligible",
+        connectedCallWithoutMeeting: "blocked",
         existingCompanyNoCommunication: "eligible",
       },
     }, { headers: { "Cache-Control": "no-store" } });

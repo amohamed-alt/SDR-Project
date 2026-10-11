@@ -383,3 +383,5 @@ def saudi_inventory_membership(body: SaudiMembershipWrite, response: Response) -
             stored += cursor.rowcount
     response.headers["Cache-Control"] = "no-store"
     return {"accounts": stored}
+
+import salesnav_operations  # noqa: F401 — register durable companion endpoints

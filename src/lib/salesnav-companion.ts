@@ -1,3 +1,4 @@
+import { captureLeadKey } from "./salesnav-identity";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { chmod, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -57,7 +58,7 @@ function sha256(value: string) {
 }
 
 function leadKey(lead: CompanionLead) {
-  return lead.linkedinUrl || lead.salesLeadUrl || `${lead.name.toLowerCase()}:${lead.company.toLowerCase()}`;
+  return captureLeadKey(lead);
 }
 
 function historyPath(id: string) {
@@ -90,10 +91,11 @@ async function readPairingStore(): Promise<PairingStore | null> {
 async function readFullRun(path: string): Promise<CompanionFullRun | null> {
   try {
     const parsed = JSON.parse(await readFile(/* turbopackIgnore: true */ path, "utf8")) as CompanionFullRun;
-    if (!parsed?.id || !Array.isArray(parsed.leads)) return null;
+    if (!parsed?.id || !Array.isArray(parsed.leads)) throw new Error("Invalid saved run; capture paused to protect progress.");
     return parsed;
-  } catch {
-    return null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
   }
 }
 

@@ -1,7 +1,11 @@
+import { operationFingerprint, readCompanyVerdict, saveCompanyVerdict } from "@/lib/salesnav-operations";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { batchRead, HubSpotApiError, readAssociations, searchAll } from "@/lib/hubspot";
+import { batchRead, HubSpotApiError, readAssociations, readCompleteAssociations, searchAll } from "@/lib/hubspot";
 import { normalizeCompanyDomain } from "@/lib/prospecting-company-intelligence";
+
+import { compatibleCompanyIdentity, normalizedCompanyName } from "@/lib/company-dedupe";
+import { scanSalesNavCompany } from "@/lib/salesnav-company-gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +20,9 @@ const ENGAGEMENT_CACHE_TTL_MS = 5 * 60 * 1000;
 const RECENT_CONNECTED_CALL_DAYS = 30;
 
 const schema = z.object({
+  strictCompanyGate: z.boolean().default(false),
+  runId: z.string().max(120).default(""),
+  freshCompanyGate: z.boolean().default(true),
   name: z.string().trim().max(220).default(""),
   company: z.string().trim().max(320).default(""),
   companyWebsite: z.string().trim().max(1500).default(""),
@@ -285,9 +292,9 @@ async function contactCheck(input: z.infer<typeof schema>) {
     const compatible = matches.find((match) => {
       if (!targetCompany) return matches.length === 1;
       const existingCompany = normalizeText(match.properties.company);
-      return existingCompany === targetCompany
+      return Boolean(existingCompany) && (existingCompany === targetCompany
         || existingCompany.includes(targetCompany)
-        || targetCompany.includes(existingCompany);
+        || targetCompany.includes(existingCompany));
     });
     if (compatible) return { inHubSpot: true, id: String(compatible.id), matchedBy: "name+company", properties: compatible.properties };
   }
@@ -295,24 +302,41 @@ async function contactCheck(input: z.infer<typeof schema>) {
   return { inHubSpot: false, id: "", matchedBy: "", properties: {} as Record<string, unknown> };
 }
 
-async function companyCheck(input: z.infer<typeof schema>) {
+async function uncachedCompanyCheck(input: z.infer<typeof schema>) {
   const properties = [
     "name", "domain", "account_type", "account_status", "hs_num_open_deals", "search_status",
     "detected_ats", "ats_status", "career_page_url", "hs_lead_status", "hubspot_owner_id",
   ];
   const domain = normalizeCompanyDomain(input.companyDomain || input.companyWebsite)
     || workDomain(unique([input.email, ...input.emails]));
+  if (input.strictCompanyGate && !domain && !input.company.trim()) throw new Error("Company identity is missing. Review before Push.");
   let match = null as Awaited<ReturnType<typeof searchAll>>[number] | null;
   let matchedBy = "";
 
   if (domain) {
     const matches = await searchAll("companies", properties, [{ propertyName: "domain", operator: "EQ", value: domain }]);
+    if (input.strictCompanyGate && matches.length > 1) throw new Error("Multiple HubSpot companies match this domain. Resolve duplicates before Push.");
     if (matches[0]) { match = matches[0]; matchedBy = "domain"; }
   }
 
   if (!match && input.company) {
     const matches = await searchAll("companies", properties, [{ propertyName: "name", operator: "EQ", value: input.company }]);
+    if (input.strictCompanyGate && matches.length > 1) throw new Error("Multiple HubSpot companies match this name. Resolve duplicates before Push.");
+    if (matches[0] && domain && normalizeCompanyDomain(String(matches[0].properties.domain || "")) && normalizeCompanyDomain(String(matches[0].properties.domain)) !== domain && input.strictCompanyGate) throw new Error("Company name matches a different HubSpot domain. Review identity before Push.");
     if (matches[0]) { match = matches[0]; matchedBy = "name"; }
+  }
+
+  // Use the same suffix-aware identity check as the downstream CRM creation path.
+  // Otherwise "Acme" could pass as new but push into protected "Acme LLC".
+  if (input.strictCompanyGate && input.company) {
+    const token = normalizedCompanyName(input.company).split(" ").filter((value) => value.length >= 3).sort((a, b) => b.length - a.length)[0];
+    if (token) {
+      const candidates = await searchAll("companies", properties, [{ propertyName: "name", operator: "CONTAINS_TOKEN", value: token }]);
+      const compatible = candidates.filter((candidate) => compatibleCompanyIdentity({ requestedName: input.company, requestedDomain: domain, existingName: String(candidate.properties.name || ""), existingDomain: String(candidate.properties.domain || "") }));
+      if (match && compatible.some((candidate) => String(candidate.id) !== String(match?.id))) throw new Error("CO_AMBIGUOUS: duplicate/sibling company identity requires review.");
+      if (compatible.length > 1) throw new Error("Ambiguous HubSpot company identity. Resolve duplicates before Push.");
+      if (compatible[0]) { match = compatible[0]; matchedBy = "normalized-name"; }
+    }
   }
 
   if (!match) {
@@ -329,8 +353,11 @@ async function companyCheck(input: z.infer<typeof schema>) {
   const accountType = String(p.account_type || "").trim();
   const accountStatus = String(p.account_status || "").trim();
   const openDeals = Math.max(0, Number(p.hs_num_open_deals || 0) || 0);
-  const engagement = await companyEngagementCheck(String(match.id));
-  const isRetention = retentionAccount(accountType);
+  const engagement = input.strictCompanyGate
+    ? await scanSalesNavCompany(String(match.id), { associations: readCompleteAssociations, records: batchRead }).catch((error) => emptyEngagement(false, error instanceof Error ? error.message : "Company scan failed"))
+    : await companyEngagementCheck(String(match.id));
+  const hasRetentionDeal = "hasRetentionDeal" in engagement && engagement.hasRetentionDeal === true;
+  const isRetention = retentionAccount(accountType) || hasRetentionDeal;
   const engagementUnknown = !engagement.checked;
   const hasMeeting = engagement.meetingCount > 0;
   const recentConnectedCall = engagement.recentConnectedCall;
@@ -360,6 +387,8 @@ async function companyCheck(input: z.infer<typeof schema>) {
     name: String(p.name || input.company || ""),
     domain: String(p.domain || domain || ""),
     accountType,
+    hasRetentionDeal,
+    scannedContactCount: "scannedContactCount" in engagement ? engagement.scannedContactCount : undefined,
     accountStatus,
     openDeals,
     searchStatus: String(p.search_status || ""),
@@ -383,6 +412,23 @@ async function companyCheck(input: z.infer<typeof schema>) {
     protectedReason,
     gateReason,
   };
+}
+
+const strictCompanyInflight = new Map<string, Promise<Awaited<ReturnType<typeof uncachedCompanyCheck>>>>();
+async function companyCheck(input: z.infer<typeof schema>) {
+  if (!input.strictCompanyGate || !input.runId || input.freshCompanyGate) return uncachedCompanyCheck(input);
+  const key = operationFingerprint({ run: input.runId, company: normalizedCompanyName(input.company), domain: normalizeCompanyDomain(input.companyDomain || input.companyWebsite) });
+  const existing = strictCompanyInflight.get(key);
+  if (existing) return existing;
+  const pending = (async () => {
+    const cached = await readCompanyVerdict(key);
+    if (cached.verdict) return cached.verdict as Awaited<ReturnType<typeof uncachedCompanyCheck>>;
+    const verdict = await uncachedCompanyCheck(input);
+    await saveCompanyVerdict(key, verdict);
+    return verdict;
+  })();
+  strictCompanyInflight.set(key, pending);
+  try { return await pending; } finally { strictCompanyInflight.delete(key); }
 }
 
 export async function POST(request: NextRequest) {

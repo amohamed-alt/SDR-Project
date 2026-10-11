@@ -95,7 +95,7 @@ jobs:
 
       - name: Dashboard cache Python syntax
         if: github.event_name == 'pull_request'
-        run: python -m py_compile services/dashboard-cache/app.py services/dashboard-cache/extended_app.py services/dashboard-cache/inventory_engine.py services/dashboard-cache/smoke.py
+        run: python -m py_compile services/dashboard-cache/app.py services/dashboard-cache/extended_app.py services/dashboard-cache/inventory_engine.py services/dashboard-cache/salesnav_operations.py services/dashboard-cache/smoke.py
 
       - name: Dashboard cache container smoke
         if: github.event_name == 'pull_request'
@@ -130,3 +130,9 @@ jobs:
             -e USAGE_DATABASE_URL=postgresql://postgres:inventory_ci@inventory-postgres:5432/inventory_ci \
             -v "$PWD/tests/inventory-engine-db.py:/tmp/inventory-engine-db.py:ro" \
             sdr-dashboard-cache-ci python /tmp/inventory-engine-db.py
+
+          docker run --rm --network inventory-ci \
+            -e INVENTORY_TEST_DATABASE=true \
+            -e USAGE_DATABASE_URL=postgresql://postgres:inventory_ci@inventory-postgres:5432/inventory_ci \
+            -v "$PWD/tests/salesnav-operations-db.py:/tmp/salesnav-operations-db.py:ro" \
+            sdr-dashboard-cache-ci python /tmp/salesnav-operations-db.py

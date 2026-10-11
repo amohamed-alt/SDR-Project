@@ -1,7 +1,14 @@
+import { usablePhone } from "@/lib/saudi-ats-policy";
+import { normalizeCompanyDomain } from "@/lib/prospecting-company-intelligence";
+import { salesNavLeadId } from "@/lib/salesnav-identity";
+import { lookupOperation, claimOperation, checkpointOperation, operationFingerprint, type Operation } from "@/lib/salesnav-operations";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { POST as pushProspect } from "@/app/api/prospecting/push/route";
 import { POST as hubspotPrecheckV2 } from "@/app/api/prospecting/salesnav/precheck-v2/route";
+import { salesNavSdrOwner } from "@/lib/salesnav-company-gate";
+import { batchRead } from "@/lib/hubspot";
+import { sdrAdminAuthorized } from "@/lib/sdr-admin-auth";
 import { manualTaskOwners } from "@/lib/acquisition-routing";
 import { saveSalesNavPush } from "@/lib/salesnav-lead-ledger";
 
@@ -17,6 +24,7 @@ const schema = z.object({
     title: z.string().trim().max(320).default(""),
     company: z.string().trim().max(320).default(""),
     location: z.string().trim().max(320).default(""),
+    connectionDegree: z.string().max(20).default(""),
     linkedinUrl: z.string().trim().max(1500).default(""),
     salesLeadUrl: z.string().trim().max(2000).default(""),
   }),
@@ -76,41 +84,30 @@ async function safetyCheck(request: NextRequest, lead: z.infer<typeof schema>["l
   if (!response.ok) throw new Error(String(payload.error || "HubSpot safety recheck failed."));
   return payload as {
     contact: { inHubSpot: boolean; id: string; matchedBy: string };
-    company: { inHubSpot: boolean; id: string; protected: boolean; protectedReason?: string; detectedAts?: string; careerPageUrl?: string };
+    company: { inHubSpot: boolean; id: string; protected: boolean; domain?: string; protectedReason?: string; detectedAts?: string; atsStatus?: string; ownerId?: string; careerPageUrl?: string };
   };
 }
 
-function hubspotToken() {
-  const value = String(process.env.HUBSPOT_PRIVATE_APP_TOKEN || "").trim();
-  if (!value) throw new Error("HUBSPOT_PRIVATE_APP_TOKEN is not configured.");
-  return value;
-}
-
-async function patchTask(taskId: string, ownerId: string, dueAt: string) {
-  if (!taskId) return;
-  const response = await fetch(`https://api.hubapi.com/crm/v3/objects/tasks/${encodeURIComponent(taskId)}`, {
-    method: "PATCH",
-    headers: { Authorization: `Bearer ${hubspotToken()}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ properties: { hubspot_owner_id: ownerId, hs_timestamp: dueAt, hs_task_type: "CALL" } }),
-    cache: "no-store",
-    signal: AbortSignal.timeout(30_000),
-  });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`HubSpot task update failed (${response.status}): ${text.slice(0, 300)}`);
-}
-
 export async function POST(request: NextRequest) {
+  let operation: Operation | undefined;
   try {
+    if (!sdrAdminAuthorized(request)) return NextResponse.json({ error: "Unlock SDR admin access before pushing." }, { status: 401 });
     const parsed = schema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: "Invalid Ready push payload." }, { status: 400 });
     const input = parsed.data;
-    const owner = manualTaskOwners().find((item) => item.id === input.taskOwnerId);
-    if (!owner) return NextResponse.json({ error: "Selected task owner is not enabled." }, { status: 400 });
     const dueAt = dueIso(input.taskDueAt);
+    const leadId = salesNavLeadId(input.lead);
+    if (!leadId) return NextResponse.json({ error: "ID_WEAK: verify person identity before push." }, { status: 422 });
+    if (input.lead.connectionDegree.toLowerCase() === "1st") return NextResponse.json({ error: "DEGREE_1ST: captured but excluded from this queue." }, { status: 409 });
+    const key = `push:${leadId}`;
+    const prior = await lookupOperation(key);
+    const reveal = await lookupOperation(`reveal:${leadId}`);
+    if (reveal.result.identityReview) return NextResponse.json({ error: "PERSON_COMPANY_CHANGED: verify the saved paid result before push." }, { status: 409 });
+    if (prior.state === "completed") return NextResponse.json({ ...prior.result.response as JsonObject, ok: true, cached: true });
     const prospect: JsonObject = { ...input.prospect };
 
     const safety = await safetyCheck(request, input.lead, prospect);
-    if (safety.contact.inHubSpot) {
+    if (safety.contact.inHubSpot && safety.contact.id !== String(prior.result.contactId || "")) {
       return NextResponse.json({
         error: `Existing HubSpot person${safety.contact.matchedBy ? ` · matched by ${safety.contact.matchedBy}` : ""}. Ready to Push is net-new people only.`,
       }, { status: 409 });
@@ -119,8 +116,36 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: safety.company.protectedReason || "Company is blocked by the HubSpot gate." }, { status: 409 });
     }
 
-    const phones = prospectPhones(prospect);
+    let routedOwnerId: string;
+    try { routedOwnerId = input.taskOwnerId === "auto"
+      ? salesNavSdrOwner(String(safety.company.detectedAts || ""), String(safety.company.atsStatus || ""))
+      : input.taskOwnerId; } catch { return NextResponse.json({ error: "ROUTE_UNVERIFIED: choose Marita or Daniel manually after reviewing ATS evidence." }, { status: 422 }); }
+    const owner = manualTaskOwners().find((item) => item.id === routedOwnerId && ["31644369", "37624223"].includes(item.id));
+    if (!owner) return NextResponse.json({ error: "Choose enabled Marita or Daniel." }, { status: 422 });
+    const existingOwner = String(safety.company.ownerId || "");
+    if (existingOwner && existingOwner !== owner.id) return NextResponse.json({ error: `Company belongs to ${existingOwner}. Review ownership before assigning ${owner.name}.` }, { status: 409 });
+    if (!safety.company.id && !String(prospect.companyDomain || prospect.companyWebsite || "").trim()) return NextResponse.json({ error: "CO_UNRESOLVED: verify a company domain before creating a contact." }, { status: 422 });
+    prospect.assignmentMode = "acquisition"; prospect.ownerId = owner.id; prospect.ownerName = owner.name;
+
+    const phones = prospectPhones(prospect).filter((value) => /^\+?[\d\s().-]+$/.test(value) && value.replace(/\D/g, "").length >= 8 && value.replace(/\D/g, "").length <= 15 && usablePhone(value));
     if (!phones.length) return NextResponse.json({ error: "Phone required. Reveal this eligible new person first." }, { status: 422 });
+
+    const resource = String(prior.result.resource || `company:${normalizeCompanyDomain(safety.company.domain || String(prospect.companyDomain || prospect.companyWebsite || "")) || safety.company.id}`);
+    const claim = await claimOperation(key, "push", resource, operationFingerprint({
+      leadId, ownerId: owner.id,
+      domain: normalizeCompanyDomain(safety.company.domain || String(prospect.companyDomain || prospect.companyWebsite || "")),
+      company: String(prospect.company || input.lead.company),
+      name: String(prospect.fullName || input.lead.name),
+      linkedinUrl: String(prospect.linkedinUrl || input.lead.linkedinUrl),
+      phones: [...phones].sort(), emails: unique([prospect.email, ...(Array.isArray(prospect.emails) ? prospect.emails : [])]).sort(),
+    }));
+    if (!claim.claimed || !claim.lease) return NextResponse.json({ error: `PUSH_${claim.state.toUpperCase()}: wait or reconcile the saved operation.` }, { status: 409 });
+    operation = { key, lease: claim.lease, result: claim.result };
+    await checkpointOperation(operation, { resource });
+    prospect.salesNavOperation = { key, lease: claim.lease };
+    prospect.requestedTaskDueAt = dueAt;
+
+    prospect.phone = phones[0]; prospect.phones = phones;
 
     // Preserve known HubSpot company intelligence without making reveal wait for slow ATS research.
     if (!String(prospect.detectedAts || "").trim() && safety.company.detectedAts) prospect.detectedAts = safety.company.detectedAts;
@@ -147,10 +172,13 @@ export async function POST(request: NextRequest) {
     const companyId = String(pushPayload.companyId || safety.company.id || "");
     const duplicate = Boolean(pushPayload.duplicate);
 
-    if (taskId && !duplicate) await patchTask(taskId, owner.id, dueAt);
+    if (!taskId || !contactId) throw new Error("HubSpot push returned no verified contact/task ID.");
+    const scheduledAt = String(pushPayload.scheduledAt || "");
+    const task = (await batchRead("tasks", [taskId], ["hubspot_owner_id", "hs_timestamp", "hs_task_type"]))[0];
+    if (!task || String(task.properties.hubspot_owner_id) !== owner.id || !scheduledAt || Date.parse(String(task.properties.hs_timestamp)) !== Date.parse(scheduledAt) || task.properties.hs_task_type !== "CALL") throw new Error(`Task ${taskId} exists but readback failed; resume verification before retrying a write.`);
     await saveSalesNavPush({ identity: input.lead, prospect, runId: input.runId, taskId, contactId, companyId });
 
-    return NextResponse.json({
+    const result = {
       ok: true,
       pushed: !duplicate,
       duplicate,
@@ -159,10 +187,14 @@ export async function POST(request: NextRequest) {
       companyId: companyId || null,
       ownerId: duplicate ? String(pushPayload.ownerId || "") : owner.id,
       ownerName: duplicate ? String(pushPayload.ownerName || "Existing task owner") : owner.name,
-      dueAt: duplicate ? String(pushPayload.clickedAt || "") : dueAt,
+      dueAt: scheduledAt,
+      resumed: Boolean(prior.result.contactId),
       message: duplicate ? "Existing open Sales Signal task kept." : "Net-new contact/company pushed and CALL task scheduled.",
-    }, { headers: { "Cache-Control": "no-store" } });
+    };
+    await checkpointOperation(operation, { response: result }, "completed");
+    return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    if (operation) await checkpointOperation(operation, { error: error instanceof Error ? error.message : "Push interrupted" }, "review").catch(() => undefined);
     console.error("Sales Nav v2 Ready push failed", error);
     return NextResponse.json({ error: error instanceof Error ? error.message : "Sales Nav Ready push failed." }, { status: 500 });
   }

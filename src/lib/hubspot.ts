@@ -328,6 +328,38 @@ export async function readAssociations(
   return associationMap;
 }
 
+// Safety gates must consume every per-record cursor and fail on partial responses.
+export async function readCompleteAssociations(from: string, to: string, ids: string[]) {
+  const result = new Map<string, string[]>();
+  for (const batch of chunks([...new Set(ids)])) {
+    let pending: Array<{ id: string; after?: string }> = batch.map((id) => ({ id }));
+    const seen = new Set<string>();
+    while (pending.length) {
+      const response = await hubspotRequest<{ results: Array<{
+        from: { id: string }; to: Array<{ toObjectId: string }>;
+        paging?: { next?: { after?: string } };
+      }>; errors?: unknown[]; status?: string }>(`/crm/v4/associations/${from}/${to}/batch/read`, {
+        method: "POST", body: JSON.stringify({ inputs: pending }),
+      });
+      if (response.errors?.length || (response.status && response.status !== "COMPLETE")) throw new Error("Incomplete HubSpot association response");
+      const returned = new Set(response.results.map((item) => String(item.from.id)));
+      if (pending.some((item) => !returned.has(item.id))) throw new Error("Missing HubSpot association result");
+      pending = [];
+      for (const item of response.results) {
+        const id = String(item.from.id);
+        result.set(id, [...new Set([...(result.get(id) || []), ...item.to.map((target) => String(target.toObjectId))])]);
+        const after = item.paging?.next?.after;
+        if (after !== undefined) {
+          const key = `${id}:${after}`;
+          if (seen.has(key)) throw new Error("Repeated HubSpot association cursor");
+          seen.add(key); pending.push({ id, after: String(after) });
+        }
+      }
+    }
+  }
+  return result;
+}
+
 export async function listOwners(): Promise<HubSpotOwner[]> {
   return cachedReference("owners", async () => {
     const owners: HubSpotOwner[] = [];
