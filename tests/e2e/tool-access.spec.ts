@@ -24,7 +24,7 @@ test("companion setup unlocks with the tools password and shares its signed sess
   expect(await page.evaluate(async () => (await fetch("/api/prospecting/salesnav/full-run")).status)).toBe(200);
   expect((await page.context().cookies()).some(row => row.name === "salesnav_setup")).toBe(false);
   await page.request.delete("/api/sdr-admin");
-  expect((await (await page.request.get("/api/prospecting/salesnav/companion")).json()).unlocked).toBe(false);
+  expect((await page.request.get("/api/prospecting/salesnav/companion")).status()).toBe(401);
   expect((await page.request.get("/api/prospecting/salesnav/full-run")).status()).toBe(401);
 });
 test("direct tools and their APIs require a password and re-lock after logout", async ({ page }) => {
