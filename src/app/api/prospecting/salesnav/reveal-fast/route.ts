@@ -65,6 +65,11 @@ export async function POST(request: NextRequest) {
     if (!parsed.success) return NextResponse.json({ error: "Invalid Sales Nav reveal payload." }, { status: 400 });
     const { lead, runId } = parsed.data;
 
+    const beforeReveal = await postRevealCheck(request, lead, {});
+    const contact = beforeReveal.contact as JsonObject | undefined;
+    const company = beforeReveal.company as JsonObject | undefined;
+    if (contact?.inHubSpot || company?.protected) return NextResponse.json({ error: String(company?.protectedReason || "Existing HubSpot person — reveal blocked before spending credits."), postRevealCheck: beforeReveal }, { status: 409 });
+
     const cached = await lookupSalesNavLead(lead);
     if (cached?.revealAttemptedAt) {
       if (cached.cachedProspect) {

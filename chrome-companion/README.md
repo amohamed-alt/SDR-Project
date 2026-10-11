@@ -8,7 +8,7 @@ This is the Talentera SDR Chrome companion for user-triggered prospecting workfl
 2. Open `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Click **Load unpacked** and select the `chrome-companion` folder.
-5. Confirm the extension shows version **1.5.0** or newer.
+5. Confirm the extension shows version **1.5.6** or newer.
 6. In the SDR Dashboard, open **Sales Nav → Companion setup**.
 7. Unlock admin settings and click **Generate / rotate token**.
 8. Paste that token into the extension and click **Test connection**.
@@ -29,7 +29,7 @@ This is the Talentera SDR Chrome companion for user-triggered prospecting workfl
 5. Full capture stops at whichever happens first: no Next page, 100 pages, or 2,500 unique leads.
 6. If the popup closes or the browser interrupts the run, progress is also kept in `chrome.storage.local`. Reopen the extension on the same search and press **Resume full search**.
 7. Click **Open full-run queue** to review the saved run in the dashboard.
-8. In the queue, run **HubSpot precheck** first. A meaningful existing meeting blocks the lead; a connected call without a meeting remains eligible.
+8. In the queue, run **HubSpot precheck** first. An existing person, Retention account/deal, meaningful meeting or any connected call across all company contacts blocks the lead. Partial HubSpot reads require review.
 9. Existing HubSpot contacts that already have a phone are marked **0-credit**. Only leads still needing contact details can be selected for **Reveal selected**.
 10. SignalHire reveal is never automatic in the full-search workflow. The UI shows the selected count and asks for confirmation before any contact credits can be used.
 11. Revealed rows can then run ATS / career-page intelligence and be reviewed before **Push + Tasks**.
@@ -55,10 +55,20 @@ This is the Talentera SDR Chrome companion for user-triggered prospecting workfl
 - 1st-degree Sales Navigator connections are removed before import.
 - Full capture itself spends **zero SignalHire contact credits**.
 - HubSpot is checked before any manual SignalHire reveal in the full-run queue.
-- Meeting history is a hard block for the full-run queue; connected-call-only accounts stay eligible.
+- Meeting history and every connected call are hard blocks for the net-new full-run queue. All company contacts and associated Retention deals are checked.
 - SignalHire reveal requires explicit user selection and confirmation.
 - SignalHire Lead List imports still require a real candidate/profile identity URL and parser v2; resume/history rows are rejected at browser and server layers.
 
 ## Detection note
 
 This is not an anti-detection tool. Websites can observe normal page loads and navigation associated with the user's session. The companion deliberately uses ordinary visible Sales Navigator pagination and avoids stealth or anti-bot evasion techniques.
+
+## Version 1.5.6 dispatch and pagination
+
+- Start a new full-search capture on page 1. Resume is permitted on the saved search.
+- Next must be a single visible identifiable pagination button. Disabled Next ends the run. Missing/ambiguous Next pauses with saved progress rather than claiming completion.
+- Changed search filters and stalled navigation pause the run. No CAPTCHA bypass or automatic paid enrichment is performed.
+- Queue dispatch can select Marita, Daniel, or Auto. Auto uses server-verified company ATS status: detected ATS → Daniel; confirmed no ATS → Marita; unknown → manual review. Existing ownership conflicts block reassignment.
+- Push requires SDR admin access, rechecks the full company graph without the preview cache, requires a usable phone, and reads back task owner/date/type before marking success.
+- LinkedIn prohibits third-party extensions that scrape or automate its site. Running this companion may restrict the account. Official CRM Sync requires Sales Navigator Advanced Plus.
+- Selectors are tested against fixtures; actual Sales Navigator UI and a live end-to-end capture must be verified in the user's Chrome before rollout.

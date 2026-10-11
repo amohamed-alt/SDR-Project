@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { POST as pushProspect } from "@/app/api/prospecting/push/route";
 import { POST as hubspotPrecheckV2 } from "@/app/api/prospecting/salesnav/precheck-v2/route";
+import { salesNavSdrOwner } from "@/lib/salesnav-company-gate";
+import { batchRead } from "@/lib/hubspot";
+import { sdrAdminAuthorized } from "@/lib/sdr-admin-auth";
 import { manualTaskOwners } from "@/lib/acquisition-routing";
 import { saveSalesNavPush } from "@/lib/salesnav-lead-ledger";
 
@@ -76,7 +79,7 @@ async function safetyCheck(request: NextRequest, lead: z.infer<typeof schema>["l
   if (!response.ok) throw new Error(String(payload.error || "HubSpot safety recheck failed."));
   return payload as {
     contact: { inHubSpot: boolean; id: string; matchedBy: string };
-    company: { inHubSpot: boolean; id: string; protected: boolean; protectedReason?: string; detectedAts?: string; careerPageUrl?: string };
+    company: { inHubSpot: boolean; id: string; protected: boolean; protectedReason?: string; detectedAts?: string; atsStatus?: string; ownerId?: string; careerPageUrl?: string };
   };
 }
 
@@ -101,11 +104,10 @@ async function patchTask(taskId: string, ownerId: string, dueAt: string) {
 
 export async function POST(request: NextRequest) {
   try {
+    if (!sdrAdminAuthorized(request)) return NextResponse.json({ error: "Unlock SDR admin access before pushing." }, { status: 401 });
     const parsed = schema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: "Invalid Ready push payload." }, { status: 400 });
     const input = parsed.data;
-    const owner = manualTaskOwners().find((item) => item.id === input.taskOwnerId);
-    if (!owner) return NextResponse.json({ error: "Selected task owner is not enabled." }, { status: 400 });
     const dueAt = dueIso(input.taskDueAt);
     const prospect: JsonObject = { ...input.prospect };
 
@@ -119,8 +121,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: safety.company.protectedReason || "Company is blocked by the HubSpot gate." }, { status: 409 });
     }
 
-    const phones = prospectPhones(prospect);
+    const routedOwnerId = input.taskOwnerId === "auto"
+      ? salesNavSdrOwner(String(safety.company.detectedAts || ""), String(safety.company.atsStatus || ""))
+      : input.taskOwnerId;
+    const owner = manualTaskOwners().find((item) => item.id === routedOwnerId && ["31644369", "37624223"].includes(item.id));
+    if (!owner) return NextResponse.json({ error: "Choose enabled Marita or Daniel." }, { status: 422 });
+    const existingOwner = manualTaskOwners().find((item) => item.id === safety.company.ownerId);
+    if (existingOwner && existingOwner.id !== owner.id) return NextResponse.json({ error: `Company belongs to ${existingOwner.name}. Review ownership before assigning ${owner.name}.` }, { status: 409 });
+    prospect.assignmentMode = "acquisition"; prospect.ownerId = owner.id; prospect.ownerName = owner.name;
+
+    const phones = prospectPhones(prospect).filter((value) => /^\+?[\d\s().-]+$/.test(value) && value.replace(/\D/g, "").length >= 8 && value.replace(/\D/g, "").length <= 15);
     if (!phones.length) return NextResponse.json({ error: "Phone required. Reveal this eligible new person first." }, { status: 422 });
+
+    prospect.phone = phones[0]; prospect.phones = phones;
 
     // Preserve known HubSpot company intelligence without making reveal wait for slow ATS research.
     if (!String(prospect.detectedAts || "").trim() && safety.company.detectedAts) prospect.detectedAts = safety.company.detectedAts;
@@ -147,7 +160,12 @@ export async function POST(request: NextRequest) {
     const companyId = String(pushPayload.companyId || safety.company.id || "");
     const duplicate = Boolean(pushPayload.duplicate);
 
-    if (taskId && !duplicate) await patchTask(taskId, owner.id, dueAt);
+    if (!taskId || !contactId) throw new Error("HubSpot push returned no verified contact/task ID.");
+    if (!duplicate) {
+      await patchTask(taskId, owner.id, dueAt);
+      const task = (await batchRead("tasks", [taskId], ["hubspot_owner_id", "hs_timestamp", "hs_task_type"]))[0];
+      if (!task || String(task.properties.hubspot_owner_id) !== owner.id || Date.parse(String(task.properties.hs_timestamp)) !== Date.parse(dueAt) || task.properties.hs_task_type !== "CALL") throw new Error(`Task ${taskId} was created but assignment verification failed; review before retry.`);
+    }
     await saveSalesNavPush({ identity: input.lead, prospect, runId: input.runId, taskId, contactId, companyId });
 
     return NextResponse.json({
