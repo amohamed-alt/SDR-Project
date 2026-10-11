@@ -56,8 +56,16 @@ function sha256(value: string) {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
+function identityUrl(raw: string) {
+  try {
+    const url = new URL(raw);
+    url.search = ""; url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch { return ""; }
+}
+
 function leadKey(lead: CompanionLead) {
-  return lead.linkedinUrl || lead.salesLeadUrl || `${lead.name.toLowerCase()}:${lead.company.toLowerCase()}`;
+  return identityUrl(lead.linkedinUrl) || identityUrl(lead.salesLeadUrl) || `${lead.name.toLowerCase()}:${lead.company.toLowerCase()}`;
 }
 
 function historyPath(id: string) {
@@ -66,7 +74,7 @@ function historyPath(id: string) {
 
 async function atomicWrite(path: string, payload: string) {
   await mkdir(/* turbopackIgnore: true */ dirname(path), { recursive: true });
-  const temp = `${path}.tmp`;
+  const temp = `${path}.${randomBytes(8).toString("hex")}.tmp`;
   await writeFile(/* turbopackIgnore: true */ temp, payload, { encoding: "utf8", mode: 0o600 });
   await chmod(temp, 0o600);
   await rename(/* turbopackIgnore: true */ temp, /* turbopackIgnore: true */ path);
@@ -200,7 +208,7 @@ export async function listCompanionFullRuns(limit = 50): Promise<CompanionFullRu
     .slice(0, Math.max(1, limit));
 }
 
-export async function saveCompanionFullRunPage(input: {
+async function saveFullRunPage(input: {
   id: string;
   sourceUrl: string;
   searchFingerprint: string;
@@ -251,7 +259,7 @@ export async function saveCompanionFullRunPage(input: {
   return next;
 }
 
-export async function finishCompanionFullRun(id: string, stopReason: string) {
+async function finishFullRun(id: string, stopReason: string) {
   const existing = await getCompanionFullRun(id);
   if (!existing) return null;
   const now = new Date().toISOString();
@@ -264,4 +272,20 @@ export async function finishCompanionFullRun(id: string, stopReason: string) {
   };
   await persistFullRun(next);
   return next;
+}
+
+// Serialize full-run read/modify/write operations in this application process.
+// Atomic rename protects files; serialization also prevents concurrent page uploads
+// from overwriting each other's newly captured leads.
+let fullRunWrites: Promise<void> = Promise.resolve();
+function serializeFullRunWrite<T>(action: () => Promise<T>): Promise<T> {
+  const operation = fullRunWrites.then(action);
+  fullRunWrites = operation.then(() => undefined, () => undefined);
+  return operation;
+}
+export function saveCompanionFullRunPage(input: Parameters<typeof saveFullRunPage>[0]) {
+  return serializeFullRunWrite(() => saveFullRunPage(input));
+}
+export function finishCompanionFullRun(id: string, stopReason: string) {
+  return serializeFullRunWrite(() => finishFullRun(id, stopReason));
 }

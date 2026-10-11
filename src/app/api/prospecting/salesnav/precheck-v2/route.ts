@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { POST as basePrecheck } from "@/app/api/prospecting/signalhire/precheck/route";
 
+import { batchRead, readCompleteAssociations } from "@/lib/hubspot";
+import { scanSalesNavCompany, salesNavGate } from "@/lib/salesnav-company-policy";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -13,8 +16,17 @@ async function jsonFrom(response: Response) {
   catch { throw new Error(`HubSpot precheck returned non-JSON: ${text.slice(0, 180)}`); }
 }
 
-function normalize(value: unknown) {
-  return String(value || "").trim().toLowerCase();
+const scans = new Map<string, { expiresAt: number; value: ReturnType<typeof scanSalesNavCompany> }>();
+function scan(id: string, fresh: boolean) {
+  const cached = scans.get(id);
+  if (!fresh && cached && cached.expiresAt > Date.now()) return cached.value;
+  const value = scanSalesNavCompany(id, { associations: readCompleteAssociations, records: batchRead });
+  if (!fresh) {
+    if (scans.size > 1000) scans.clear();
+    scans.set(id, { value, expiresAt: Date.now() + 60_000 });
+    void value.catch(() => scans.delete(id));
+  }
+  return value;
 }
 
 export async function POST(request: NextRequest) {
@@ -35,47 +47,20 @@ export async function POST(request: NextRequest) {
     const rawCompany = (payload.company && typeof payload.company === "object" ? payload.company : {}) as JsonObject;
     const company: JsonObject = { ...rawCompany };
 
-    const existingPerson = Boolean(contact.inHubSpot);
-    const companyExists = Boolean(company.inHubSpot);
-    const retention = normalize(company.accountType) === "retention";
-    const meetingCount = Math.max(0, Number(company.meetingCount || 0) || 0);
-    const connectedCallCount = Math.max(0, Number(company.connectedCallCount || 0) || 0);
-    const communicationUnknown = companyExists && company.engagementChecked === false;
-
-    // Ready-to-Push policy requested by Abdullah:
-    // 1) Person must be net-new in HubSpot.
-    // 2) Retention companies are always excluded.
-    // 3) Any meaningful meeting blocks the company.
-    // 4) Connected calls WITHOUT a meeting remain eligible, regardless of age.
-    // 5) Existing company with no call/meeting is eligible.
-    if (existingPerson) {
-      company.protected = true;
-      company.protectedReason = `Existing HubSpot person${contact.matchedBy ? ` · matched by ${String(contact.matchedBy)}` : ""} — Ready to Push is for net-new people only.`;
-      company.gateReason = "Existing person blocked";
-    } else if (retention) {
-      company.protected = true;
-      company.protectedReason = "Retention account — excluded from acquisition / SDR prospecting.";
-      company.gateReason = "Retention blocked";
-    } else if (meetingCount > 0) {
-      company.protected = true;
-      company.protectedReason = `${meetingCount} existing meeting${meetingCount === 1 ? "" : "s"} — do not push another SDR prospect from this search.`;
-      company.gateReason = "Meeting blocked";
-    } else if (communicationUnknown) {
-      company.protected = true;
-      company.protectedReason = String(company.engagementError || company.protectedReason || "Company communication could not be verified. Review before Push.");
-      company.gateReason = "Communication check incomplete";
-    } else {
-      company.protected = false;
-      company.protectedReason = "";
-      if (!companyExists) {
-        company.gateReason = "Net-new company";
-      } else if (connectedCallCount > 0) {
-        const age = company.connectedCallAgeDays === null || company.connectedCallAgeDays === undefined ? "" : ` · latest ${String(company.connectedCallAgeDays)}d ago`;
-        company.gateReason = `Connected call allowed · no meeting${age}`;
-      } else {
-        company.gateReason = "Existing company · no connected call or meeting";
+    if (company.inHubSpot && company.id) {
+      try {
+        Object.assign(company, await scan(String(company.id), body.fresh === true));
+        company.engagementError = "";
+      } catch (error) {
+        company.engagementChecked = false;
+        company.engagementError = error instanceof Error ? error.message : "Company scan failed.";
       }
     }
+    const hasIdentity = Boolean(String(body.company || body.companyDomain || body.companyWebsite || "").trim());
+    const reason = salesNavGate(contact, company, hasIdentity);
+    company.protected = Boolean(reason);
+    company.protectedReason = reason;
+    company.gateReason = reason || (company.inHubSpot ? "Existing company · no connected call, meeting or protected deal" : "Net-new company");
 
     return NextResponse.json({
       ...payload,
@@ -85,7 +70,9 @@ export async function POST(request: NextRequest) {
         readyPerson: "net-new-only",
         retention: "blocked",
         meeting: "blocked",
-        connectedCallWithoutMeeting: "eligible",
+        retentionDeal: "blocked",
+        openDeal: "blocked",
+        connectedCallWithoutMeeting: "blocked",
         existingCompanyNoCommunication: "eligible",
       },
     }, { headers: { "Cache-Control": "no-store" } });

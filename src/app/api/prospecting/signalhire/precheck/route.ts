@@ -285,9 +285,9 @@ async function contactCheck(input: z.infer<typeof schema>) {
     const compatible = matches.find((match) => {
       if (!targetCompany) return matches.length === 1;
       const existingCompany = normalizeText(match.properties.company);
-      return existingCompany === targetCompany
+      return Boolean(existingCompany) && (existingCompany === targetCompany
         || existingCompany.includes(targetCompany)
-        || targetCompany.includes(existingCompany);
+        || targetCompany.includes(existingCompany));
     });
     if (compatible) return { inHubSpot: true, id: String(compatible.id), matchedBy: "name+company", properties: compatible.properties };
   }
@@ -304,15 +304,16 @@ async function companyCheck(input: z.infer<typeof schema>) {
     || workDomain(unique([input.email, ...input.emails]));
   let match = null as Awaited<ReturnType<typeof searchAll>>[number] | null;
   let matchedBy = "";
+  let identityAmbiguous = false;
 
   if (domain) {
     const matches = await searchAll("companies", properties, [{ propertyName: "domain", operator: "EQ", value: domain }]);
-    if (matches[0]) { match = matches[0]; matchedBy = "domain"; }
+    if (matches[0]) { match = matches[0]; matchedBy = "domain"; identityAmbiguous = matches.length > 1; }
   }
 
   if (!match && input.company) {
     const matches = await searchAll("companies", properties, [{ propertyName: "name", operator: "EQ", value: input.company }]);
-    if (matches[0]) { match = matches[0]; matchedBy = "name"; }
+    if (matches[0]) { match = matches[0]; matchedBy = "name"; identityAmbiguous = matches.length > 1; }
   }
 
   if (!match) {
@@ -355,6 +356,7 @@ async function companyCheck(input: z.infer<typeof schema>) {
 
   return {
     inHubSpot: true,
+    identityAmbiguous,
     id: String(match.id),
     matchedBy,
     name: String(p.name || input.company || ""),

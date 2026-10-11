@@ -90,6 +90,13 @@ export async function POST(request: NextRequest) {
       }, { headers: { "Cache-Control": "no-store" } });
     }
 
+    const beforeReveal = await postRevealCheck(request, lead, {});
+    const checkedContact = beforeReveal.contact as JsonObject | undefined;
+    const checkedCompany = beforeReveal.company as JsonObject | undefined;
+    if (checkedContact?.inHubSpot || checkedCompany?.protected) {
+      return NextResponse.json({ error: checkedCompany?.protectedReason || "Existing HubSpot person — reveal blocked." }, { status: 409 });
+    }
+
     // Mark first-time reveal before contacting SignalHire so accidental retries cannot
     // spend another credit if the browser times out after the provider accepted it.
     await saveSalesNavReveal({ identity: lead, runId, attempted: true });

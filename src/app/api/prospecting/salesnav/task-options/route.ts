@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   if (!sdrAdminAuthorized(request) && !salesNavUnlocked(request)) {
     return NextResponse.json({ error: "Unlock Sales Nav setup or SDR admin access first." }, { status: 401 });
   }
-  const owners = manualTaskOwners().map((owner) => ({ id: owner.id, name: owner.name }));
+  const owners = manualTaskOwners().filter((owner) => ["31644369", "37624223"].includes(owner.id)).map((owner) => ({ id: owner.id, name: owner.name }));
   const defaultOwner = owners.find((owner) => owner.id === "31644369") || owners[0] || null;
   return NextResponse.json({
     ok: true,

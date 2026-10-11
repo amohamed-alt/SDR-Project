@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'chrome-companion/**'
       - 'src/**'
       - 'tests/**'
       - 'docker/**'
@@ -19,6 +20,7 @@ on:
       - 'eslint.config.mjs'
   pull_request:
     paths:
+      - 'chrome-companion/**'
       - 'src/**'
       - 'tests/**'
       - 'docker/**'

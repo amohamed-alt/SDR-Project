@@ -12,12 +12,20 @@ const RETRY_DELAY_MS = 3000;
 const MAX_STALE_RETRIES = 8;
 let processing = false;
 
+function identityUrl(raw) {
+  try {
+    const url = new URL(raw);
+    url.search = ''; url.hash = '';
+    return url.toString().replace(/\/$/, '');
+  } catch { return ''; }
+}
+
 function leadKey(lead) {
-  return lead.salesLeadUrl || lead.linkedinUrl || `${String(lead.name || '').toLowerCase()}:${String(lead.company || '').toLowerCase()}`;
+  return identityUrl(lead.salesLeadUrl) || identityUrl(lead.linkedinUrl) || `${String(lead.name || '').toLowerCase()}:${String(lead.company || '').toLowerCase()}`;
 }
 
 function pageSignature(leads) {
-  return (leads || []).slice(0, 5).map(leadKey).join('|');
+  return (leads || []).map(leadKey).join('|');
 }
 
 function cleanUrl(raw) {
@@ -252,19 +260,18 @@ async function extractCurrentSalesNavPageV154() {
 }
 
 function clickNextSalesNavPageV154() {
-  const candidates = [
-    ...document.querySelectorAll('button[aria-label="Next" i], button[aria-label^="Next " i], button[data-control-name*="next" i]'),
-  ];
-  for (const node of candidates) {
-    if (!(node instanceof HTMLButtonElement) || node.disabled) continue;
-    const aria = String(node.getAttribute('aria-label') || '').trim();
-    const text = String(node.innerText || '').trim();
-    const containerText = String(node.closest('nav,[class*="pagination"]')?.innerText || '');
-    if (!/^next\b/i.test(aria) && !/^next$/i.test(text) && !/next/i.test(containerText)) continue;
-    node.click();
-    return true;
-  }
-  return false;
+  const isNext = (node) => /^(next(?:\s+page)?|التالي|التالية|الصفحة التالية)$/i.test(
+    String(node.getAttribute('aria-label') || node.innerText || '').trim()
+  ) || /pagination.*next|next.*pagination/i.test(String(node.getAttribute('data-control-name') || ''));
+  const roots = [...document.querySelectorAll('nav,[class*="pagination"],[aria-label*="pagination" i]')];
+  const candidates = [...new Set(roots.flatMap((root) => [...root.querySelectorAll('button,a[role="button"]')]))].filter(isNext);
+  const visible = candidates.filter((node) => node.getClientRects().length > 0);
+  if (!visible.length) return { status: 'missing' };
+  const enabled = visible.filter((node) => !node.disabled && node.getAttribute('aria-disabled') !== 'true');
+  if (!enabled.length) return { status: 'end' };
+  if (enabled.length !== 1) return { status: 'ambiguous' };
+  enabled[0].click();
+  return { status: 'moved' };
 }
 
 async function extractPage(tabId) {
@@ -274,7 +281,7 @@ async function extractPage(tabId) {
 
 async function clickNext(tabId) {
   const result = await chrome.scripting.executeScript({ target: { tabId }, func: clickNextSalesNavPageV154 });
-  return Boolean(result?.[0]?.result);
+  return result?.[0]?.result || { status: "missing" };
 }
 
 async function scheduleContinuation(tabId, delayMs = NORMAL_DELAY_MS) {
@@ -318,6 +325,8 @@ async function persistCurrentPage(run, current) {
     lastPageUrl: cleanUrl(current.sourceUrl),
     staleRetries: 0,
     navigationPending: false,
+    nextClickRetries: 0,
+    paused: false,
     backgroundError: '',
     backgroundStatus: `Saved page ${nextPageNumber} · ${Number(payload.total || run.total || 0)} unique leads`,
   };
@@ -328,8 +337,14 @@ async function persistCurrentPage(run, current) {
 async function advance(run, tabId) {
   if (Number(run.pagesRead || 0) >= MAX_PAGES) return markComplete(run, `Reached ${MAX_PAGES}-page safety cap`);
   if (Number(run.total || 0) >= MAX_LEADS) return markComplete(run, `Reached ${MAX_LEADS}-lead safety cap`);
-  const moved = await clickNext(tabId);
-  if (!moved) return markComplete(run, 'No next page');
+  // Persist navigation intent before clicking so worker termination cannot skip a page.
+  await setRun({ ...run, navigationPending: true });
+  const next = await clickNext(tabId);
+  if (next.status === 'end') return markComplete(run, 'No next page');
+  if (next.status !== 'moved') {
+    await setRun({ ...run, paused: true, backgroundError: `Pagination ${next.status}. Progress saved; check the page and press Resume.`, backgroundStatus: 'Paused before navigation' });
+    return;
+  }
   const waiting = {
     ...run,
     navigationPending: true,
@@ -364,6 +379,11 @@ async function startOrResume(tabId) {
     };
   }
 
+  if (run.navigationPending && signature === run.lastSignature) {
+    await setRun({ ...run, paused: false, nextClickRetries: 0, staleRetries: 0, backgroundError: '' });
+    await scheduleContinuation(tabId, RETRY_DELAY_MS);
+    return run;
+  }
   if (!run.signatures?.includes(signature)) run = await persistCurrentPage(run, current);
   else {
     run = {
@@ -371,6 +391,7 @@ async function startOrResume(tabId) {
       lastSignature: signature,
       lastPageUrl: cleanUrl(current.sourceUrl),
       navigationPending: false,
+      paused: false,
       staleRetries: 0,
       backgroundError: '',
       backgroundStatus: `Resume armed · ${run.pagesRead} pages / ${run.total} leads`,
@@ -388,9 +409,9 @@ async function processContinuation(tabId) {
   try {
     const stored = await chrome.storage.local.get([FULL_RUN_KEY]);
     let run = stored[FULL_RUN_KEY];
-    if (!run || run.complete || !run.runId) return;
+    if (!run || run.complete || run.paused || !run.runId) return;
     if (!await verifySalesNavTab(tabId)) {
-      await setRun({ ...run, backgroundError: 'The saved Sales Navigator tab is no longer a People Search. Reopen the search and press Resume.', backgroundStatus: 'Paused' });
+      await setRun({ ...run, paused: true, backgroundError: 'The saved Sales Navigator tab is no longer a People Search. Reopen the search and press Resume.', backgroundStatus: 'Paused' });
       return;
     }
 
@@ -399,16 +420,21 @@ async function processContinuation(tabId) {
       const retries = Number(run.staleRetries || 0) + 1;
       await setRun({ ...run, staleRetries: retries, backgroundError: current.error || 'Could not read Sales Navigator.', backgroundStatus: `Waiting for Sales Nav · retry ${retries}/${MAX_STALE_RETRIES}` });
       if (retries < MAX_STALE_RETRIES) await scheduleContinuation(tabId, RETRY_DELAY_MS);
+      else await setRun({ ...run, paused: true, backgroundError: current.error || "Could not read Sales Navigator. Progress saved; press Resume.", backgroundStatus: "Paused after read retries" });
       return;
     }
 
+    if (searchFingerprint(current.sourceUrl) !== run.searchFingerprint) {
+      await setRun({ ...run, paused: true, backgroundError: 'Search filters changed. Return to the original search or start a new capture.', backgroundStatus: 'Paused on different search' });
+      return;
+    }
     const signature = pageSignature(current.leads || []);
     const currentUrl = cleanUrl(current.sourceUrl);
     if (!signature) {
       const retries = Number(run.staleRetries || 0) + 1;
       await setRun({ ...run, staleRetries: retries, backgroundError: '', backgroundStatus: `Sales Nav cards are loading · retry ${retries}/${MAX_STALE_RETRIES}` });
       if (retries < MAX_STALE_RETRIES) await scheduleContinuation(tabId, RETRY_DELAY_MS);
-      else await setRun({ ...run, staleRetries: retries, backgroundError: 'Sales Navigator kept showing a loading skeleton. Progress is saved; press Resume when the cards finish loading.', backgroundStatus: 'Paused on loading page' });
+      else await setRun({ ...run, staleRetries: retries, paused: true, backgroundError: 'Sales Navigator kept showing a loading skeleton. Progress is saved; press Resume when the cards finish loading.', backgroundStatus: 'Paused on loading page' });
       return;
     }
 
@@ -419,7 +445,7 @@ async function processContinuation(tabId) {
       const retries = Number(run.staleRetries || 0) + 1;
       await setRun({ ...run, staleRetries: retries, backgroundError: '', backgroundStatus: `URL changed but LinkedIn is still showing the previous cards · retry ${retries}/${MAX_STALE_RETRIES}` });
       if (retries < MAX_STALE_RETRIES) await scheduleContinuation(tabId, RETRY_DELAY_MS);
-      else await setRun({ ...run, staleRetries: retries, backgroundError: 'LinkedIn changed page URL but kept stale cards too long. No page was skipped. Press Resume after the new cards appear.', backgroundStatus: 'Paused safely before next capture' });
+      else await setRun({ ...run, staleRetries: retries, paused: true, backgroundError: 'LinkedIn changed page URL but kept stale cards too long. No page was skipped. Press Resume after the new cards appear.', backgroundStatus: 'Paused safely before next capture' });
       return;
     }
 
@@ -430,14 +456,17 @@ async function processContinuation(tabId) {
         await scheduleContinuation(tabId, RETRY_DELAY_MS);
         return;
       }
-      await setRun({ ...run, staleRetries: 0, navigationPending: false, backgroundStatus: 'Next click did not move; retrying once without skipping' });
-      await advance({ ...run, staleRetries: 0, navigationPending: false }, tabId);
+      const nextClickRetries = Number(run.nextClickRetries || 0) + 1;
+      if (nextClickRetries > 1) {
+        await setRun({ ...run, paused: true, backgroundError: 'Next did not load a new page after a bounded retry. Progress saved; press Resume.', backgroundStatus: 'Paused on stuck pagination' });
+        return;
+      }
+      await advance({ ...run, nextClickRetries, staleRetries: 0, navigationPending: false }, tabId);
       return;
     }
 
     if (run.signatures?.includes(signature)) {
-      await setRun({ ...run, lastSignature: signature, lastPageUrl: currentUrl, navigationPending: false, staleRetries: 0, backgroundStatus: 'Current page was already captured · moving to the next page' });
-      await advance({ ...run, lastSignature: signature, lastPageUrl: currentUrl, navigationPending: false, staleRetries: 0 }, tabId);
+      await setRun({ ...run, paused: true, backgroundError: 'Pagination returned an already captured page. Progress saved; check the page and press Resume.', backgroundStatus: 'Paused on repeated page' });
       return;
     }
 
@@ -447,7 +476,7 @@ async function processContinuation(tabId) {
     const stored = await chrome.storage.local.get([FULL_RUN_KEY]);
     const run = stored[FULL_RUN_KEY];
     if (run && !run.complete) {
-      await setRun({ ...run, backgroundError: error instanceof Error ? error.message : 'Background continuation failed.', backgroundStatus: 'Paused with error' });
+      await setRun({ ...run, backgroundError: error instanceof Error ? error.message : 'Background continuation failed.', paused: true, backgroundStatus: 'Paused with error' });
     }
   } finally {
     processing = false;
@@ -465,8 +494,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         const tabId = Number(message.tabId);
         if (!Number.isFinite(tabId)) throw new Error('Sales Navigator tab was not found.');
-        const run = await startOrResume(tabId);
-        sendResponse({ ok: true, run });
+        if (processing) throw new Error('Capture is already processing a page. Wait before resuming.');
+        processing = true;
+        try {
+          const run = await startOrResume(tabId);
+          sendResponse({ ok: true, run });
+        } finally { processing = false; }
       } catch (error) {
         sendResponse({ ok: false, error: error instanceof Error ? error.message : 'Could not start full capture.' });
       }
@@ -499,7 +532,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       const stored = await chrome.storage.local.get([FULL_RUN_KEY, CONTINUATION_TAB_KEY]);
       const run = stored[FULL_RUN_KEY];
       const tabId = Number(stored[CONTINUATION_TAB_KEY]);
-      if (!run || run.complete || !Number.isFinite(tabId)) return;
+      if (!run || run.complete || run.paused || !Number.isFinite(tabId)) return;
       const age = Date.now() - Date.parse(run.backgroundUpdatedAt || run.startedAt || 0);
       if (age > 45000) await processContinuation(tabId);
     })();

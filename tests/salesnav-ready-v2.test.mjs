@@ -15,13 +15,11 @@ test('signalhire queue uses the net-new Sales Nav pipeline', () => {
   assert.match(pipeline, /isExistingPerson\(row\)/);
 });
 
-test('Ready gate blocks existing people, Retention and meetings but allows connected calls without meetings', () => {
-  assert.match(gate, /Existing HubSpot person/);
-  assert.match(gate, /Retention account/);
-  assert.match(gate, /meetingCount > 0/);
-  assert.match(gate, /Connected call allowed · no meeting/);
-  assert.match(gate, /connectedCallWithoutMeeting: "eligible"/);
-  assert.doesNotMatch(gate, /recentConnectedCall\).*protected/);
+test('Ready gate scans complete company history and blocks any connected call', () => {
+  assert.match(gate, /scanSalesNavCompany/);
+  assert.match(gate, /salesNavGate/);
+  assert.match(gate, /connectedCallWithoutMeeting: "blocked"/);
+  assert.match(gate, /body.fresh === true/);
 });
 
 test('manual SignalHire reveal is parallel and no longer waits for ATS intelligence', () => {

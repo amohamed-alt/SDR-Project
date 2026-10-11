@@ -3,6 +3,9 @@ import { z } from "zod";
 import { POST as pushProspect } from "@/app/api/prospecting/push/route";
 import { POST as hubspotPrecheckV2 } from "@/app/api/prospecting/salesnav/precheck-v2/route";
 import { manualTaskOwners } from "@/lib/acquisition-routing";
+import { batchRead } from "@/lib/hubspot";
+import { salesNavSdrOwner, usableSalesNavPhone } from "@/lib/salesnav-company-policy";
+import { sdrAdminAuthorized } from "@/lib/sdr-admin-auth";
 import { saveSalesNavPush } from "@/lib/salesnav-lead-ledger";
 
 export const runtime = "nodejs";
@@ -51,7 +54,7 @@ function unique(values: unknown[]) {
 }
 
 function prospectPhones(prospect: JsonObject) {
-  return unique([prospect.phone, ...(Array.isArray(prospect.phones) ? prospect.phones : [])]);
+  return unique([prospect.phone, ...(Array.isArray(prospect.phones) ? prospect.phones : [])]).map(usableSalesNavPhone).filter(Boolean);
 }
 
 function dueIso(value: string) {
@@ -62,6 +65,7 @@ function dueIso(value: string) {
 
 async function safetyCheck(request: NextRequest, lead: z.infer<typeof schema>["lead"], prospect: JsonObject) {
   const response = await hubspotPrecheckV2(requestLike(request, "/api/prospecting/salesnav/precheck-v2", {
+    fresh: true,
     name: prospect.fullName || lead.name,
     company: prospect.company || lead.company,
     companyWebsite: prospect.companyWebsite || "",
@@ -76,7 +80,7 @@ async function safetyCheck(request: NextRequest, lead: z.infer<typeof schema>["l
   if (!response.ok) throw new Error(String(payload.error || "HubSpot safety recheck failed."));
   return payload as {
     contact: { inHubSpot: boolean; id: string; matchedBy: string };
-    company: { inHubSpot: boolean; id: string; protected: boolean; protectedReason?: string; detectedAts?: string; careerPageUrl?: string };
+    company: { inHubSpot: boolean; id: string; protected: boolean; protectedReason?: string; detectedAts?: string; careerPageUrl?: string; atsStatus?: string; ownerId?: string };
   };
 }
 
@@ -101,11 +105,13 @@ async function patchTask(taskId: string, ownerId: string, dueAt: string) {
 
 export async function POST(request: NextRequest) {
   try {
+    if (!sdrAdminAuthorized(request)) {
+      return NextResponse.json({ error: "Unlock SDR tools before Push." }, { status: 401 });
+    }
     const parsed = schema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: "Invalid Ready push payload." }, { status: 400 });
     const input = parsed.data;
-    const owner = manualTaskOwners().find((item) => item.id === input.taskOwnerId);
-    if (!owner) return NextResponse.json({ error: "Selected task owner is not enabled." }, { status: 400 });
+    const owners = manualTaskOwners().filter((item) => ["31644369", "37624223"].includes(item.id));
     const dueAt = dueIso(input.taskDueAt);
     const prospect: JsonObject = { ...input.prospect };
 
@@ -119,8 +125,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: safety.company.protectedReason || "Company is blocked by the HubSpot gate." }, { status: 409 });
     }
 
+    const routedId = input.taskOwnerId === "auto"
+      ? salesNavSdrOwner(safety.company.detectedAts, safety.company.atsStatus)
+      : input.taskOwnerId;
+    const owner = owners.find((item) => item.id === routedId);
+    if (!owner) return NextResponse.json({ error: "Choose Marita or Daniel. Automatic routing requires verified ATS / no-ATS evidence." }, { status: 422 });
+    if (safety.company.ownerId && safety.company.ownerId !== owner.id) {
+      return NextResponse.json({ error: "Company has a different owner. Review ownership before creating SDR tasks." }, { status: 409 });
+    }
+    prospect.assignmentMode = "acquisition";
+    prospect.ownerId = owner.id;
+    prospect.ownerName = owner.name;
+
     const phones = prospectPhones(prospect);
     if (!phones.length) return NextResponse.json({ error: "Phone required. Reveal this eligible new person first." }, { status: 422 });
+
+    prospect.phone = phones[0];
+    prospect.phones = phones;
 
     // Preserve known HubSpot company intelligence without making reveal wait for slow ATS research.
     if (!String(prospect.detectedAts || "").trim() && safety.company.detectedAts) prospect.detectedAts = safety.company.detectedAts;
@@ -147,7 +168,13 @@ export async function POST(request: NextRequest) {
     const companyId = String(pushPayload.companyId || safety.company.id || "");
     const duplicate = Boolean(pushPayload.duplicate);
 
-    if (taskId && !duplicate) await patchTask(taskId, owner.id, dueAt);
+    if (!taskId || !contactId) throw new Error("HubSpot push did not confirm contact and task IDs. Review before retrying.");
+    if (String(pushPayload.ownerId || "") !== owner.id) throw new Error("HubSpot preserved a different company owner. Review the existing task before retrying.");
+    if (!duplicate) await patchTask(taskId, owner.id, dueAt);
+    const task = (await batchRead("tasks", [taskId], ["hubspot_owner_id", "hs_timestamp"]))[0];
+    if (!task || String(task.properties.hubspot_owner_id) !== owner.id || (!duplicate && Date.parse(String(task.properties.hs_timestamp)) !== Date.parse(dueAt))) {
+      throw new Error(`Task ${taskId} was written but verification failed. Review it before retrying.`);
+    }
     await saveSalesNavPush({ identity: input.lead, prospect, runId: input.runId, taskId, contactId, companyId });
 
     return NextResponse.json({

@@ -8,7 +8,7 @@ This is the Talentera SDR Chrome companion for user-triggered prospecting workfl
 2. Open `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Click **Load unpacked** and select the `chrome-companion` folder.
-5. Confirm the extension shows version **1.5.0** or newer.
+5. Confirm the extension shows version **1.5.6** or newer.
 6. In the SDR Dashboard, open **Sales Nav → Companion setup**.
 7. Unlock admin settings and click **Generate / rotate token**.
 8. Paste that token into the extension and click **Test connection**.
@@ -29,10 +29,10 @@ This is the Talentera SDR Chrome companion for user-triggered prospecting workfl
 5. Full capture stops at whichever happens first: no Next page, 100 pages, or 2,500 unique leads.
 6. If the popup closes or the browser interrupts the run, progress is also kept in `chrome.storage.local`. Reopen the extension on the same search and press **Resume full search**.
 7. Click **Open full-run queue** to review the saved run in the dashboard.
-8. In the queue, run **HubSpot precheck** first. A meaningful existing meeting blocks the lead; a connected call without a meeting remains eligible.
-9. Existing HubSpot contacts that already have a phone are marked **0-credit**. Only leads still needing contact details can be selected for **Reveal selected**.
+8. In the queue, run **HubSpot precheck** first. Existing people, any connected call or meaningful meeting, Retention accounts/deals and open deals block the lead. The check follows all company contacts and association pages; failed or partial reads require review.
+9. Existing HubSpot people are excluded from this net-new queue. Previous successful reveals are reused at zero new contact credits. Only eligible new people can be selected for **Reveal selected**.
 10. SignalHire reveal is never automatic in the full-search workflow. The UI shows the selected count and asks for confirmation before any contact credits can be used.
-11. Revealed rows can then run ATS / career-page intelligence and be reviewed before **Push + Tasks**.
+11. Choose Marita or Daniel, or automatic routing using verified HubSpot ATS evidence (ATS → Daniel, confirmed no ATS → Marita). Unknown ATS requires manual review. A different existing company owner blocks the push. Task owner and due time are reread from HubSpot before success is recorded.
 
 ## SignalHire Lead List workflow
 
@@ -55,10 +55,16 @@ This is the Talentera SDR Chrome companion for user-triggered prospecting workfl
 - 1st-degree Sales Navigator connections are removed before import.
 - Full capture itself spends **zero SignalHire contact credits**.
 - HubSpot is checked before any manual SignalHire reveal in the full-run queue.
-- Meeting history is a hard block for the full-run queue; connected-call-only accounts stay eligible.
+- Any connected call or meaningful meeting is a hard block for the net-new queue. Retention deals also block even if the company account type is blank.
 - SignalHire reveal requires explicit user selection and confirmation.
 - SignalHire Lead List imports still require a real candidate/profile identity URL and parser v2; resume/history rows are rejected at browser and server layers.
 
 ## Detection note
 
 This is not an anti-detection tool. Websites can observe normal page loads and navigation associated with the user's session. The companion deliberately uses ordinary visible Sales Navigator pagination and avoids stealth or anti-bot evasion techniques.
+
+## Pagination recovery in 1.5.6
+
+The active background worker scopes Next to visible pagination controls, supports English and Arabic labels, and checks both disabled and aria-disabled. Missing or ambiguous pagination pauses with saved progress instead of reporting completion. Changed search filters pause the old run; stale results never trigger an unsaved-page advance. A stuck Next click gets one bounded retry. Resume continues the same search after review.
+
+Capture saves up to 100 pages / 2,500 unique people actually returned by the current Sales Navigator search. It cannot guarantee that LinkedIn exposes every matching person. Install/reload this version in Chrome and test a two-page search in your logged-in session before a full run. No live LinkedIn session or production CRM write is part of automated fixture tests.
