@@ -1,0 +1,79 @@
+name: Isolated SalesNav Queue Read-Only Preflight
+on:
+  push:
+    branches: [ops/salesnav-20261012-readonly]
+    paths: [.github/workflows/salesnav-20261012-readonly.yml]
+permissions:
+  contents: read
+concurrency:
+  group: salesnav-20261012-readonly
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      SDR_ADMIN_PASSWORD: ${{ secrets.SDR_ADMIN_PASSWORD }}
+    steps:
+      - name: Authenticate normally and inspect saved run without paid calls or CRM writes
+        shell: bash
+        run: |
+          python - <<'PYCODE'
+          import collections
+          import http.cookiejar
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          BASE = 'https://sdr.dashboardtalentera.tech'
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+          opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
+          def request(path, body=None):
+              data = None if body is None else json.dumps(body).encode()
+              req = urllib.request.Request(BASE + path, data=data, headers={'Content-Type': 'application/json', 'Cache-Control': 'no-store'})
+              try:
+                  with opener.open(req, timeout=35) as response:
+                      return json.load(response)
+              except urllib.error.HTTPError as error:
+                  raise RuntimeError('HTTP %s at %s; response body suppressed' % (error.code, path.split('?')[0])) from None
+              except Exception as error:
+                  raise RuntimeError('Request failed at %s (%s); sensitive details suppressed' % (path.split('?')[0], type(error).__name__)) from None
+
+          password = os.environ.get('SDR_ADMIN_PASSWORD', '')
+          if not password:
+              raise SystemExit('BLOCKED: SDR_ADMIN_PASSWORD is not available to this isolated workflow. No CRM or enrichment calls made.')
+          status = request('/api/sdr-admin', {'password': password})
+          del password
+          if not status.get('unlocked'):
+              raise SystemExit('BLOCKED: normal SDR admin authentication did not succeed. No CRM or enrichment calls made.')
+          payload = request('/api/prospecting/salesnav/full-run')
+          run = payload.get('run') or {}
+          leads = run.get('leads') or []
+          keys = [str(p.get('linkedinUrl') or p.get('salesLeadUrl') or (str(p.get('name', '')) + ':' + str(p.get('company', '')))) for p in leads]
+          ksa = lambda p: bool(re.search(r'saudi|riyadh|jeddah|dammam|khobar|mecca|makkah|medina|madinah|السعودية|الرياض|جدة|الدمام|الخبر', str(p.get('location', '')), re.I))
+          options = request('/api/prospecting/salesnav/task-options')
+          summary = {
+              'mode': 'read_only_no_enrichment_no_crm_writes',
+              'auth': 'SDR_ADMIN_PASSWORD normal login succeeded; no credentials exported',
+              'runId': run.get('id'), 'runTotal': run.get('total'), 'actualRows': len(leads),
+              'uniqueRows': len(set(keys)), 'duplicateRows': len(keys)-len(set(keys)),
+              'runComplete': run.get('complete'), 'pagesRead': run.get('pagesRead'),
+              'startedAt': run.get('startedAt'), 'updatedAt': run.get('updatedAt'),
+              'saudiLocationHintsOnly': sum(ksa(p) for p in leads),
+              'missingCompany': sum(not p.get('company') for p in leads),
+              'withLinkedinUrl': sum(bool(p.get('linkedinUrl')) for p in leads),
+              'history': [{k: item.get(k) for k in ('id', 'total', 'pagesRead', 'complete', 'startedAt', 'updatedAt')} for item in payload.get('history', [])[:15]],
+              'targetOwners': [{'id': owner.get('id'), 'target': 'marita' if 'marita' in str(owner.get('name','')).lower() else 'daniel'} for owner in options.get('owners', []) if re.search(r'marita|daniel', str(owner.get('name','')), re.I)],
+              'signalhireRevealCalls': 0, 'hubspotWrites': 0,
+              'note': 'Location hints do not prove company eligibility. No people or contact data is published.'
+          }
+          encoded = json.dumps(summary, indent=2)
+          print('SDR_PREFLIGHT_SUMMARY\n' + encoded)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as report:
+              report.write('# SalesNav queue read-only preflight for 2026-10-12\n```json\n' + encoded + '\n```\n')
+          PYCODE
