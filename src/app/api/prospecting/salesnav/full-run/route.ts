@@ -8,13 +8,13 @@ import {
   listCompanionFullRuns,
   saveCompanionFullRunPage,
 } from "@/lib/salesnav-companion";
-import { SALESNAV_SETUP_COOKIE, verifySalesNavSetupKey } from "@/lib/salesnav-session";
+import { sdrAdminAuthorized } from "@/lib/sdr-admin-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function unlocked(request: NextRequest) {
-  return verifySalesNavSetupKey(request.cookies.get(SALESNAV_SETUP_COOKIE)?.value || "");
+  return sdrAdminAuthorized(request);
 }
 
 async function migrateLegacyBatchIfNeeded() {

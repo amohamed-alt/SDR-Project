@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { SALESNAV_SETUP_COOKIE, clearLinkedInSession, verifySalesNavSetupKey } from "@/lib/salesnav-session";
+import { clearLinkedInSession } from "@/lib/salesnav-session";
+import { sdrAdminAuthorized } from "@/lib/sdr-admin-auth";
 import {
   companionStatus,
   finishCompanionFullRun,
@@ -69,7 +70,7 @@ function corsHeaders() {
 }
 
 function unlocked(request: NextRequest) {
-  return verifySalesNavSetupKey(request.cookies.get(SALESNAV_SETUP_COOKIE)?.value || "");
+  return sdrAdminAuthorized(request);
 }
 
 function bearer(request: NextRequest) {
