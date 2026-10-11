@@ -19,9 +19,9 @@ test("companion setup unlocks with the tools password and shares its signed sess
   await page.getByPlaceholder("Enter SDR admin setup key").fill("playwright-tools-only-password");
   await page.getByRole("button", { name: "Unlock", exact: true }).click();
   await expect(page.getByText("Admin setup unlocked on this browser.", { exact: true })).toBeVisible();
-  expect((await (await page.request.get("/api/prospecting/salesnav/companion")).json()).unlocked).toBe(true);
-  expect((await page.request.get("/api/prospecting/salesnav/task-options")).status()).toBe(200);
-  expect((await page.request.get("/api/prospecting/salesnav/full-run")).status()).toBe(200);
+  expect(await page.evaluate(async () => (await (await fetch("/api/prospecting/salesnav/companion")).json()).unlocked)).toBe(true);
+  expect(await page.evaluate(async () => (await fetch("/api/prospecting/salesnav/task-options")).status)).toBe(200);
+  expect(await page.evaluate(async () => (await fetch("/api/prospecting/salesnav/full-run")).status)).toBe(200);
   expect((await page.context().cookies()).some(row => row.name === "salesnav_setup")).toBe(false);
   await page.request.delete("/api/sdr-admin");
   expect((await (await page.request.get("/api/prospecting/salesnav/companion")).json()).unlocked).toBe(false);
