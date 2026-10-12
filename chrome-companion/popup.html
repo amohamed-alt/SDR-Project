@@ -11,11 +11,12 @@
     <header>
       <div class="eyebrow">TALENTERA SDR</div>
       <h1>Prospecting Companion</h1>
-      <p>Sales Navigator is the lead source. Everything goes to one persistent SDR queue; SignalHire reveal stays manual.</p>
+      <p>Sales Navigator is the lead source. Capture searches or check and push the profile you are viewing. Contact reveal stays manual.</p>
       <div id="versionStatus" class="status muted">Loading version…</div>
     </header>
 
     <section class="card">
+      <details id="pairingDetails"><summary>Connection settings</summary>
       <label>Dashboard URL</label>
       <input id="dashboard" value="https://sdr.dashboardtalentera.tech" />
       <label>Pairing token</label>
@@ -25,6 +26,23 @@
         <button id="ping" class="secondary">Test connection</button>
       </div>
       <div id="pairStatus" class="status muted">Not checked</div>
+      </details>
+    </section>
+
+    <section class="card" id="workQueueCard" hidden>
+      <h2>Work the current 25</h2>
+      <p class="small">Capture this search page, select people, then read their public profile URLs and check HubSpot. Profile reading opens temporary tabs and returns you to this search.</p>
+      <button id="workQueueCapture" class="primary">Load current page · up to 25</button>
+      <p class="small" id="workQueueSource"></p>
+      <div id="workQueueStatus" class="status muted" role="status" aria-live="polite">No page loaded</div>
+      <div class="row"><button id="workQueueSelect" class="secondary">Select / clear all</button><button id="workQueueCheck" class="secondary" disabled>Read profiles + HubSpot Check</button></div>
+      <p class="small" id="workQueueSelection">0 selected</p>
+      <div class="workQueueTable"><table><thead><tr><th>Select</th><th>Person / company</th><th>Status / contacts</th></tr></thead><tbody id="workQueueRows"></tbody></table></div>
+      <button id="workQueueReveal" class="secondary" disabled>Reveal selected (0)</button>
+      <label for="workQueueOwner">Task owner</label><select id="workQueueOwner"><option value="">Loading owners…</option></select>
+      <div class="row"><div><label for="workQueueDate">Due date</label><input id="workQueueDate" type="date" /></div><div><label for="workQueueTime">Time (your timezone)</label><input id="workQueueTime" type="time" value="09:00" /></div></div>
+      <button id="workQueuePush" class="primary" disabled>Push + CALL tasks (0)</button>
+      <button id="workQueueStop" class="secondary" disabled>Stop after current lead</button>
     </section>
 
     <section class="card">
@@ -43,17 +61,24 @@
     </section>
 
     <section class="card" id="liveProfileCard" hidden>
-      <h2>This LinkedIn Profile</h2>
-      <p class="small">Live check for the profile you're viewing right now — HubSpot status and hiring signal, no full extract needed.</p>
-      <button id="enrichProfile" class="primary">Enrich this profile</button>
-      <div id="liveProfileStatus" class="status muted">Checking page…</div>
+      <h2>Work this profile</h2>
+      <p class="small">Read the profile you're viewing and check HubSpot first. Reveal and push stay separate.</p>
+      <button id="enrichProfile" class="primary">Read profile + HubSpot Check</button>
+      <div id="liveProfileStatus" class="status muted" role="status" aria-live="polite">Checking page…</div>
       <div id="liveProfileResult" class="liveProfileResult" hidden>
         <div class="liveProfileName" id="liveProfileName"></div>
-        <div class="liveProfileBadges">
-          <span id="liveProfileHubspot" class="badge muted"></span>
-          <span id="liveProfileHiring" class="badge muted"></span>
+        <a id="liveProfileUrl" target="_blank" rel="noreferrer"></a>
+        <div class="liveProfileBadges"><span id="liveProfileHubspot" class="badge muted"></span></div>
+        <p class="small" id="liveProfileGate"></p>
+        <p id="liveProfileContacts" class="small"></p>
+        <button id="revealProfile" class="secondary" disabled>Reveal phone / email</button>
+        <label for="liveProfileOwner">Task owner</label>
+        <select id="liveProfileOwner"><option value="">Loading owners…</option></select>
+        <div class="row">
+          <div><label for="liveProfileDate">Due date</label><input id="liveProfileDate" type="date" /></div>
+          <div><label for="liveProfileTime">Time (your timezone)</label><input id="liveProfileTime" type="time" value="09:00" /></div>
         </div>
-        <button id="pushProfile" class="primary">Push to Marita</button>
+        <button id="pushProfile" class="primary" disabled>Push + CALL task</button>
       </div>
     </section>
 
@@ -69,6 +94,8 @@
   <script src="popup.js"></script>
   <script src="popup-v154.js"></script>
   <script src="popup-signalhire.js"></script>
+  <script src="profile-dom.js"></script>
   <script src="popup-live-profile.js"></script>
+  <script src="popup-work-queue.js"></script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 const DEFAULT_DASHBOARD = 'https://sdr.dashboardtalentera.tech';
 const CLIENT_VERSION = chrome.runtime.getManifest().version;
-const PARSER_VERSION = 'card-v3-full-search';
+const PARSER_VERSION = 'card-v4-correct-title';
 const FULL_RUN_KEY = 'salesNavFullRunV1';
 const FULL_RUN_MAX_PAGES = 100;
 const FULL_RUN_MAX_LEADS = 2500;
@@ -59,6 +59,7 @@ async function loadSettings() {
   const stored = await chrome.storage.local.get(['dashboardUrl', 'pairingToken', FULL_RUN_KEY]);
   $('dashboard').value = cleanDashboard(stored.dashboardUrl || DEFAULT_DASHBOARD);
   $('token').value = stored.pairingToken || '';
+  if ($('pairingDetails')) $('pairingDetails').open = !stored.pairingToken;
   setStatus('versionStatus', `Companion v${CLIENT_VERSION} · parser ${PARSER_VERSION}`);
   const run = stored[FULL_RUN_KEY];
   if (run && !run.complete) {
@@ -141,7 +142,7 @@ async function extractCurrentSalesNavPage() {
   const isNoise = (value) => {
     const text = String(value || '').trim();
     if (!text) return true;
-    return /(?:\b(?:1st|2nd|3rd)\b.*degree connection|linkedin premium member|shared connections?|recently posted|^save$|^message$|^connect$|^view profile$|^more$|^follow$)/i.test(text);
+    return /(?:\b(?:1st|2nd|3rd)\b.*degree connection|linkedin premium member|shared connections?|recently posted|\bin role\b|\bin company\b|^[·•\s]*(?:1st|2nd|3rd)$|^viewed$|you[’\']ve already seen|^about:$|^…?\s*show more$|^save$|^message$|^connect$|^view profile$|^more$|^follow$)/i.test(text);
   };
 
   const companyFromCard = (card, anchors, lines, name, locationText) => {
@@ -165,7 +166,8 @@ async function extractCurrentSalesNavPage() {
   };
 
   const titleFromCard = (card, lines, name, company, locationText) => {
-    const structured = textOf(card.querySelector('[data-anonymize="job-title"]'));
+    const structured = textOf(card.querySelector('[data-anonymize="title"]'))
+      || textOf(card.querySelector('[data-anonymize="job-title"]'));
     if (structured && !isNoise(structured)) return structured;
 
     const candidates = lines.filter((line) => line !== name && line !== company && line !== locationText && !isNoise(line) && line.length <= 240);

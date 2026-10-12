@@ -21,6 +21,7 @@ export type CompanionLead = {
 
 type PairingStore = {
   tokenHash: string;
+  profileActionsEnabled?: boolean;
   createdAt: string;
   lastUsedAt?: string;
 };
@@ -79,6 +80,7 @@ async function readPairingStore(): Promise<PairingStore | null> {
     if (!parsed.tokenHash) return null;
     return {
       tokenHash: String(parsed.tokenHash),
+      profileActionsEnabled: parsed.profileActionsEnabled === true,
       createdAt: String(parsed.createdAt || ""),
       lastUsedAt: String(parsed.lastUsedAt || ""),
     };
@@ -116,6 +118,7 @@ export async function companionStatus() {
   const store = await readPairingStore();
   return {
     paired: Boolean(store?.tokenHash),
+    profileActionsEnabled: store?.profileActionsEnabled === true,
     createdAt: store?.createdAt || "",
     lastUsedAt: store?.lastUsedAt || "",
   };
@@ -125,6 +128,7 @@ export async function generateCompanionToken() {
   const token = `snc_${randomBytes(32).toString("base64url")}`;
   await atomicWrite(PAIRING_STORE, JSON.stringify({
     tokenHash: sha256(token),
+    profileActionsEnabled: true,
     createdAt: new Date().toISOString(),
   }));
   return token;

@@ -3,3 +3,9 @@
 .liveProfileName{font-size:13px;font-weight:850;margin-bottom:6px}
 .liveProfileBadges{display:flex;gap:6px;flex-wrap:wrap}
 .badge{padding:5px 8px;border-radius:7px;font-size:10px;font-weight:800}
+
+select{width:100%;border:1px solid #d5e2dd;border-radius:9px;padding:9px 10px;font:inherit;background:#fff}#liveProfileUrl{display:block;font-size:11px;overflow-wrap:anywhere;color:#087a50;margin-bottom:8px}#liveProfileGate,#liveProfileContacts{margin-top:8px}[hidden]{display:none!important}
+
+body:has(#workQueueCard:not([hidden])){width:620px}.workQueueTable{max-height:330px;overflow:auto;margin-top:8px}.workQueueTable table{width:100%;border-collapse:collapse;table-layout:fixed}.workQueueTable th{position:sticky;top:0;background:#f2f5f4;text-align:left;font-size:10px;padding:6px}.workQueueTable th:first-child{width:48px}.workQueueTable td{vertical-align:top;padding:7px 5px;border-bottom:1px solid #edf2ef;font-size:11px;overflow-wrap:anywhere}.workQueueTable td input{width:auto}.workQueueTable td strong,.workQueueTable td small,.workQueueTable td a{display:block}.workQueueTable td small{color:#697b74;margin-top:3px}.workQueueTable td a{font-size:10px;color:#087a50}
+
+summary{cursor:pointer;font-weight:800;color:#244f41}details[open] summary{margin-bottom:9px}

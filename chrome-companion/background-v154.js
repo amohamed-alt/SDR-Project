@@ -1,3 +1,4 @@
+importScripts('queue-v160.js');
 const FULL_RUN_KEY = 'salesNavFullRunV1';
 const CONTINUATION_TAB_KEY = 'salesNavFullRunContinuationTabV1';
 const CONTINUE_ALARM = 'salesnav-full-run-v154-continue';
@@ -6,7 +7,7 @@ const DASHBOARD_DEFAULT = 'https://sdr.dashboardtalentera.tech';
 const MAX_PAGES = 100;
 const MAX_LEADS = 2500;
 const CLIENT_VERSION = chrome.runtime.getManifest().version;
-const PARSER_VERSION = 'card-v4-single-engine';
+const PARSER_VERSION = 'card-v5-title-profile-queue';
 const NORMAL_DELAY_MS = 6500;
 const RETRY_DELAY_MS = 3000;
 const MAX_STALE_RETRIES = 8;
@@ -156,7 +157,7 @@ async function extractCurrentSalesNavPageV154() {
   const isNoise = (value) => {
     const text = String(value || '').trim();
     if (!text) return true;
-    return /(?:\b(?:1st|2nd|3rd)\b.*degree connection|linkedin premium member|shared connections?|recently posted|^save$|^message$|^connect$|^view profile$|^more$|^follow$)/i.test(text);
+    return /(?:\b(?:1st|2nd|3rd)\b.*degree connection|linkedin premium member|shared connections?|recently posted|\bin role\b|\bin company\b|^[·•\s]*(?:1st|2nd|3rd)$|^viewed$|you[’\']ve already seen|^about:$|^…?\s*show more$|^save$|^message$|^connect$|^view profile$|^more$|^follow$)/i.test(text);
   };
   const locationFromCard = (card, lines) => {
     const structured = textOf(card.querySelector('[data-anonymize="location"]'));
@@ -181,7 +182,8 @@ async function extractCurrentSalesNavPageV154() {
     return '';
   };
   const titleFromCard = (card, lines, name, company, locationText) => {
-    const structured = textOf(card.querySelector('[data-anonymize="job-title"]'));
+    const structured = textOf(card.querySelector('[data-anonymize="title"]'))
+      || textOf(card.querySelector('[data-anonymize="job-title"]'));
     if (structured && !isNoise(structured)) return structured;
     const candidates = lines.filter((line) => line !== name && line !== company && line !== locationText && !isNoise(line) && line.length <= 240);
     let title = candidates[0] || '';

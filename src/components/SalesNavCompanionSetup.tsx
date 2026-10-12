@@ -92,17 +92,18 @@ export function SalesNavCompanionSetup() {
         <label>One-time pairing token</label>
         <div className={styles.row}>
           <input readOnly value={token} placeholder="Generate a token, then paste it into the extension" />
-          <button disabled={busy} onClick={() => void generate()}>Generate / rotate token</button>
+          <button disabled={busy} onClick={() => void generate()}>Enable profile actions / rotate token</button>
           <button disabled={!token} onClick={() => void navigator.clipboard.writeText(token)}>Copy token</button>
         </div>
       </div>}
 
       {message && <div className={styles.message}>{message}</div>}
       <div className={styles.actions}>
+        <a href="/downloads/talentera-companion-v1.6.0.zip" download>Download Companion v1.6.0</a>
         <Link href="/signalhire-queue">Open Persistent Prospecting Queue</Link>
         <a href="https://github.com/amohamed-alt/SDR-Project/tree/main/chrome-companion" target="_blank" rel="noreferrer">Chrome Companion files</a>
       </div>
-      <p className={styles.note}>Recommended flow: Sales Navigator → Companion “Capture FULL search” → Persistent Queue → HubSpot Check → manual SignalHire reveal only when needed → Push Ready + Tasks.</p>
+      <p className={styles.note}>v1.6.0: Load current 25 → Read profiles + HubSpot Check → manual Reveal → select Marita/Daniel and task time → Push. Enable profile actions and copy the new token once; previous tokens retain capture-only access.</p>
     </section>
   </main>;
 }

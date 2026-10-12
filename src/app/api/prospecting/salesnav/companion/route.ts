@@ -1,3 +1,4 @@
+import { handleCompanionProfileAction } from "@/lib/companion-profile-actions";
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -183,6 +184,12 @@ export async function POST(request: NextRequest) {
   if (!await verifyCompanionToken(token)) {
     return NextResponse.json({ error: "Invalid or expired companion pairing token." }, { status: 401, headers: corsHeaders() });
   }
+
+  if (["profile_options", "profile_check", "profile_reveal", "profile_push"].includes(String(body.action || "")) && !(await companionStatus()).profileActionsEnabled) {
+    return NextResponse.json({ error: "Generate a new pairing token in Companion setup to enable on-page checks and SDR pushes. Your existing token still works for capture." }, { status: 403, headers: corsHeaders() });
+  }
+  const profileAction = await handleCompanionProfileAction(request, body);
+  if (profileAction) { await touchCompanionToken(); return new NextResponse(profileAction.body, { status: profileAction.status, headers: { ...corsHeaders(), "Content-Type": "application/json" } }); }
 
   const fullRunPage = fullRunPageSchema.safeParse(body);
   if (fullRunPage.success) {

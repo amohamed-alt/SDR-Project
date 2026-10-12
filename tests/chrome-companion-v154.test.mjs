@@ -9,8 +9,8 @@ const popupController = fs.readFileSync('chrome-companion/popup-v154.js', 'utf8'
 const background = fs.readFileSync('chrome-companion/background-v154.js', 'utf8');
 const popupLiveProfile = fs.readFileSync('chrome-companion/popup-live-profile.js', 'utf8');
 
-test('Chrome Companion v1.5.5 uses one background full-search engine', () => {
-  assert.equal(manifest.version, '1.5.5');
+test('Chrome Companion v1.6.0 uses one background full-search engine', () => {
+  assert.equal(manifest.version, '1.6.0');
   assert.equal(manifest.background?.service_worker, 'background-v154.js');
   assert.match(popupHtml, /popup-v154\.js/);
   assert.doesNotMatch(background, /importScripts\(['"]background\.js/);

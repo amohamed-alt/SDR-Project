@@ -8,9 +8,9 @@ This is the Talentera SDR Chrome companion for user-triggered prospecting workfl
 2. Open `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Click **Load unpacked** and select the `chrome-companion` folder.
-5. Confirm the extension shows version **1.5.0** or newer.
+5. Confirm the extension shows version **1.6.0**.
 6. In the SDR Dashboard, open **Sales Nav → Companion setup**.
-7. Unlock admin settings and click **Generate / rotate token**.
+7. Unlock admin settings and click **Enable profile actions / rotate token**.
 8. Paste that token into the extension and click **Test connection**.
 
 ## Sales Navigator quick workflow
@@ -62,3 +62,21 @@ This is the Talentera SDR Chrome companion for user-triggered prospecting workfl
 ## Detection note
 
 This is not an anti-detection tool. Websites can observe normal page loads and navigation associated with the user's session. The companion deliberately uses ordinary visible Sales Navigator pagination and avoids stealth or anti-bot evasion techniques.
+
+
+## v1.6.0: work the current 25 without opening the dashboard
+
+1. Reload the unpacked extension to install v1.6.0. In Companion setup, enable profile actions / rotate token once, then save the new token in the extension. Previous capture tokens deliberately cannot reveal or push via the new controls.
+2. Stay on the Sales Navigator People Search page and open the extension.
+3. Click **Load current page · up to 25**. This reads the cards only and uses no contact credits.
+4. Select the people to review and click **Read profiles + HubSpot Check**. Chrome asks for optional LinkedIn host access on the first click. This allows the companion to open ordinary temporary Sales Navigator profile tabs, read the current role and **View LinkedIn profile** link, then close them. The search tab stays in place. No cookie access or hidden profile API is used.
+5. Existing HubSpot people, Retention companies, meaningful meetings, incomplete communication checks and mismatched provider identities are blocked. The current queue policy continues to allow connected calls without a meeting.
+6. Select eligible people and click **Reveal selected**. Confirm credit use. The server reuses the reveal ledger; it does not accept arbitrary client-supplied phone data for push.
+7. Choose **Marita or Daniel**, the date and the local time. Select the ready people and click **Push + CALL tasks**. Confirm the exact owner/time. The server rechecks eligibility and rereads the written task, its owner/time and contact association before reporting success.
+8. Progress is kept in local extension storage when the popup closes. Reopen to review. **Stop after current lead** cancels remaining work; it does not reverse completed operations.
+
+Search captures now read `data-anonymize="title"`; `job-title` contains tenure on current search cards. Plain `/in/` URLs are absent from these cards, so they are completed during the explicit profile-reading step rather than invented or inferred.
+
+The page queue is limited to the loaded page. Full-search capture remains available separately and uses the persistent dashboard queue.
+
+Rebuild the versioned download after extension changes with `python3 scripts/package-companion.py` from the repository root.

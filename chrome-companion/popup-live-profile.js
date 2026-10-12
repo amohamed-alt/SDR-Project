@@ -1,121 +1,64 @@
-// Live single-profile lookup: works on one LinkedIn profile page at a time,
-// using the exact same server-side resolve/push endpoints the batch flow
-// already relies on. Deliberately does not scrape the LinkedIn page DOM —
-// only reads the tab's URL — to avoid depending on LinkedIn's markup, which
-// changes without notice and can't be verified outside a live browser.
-
-function profileUrlFromTab(url) {
-  try {
-    const parsed = new URL(String(url || ''));
-    const host = parsed.hostname.replace(/^www\./, '');
-    if (host !== 'linkedin.com') return '';
-    if (/^\/in\/[^/]+\/?$/i.test(parsed.pathname)) return parsed.href;
-    if (/^\/sales\/lead\//i.test(parsed.pathname)) return parsed.href;
-    return '';
-  } catch {
-    return '';
+function profileUrlFromTab(raw) {
+  try { const url = new URL(raw); return url.protocol === 'https:' && /^(www\.)?linkedin\.com$/.test(url.hostname) && /^\/(?:in\/[^/]+\/?|sales\/lead\/.+)$/.test(url.pathname) ? url.href : ''; }
+  catch { return ''; }
+}
+(() => {
+  let lead = null, state = null, working = false;
+  const el = (id) => document.getElementById(id);
+  const status = (message, kind = 'muted') => setStatus('liveProfileStatus', message, kind);
+  async function api(body) {
+    const { pairingToken } = await chrome.storage.local.get(['pairingToken']);
+    if (!pairingToken) throw new Error('Save a pairing token first.');
+    const response = await fetch('https://sdr.dashboardtalentera.tech/api/prospecting/salesnav/companion', { method: 'POST', headers: { Authorization: `Bearer ${pairingToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(120000) });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) throw new Error(payload.error || 'Profile operation failed.');
+    return payload;
   }
-}
-
-function setLiveStatus(message, state = 'muted') {
-  const node = document.getElementById('liveProfileStatus');
-  if (!node) return;
-  node.textContent = message;
-  node.className = `status ${state}`;
-}
-
-function setBadge(id, label, state) {
-  const node = document.getElementById(id);
-  if (!node) return;
-  node.textContent = label;
-  node.className = `badge ${state}`;
-}
-
-async function liveSettings() {
-  const stored = await chrome.storage.local.get(['dashboardUrl']);
-  const raw = String(stored.dashboardUrl || 'https://sdr.dashboardtalentera.tech').trim();
-  try {
-    const url = new URL(raw);
-    return `${url.protocol}//${url.host}`;
-  } catch {
-    return 'https://sdr.dashboardtalentera.tech';
+  function render() {
+    el('liveProfileResult').hidden = !lead || !state;
+    if (lead) { el('liveProfileName').textContent = `${lead.name} · ${lead.title} · ${lead.company}`; el('liveProfileUrl').textContent = lead.linkedinUrl; el('liveProfileUrl').href = lead.linkedinUrl; }
+    if (state) {
+      el('liveProfileHubspot').textContent = state.check?.eligible ? 'Eligible new person' : 'Blocked';
+      el('liveProfileHubspot').className = `badge ${state.check?.eligible ? 'ok' : 'bad'}`;
+      el('liveProfileGate').textContent = state.check?.identityError || state.check?.company?.protectedReason || state.check?.company?.gateReason || '';
+      el('liveProfileContacts').textContent = [state.prospect?.phone || state.prospect?.phones?.[0],state.prospect?.email].filter(Boolean).join(' · ') || 'No usable phone yet';
+    }
+    el('enrichProfile').disabled = working;
+    el('revealProfile').disabled = working || !state?.check?.eligible || state?.hasPhone || state?.revealAttempted || !!state?.previousPush;
+    el('pushProfile').disabled = working || !state?.check?.eligible || !state?.hasPhone || !el('liveProfileOwner').value || !!state?.previousPush;
   }
-}
-
-let currentProfileUrl = '';
-let currentProspect = null;
-
-async function initLiveProfile() {
-  const card = document.getElementById('liveProfileCard');
-  const enrichButton = document.getElementById('enrichProfile');
-  const pushButton = document.getElementById('pushProfile');
-  const resultBox = document.getElementById('liveProfileResult');
-  if (!card || !enrichButton || !pushButton || !resultBox) return;
-
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  currentProfileUrl = profileUrlFromTab(tab?.url);
-  if (!currentProfileUrl) return; // Not a single profile page — leave the card hidden.
-
-  card.hidden = false;
-  setLiveStatus('Ready to check this profile', 'muted');
-
-  enrichButton.addEventListener('click', async () => {
-    enrichButton.disabled = true;
-    resultBox.hidden = true;
-    setLiveStatus('Checking HubSpot and hiring status…', 'muted');
-    try {
-      const dashboardUrl = await liveSettings();
-      const response = await fetch(`${dashboardUrl}/api/prospecting/resolve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ linkedinUrl: currentProfileUrl, source: 'Chrome Companion — Live Profile' }),
-      });
-      const payload = await response.json();
-      if (!response.ok || !payload.prospect) {
-        throw new Error(payload.error || 'Could not resolve this profile.');
-      }
-      currentProspect = payload.prospect;
-      document.getElementById('liveProfileName').textContent =
-        [currentProspect.fullName, currentProspect.title, currentProspect.company].filter(Boolean).join(' · ') || 'Profile resolved';
-      setBadge(
-        'liveProfileHubspot',
-        currentProspect.hubspot?.inHubSpot ? 'In HubSpot' : 'Not in HubSpot',
-        currentProspect.hubspot?.inHubSpot ? 'ok' : 'muted',
-      );
-      const hiringStatus = currentProspect.hiring?.status || 'Unknown';
-      setBadge('liveProfileHiring', hiringStatus, hiringStatus === 'Hiring Now' ? 'ok' : 'muted');
-      resultBox.hidden = false;
-      pushButton.disabled = false;
-      pushButton.textContent = 'Push to Marita';
-      setLiveStatus('Profile resolved', 'ok');
-    } catch (error) {
-      setLiveStatus(error instanceof Error ? error.message : 'Could not resolve this profile.', 'bad');
-    } finally {
-      enrichButton.disabled = false;
-    }
+  document.addEventListener('DOMContentLoaded', async () => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!profileUrlFromTab(tab?.url)) return;
+    el('liveProfileCard').hidden = false; status('Read the profile and check HubSpot before revealing contact details.');
+    const date = new Date(); date.setDate(date.getDate()+1); el('liveProfileDate').value = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+    try { const data = await api({ action:'profile_options' }); el('liveProfileOwner').replaceChildren(); for (const owner of data.owners || []) { const option = document.createElement('option'); option.value = owner.id; option.textContent = owner.name; el('liveProfileOwner').append(option); } }
+    catch(error) { status(error.message,'bad'); }
+    el('liveProfileOwner').addEventListener('change',render);
+    el('enrichProfile').addEventListener('click',async () => {
+      working = true; lead = null; state = null; render(); status('Reading visible profile and checking HubSpot…');
+      try { await chrome.scripting.executeScript({ target:{tabId:tab.id}, files:['profile-dom.js'] }); const values = await chrome.scripting.executeScript({ target:{tabId:tab.id}, func:readVisibleLinkedInProfile }); const value = values?.[0]?.result; if (!value?.ok) throw new Error(value?.error || 'Could not read the profile.'); lead = value.lead; state = await api({ action:'profile_check',lead }); status(state.previousPush ? `Already pushed · task ${state.previousPush.taskId}` : 'HubSpot check complete', 'ok'); }
+      catch(error) { status(error.message,'bad'); }
+      finally { working = false; render(); }
+    });
+    el('revealProfile').addEventListener('click',async () => {
+      if (!lead || !state?.check?.eligible || !confirm('Reveal this new person? A first-time successful reveal can use SignalHire credits.')) return;
+      working = true; render(); status('Rechecking eligibility and revealing contact details…');
+      try { state = await api({ action:'profile_reveal',lead,revealConfirmed:true }); state.revealAttempted = true; status(state.hasPhone ? 'Phone available. Review owner and time before push.' : 'No usable phone returned. Push is disabled.',state.hasPhone?'ok':'muted'); }
+      catch(error) { state = null; status(`${error.message} Read + Check again before retrying.`,'bad'); }
+      finally { working = false; render(); }
+    });
+    el('pushProfile').addEventListener('click',async () => {
+      if (!lead || !state?.check?.eligible || !state?.hasPhone) return;
+      const date = new Date(`${el('liveProfileDate').value}T${el('liveProfileTime').value}:00`);
+      if (Number.isNaN(date.getTime())) { status('Choose a valid task date and time.','bad'); return; }
+      const owner = el('liveProfileOwner').selectedOptions[0]?.textContent;
+      if (!confirm(`Push ${lead.name} and create a CALL task for ${owner} on ${date.toLocaleString()}?`)) return;
+      working = true; render(); status('Rechecking HubSpot and creating the task…');
+      try { const payload = await api({ action:'profile_push',lead,taskOwnerId:el('liveProfileOwner').value,taskDueAt:date.toISOString(),pushConfirmed:true }); state.previousPush = payload; status(`Task ${payload.taskId} → ${payload.ownerName}`,'ok'); }
+      catch(error) { state = null; status(`${error.message} Read + Check again to reconcile the result.`,'bad'); }
+      finally { working = false; render(); }
+    });
+    render();
   });
-
-  pushButton.addEventListener('click', async () => {
-    if (!currentProspect) return;
-    pushButton.disabled = true;
-    pushButton.textContent = 'Pushing…';
-    try {
-      const dashboardUrl = await liveSettings();
-      const response = await fetch(`${dashboardUrl}/api/prospecting/push`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(currentProspect),
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || 'HubSpot push failed.');
-      pushButton.textContent = payload.duplicate ? 'Already queued' : 'Pushed ✓';
-      setLiveStatus(payload.duplicate ? 'Already queued for Marita' : 'Task created for Marita', 'ok');
-    } catch (error) {
-      pushButton.disabled = false;
-      pushButton.textContent = 'Push to Marita';
-      setLiveStatus(error instanceof Error ? error.message : 'HubSpot push failed.', 'bad');
-    }
-  });
-}
-
-document.addEventListener('DOMContentLoaded', () => { void initLiveProfile(); });
+})();
