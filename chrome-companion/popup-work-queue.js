@@ -8,22 +8,31 @@
     queue = value || null;
     const rows = queue?.rows || [], running = Boolean(queue?.pending?.length);
     if (queue?.sourceUrl) { try { const page = new URL(queue.sourceUrl).searchParams.get('page') || '1'; el('workQueueSource').textContent = `Saved search page ${page}. Load current page to replace this list.`; } catch {} }
+    el('queueMetricTotal').textContent = rows.length;
+    el('queueMetricEligible').textContent = rows.filter((row) => row.check?.eligible && row.status !== 'pushed').length;
+    el('queueMetricReady').textContent = rows.filter((row) => row.status === 'ready' && row.hasPhone).length;
+    el('queueMetricBlocked').textContent = rows.filter((row) => row.status === 'blocked').length;
     const existing = new Set(rows.map((row) => row.key)); selected = new Set([...selected].filter((key) => existing.has(key)));
     el('workQueueRows').replaceChildren();
     for (const row of rows) {
-      const tr = document.createElement('tr'), choice = document.createElement('input'); choice.type = 'checkbox'; choice.checked = selected.has(row.key); choice.disabled = running || row.status === 'pushed';
+      const tr = document.createElement('tr'); tr.dataset.stage = row.status; const choice = document.createElement('input'); choice.type = 'checkbox'; choice.checked = selected.has(row.key); choice.disabled = running || row.status === 'pushed';
       choice.addEventListener('change', () => { if (choice.checked) selected.add(row.key); else selected.delete(row.key); updateButtons(); });
       const td = document.createElement('td'); td.append(choice); tr.append(td);
       const person = document.createElement('td'), name = document.createElement('strong'), detail = document.createElement('small'), url = document.createElement('a');
-      name.textContent = row.lead.name; detail.textContent = `${row.lead.title} · ${row.lead.company}`; person.append(name,detail);
-      if (row.lead.linkedinUrl) { url.href = row.lead.linkedinUrl; url.target = '_blank'; url.rel = 'noreferrer'; url.textContent = 'LinkedIn'; person.append(url); }
+      const identity = document.createElement('div'), avatar = document.createElement('span'), copy = document.createElement('div'), company = document.createElement('small');
+      identity.className = 'personCell'; avatar.className = 'personAvatar'; avatar.setAttribute('aria-hidden','true'); avatar.textContent = row.lead.name.split(/\s+/).map((part) => part[0]).slice(0,2).join('').toUpperCase(); copy.className = 'personCopy'; company.className = 'companyLabel';
+      name.textContent = row.lead.name; detail.textContent = row.lead.title; company.textContent = row.lead.company; copy.append(name,detail,company); identity.append(avatar,copy); person.append(identity);
+      if (row.lead.linkedinUrl) { url.href = row.lead.linkedinUrl; url.target = '_blank'; url.rel = 'noreferrer'; url.textContent = 'LinkedIn'; copy.append(url); }
       const outcome = document.createElement('td'), label = document.createElement('strong'), note = document.createElement('small');
-      label.textContent = row.status;
+      label.className = 'stageBadge'; label.dataset.stage = row.status;
+      label.textContent = ({pending:'Not checked',working:'Working',ready:'Phone-ready','needs-reveal':'Needs reveal',blocked:'Blocked',pushed:'Pushed',error:'Needs review','no-phone':'No phone'})[row.status] || row.status;
       note.textContent = row.error || row.message || row.check?.identityError || row.check?.company?.protectedReason || row.check?.company?.gateReason || 'Not checked';
       const contacts = [row.prospect?.phone || row.prospect?.phones?.[0],row.prospect?.email].filter(Boolean).join(' · ');
-      if (contacts) { const data = document.createElement('small'); data.textContent = contacts; outcome.append(data); }
+      if (contacts) { const data = document.createElement('small'); data.className = 'contactCopy'; data.textContent = contacts; outcome.append(data); }
       outcome.prepend(label,note); tr.append(person,outcome); el('workQueueRows').append(tr);
     }
+    if (!rows.length) { const tr = document.createElement('tr'), td = document.createElement('td'), title = document.createElement('strong'), hint = document.createElement('span'); td.colSpan = 3; td.className = 'queueEmpty'; title.textContent = 'Your next conversations start here'; hint.textContent = 'Load the current 25 to review eligibility and prepare SDR tasks.'; td.append(title,hint); tr.append(td); el('workQueueRows').append(tr); }
+    el('workQueueSelect').textContent = rows.filter((row) => row.status !== 'pushed').length && rows.filter((row) => row.status !== 'pushed').every((row) => selected.has(row.key)) ? 'Clear selection' : 'Select all';
     if (running) status(`${queue.action}: ${queue.done || 0}/${queue.total} completed. You can close the popup; progress is saved.`);
     else if (rows.length) status(`${rows.length} captured · ${rows.filter((row) => row.status === 'ready').length} ready · ${rows.filter((row) => row.status === 'pushed').length} pushed`, 'ok');
     updateButtons();

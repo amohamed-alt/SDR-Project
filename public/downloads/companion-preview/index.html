@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Companion v1.6.1 · Design preview</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body class="designPreview"><div class="previewNotice"><strong>DESIGN PREVIEW</strong><span>Sample data · CRM and enrichment actions disabled</span></div>
+  <main>
+    <header class="appHeader">
+      <div class="brandRow"><div class="brandMark" aria-hidden="true">T<span></span></div><div class="brandCopy"><div class="eyebrow">TALENTERA · SDR WORKSPACE</div><h1>Prospecting Companion<span class="headerAccent">.</span></h1></div><span class="workspaceBadge">SALES NAV</span></div>
+      <div class="headerBottom"><p>Your search. Your next pipeline.</p><div id="versionStatus" class="versionLabel">Loading version…</div></div>
+    </header>
+
+    <section class="card" id="workQueueCard" hidden>
+      <div class="sectionHead"><div><div class="sectionEyebrow">CURRENT SEARCH PAGE</div><h2>Turn people into pipeline</h2></div><button id="workQueueCapture" class="primary captureButton">Load current 25 <span aria-hidden="true">↗</span></button></div>
+      <div class="queueMetrics" aria-label="Page queue overview"><div><span>Captured</span><strong id="queueMetricTotal">0</strong></div><div><span>Eligible</span><strong id="queueMetricEligible">0</strong></div><div class="metricReady"><span>Phone-ready</span><strong id="queueMetricReady">0</strong></div><div><span>Blocked</span><strong id="queueMetricBlocked">0</strong></div></div>
+      <p class="small" id="workQueueSource"></p>
+      <div id="workQueueStatus" class="status muted" role="status" aria-live="polite">No page loaded</div>
+      <div class="queueToolbar"><button id="workQueueSelect" class="quietButton">Select all</button><p id="workQueueSelection">0 selected</p><button id="workQueueCheck" class="secondary checkButton" disabled>Read profiles + HubSpot Check</button></div>
+      <div class="workQueueTable"><table><thead><tr><th aria-label="Select lead"></th><th>PERSON & COMPANY</th><th>ELIGIBILITY & CONTACT</th></tr></thead><tbody id="workQueueRows"></tbody></table></div>
+      <div class="dispatchPanel"><div class="dispatchHead"><span class="sectionEyebrow">HANDOFF TO YOUR SDR</span><button id="workQueueStop" class="quietButton" disabled>Stop after current lead</button></div>
+      <div class="dispatchFields"><div><label for="workQueueOwner">Task owner</label><select id="workQueueOwner"><option value="">Loading owners…</option></select></div><div><label for="workQueueDate">Due date</label><input id="workQueueDate" type="date" /></div><div><label for="workQueueTime">Time · local</label><input id="workQueueTime" type="time" value="09:00" /></div></div>
+      <div class="dispatchActions"><button id="workQueueReveal" class="secondary" disabled>Reveal selected (0)</button><button id="workQueuePush" class="primary pushButton" disabled>Push + CALL tasks (0)</button></div>
+      <p class="dispatchNote"><span aria-hidden="true">✓</span> Phone required · checked before every push</p></div>
+    </section>
+
+    <section class="card">
+      <details class="secondaryFeature"><summary><span>Full-search capture</span><small>Up to 2,500 leads</small></summary>
+      <p class="small">For normal prospecting use the full-search button below. One background engine saves each page, waits for fresh cards, then moves to Next. You can close this popup after starting.</p>
+      <button id="extractFull" class="primary">Capture FULL search · up to 2,500</button>
+      <div id="fullRunStatus" class="status muted">Recommended · up to 100 pages / 2,500 leads</div>
+      <p class="small">Quick extracts are only for testing. They now go to the same persistent queue too.</p>
+      <button id="extract25" class="secondary">Quick test · current 25</button>
+      <button id="extract50" class="secondary">Quick test · up to 50</button>
+      <div class="row">
+        <a class="secondaryLink" href="https://sdr.dashboardtalentera.tech/signalhire-queue" target="_blank" rel="noreferrer">Open persistent queue</a>
+        <button id="resetFull" class="secondary">Reset local resume state</button>
+      </div>
+      <div id="runStatus" class="status muted">Quick extract ready</div>
+      </details>
+    </section>
+
+    <section class="card" id="liveProfileCard" hidden>
+      <h2>Work this profile</h2>
+      <p class="small">Read the profile you're viewing and check HubSpot first. Reveal and push stay separate.</p>
+      <button id="enrichProfile" class="primary">Read profile + HubSpot Check</button>
+      <div id="liveProfileStatus" class="status muted" role="status" aria-live="polite">Checking page…</div>
+      <div id="liveProfileResult" class="liveProfileResult" hidden>
+        <div class="liveProfileName" id="liveProfileName"></div>
+        <a id="liveProfileUrl" target="_blank" rel="noreferrer"></a>
+        <div class="liveProfileBadges"><span id="liveProfileHubspot" class="badge muted"></span></div>
+        <p class="small" id="liveProfileGate"></p>
+        <p id="liveProfileContacts" class="small"></p>
+        <button id="revealProfile" class="secondary" disabled>Reveal phone / email</button>
+        <label for="liveProfileOwner">Task owner</label>
+        <select id="liveProfileOwner"><option value="">Loading owners…</option></select>
+        <div class="row">
+          <div><label for="liveProfileDate">Due date</label><input id="liveProfileDate" type="date" /></div>
+          <div><label for="liveProfileTime">Time (your timezone)</label><input id="liveProfileTime" type="time" value="09:00" /></div>
+        </div>
+        <button id="pushProfile" class="primary" disabled>Push + CALL task</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <details class="secondaryFeature"><summary><span>Sync a SignalHire list</span><small>Existing lists only</small></summary>
+      <p class="small">Use this only for an existing SignalHire list. Sales Nav remains the primary discovery source; contact reveal in the SDR queue is manual.</p>
+      <button id="extractSignalHire" class="secondary">Sync current SignalHire list</button>
+      <div id="signalHireStatus" class="status muted">Ready</div>
+      </details>
+    </section>
+
+    <section class="card">
+      <details id="pairingDetails"><summary><span>Connection settings</span><small>Pairing & status</small></summary>
+      <label>Dashboard URL</label>
+      <input id="dashboard" value="https://sdr.dashboardtalentera.tech" />
+      <label>Pairing token</label>
+      <input id="token" type="password" placeholder="Paste token from SDR Dashboard" autocomplete="off" />
+      <div class="row">
+        <button id="save" class="secondary">Save pairing</button>
+        <button id="ping" class="secondary">Test connection</button>
+      </div>
+      <div id="pairStatus" class="status muted">Not checked</div>
+      </details>
+    </section>
+
+    <footer>Talentera SDR workspace <span>Capture → Check → Reveal → Push</span></footer>
+  </main>
+  <script src="preview.js"></script>
+</body>
+</html>

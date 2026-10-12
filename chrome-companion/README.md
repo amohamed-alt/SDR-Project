@@ -8,7 +8,7 @@ This is the Talentera SDR Chrome companion for user-triggered prospecting workfl
 2. Open `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Click **Load unpacked** and select the `chrome-companion` folder.
-5. Confirm the extension shows version **1.6.0**.
+5. Confirm the extension shows version **1.6.1**.
 6. In the SDR Dashboard, open **Sales Nav → Companion setup**.
 7. Unlock admin settings and click **Enable profile actions / rotate token**.
 8. Paste that token into the extension and click **Test connection**.
@@ -80,3 +80,7 @@ Search captures now read `data-anonymize="title"`; `job-title` contains tenure o
 The page queue is limited to the loaded page. Full-search capture remains available separately and uses the persistent dashboard queue.
 
 Rebuild the versioned download after extension changes with `python3 scripts/package-companion.py` from the repository root.
+
+## v1.6.1: dashboard visual system
+
+The popup now shares the SDR dashboard green palette, compact table hierarchy, semantic status badges, four live queue counters and a dedicated dispatch panel. Full capture, list sync and pairing settings use progressive disclosure. Existing permissions, confirmation prompts and server safety gates are unchanged. The hosted design preview uses explicitly labeled sample data and cannot perform CRM or enrichment actions.

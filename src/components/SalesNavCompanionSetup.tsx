@@ -99,11 +99,12 @@ export function SalesNavCompanionSetup() {
 
       {message && <div className={styles.message}>{message}</div>}
       <div className={styles.actions}>
-        <a href="/downloads/talentera-companion-v1.6.0.zip" download>Download Companion v1.6.0</a>
+        <a href="/downloads/talentera-companion-v1.6.1.zip" download>Download Companion v1.6.1</a>
+        <a href="/downloads/companion-preview/">Preview the design</a>
         <Link href="/signalhire-queue">Open Persistent Prospecting Queue</Link>
         <a href="https://github.com/amohamed-alt/SDR-Project/tree/main/chrome-companion" target="_blank" rel="noreferrer">Chrome Companion files</a>
       </div>
-      <p className={styles.note}>v1.6.0: Load current 25 → Read profiles + HubSpot Check → manual Reveal → select Marita/Daniel and task time → Push. Enable profile actions and copy the new token once; previous tokens retain capture-only access.</p>
+      <p className={styles.note}>v1.6.1: Load current 25 → Read profiles + HubSpot Check → manual Reveal → select Marita/Daniel and task time → Push. Enable profile actions and copy the new token once; previous tokens retain capture-only access.</p>
     </section>
   </main>;
 }

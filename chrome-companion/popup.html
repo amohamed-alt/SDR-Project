@@ -8,45 +8,26 @@
 </head>
 <body>
   <main>
-    <header>
-      <div class="eyebrow">TALENTERA SDR</div>
-      <h1>Prospecting Companion</h1>
-      <p>Sales Navigator is the lead source. Capture searches or check and push the profile you are viewing. Contact reveal stays manual.</p>
-      <div id="versionStatus" class="status muted">Loading version…</div>
+    <header class="appHeader">
+      <div class="brandRow"><div class="brandMark" aria-hidden="true">T<span></span></div><div class="brandCopy"><div class="eyebrow">TALENTERA · SDR WORKSPACE</div><h1>Prospecting Companion<span class="headerAccent">.</span></h1></div><span class="workspaceBadge">SALES NAV</span></div>
+      <div class="headerBottom"><p>Your search. Your next pipeline.</p><div id="versionStatus" class="versionLabel">Loading version…</div></div>
     </header>
 
-    <section class="card">
-      <details id="pairingDetails"><summary>Connection settings</summary>
-      <label>Dashboard URL</label>
-      <input id="dashboard" value="https://sdr.dashboardtalentera.tech" />
-      <label>Pairing token</label>
-      <input id="token" type="password" placeholder="Paste token from SDR Dashboard" autocomplete="off" />
-      <div class="row">
-        <button id="save" class="secondary">Save pairing</button>
-        <button id="ping" class="secondary">Test connection</button>
-      </div>
-      <div id="pairStatus" class="status muted">Not checked</div>
-      </details>
-    </section>
-
     <section class="card" id="workQueueCard" hidden>
-      <h2>Work the current 25</h2>
-      <p class="small">Capture this search page, select people, then read their public profile URLs and check HubSpot. Profile reading opens temporary tabs and returns you to this search.</p>
-      <button id="workQueueCapture" class="primary">Load current page · up to 25</button>
+      <div class="sectionHead"><div><div class="sectionEyebrow">CURRENT SEARCH PAGE</div><h2>Turn people into pipeline</h2></div><button id="workQueueCapture" class="primary captureButton">Load current 25 <span aria-hidden="true">↗</span></button></div>
+      <div class="queueMetrics" aria-label="Page queue overview"><div><span>Captured</span><strong id="queueMetricTotal">0</strong></div><div><span>Eligible</span><strong id="queueMetricEligible">0</strong></div><div class="metricReady"><span>Phone-ready</span><strong id="queueMetricReady">0</strong></div><div><span>Blocked</span><strong id="queueMetricBlocked">0</strong></div></div>
       <p class="small" id="workQueueSource"></p>
       <div id="workQueueStatus" class="status muted" role="status" aria-live="polite">No page loaded</div>
-      <div class="row"><button id="workQueueSelect" class="secondary">Select / clear all</button><button id="workQueueCheck" class="secondary" disabled>Read profiles + HubSpot Check</button></div>
-      <p class="small" id="workQueueSelection">0 selected</p>
-      <div class="workQueueTable"><table><thead><tr><th>Select</th><th>Person / company</th><th>Status / contacts</th></tr></thead><tbody id="workQueueRows"></tbody></table></div>
-      <button id="workQueueReveal" class="secondary" disabled>Reveal selected (0)</button>
-      <label for="workQueueOwner">Task owner</label><select id="workQueueOwner"><option value="">Loading owners…</option></select>
-      <div class="row"><div><label for="workQueueDate">Due date</label><input id="workQueueDate" type="date" /></div><div><label for="workQueueTime">Time (your timezone)</label><input id="workQueueTime" type="time" value="09:00" /></div></div>
-      <button id="workQueuePush" class="primary" disabled>Push + CALL tasks (0)</button>
-      <button id="workQueueStop" class="secondary" disabled>Stop after current lead</button>
+      <div class="queueToolbar"><button id="workQueueSelect" class="quietButton">Select all</button><p id="workQueueSelection">0 selected</p><button id="workQueueCheck" class="secondary checkButton" disabled>Read profiles + HubSpot Check</button></div>
+      <div class="workQueueTable"><table><thead><tr><th aria-label="Select lead"></th><th>PERSON & COMPANY</th><th>ELIGIBILITY & CONTACT</th></tr></thead><tbody id="workQueueRows"></tbody></table></div>
+      <div class="dispatchPanel"><div class="dispatchHead"><span class="sectionEyebrow">HANDOFF TO YOUR SDR</span><button id="workQueueStop" class="quietButton" disabled>Stop after current lead</button></div>
+      <div class="dispatchFields"><div><label for="workQueueOwner">Task owner</label><select id="workQueueOwner"><option value="">Loading owners…</option></select></div><div><label for="workQueueDate">Due date</label><input id="workQueueDate" type="date" /></div><div><label for="workQueueTime">Time · local</label><input id="workQueueTime" type="time" value="09:00" /></div></div>
+      <div class="dispatchActions"><button id="workQueueReveal" class="secondary" disabled>Reveal selected (0)</button><button id="workQueuePush" class="primary pushButton" disabled>Push + CALL tasks (0)</button></div>
+      <p class="dispatchNote"><span aria-hidden="true">✓</span> Phone required · checked before every push</p></div>
     </section>
 
     <section class="card">
-      <h2>Sales Navigator → Persistent Queue</h2>
+      <details class="secondaryFeature"><summary><span>Full-search capture</span><small>Up to 2,500 leads</small></summary>
       <p class="small">For normal prospecting use the full-search button below. One background engine saves each page, waits for fresh cards, then moves to Next. You can close this popup after starting.</p>
       <button id="extractFull" class="primary">Capture FULL search · up to 2,500</button>
       <div id="fullRunStatus" class="status muted">Recommended · up to 100 pages / 2,500 leads</div>
@@ -58,6 +39,7 @@
         <button id="resetFull" class="secondary">Reset local resume state</button>
       </div>
       <div id="runStatus" class="status muted">Quick extract ready</div>
+      </details>
     </section>
 
     <section class="card" id="liveProfileCard" hidden>
@@ -83,13 +65,28 @@
     </section>
 
     <section class="card">
-      <h2>SignalHire Lead List</h2>
+      <details class="secondaryFeature"><summary><span>Sync a SignalHire list</span><small>Existing lists only</small></summary>
       <p class="small">Use this only for an existing SignalHire list. Sales Nav remains the primary discovery source; contact reveal in the SDR queue is manual.</p>
       <button id="extractSignalHire" class="secondary">Sync current SignalHire list</button>
       <div id="signalHireStatus" class="status muted">Ready</div>
+      </details>
     </section>
 
-    <footer>User-triggered · no LinkedIn cookie permission · no hidden profile fetches · persistent queue is the single destination</footer>
+    <section class="card">
+      <details id="pairingDetails"><summary><span>Connection settings</span><small>Pairing & status</small></summary>
+      <label>Dashboard URL</label>
+      <input id="dashboard" value="https://sdr.dashboardtalentera.tech" />
+      <label>Pairing token</label>
+      <input id="token" type="password" placeholder="Paste token from SDR Dashboard" autocomplete="off" />
+      <div class="row">
+        <button id="save" class="secondary">Save pairing</button>
+        <button id="ping" class="secondary">Test connection</button>
+      </div>
+      <div id="pairStatus" class="status muted">Not checked</div>
+      </details>
+    </section>
+
+    <footer>Talentera SDR workspace <span>Capture → Check → Reveal → Push</span></footer>
   </main>
   <script src="popup.js"></script>
   <script src="popup-v154.js"></script>
