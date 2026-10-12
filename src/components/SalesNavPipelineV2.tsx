@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
-  ArrowLeft, CalendarClock, CheckCircle2, CircleAlert, ExternalLink, History,
+  ArrowLeft, CalendarClock, CheckCircle2, CircleAlert, Download, ExternalLink, History,
   LoaderCircle, Phone, RefreshCw, Search, Send, ShieldCheck, Sparkles, UserRoundCheck, UsersRound,
 } from "lucide-react";
 import styles from "./SalesNavPipeline.module.css";
@@ -191,6 +191,56 @@ export function SalesNavPipelineV2() {
     await Promise.all(workers); setSelected(new Set()); setPushing(false); setView("pushed"); setMessage("Push finished. Server rechecked that every pushed person was still net-new immediately before writing to HubSpot.");
   }
 
+  function exportRunCsv() {
+    if (!run || loading || !rows.length) return;
+    try {
+      const mapped = rows.map((row) => ({
+        "Run ID": run.id,
+        "Captured at": run.startedAt,
+        "Full name": row.prospect?.fullName || row.lead.name,
+        "Job title": row.prospect?.title || row.lead.title,
+        Company: row.prospect?.company || row.precheck?.company.name || row.lead.company,
+        Location: row.prospect?.location || row.lead.location,
+        "Connection degree": row.lead.connectionDegree,
+        "LinkedIn URL": row.prospect?.linkedinUrl || row.lead.linkedinUrl,
+        "Sales Navigator URL": row.lead.salesLeadUrl,
+        "Company domain": row.prospect?.companyDomain || row.precheck?.company.domain,
+        Phone: readyPhone(row),
+        "All phones": prospectPhones(row).join("; "),
+        Email: row.prospect?.email || existingEmail(row),
+        "All emails": unique([row.prospect?.email, ...(Array.isArray(row.prospect?.emails) ? row.prospect.emails : []), existingEmail(row)]).join("; "),
+        Status: row.stage,
+        "HubSpot contact ID": row.precheck?.contact.id,
+        "HubSpot company ID": row.precheck?.company.id,
+        "Account type": row.precheck?.company.accountType,
+        "Account status": row.precheck?.company.accountStatus,
+        "HubSpot gate": row.precheck ? row.precheck.contact.inHubSpot ? "Existing person" : row.precheck.company.protected ? "Blocked" : "Eligible" : "Not checked",
+        "Gate reason": row.precheck?.company.protectedReason || row.precheck?.company.gateReason,
+        ATS: row.prospect?.detectedAts || row.precheck?.company.detectedAts,
+        "Career page URL": row.prospect?.careerPageUrl || row.precheck?.company.careerPageUrl,
+        Notes: row.error || row.message,
+      }));
+      const headers = Object.keys(mapped[0]) as (keyof typeof mapped[number])[];
+      const cell = (value: unknown) => {
+        let text = value == null ? "" : String(value);
+        // Preserve phone prefixes/leading zeroes and keep spreadsheet cells as text.
+        if (/^[\s]*[=+@-]/.test(text) || /^0\d+$/.test(text)) text = `'${text}`;
+        return `"${text.replaceAll('"', '""')}"`;
+      };
+      const csv = "\uFEFF" + [headers.map(cell).join(","), ...mapped.map((row) => headers.map((header) => cell(row[header])).join(","))].join("\r\n");
+      const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `salesnav-${run.id.replace(/[^a-zA-Z0-9_-]/g, "_")}-${rows.length}-leads.csv`;
+      document.body.appendChild(anchor);
+      try { anchor.click(); } finally { anchor.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); }
+      setError("");
+      setMessage(`Exported all ${rows.length} leads from this run. Includes available contact data and HubSpot checks; view filters do not limit the export.`);
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : "Could not export this run.");
+    }
+  }
+
   const counts = useMemo(() => ({
     total: rows.length,
     ready: rows.filter((row) => row.stage === "ready" && readyPhone(row) && !isExistingPerson(row)).length,
@@ -230,7 +280,7 @@ export function SalesNavPipelineV2() {
     {error && <div className={styles.error}><CircleAlert size={15}/>{error}</div>}{message && <div className={styles.notice}><CheckCircle2 size={15}/>{message}</div>}
     {(loading || processing || revealing || pushing) && <div className={styles.progress}><LoaderCircle className={styles.spin} size={15}/>{loading ? "Loading…" : `${progress.label} ${progress.done}/${progress.total}`}</div>}
 
-    <section className={styles.runBar}><div className={styles.runSelect}><label>Search history</label><select value={run?.id || ""} onChange={(event) => void loadRun(event.target.value)} disabled={loading}>{history.map((item) => <option key={item.id} value={item.id}>{runLabel(item)}</option>)}</select><small>{run ? `${run.pagesRead} pages · ${run.total} unique leads · ${run.complete ? run.stopReason || "completed" : "capture can resume"}` : "No run loaded"}</small></div><div className={styles.runActions}><button onClick={() => void loadRun(run?.id || "")} disabled={loading}><RefreshCw size={14}/>Reload</button><button className={styles.primary} onClick={() => void runPrecheck()} disabled={!rows.length || processing}><ShieldCheck size={14}/>HubSpot Check</button>{run?.sourceUrl && <a href={run.sourceUrl} target="_blank" rel="noreferrer">Open Sales Nav <ExternalLink size={11}/></a>}</div></section>
+    <section className={styles.runBar}><div className={styles.runSelect}><label>Search history</label><select value={run?.id || ""} onChange={(event) => void loadRun(event.target.value)} disabled={loading}>{history.map((item) => <option key={item.id} value={item.id}>{runLabel(item)}</option>)}</select><small>{run ? `${run.pagesRead} pages · ${run.total} unique leads · ${run.complete ? run.stopReason || "completed" : "capture can resume"}` : "No run loaded"}</small></div><div className={styles.runActions}><button onClick={() => void loadRun(run?.id || "")} disabled={loading}><RefreshCw size={14}/>Reload</button><button onClick={exportRunCsv} disabled={loading || !run || !rows.length} title="Download all captured leads in this run, including available enrichment and checks"><Download size={14}/>Export CSV ({rows.length})</button><button className={styles.primary} onClick={() => void runPrecheck()} disabled={!rows.length || processing}><ShieldCheck size={14}/>HubSpot Check</button>{run?.sourceUrl && <a href={run.sourceUrl} target="_blank" rel="noreferrer">Open Sales Nav <ExternalLink size={11}/></a>}</div></section>
 
     <section className={styles.metrics}><article><UsersRound size={16}/><span>Saved</span><strong>{counts.total}</strong></article><article><Phone size={16}/><span>Ready · NEW + phone</span><strong>{counts.ready}</strong></article><article><Sparkles size={16}/><span>Needs reveal</span><strong>{counts.reveal}</strong></article><article><ShieldCheck size={16}/><span>Blocked</span><strong>{counts.blocked}</strong></article><article><UserRoundCheck size={16}/><span>Retention</span><strong>{counts.retention}</strong></article><article><UserRoundCheck size={16}/><span>Existing people</span><strong>{counts.existingPeople}</strong></article><article><CheckCircle2 size={16}/><span>Calls · no meeting</span><strong>{counts.callsEligible}</strong></article><article><Send size={16}/><span>Pushed</span><strong>{counts.pushed}</strong></article></section>
 
