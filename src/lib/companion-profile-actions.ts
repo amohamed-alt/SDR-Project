@@ -106,7 +106,10 @@ export async function handleCompanionProfileAction(request: NextRequest, body: J
     // Ignore client-supplied phone/prospect data: only use the verified server ledger.
     const payload = await json(await push(requestLike(request, "/api/prospecting/salesnav/push-ready-v2", {
       lead: input.lead, taskOwnerId: input.taskOwnerId, taskDueAt: input.taskDueAt,
-      prospect: { ...prospect, assignmentMode: "acquisition", ownerId: input.taskOwnerId },
+      prospect: {
+        ...prospect, assignmentMode: "acquisition", ownerId: input.taskOwnerId, source: "SDR Outbound",
+        scoreReasons: Array.isArray(prospect.scoreReasons) ? prospect.scoreReasons.filter((reason) => !/signalhire|sales nav|linkedin/i.test(String(object(reason).label || ""))) : [],
+      },
     }, true)));
     const taskId = String(payload.taskId || ""), contactId = String(payload.contactId || "");
     if (!taskId || !contactId) throw new Error("Push returned no task/contact identity. Recheck this lead before retrying.");
