@@ -38,6 +38,11 @@ function phones(prospect: Json) { return [prospect.phone, ...(Array.isArray(pros
 function nameKey(value: unknown) { return String(value || "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim(); }
 function identityError(lead: z.infer<typeof leadSchema>, prospect: Json) {
   if (!Object.keys(prospect).length) return "";
+  const profileKey = (value: unknown) => {
+    try { const url = new URL(String(value || "")); return /^(www\.)?linkedin\.com$/i.test(url.hostname) ? url.pathname.replace(/\/$/, "").toLowerCase() : ""; }
+    catch { return ""; }
+  };
+  if (profileKey(lead.linkedinUrl) !== profileKey(prospect.linkedinUrl)) return "Stored reveal belongs to a different LinkedIn profile. Review before push.";
   if (nameKey(lead.name) !== nameKey(prospect.fullName)) return "Contact provider identity differs from this profile. Review before push.";
   if (normalizedCompanyName(lead.company) !== normalizedCompanyName(String(prospect.company || ""))) return "Contact provider company differs from the current LinkedIn role. Review before push.";
   return "";
