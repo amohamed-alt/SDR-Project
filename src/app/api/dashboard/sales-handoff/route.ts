@@ -21,7 +21,7 @@ import {
 import { meetingCreatorId } from "@/lib/owner-attribution";
 import { SALES_REP_OWNER_IDS } from "@/lib/sales-reps";
 import { dashboardDate } from "@/lib/dashboard-query";
-import { bookingEvidenceIndex } from "@/lib/handoff-attribution";
+import { bookingEvidenceIndex, handoffAttributionDiagnostics, type HandoffAttributionDiagnostics } from "@/lib/handoff-attribution";
 import { SDR_OWNERS } from "@/lib/sdr-owners";
 import type { HubSpotRecord } from "@/lib/types";
 
@@ -148,6 +148,7 @@ type HandoffPayload = {
     salesRep: { id: string; name: string };
     salesReps: Array<{ id: string; name: string }>;
     followUpDays: number;
+    attribution: HandoffAttributionDiagnostics;
     cache: "hit" | "miss";
   };
   kpis: {
@@ -400,8 +401,10 @@ async function buildHandoff(from: string, to: string, salesRepId: string, sdr: B
   ]);
 
   const allMeetingGroups = dedupeMeetings(meetingsRaw, meetingContacts, sdrCreatorId, sdr);
-  const cohort = allMeetingGroups
-    .filter((meeting) => meeting.sdrCreated && localDay(meeting.startAt) >= from && localDay(meeting.startAt) <= to)
+  const meetingDateGroups = allMeetingGroups.filter((meeting) => localDay(meeting.startAt) >= from && localDay(meeting.startAt) <= to);
+  const attribution = handoffAttributionDiagnostics(meetingDateGroups, Boolean(sdrCreatorId));
+  const cohort = meetingDateGroups
+    .filter((meeting) => meeting.sdrCreated)
     .sort((a, b) => validDate(b.startAt) - validDate(a.startAt));
 
   const contactIds = [...new Set(cohort.flatMap((meeting) => meeting.contactIds))];
@@ -569,6 +572,7 @@ async function buildHandoff(from: string, to: string, salesRepId: string, sdr: B
       salesRep: { id: salesRepId, name: salesRep?.name ?? (salesRepId === DEFAULT_SALES_REP_ID ? "Ursula Waked" : salesRepId) },
       salesReps,
       followUpDays: FOLLOW_UP_DAYS,
+      attribution,
       cache: "miss",
     },
     kpis: {

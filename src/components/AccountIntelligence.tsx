@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -26,6 +26,7 @@ import {
   Zap,
 } from "lucide-react";
 import styles from "./AccountIntelligence.module.css";
+import { useModalFocus } from "./dashboard/useModalFocus";
 
 type MarketTier = "Core" | "Expansion A" | "Expansion B" | "Selective";
 type AccountTier = "A" | "B" | "C" | "Watch";
@@ -224,6 +225,8 @@ export function AccountIntelligence({ onBack }: { onBack?: () => void } = {}) {
   const [marketTier, setMarketTier] = useState<MarketTier | "">("");
   const [country, setCountry] = useState("");
   const [selectedId, setSelectedId] = useState("");
+  const drawerRef = useRef<HTMLElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState("");
   const [aiBriefs, setAiBriefs] = useState<Record<string, AiPayload>>({});
@@ -282,6 +285,7 @@ export function AccountIntelligence({ onBack }: { onBack?: () => void } = {}) {
     () => accounts.find((account) => account.companyId === selectedId) || null,
     [accounts, selectedId],
   );
+  useModalFocus({ open: Boolean(selected) && !loading, panelRef: drawerRef, initialFocusRef: closeRef, onClose: () => setSelectedId("") });
   const selectedAi = selected ? aiBriefs[selected.companyId] : undefined;
   const summary = payload?.summary;
   const scope = payload?.meta.scope;
@@ -451,13 +455,13 @@ export function AccountIntelligence({ onBack }: { onBack?: () => void } = {}) {
     </section>
 
     {selected ? <div className={styles.drawerBackdrop} onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedId(""); }}>
-      <aside className={styles.drawer}>
+      <aside ref={drawerRef} className={styles.drawer} role="dialog" aria-modal="true" aria-label={`${selected.name} · Account intelligence`} tabIndex={-1}>
         <div className={styles.drawerTop}>
           <div className={styles.drawerAccount}>
             <span className={styles.drawerAvatar}>{selected.name.slice(0, 2).toUpperCase()}</span>
             <div><span className={styles.eyebrow}>{selected.market.tier} · {selected.country}</span><h2>{selected.name}</h2><p>{selected.source?.industry || selected.domain || "Account intelligence"}</p></div>
           </div>
-          <button type="button" onClick={() => setSelectedId("")}><X size={17}/></button>
+          <button ref={closeRef} type="button" aria-label="Close account details" onClick={() => setSelectedId("")}><X size={17}/></button>
         </div>
 
         <div className={styles.drawerScoreBand}>

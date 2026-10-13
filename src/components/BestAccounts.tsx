@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft, ArrowUpRight, BrainCircuit, CheckCircle2, ChevronRight,
   CircleAlert, Database, ExternalLink, Filter, Flame, KeyRound, LoaderCircle,
@@ -9,6 +9,7 @@ import {
   UsersRound, X, Zap,
 } from "lucide-react";
 import styles from "./BestAccounts.module.css";
+import { useModalFocus } from "./dashboard/useModalFocus";
 
 type AiBrief = {
   whyNow: string;
@@ -145,6 +146,8 @@ export function BestAccounts({ onBack }: { onBack: () => void }) {
   const [country, setCountry] = useState<Country>("");
   const [query, setQuery] = useState("");
   const [selectedDomain, setSelectedDomain] = useState("");
+  const drawerRef = useRef<HTMLElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const [ownerToken, setOwnerToken] = useState(savedOwnerToken);
   const [ownerDraft, setOwnerDraft] = useState(savedOwnerToken);
   const [researchLimit, setResearchLimit] = useState(6);
@@ -194,6 +197,8 @@ export function BestAccounts({ onBack }: { onBack: () => void }) {
     () => payload?.accounts.find((account) => account.domain === selectedDomain) || null,
     [payload, selectedDomain],
   );
+
+  useModalFocus({ open: Boolean(selected), panelRef: drawerRef, initialFocusRef: closeRef, onClose: () => setSelectedDomain("") });
 
   const spotlights = useMemo(() => eligible.slice(0, 3), [eligible]);
   const config = payload?.configuration;
@@ -405,10 +410,10 @@ export function BestAccounts({ onBack }: { onBack: () => void }) {
     </div>
 
     {selected ? <div className={styles.drawerBackdrop} onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedDomain(""); }}>
-      <aside className={styles.drawer}>
+      <aside ref={drawerRef} className={styles.drawer} role="dialog" aria-modal="true" aria-label={`${selected.name} · Priority account`} tabIndex={-1}>
         <div className={styles.drawerHeader}>
           <div className={styles.drawerIdentity}><span className={styles.companyMarkLarge}>{selected.name.slice(0, 2).toUpperCase()}</span><div><span>PRIORITY ACCOUNT</span><h2>{selected.name}</h2><p>{selected.domain} · {selected.country || "Market unknown"}</p></div></div>
-          <button type="button" onClick={() => setSelectedDomain("")}><X size={17}/></button>
+          <button ref={closeRef} type="button" aria-label="Close priority account" onClick={() => setSelectedDomain("")}><X size={17}/></button>
         </div>
 
         <div className={styles.drawerScore}>

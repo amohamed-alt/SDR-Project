@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import styles from "./NetNewAccounts.module.css";
 import { SaudiCoveragePanel } from "./SaudiCoveragePanel";
+import { useModalFocus } from "./dashboard/useModalFocus";
 
 type Account = {
   domain: string;
@@ -131,6 +132,8 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
   const [tier, setTier] = useState<FilterTier>("");
   const [country, setCountry] = useState<FilterCountry>("");
   const [selectedDomain, setSelectedDomain] = useState("");
+  const drawerRef = useRef<HTMLElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const [people, setPeople] = useState<Person[]>([]);
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
@@ -206,6 +209,8 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
     () => payload?.accounts.find((account) => account.domain === selectedDomain) || null,
     [payload, selectedDomain],
   );
+
+  useModalFocus({ open: Boolean(selected), panelRef: drawerRef, initialFocusRef: closeRef, onClose: () => setSelectedDomain("") });
 
   const filtered = useMemo(() => {
 
@@ -522,10 +527,10 @@ export function NetNewAccounts({ onBack, inventory = false }: { onBack: () => vo
     </div>
 
     {selected ? <div className={styles.drawerBackdrop} onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedDomain(""); }}>
-      <aside className={styles.drawer} role="dialog" aria-modal="true" aria-label="Company details">
+      <aside ref={drawerRef} className={styles.drawer} role="dialog" aria-modal="true" aria-label="Company details" tabIndex={-1}>
         <div className={styles.drawerHeader}>
           <div><span>NET-NEW ACCOUNT</span><h2>{selected.name}</h2><p>{selected.domain} · {selected.country || "Market unknown"}</p></div>
-          <button type="button" aria-label="Close company details" onClick={() => setSelectedDomain("")}><X size={18}/></button>
+          <button ref={closeRef} type="button" aria-label="Close company details" onClick={() => setSelectedDomain("")}><X size={18}/></button>
         </div>
 
         <div className={styles.drawerScoreRow}>

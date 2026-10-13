@@ -18,3 +18,21 @@ export function bookingEvidenceIndex(records: Array<{ notes: string; creatorId: 
   if (explicit.size === 1) return records.findIndex(record => bookingMarker(record.notes) === sdr);
   return expectedCreatorId ? records.findIndex(record => record.creatorId === expectedCreatorId) : -1;
 }
+
+export type HandoffAttributionDiagnostics = {
+  meetingGroupsInPeriod: number;
+  attributedToSelectedSdr: number;
+  excludedFromSelectedSdr: number;
+  creatorMappingAvailable: boolean;
+};
+
+/** Aggregate evidence coverage only; this does not change booking attribution. */
+export function handoffAttributionDiagnostics(groups: Array<{ sdrCreated: boolean }>, creatorMappingAvailable: boolean): HandoffAttributionDiagnostics {
+  const attributedToSelectedSdr = groups.filter(group => group.sdrCreated).length;
+  return { meetingGroupsInPeriod: groups.length, attributedToSelectedSdr, excludedFromSelectedSdr: groups.length - attributedToSelectedSdr, creatorMappingAvailable };
+}
+
+export function handoffAttributionMessage(evidence: HandoffAttributionDiagnostics): string {
+  if (!evidence.meetingGroupsInPeriod) return "No RM-owned HubSpot meeting groups were found in the loaded meeting-date cohort. Google Sheet booking totals are a separate source.";
+  return `${evidence.attributedToSelectedSdr} of ${evidence.meetingGroupsInPeriod} RM-owned HubSpot meeting groups meet the selected SDR booking-evidence rule. ${evidence.excludedFromSelectedSdr} excluded. Attribution requires an explicit booking marker or the SDR creator ID; a zero result does not establish that the SDR booked no meetings. Google Sheet booking totals are a separate source.`;
+}
