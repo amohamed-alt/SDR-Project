@@ -35,7 +35,9 @@ test("server cookie and verified machine secrets unlock only intended paths", ()
     assert.equal(toolAccessResponse(request("/api/usage", "GET", {}, sdrAdminCookieToken())), null);
     assert.equal(toolAccessResponse(request("/api/usage", "GET", {}, "forged"))?.status, 401);
     assert.equal(toolAccessResponse(request("/api/maqsam/calls", "POST", { "x-maqsam-ingest-secret": "test-only-ingest" })), null);
-    assert.equal(toolAccessResponse(request("/api/maqsam/calls", "GET", { "x-maqsam-ingest-secret": "test-only-ingest" }))?.status, 401);
+    assert.equal(toolAccessResponse(request("/api/maqsam/calls", "GET", { "x-maqsam-ingest-secret": "test-only-ingest" })), null);
+    assert.equal(toolAccessResponse(request("/api/maqsam/calls", "GET", { authorization: "Bearer test-only-ingest" })), null);
+    assert.equal(toolAccessResponse(request("/api/usage", "GET", { authorization: "Bearer test-only-ingest" }))?.status, 401);
     assert.equal(toolAccessResponse(request("/api/acquisition/autorun", "POST", { "x-acquisition-worker-key": "test-only-worker" })), null);
     assert.equal(toolAccessResponse(request("/api/usage", "GET", { "x-acquisition-worker-key": "test-only-worker" }))?.status, 401);
   } finally {

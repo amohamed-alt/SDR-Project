@@ -280,7 +280,7 @@ export function Dashboard({
   let toolContent: ReactNode;
   switch (view) {
     case "motion": toolContent = <MotionDashboard sdr={sdr} onBack={() => changeView("core")}/>; break;
-    case "maqsam": toolContent = <MaqsamCallsDashboard initialAgent={sdr === "daniel" ? "daniel" : "marita"} onBack={() => changeView("core")}/>; break;
+    case "maqsam": toolContent = <MaqsamCallsDashboard initialSearch={initialSearch} initialAgent={sdr === "daniel" ? "daniel" : "marita"} onBack={() => changeView("core")}/>; break;
     case "marita-priority": toolContent = <MaritaPriorityQueue onBack={() => changeView("core")}/>; break;
     case "team-activity": toolContent = <TeamActivity onBack={() => changeView("core")}/>; break;
     case "inventory": toolContent = <LeadInventory inventory onBack={() => changeView("core")}/>; break;

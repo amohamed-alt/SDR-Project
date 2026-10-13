@@ -24,7 +24,7 @@ function equalSecret(value: string | null, expected: string | undefined) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 function machineRoute(request: NextRequest, path: string) {
-  if (request.method === "POST" && path === "/api/maqsam/calls") {
+  if (["GET", "POST"].includes(request.method) && path === "/api/maqsam/calls") {
     const secret = request.headers.get("x-maqsam-ingest-secret") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || null;
     return [process.env.MAQSAM_INGEST_SECRET, process.env.HUBSPOT_PRIVATE_APP_TOKEN].some(expected => equalSecret(secret, expected));
   }

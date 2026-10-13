@@ -115,12 +115,17 @@ function MetricCard({ label, value, helper, icon: Icon }: {
   </article>;
 }
 
-export function MaqsamCallsDashboard({ onBack, initialAgent = "marita" }: { onBack: () => void; initialAgent?: "marita" | "daniel" }) {
+export function MaqsamCallsDashboard({ onBack, initialAgent = "marita", initialSearch = "" }: { onBack: () => void; initialAgent?: "marita" | "daniel"; initialSearch?: string }) {
   const [agent, setAgent] = useState<"all" | "marita" | "daniel">(initialAgent);
   const [data, setData] = useState<MaqsamCallsResponse | null>(null);
-  const [from, setFrom] = useState(defaultFrom);
-  const [to, setTo] = useState(today);
-  const [appliedRange, setAppliedRange] = useState({ from: defaultFrom, to: today });
+  const [initialRange] = useState(() => {
+    const params = new URLSearchParams(initialSearch);
+    const date = (key: string, fallback: string) => { const value = params.get(key); return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : fallback; };
+    return { from: date("from", defaultFrom), to: date("to", today) };
+  });
+  const [from, setFrom] = useState(initialRange.from);
+  const [to, setTo] = useState(initialRange.to);
+  const [appliedRange, setAppliedRange] = useState(initialRange);
   const [search, setSearch] = useState("");
   const [matchStatus, setMatchStatus] = useState<"all" | MaqsamMatchStatus>("all");
   const [callStatus, setCallStatus] = useState<"all" | "completed" | "other">("all");
@@ -264,6 +269,7 @@ export function MaqsamCallsDashboard({ onBack, initialAgent = "marita" }: { onBa
         </aside>
       </section>
 
+      {data?.meta.history && Date.parse(data.meta.generatedAt) - Date.parse(data.meta.history.updatedAt) > 30 * 60_000 && <p role="alert">Maqsam sync has not reported progress for over 30 minutes. Counts may be incomplete; check the sync worker.</p>}
       {data && <p role="status">{data.meta.history ? `Historical import ${data.meta.history.retrying ? "retrying after a sync failure" : data.meta.history.caughtUp ? "caught up" : "in progress"} · from ${data.meta.history.from} through ${formatDate(data.meta.history.importedThrough)}` : "Historical import status unavailable. The counts show calls currently stored; older calls may still be importing."}</p>}
       {error && <div className={styles.errorBanner}><AlertTriangle size={16}/>{error}</div>}
       {loading && !data && <div className={styles.loading}><div className={styles.loader}/><strong>Loading Maqsam calls…</strong></div>}

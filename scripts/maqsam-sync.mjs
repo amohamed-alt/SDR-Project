@@ -125,7 +125,7 @@ export function isEligibleCall(call) {
   return String(call.type ?? "").toLowerCase() !== "internal";
 }
 
-async function fetchJson(url, options) {
+export async function fetchJson(url, options) {
   const response = await fetch(url, { ...options, signal: AbortSignal.timeout(30_000) });
   const text = await response.text();
   let body = {};
@@ -134,7 +134,7 @@ async function fetchJson(url, options) {
   } catch {
     body = { raw: text };
   }
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${text.slice(0, 300)}`);
+  if (!response.ok) throw new Error(`HTTP ${response.status} from ${new URL(url).pathname}${body.code === "TOOLS_LOCKED" ? ": TOOLS_LOCKED" : ""}`);
   return body;
 }
 
@@ -269,7 +269,7 @@ async function syncOnce(startTime, endTime) {
     await rename(discoveryTemporary, discoveryPath);
     console.log(`Maqsam Daniel identities: ${JSON.stringify([...candidates.values()])}`);
   }
-  const existingPayload = await fetchJson(`${config.dashboardBaseUrl}/api/maqsam/calls?from=${new Date(startTime * 1000).toISOString().slice(0, 10)}&to=${new Date(endTime * 1000).toISOString().slice(0, 10)}&limit=5000`);
+  const existingPayload = await fetchJson(`${config.dashboardBaseUrl}/api/maqsam/calls?from=${new Date(startTime * 1000).toISOString().slice(0, 10)}&to=${new Date(endTime * 1000).toISOString().slice(0, 10)}&limit=5000`, { headers: { Authorization: `Bearer ${config.ingestSecret}` } });
   const existing = new Map((existingPayload.calls ?? []).map((record) => [record.callKey, record]));
   let ready = 0;
   let upserted = 0;
