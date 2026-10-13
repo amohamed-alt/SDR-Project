@@ -55,7 +55,7 @@ test("Intelligence Studio releases a stalled refresh and keeps its last snapshot
   await expect(page.getByRole("heading", { name: "Where to focus next" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Updating…", exact: true })).toBeDisabled();
   await page.evaluate(() => { (window as unknown as { readTestOffset: number }).readTestOffset = 91_000; });
-  await expect(page.getByRole("alert")).toContainText("The live refresh is taking longer than expected", { timeout: 10_000 });
+  await expect(page.getByRole("alert").filter({ hasText: "The live refresh is taking longer than expected" })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: "Refresh data", exact: true })).toBeEnabled();
   await expect(page.getByRole("heading", { name: "Where to focus next" })).toBeVisible();
 });

@@ -243,6 +243,7 @@ export function MaritaWorkspace({
       <label className={styles.filterField}>
         <span>Task country</span>
         <select
+          aria-label="Task country"
           value={selectedCountry}
           onChange={(event) => setSelectedCountry(event.target.value)}
           disabled={loading || !countryOptions.length}

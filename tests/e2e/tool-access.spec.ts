@@ -31,7 +31,9 @@ test("direct tools and their APIs require a password and re-lock after logout", 
   await page.addInitScript(() => { localStorage.setItem("sdr_v2_visitor_id", "visitor_tools_gate"); localStorage.setItem("sdr_v2_visitor_name", "Tool gate QA"); sessionStorage.setItem("sdr_v2_session_id", "session_tools_gate"); });
   const protectedUrl = "/?view=team-activity&from=2026-07-15&to=2026-10-07";
   expect((await page.request.get("/api/usage")).status()).toBe(401);
-  expect((await page.request.get("/api/maqsam/calls", { headers: { Authorization: "Bearer invalid" } })).status()).toBe(401);
+  // Maqsam reads are intentionally public; administrative writes remain protected.
+  expect((await page.request.get("/api/maqsam/calls")).status()).toBe(200);
+  expect((await page.request.post("/api/maqsam/calls", { data: { callKey: "qa-unauthorized" }, headers: { Authorization: "Bearer invalid" } })).status()).toBe(401);
   await page.goto(protectedUrl);
   await expect(page).toHaveURL(/\/tools-unlock\?returnTo=/);
   await expect(page.getByRole("heading", { name: "SDR tools are locked" })).toBeVisible();

@@ -24,8 +24,10 @@ test("workspace totals and full task drawer use complete records while country f
   await expect(page.getByText("Loaded 3 of 3004 open tasks. Country counts are preview counts.")).toBeVisible();
   await expect(page.getByRole("button", { name: /Tasks due today.*42/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /High-priority tasks.*2168/ })).toBeVisible();
-  const country = page.getByLabel("Task country", { exact: true });
-  await expect(country.getByRole("option", { name: "Saudi Arabia (3)", exact: true })).toHaveCount(1);
+  const country = page.getByRole("combobox", { name: "Task country", exact: true });
+  await expect(country).toBeVisible();
+  await expect(country).toBeEnabled();
+  await expect(country.locator("option")).toHaveText(["Preview · all countries (3)", "Saudi Arabia (3)"]);
   const recordsRequest = page.waitForRequest(request => request.url().includes("/api/dashboard/records?"));
   await page.getByRole("button", { name: "Open all 3004 tasks", exact: true }).click();
   const request = await recordsRequest;
