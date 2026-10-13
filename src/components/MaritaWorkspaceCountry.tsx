@@ -6,7 +6,8 @@ import { MaritaWorkspace as OriginalMaritaWorkspace } from "./MaritaWorkspace";
 import type { Drilldown } from "@/components/DrilldownDrawer";
 import styles from "@/components/MaritaWorkspaceCountry.module.css";
 import type { CalendarOrganizerId } from "@/lib/calendar-organizers";
-import type { DashboardData } from "@/lib/types";
+import { normalizeCountry } from "@/lib/country-normalization";
+import type { DashboardData, DashboardFilters } from "@/lib/types";
 
 type CountrySource = "contact" | "contact_company" | "task_company" | "unknown";
 
@@ -71,8 +72,10 @@ export function MaritaWorkspace({
   data,
   onOpen,
   organizerId,
+  filters,
 }: {
   data: DashboardData;
+  filters: DashboardFilters;
   onOpen: (drilldown: Drilldown) => void;
   organizerId?: CalendarOrganizerId;
 }) {
@@ -189,7 +192,7 @@ export function MaritaWorkspace({
   }, [taskIdKey, taskRows, numericTasks]);
 
   const resolutionMap = useMemo(
-    () => new Map(resolutions.map((resolution) => [resolution.taskId, resolution])),
+    () => new Map(resolutions.map((resolution) => [resolution.taskId, { ...resolution, country: normalizeCountry(resolution.country) || "Unknown" }])),
     [resolutions],
   );
 
@@ -232,8 +235,8 @@ export function MaritaWorkspace({
       <div className={styles.filterIntro}>
         <span className={styles.filterIcon}><MapPin size={18}/></span>
         <div>
-          <strong>Filter task queue by country</strong>
-          <span>Country is taken from the associated contact first. If the task is linked to a company, or the contact country is empty, the company country is used automatically.</span>
+          <strong>Filter loaded task preview by country</strong>
+          <span>This filter covers the loaded preview only, not the full task queue. Country uses the associated contact first, then its company or the task company.</span>
         </div>
       </div>
 
@@ -244,13 +247,13 @@ export function MaritaWorkspace({
           onChange={(event) => setSelectedCountry(event.target.value)}
           disabled={loading || !countryOptions.length}
         >
-          <option value="">All countries ({taskRows.length})</option>
+          <option value="">Preview · all countries ({taskRows.length})</option>
           {countryOptions.map((option) => <option key={option.country} value={option.country}>{option.country} ({option.count})</option>)}
         </select>
       </label>
 
       <div className={styles.filterActions}>
-        <div className={styles.resultBadge}><strong>{filteredTaskCount}</strong><span>open tasks</span></div>
+        <div className={styles.resultBadge}><strong>{filteredTaskCount}</strong><span>preview tasks</span></div>
         <button
           className={styles.clearButton}
           type="button"
@@ -262,13 +265,15 @@ export function MaritaWorkspace({
       </div>
 
       <div className={styles.statusRow}>
+        <span>Loaded {taskRows.length} of {data.kpis.openTasks} open tasks. Country counts are preview counts.</span>
+        <button type="button" className={styles.fullQueueButton} onClick={() => onOpen({ kind: "activities", title: "All open tasks", description: "Complete open task queue for the current dashboard filters. The preview country filter does not apply.", rows: [], hubspotUrl: data.meta.hubspotUrls.tasks, source: { filters, version: data.meta.generatedAt, selection: { kind: "activities", where: [{ field: "type", value: "Task" }, { field: "isOpen", value: true }] } } })}>Open all {data.kpis.openTasks} tasks</button>
         {loading && <span className={styles.loading}><LoaderCircle size={12}/>Resolving task countries from cache and HubSpot… {resolvedProgress}/{numericTasks.length}</span>}
-        {!loading && !error && lookupComplete && <span>{selectedCountry ? `Showing ${selectedCountry} only` : "Showing all countries"}</span>}
+        {!loading && !error && lookupComplete && <span>{selectedCountry ? `Preview: ${selectedCountry}` : "Preview: all countries"}</span>}
         {!loading && !error && lookupComplete && <><i/><span>{unknownCount} task{unknownCount === 1 ? "" : "s"} without a resolved country</span></>}
         {error && <span className={styles.error}><AlertTriangle size={12}/>{error} Unresolved tasks remain available under Unknown.</span>}
       </div>
     </section>
 
-    <OriginalMaritaWorkspace data={filteredData} onOpen={onOpen} organizerId={organizerId}/>
+    <OriginalMaritaWorkspace data={filteredData} filters={filters} taskPreviewCountry={selectedCountry} onOpen={onOpen} organizerId={organizerId}/>
   </div>;
 }

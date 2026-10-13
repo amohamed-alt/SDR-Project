@@ -181,7 +181,7 @@
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.16);
   color: rgba(255, 255, 255, 0.94);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 900;
 }
 
@@ -223,7 +223,7 @@
 
 .toolsHeader span {
   color: #7a8ba0;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.11em;
 }
@@ -285,7 +285,7 @@
 .toolSectionLabel {
   padding: 6px 10px 4px;
   color: #8a9aaa;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.12em;
 }
@@ -355,7 +355,7 @@
 .toolCopy small {
   overflow: hidden;
   color: #7a8b9e;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1.35;
   text-overflow: ellipsis;
@@ -398,14 +398,14 @@
 
 .advancedToggle strong {
   color: #29465a;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 900;
 }
 
 .advancedToggle small {
   grid-column: 2;
   color: #8493a1;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -465,7 +465,7 @@
   }
 }
 
-.adminGate{margin:6px 4px 3px;padding:12px;border:1px solid #d7e4dd;border-radius:13px;background:linear-gradient(180deg,#f8fcfa,#f2f8f5);display:grid;gap:7px}.adminGate strong{color:#234f3b;font-size:10px;font-weight:900}.adminGate small{color:#72837a;font-size:8px;line-height:1.4}.adminGate input{width:100%;box-sizing:border-box;border:1px solid #cfdcd5;border-radius:9px;background:#fff;padding:9px 10px;color:#173249;font:inherit;font-size:10px;outline:none}.adminGate input:focus{border-color:#55a47c;box-shadow:0 0 0 3px rgba(37,149,95,.1)}.adminGate button{border:0;border-radius:9px;background:#177f4c;color:#fff;padding:9px 10px;font:inherit;font-size:9px;font-weight:900;cursor:pointer}.adminGate button:disabled{opacity:.5;cursor:not-allowed}.adminError{color:#a33c3c;font-size:8px;font-weight:800}
+.adminGate{margin:6px 4px 3px;padding:12px;border:1px solid #d7e4dd;border-radius:13px;background:linear-gradient(180deg,#f8fcfa,#f2f8f5);display:grid;gap:7px}.adminGate strong{color:#234f3b;font-size:12px;font-weight:900}.adminGate small{color:#72837a;font-size:11px;line-height:1.4}.adminGate input{width:100%;box-sizing:border-box;border:1px solid #cfdcd5;border-radius:9px;background:#fff;padding:9px 10px;color:#173249;font:inherit;font-size:12px;outline:none}.adminGate input:focus{border-color:#55a47c;box-shadow:0 0 0 3px rgba(37,149,95,.1)}.adminGate button{border:0;border-radius:9px;background:#177f4c;color:#fff;padding:9px 10px;font:inherit;font-size:12px;font-weight:900;cursor:pointer}.adminGate button:disabled{opacity:.5;cursor:not-allowed}.adminError{color:#a33c3c;font-size:11px;font-weight:800}
 
 
 /* Permanent SDR navigation: one sidebar scroll, no overlay or nested popup. */
@@ -481,7 +481,7 @@
 .toolsTitle {
   padding: 18px 10px 9px;
   color: rgba(255, 255, 255, 0.65);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.12em;
 }
@@ -546,8 +546,8 @@
   border-top: 1px solid rgba(255, 255, 255, 0.16);
   color: #fff;
 }
-.adminHeading strong { font-size: 10px; }
-.adminHeading small { flex-basis: 100%; color: rgba(255, 255, 255, 0.7); font-size: 9px; }
+.adminHeading strong { font-size: 12px; }
+.adminHeading small { flex-basis: 100%; color: rgba(255, 255, 255, 0.7); font-size: 12px; }
 .sidebarTools .advancedList {
   display: flex;
   flex-direction: column;
@@ -563,41 +563,9 @@
 .sidebarTools .adminGate { margin: 4px 0; }
 .sidebarTools .adminGate button { justify-content: center; }
 
-/* Keep labels available instead of turning this workspace into an icon rail. */
-@media (min-width: 641px) and (max-width: 900px) {
-  .shell :global(.sidebar) { width: 244px; padding: 20px 14px; }
-  .shell :global(.workspace) { grid-template-columns: 244px minmax(0, 1fr); }
-  .shell :global(.topbar) { margin-left: 244px; }
-  .shell :global(.sidebar .brand),
-  .shell :global(.sidebar .owner-card) { display: flex; }
-  .shell :global(.sidebar .nav-label),
-  .shell :global(.sidebar .brand-subtitle),
-  .shell :global(.sidebar nav button span) { display: block; }
-}
-/* Small screens keep an expanded, in-flow menu rather than a hidden bottom drawer. */
-@media (max-width: 640px) {
-  .shell :global(.workspace) { display: block; }
-  .shell :global(.sidebar) {
-    position: relative;
-    inset: auto;
-    width: 100%;
-    height: auto;
-    max-height: none;
-    flex-direction: column;
-    align-items: stretch;
-    padding: 16px;
-    overflow: visible;
-  }
-  .shell :global(.topbar) { margin-left: 0; }
-  .shell :global(.sidebar .brand),
-  .shell :global(.sidebar .owner-card),
-  .shell :global(.sidebar .sync-card) { display: flex; }
-  .shell :global(.sidebar .nav-label),
-  .shell :global(.sidebar .brand-subtitle),
-  .shell :global(.sidebar nav button span) { display: block; }
-  .shell :global(.sidebar nav) { display: flex; flex-direction: column; }
-  .shell :global(.sidebar nav button) { width: 100%; justify-content: flex-start; }
-  .shell :global(.sidebar nav button:nth-child(n+5)) { display: flex; }
+/* Tool-specific sizing; shared navigation lives in gtm-premium.css. */
+@media (max-width: 900px) {
   .sidebarTools .toolList, .sidebarTools .advancedList { max-height: none; overflow: visible; }
   .sidebarTools .toolItem { min-height: 44px; }
+  .toolContent { padding-top: 64px; }
 }

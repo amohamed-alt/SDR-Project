@@ -1,3 +1,4 @@
+import { CONTACT_LINKEDIN_PROPERTIES, contactLinkedInProfile } from "./linkedin-profile.ts";
 import { acquisitionMotion, meetingPerformance, verifiedEmailStatus, testedPhoneStatus } from "./meeting-performance.ts";
 import { responseMilliseconds } from "./dashboard-values.ts";
 import { meetingCreatorId } from "@/lib/owner-attribution";
@@ -20,6 +21,7 @@ import {
   hubspotRecordUrl,
 } from "@/lib/config";
 import {
+  availablePropertyNames,
   batchRead,
   getPropertyDefinitions,
   listDealStages,
@@ -247,7 +249,12 @@ function activityFilters(ownerId: string, dateProperty: string, from: string, to
 
 export async function buildDashboard(filters: DashboardFilters): Promise<DashboardData> {
   const warnings: string[] = [];
-  const reportingOwners = await optional("Owners", warnings, () => listOwners(), [] as HubSpotOwner[]);
+  const [reportingOwners, availableContactProperties] = await Promise.all([
+    optional("Owners", warnings, () => listOwners(), [] as HubSpotOwner[]),
+    optional("LinkedIn property discovery", warnings, () => availablePropertyNames("contacts"), new Set<string>()),
+  ]);
+  const linkedInProperties = CONTACT_LINKEDIN_PROPERTIES.filter((field) => field === "gtm_linkedin_url" || availableContactProperties.has(field));
+  const contactProperties = [...new Set([...CONTACT_PROPERTIES, ...linkedInProperties])];
   const creatorId = meetingCreatorId(reportingOwners, filters.ownerId);
   const ownerScope = reportingOwnerScope(filters.ownerId, creatorId);
   if (!ownerScope.meetingOwner) warnings.push("Meeting creator mapping unavailable; meeting totals are incomplete.");
@@ -268,7 +275,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     taskDefinitions,
     ...openTaskGroups
   ] = await Promise.all([
-    searchAll("contacts", CONTACT_PROPERTIES, [{ propertyName: ownerScope.contactProperty, operator: "EQ", value: filters.ownerId }], ["createdate"]),
+    searchAll("contacts", contactProperties, [{ propertyName: ownerScope.contactProperty, operator: "EQ", value: filters.ownerId }], ["createdate"]),
     optional("Calls", warnings, () => searchAll("calls", CALL_PROPERTIES, activityFilters(filters.ownerId, "hs_timestamp", filters.from, filters.to), ["hs_timestamp"]), []),
     optional("Meetings", warnings, async () => {
       if (!ownerScope.meetingOwner) return [];
@@ -351,22 +358,32 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
   }
   const companyIds = [...companyContactCounts.keys()];
   const dealIds = [...new Set([...contactDeals.values()].flat())];
-  const [companiesRaw, dealsRaw] = await Promise.all([
+  // Tasks may belong to this owner while their associated contact belongs to a
+  // different portfolio. Hydrate only those missing task contacts in batches;
+  // this does not add them to the reporting cohort or change any totals.
+  const knownContactIds = new Set(allContacts.map((contact) => contact.id));
+  const taskContactIds = [...new Set([...tasksDue, ...tasksCompleted, ...openTasks].flatMap((task) => taskContacts.get(task.id) ?? []))];
+  const missingTaskContactIds = taskContactIds.filter((id) => !knownContactIds.has(id));
+  const [companiesRaw, dealsRaw, taskActionContacts] = await Promise.all([
     optional("Companies", warnings, () => batchRead("companies", companyIds, COMPANY_PROPERTIES), []),
     optional("Deals", warnings, async () => {
       if (!ownerScope.isRm) return batchRead("deals", dealIds, DEAL_PROPERTIES);
       const owned = await searchAll("deals", DEAL_PROPERTIES, [{ propertyName: "hubspot_owner_id", operator: "EQ", value: filters.ownerId }]);
       return cohortFilterEnabled ? owned.filter(deal => dealIds.includes(deal.id)) : owned;
     }, []),
+    optional("Task contact actions", warnings, () => batchRead("contacts", missingTaskContactIds, [
+      "firstname", "lastname", "phone", "mobilephone", "whatsapp_number", "hs_whatsapp_phone_number", "whatsapp_phone_number", ...linkedInProperties,
+    ]), []),
   ]);
 
   const ownerMap = new Map(owners.map((owner) => [owner.id, owner.name]));
   const ownerName = ownerMap.get(filters.ownerId) ?? (filters.ownerId === "31644369" ? "Marita Chedid" : filters.ownerId);
-  const contactNameMap = new Map(allContacts.map((contact) => [
+  const actionContacts = [...allContacts, ...taskActionContacts];
+  const contactNameMap = new Map(actionContacts.map((contact) => [
     contact.id,
     [value(contact, "firstname"), value(contact, "lastname")].filter(Boolean).join(" ") || "Unnamed contact",
   ]));
-  const contactRecordMap = new Map(allContacts.map((contact) => [contact.id, contact]));
+  const contactRecordMap = new Map(actionContacts.map((contact) => [contact.id, contact]));
   const activityContact = (contactIds: string[], fallbackType: "call" | "meeting" | "task" | "email" | "communication") => {
     const contactId = contactIds.find((id) => selectedIds.has(id)) ?? contactIds[0];
     if (!contactId) {
@@ -383,6 +400,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       relatedContactName: contactNameMap.get(contactId) ?? `Contact #${contactId}`,
       relatedContactUrl: contactUrl,
       relatedContactHasPhone: Boolean(contactPhone(contactRecordMap.get(contactId))),
+      relatedContactLinkedinUrl: contactLinkedInProfile(contactRecordMap.get(contactId)?.properties),
       url: contactUrl,
     };
   };
@@ -471,7 +489,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
     completeness("gtm_email_status", "Verified email", selectedContacts, (contact) => verifiedEmailStatus(value(contact, "gtm_email_status"))),
     completeness("phone", "Phone coverage", selectedContacts, (contact) => Boolean(contactPhone(contact))),
     completeness("phone_number_status", "Tested phone", selectedContacts, (contact) => testedPhoneStatus(value(contact, "phone_number_status"))),
-    completeness("gtm_linkedin_url", "LinkedIn coverage", selectedContacts),
+    completeness("gtm_linkedin_url", "LinkedIn coverage", selectedContacts, (contact) => Boolean(contactLinkedInProfile(contact.properties))),
     completeness("company_id", "Company association", selectedContacts),
     completeness("country", "Country coverage", selectedContacts),
     completeness("hs_analytics_source", "Original source coverage", selectedContacts),
@@ -503,7 +521,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
         firstEngagementMs: response,
         hasPhone: Boolean(contactPhone(contact)),
         hasEmail: Boolean(value(contact, "email")),
-        hasLinkedIn: Boolean(value(contact, "gtm_linkedin_url")),
+        hasLinkedIn: Boolean(contactLinkedInProfile(contact.properties)),
       };
     }),
     deals: dealsRaw.map((deal) => ({
@@ -579,7 +597,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
       id: contact.id,
       name: [value(contact, "firstname"), value(contact, "lastname")].filter(Boolean).join(" ") || "Unnamed contact",
       email: value(contact, "email"), phone: contactPhone(contact),
-      linkedinUrl: value(contact, "gtm_linkedin_url"),
+      linkedinUrl: contactLinkedInProfile(contact.properties),
       title: value(contact, "jobtitle"), company: value(contact, "company"), country: normalizeCountry(value(contact, "country")),
       originalSource: displayValue(value(contact, "hs_analytics_source"), originalSourceLabels),
       originalSourceDetail: value(contact, "hs_analytics_source_data_1") || "—",
@@ -605,7 +623,7 @@ export async function buildDashboard(filters: DashboardFilters): Promise<Dashboa
         !verifiedEmailStatus(emailStatus) && "gtm_email_status",
         !contactPhone(contact) && "phone",
         !testedPhoneStatus(phoneStatus) && "phone_number_status",
-        !value(contact, "gtm_linkedin_url") && "gtm_linkedin_url",
+        !contactLinkedInProfile(contact.properties) && "gtm_linkedin_url",
         !value(contact, "company_id") && "company_id",
         !value(contact, "country") && "country",
         !value(contact, "hs_analytics_source") && "hs_analytics_source",

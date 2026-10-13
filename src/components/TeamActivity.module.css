@@ -2,7 +2,7 @@
   min-height: 100vh;
   padding: 28px;
   color: #14243a;
-  background: #f4f6f9;
+  background: var(--bg);
 }
 
 .header {
@@ -41,7 +41,7 @@
 .eyebrow,
 .panelHeader span {
   color: #7a899d;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.14em;
 }
@@ -49,7 +49,7 @@
 .header h1 {
   margin: 5px 0 4px;
   color: #13263f;
-  font-size: clamp(27px, 3vw, 38px);
+  font-size: clamp(27px, 3vw, 34px);
   font-weight: 780;
   letter-spacing: -0.04em;
 }
@@ -70,7 +70,7 @@
 
 .health {
   display: inline-flex;
-  height: 36px;
+  height: 40px;
   align-items: center;
   gap: 7px;
   padding: 0 12px;
@@ -78,7 +78,7 @@
   border-radius: 999px;
   color: #5f6f82;
   background: rgba(255,255,255,.75);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -94,13 +94,13 @@
 
 .refresh {
   display: inline-flex;
-  height: 36px;
+  height: 40px;
   align-items: center;
   gap: 7px;
   padding: 0 12px;
   border-radius: 10px;
   font: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 750;
 }
 
@@ -137,7 +137,7 @@
 .metrics article > span {
   display: block;
   color: #78879a;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -162,8 +162,8 @@
   display: block;
   margin-top: 4px;
   overflow: hidden;
-  color: #92a0b0;
-  font-size: 10px;
+  color: var(--muted);
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -207,8 +207,8 @@
 }
 
 .panelHeader > small {
-  color: #9aa6b5;
-  font-size: 10px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .tableWrap { overflow-x: auto; }
@@ -216,15 +216,15 @@
 .tableWrap table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tableWrap th {
   padding: 11px 16px;
   border-bottom: 1px solid #eef1f5;
-  color: #8996a6;
+  color: var(--muted);
   background: #fafbfc;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: .08em;
   text-align: left;
@@ -258,7 +258,7 @@
   border-radius: 9px;
   color: #244c7b;
   background: #f3f7fb;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 850;
 }
 
@@ -266,7 +266,7 @@
 .feature {
   display: block;
   color: #243950;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 750;
 }
 
@@ -276,8 +276,8 @@
   max-width: 210px;
   margin-top: 2px;
   overflow: hidden;
-  color: #9aa7b6;
-  font-size: 9px;
+  color: var(--muted);
+  font-size: 12px;
   text-overflow: ellipsis;
 }
 
@@ -286,7 +286,7 @@
   align-items: center;
   gap: 6px;
   color: #8794a5;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -316,22 +316,22 @@
 
 .rank {
   color: #a0abba;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
 }
 
 .featureRow div strong {
   display: block;
   color: #2a3e55;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 740;
 }
 
 .featureRow div small {
   display: block;
   margin-top: 2px;
-  color: #9aa6b5;
-  font-size: 9px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .featureRow b {
@@ -349,7 +349,7 @@
   border-radius: 11px;
   color: #7b899a;
   background: #fafbfc;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -376,3 +376,7 @@
   .metrics article { min-height: 126px; padding: 15px; }
   .grid { gap: 10px; }
 }
+
+.headerActions { flex-wrap: wrap; }
+.panelHeader { flex-wrap: wrap; }
+@media (pointer: coarse) { .back, .refresh { min-height: 44px; }.back { min-width: 44px; } }

@@ -186,6 +186,7 @@ export interface ActivityRow {
   relatedContactName?: string;
   relatedContactUrl?: string;
   relatedContactHasPhone?: boolean;
+  relatedContactLinkedinUrl?: string;
   url: string;
 }
 
@@ -226,6 +227,7 @@ export interface FilterOptions {
 }
 
 export interface DashboardData {
+  workspaceSummary?: { onlineLeads: number; untouchedOnlineLeads: number; meetingsToday: number; upcomingMeetings: number };
   hubspotMeetingEvidence?: ActivityRow[];
   meetingSheet?: import("./meeting-sheet-data.ts").SheetSnapshot & { scope?: string };
   meetingPerformance?: import("./meeting-performance.ts").MeetingPerformance;

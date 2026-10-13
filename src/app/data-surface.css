@@ -39,19 +39,19 @@
   outline: 0;
   background: transparent;
   color: var(--text);
-  font-size: 10px;
+  font-size: 12px;
 }
 .gtm-data-search input::placeholder { color: #91a098; }
 
 .gtm-data-sort { gap: 6px; padding: 0 8px 0 10px; }
-.gtm-data-sort span { font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.gtm-data-sort span { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .gtm-data-sort select {
   max-width: 150px;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--text);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -64,7 +64,7 @@
   line-height: 1.05;
 }
 .gtm-data-count strong { font: 800 14px/1 var(--font-manrope), sans-serif; color: var(--text); font-variant-numeric: tabular-nums; }
-.gtm-data-count span { margin-top: 4px; color: var(--muted); font-size: 8px; white-space: nowrap; }
+.gtm-data-count span { margin-top: 4px; color: var(--muted); font-size: 11px; white-space: nowrap; }
 
 .gtm-data-export {
   min-height: 36px;
@@ -77,7 +77,7 @@
   border-radius: 9px;
   background: rgba(226,242,233,.66);
   color: var(--green);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   cursor: pointer;
   transition: transform 160ms cubic-bezier(.22,1,.36,1), background 160ms ease, border-color 160ms ease;
@@ -102,7 +102,7 @@
 }
 .gtm-data-empty svg { color: #8eaa9e; }
 .gtm-data-empty strong { color: var(--text); font: 800 11px/1.2 var(--font-manrope), sans-serif; }
-.gtm-data-empty span { max-width: 310px; font-size: 9px; }
+.gtm-data-empty span { max-width: 310px; font-size: 12px; }
 
 @media (max-width: 760px) {
   .gtm-data-toolbar { grid-template-columns: minmax(0,1fr) auto; }

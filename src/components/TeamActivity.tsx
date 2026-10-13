@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   ArrowLeft,
@@ -80,26 +80,39 @@ export function TeamActivity({ onBack }: { onBack: () => void }) {
   const [data, setData] = useState<UsageSummary>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<number>(0);
+  const request = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
+    if (document.hidden || request.current) return;
+    const controller = new AbortController();
+    request.current = controller;
+    setLoading(true);
     try {
-      const response = await fetch("/api/usage", { cache: "no-store" });
+      const response = await fetch("/api/usage", { cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]) });
       const payload = await response.json() as UsageSummary;
+      if (!response.ok || payload.unavailable || !Array.isArray(payload.users) || !Array.isArray(payload.topFeatures) || !payload.metrics) throw new Error("Usage data unavailable");
+      if (controller.signal.aborted) return;
       setData(payload);
       setUpdatedAt(Date.now());
     } catch {
-      setData({ ...EMPTY, unavailable: true });
+      if (!controller.signal.aborted) setData(previous => ({ ...previous, tracking: false, unavailable: true }));
     } finally {
-      setLoading(false);
+      if (request.current === controller) request.current = null;
+      if (!controller.signal.aborted) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     const initial = window.setTimeout(() => void load(), 0);
     const timer = window.setInterval(() => void load(), 15_000);
+    const onVisible = () => { if (!document.hidden) void load(); };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      request.current?.abort();
+      request.current = null;
     };
   }, [load]);
 
@@ -153,7 +166,7 @@ export function TeamActivity({ onBack }: { onBack: () => void }) {
                     <td>{user.totalPageViews}</td>
                   </tr>
                 )) : (
-                  <tr><td colSpan={6}><div className={styles.empty}>{loading ? "Loading activity…" : "No usage has been recorded yet. The first visitor will appear here automatically."}</div></td></tr>
+                  <tr><td colSpan={6}><div className={styles.empty}>{loading ? "Loading activity…" : data.unavailable ? "Usage data could not load. Refresh to try again." : "No usage has been recorded yet. The first visitor will appear here automatically."}</div></td></tr>
                 )}
               </tbody>
             </table>

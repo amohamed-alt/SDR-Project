@@ -1,4 +1,5 @@
 "use client";
+import { DashboardSidebar } from "./DashboardSidebar";
 import { DashboardDisclosure } from "./DashboardDisclosure";
 import { ToolAccessGate } from "./ToolAccessGate";
 
@@ -122,10 +123,10 @@ function ComparisonWorkspace({ onSelect, initialSearch }: { onSelect: (owner: Ac
       <div className="top-title"><strong>SDR Command Center</strong><span>Team performance comparison</span></div>
     </header>
     <div className="workspace">
-      <aside className="sidebar">
+      <DashboardSidebar>
         <div className="brand"><div className="brand-logo" role="img" aria-label="Talentera ATS"/><span className="brand-subtitle">SDR Intelligence</span></div>
         <AcquisitionNav activeOwner="comparison" onSelect={onSelect}/>
-      </aside>
+      </DashboardSidebar>
       <div className="content"><SdrComparison onSelect={onSelect} initialSearch={initialSearch}/></div>
     </div>
   </main>;
@@ -406,7 +407,7 @@ function RepKpiDashboard({
     </header>
 
     <div className="workspace">
-      <aside className="sidebar">
+      <DashboardSidebar>
         <div className="brand"><div className="brand-logo" role="img" aria-label="Talentera ATS"/><span className="brand-subtitle">SDR Intelligence</span></div>
         <AcquisitionNav activeOwner={ownerKey} onSelect={onSelectOwner}/>
         <div className="nav-label owner-label">RM OWNER</div>
@@ -416,7 +417,7 @@ function RepKpiDashboard({
           <BadgeCheck size={17}/>
         </div>
         <div className="sync-card"><Database size={18}/><div><strong>Last sync</strong><span>{data ? new Date(data.meta.generatedAt).toLocaleString("en-GB") : "Loading…"}</span></div></div>
-      </aside>
+      </DashboardSidebar>
 
       <div className="content">
         <div className="page-title">
@@ -502,7 +503,7 @@ export function AcquisitionDashboard({ initialOwner, initialSearch }: { initialO
       <ExistingDashboard key="daniel" sdr="daniel" active initialSearch={activeSearch} workspaceNavigation={<AcquisitionNav activeOwner="daniel" onSelect={selectOwner}/>}/>
     </div>;
 
-  if (activeOwner === "intelligence") return <main className="app-shell intelligence-shell"><header className="topbar"><div className="top-title"><strong>SDR Command Center</strong><span>Intelligence & decision workspace</span></div></header><div className="workspace"><aside className="sidebar"><div className="brand"><div className="brand-logo" role="img" aria-label="Talentera ATS"/><span className="brand-subtitle">SDR Intelligence</span></div><AcquisitionNav activeOwner="intelligence" onSelect={selectOwner}/></aside><div className="content"><DecisionStudio initialSearch={activeSearch}/></div></div></main>;
+  if (activeOwner === "intelligence") return <main className="app-shell intelligence-shell"><header className="topbar"><div className="top-title"><strong>SDR Command Center</strong><span>Intelligence & decision workspace</span></div></header><div className="workspace"><DashboardSidebar><div className="brand"><div className="brand-logo" role="img" aria-label="Talentera ATS"/><span className="brand-subtitle">SDR Intelligence</span></div><AcquisitionNav activeOwner="intelligence" onSelect={selectOwner}/></DashboardSidebar><div className="content"><DecisionStudio initialSearch={activeSearch}/></div></div></main>;
 
   if (activeOwner === "comparison") return <div className="sdr-tab-panel"><ComparisonWorkspace onSelect={selectOwner} initialSearch={activeSearch}/></div>;
 

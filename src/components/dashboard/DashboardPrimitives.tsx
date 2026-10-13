@@ -125,12 +125,13 @@ export function DrilldownHint() {
   return <span className="drilldown-hint"><MousePointerClick size={13}/>Click a value</span>;
 }
 
-export function DonutChart({ data, centerLabel, onSelect }: { data: ChartDatum[]; centerLabel: string; onSelect?: (item: ChartDatum) => void }) {
+export function DonutChart({ data, centerLabel, onSelect, label = name => name }: { data: ChartDatum[]; centerLabel: string; onSelect?: (item: ChartDatum) => void; label?: (name: string) => string }) {
   if (!data.length) return <EmptyChart/>;
+  const visibleData = data.slice(0, 8).map(item => ({ ...item, displayName: label(item.name) }));
   return <div className={"donut-wrap" + (onSelect ? " is-clickable" : "")}>
-    <ResponsiveContainer width="100%" height={250}><PieChart><Pie data={data.slice(0, 8)} dataKey="value" nameKey="name" innerRadius={62} outerRadius={92} paddingAngle={2} stroke="#fff" strokeWidth={2} cursor={onSelect ? "pointer" : "default"} onClick={onSelect ? (entry) => onSelect(selectedDatum(entry)) : undefined}>{data.slice(0, 8).map((entry, index) => <Cell key={entry.name} fill={COLORS[index % COLORS.length]}/>)}</Pie><RechartsTooltip content={<ChartTooltip/>}/></PieChart></ResponsiveContainer>
+    <ResponsiveContainer width="100%" height={250}><PieChart><Pie data={visibleData} dataKey="value" nameKey="displayName" innerRadius={62} outerRadius={92} paddingAngle={2} stroke="#fff" strokeWidth={2} cursor={onSelect ? "pointer" : "default"} onClick={onSelect ? (entry) => onSelect(selectedDatum(entry)) : undefined}>{visibleData.map((entry, index) => <Cell key={entry.name} fill={COLORS[index % COLORS.length]}/>)}</Pie><RechartsTooltip content={<ChartTooltip/>}/></PieChart></ResponsiveContainer>
     <div className="donut-center"><strong>{formatNumber(data.reduce((sum, item) => sum + item.value, 0))}</strong><span>{centerLabel}</span></div>
-    <div className="legend-list">{data.slice(0, 8).map((item, index) => <button type="button" disabled={!onSelect} onClick={() => onSelect?.(item)} key={item.name}><i style={{ background: COLORS[index % COLORS.length] }}/><span>{item.name}</span><b>{item.value}</b></button>)}</div>
+    <div className="legend-list">{visibleData.map((item, index) => <button type="button" disabled={!onSelect} onClick={() => onSelect?.(item)} key={item.name}><i style={{ background: COLORS[index % COLORS.length] }}/><span>{item.displayName}</span><b>{item.value}</b></button>)}</div>
   </div>;
 }
 

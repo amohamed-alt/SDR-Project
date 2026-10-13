@@ -6,6 +6,7 @@ import {
   LoaderCircle, Mail, MapPin, Phone, Plus, Sparkles, Target, UserRound, Users, Video, X,
 } from "lucide-react";
 import type { Drilldown } from "@/components/DrilldownDrawer";
+import { LinkedInQuickAction } from "@/components/LinkedInQuickAction";
 import { WhatsAppQuickAction } from "@/components/WhatsAppQuickAction";
 import styles from "@/components/MaritaWorkspace.module.css";
 import {
@@ -17,7 +18,8 @@ import {
   calendarOrganizer,
   type CalendarOrganizerId,
 } from "@/lib/calendar-organizers";
-import type { ActivityRow, ContactRow, DashboardData } from "@/lib/types";
+import type { RecordSelection } from "@/lib/dashboard-records";
+import type { ActivityRow, ContactRow, DashboardData, DashboardFilters } from "@/lib/types";
 
 type QueueMode = "tasks" | "leads" | "meetings";
 type CalendarStatus = { configured: boolean; connected: boolean; email?: string; connectedAt?: string; error?: string };
@@ -119,8 +121,12 @@ export function MaritaWorkspace({
   data,
   onOpen,
   organizerId = "marita",
+  filters,
+  taskPreviewCountry = "",
 }: {
   data: DashboardData;
+  filters: DashboardFilters;
+  taskPreviewCountry?: string;
   onOpen: (drilldown: Drilldown) => void;
   organizerId?: CalendarOrganizerId;
 }) {
@@ -153,7 +159,7 @@ export function MaritaWorkspace({
     ? "/api/google/connect"
     : `/api/google/connect?organizer=${organizerId}`;
 
-  const today = localDay(new Date().toISOString(), data.meta.timezone);
+  const today = localDay(data.meta.generatedAt, data.meta.timezone);
   const tasks = useMemo(
     () => data.recentActivities.filter((row) => row.type === "Task" && row.isOpen),
     [data.recentActivities],
@@ -175,6 +181,12 @@ export function MaritaWorkspace({
   const meetingsToday = meetings.filter((row) => localDay(row.occurredAt, data.meta.timezone) === today);
   const generatedAt = new Date(data.meta.generatedAt).getTime();
   const upcomingMeetings = meetings.filter((row) => new Date(row.occurredAt).getTime() >= generatedAt);
+  const dueTodayCount = taskPreviewCountry ? dueToday.length : data.kpis.dueToday;
+  const highPriorityCount = taskPreviewCountry ? highPriorityTasks.length : data.kpis.highPriorityOpenTasks;
+  const onlineCount = data.workspaceSummary?.onlineLeads ?? onlineLeads.length;
+  const untouchedCount = data.workspaceSummary?.untouchedOnlineLeads ?? untouchedOnlineLeads.length;
+  const meetingTodayCount = data.workspaceSummary?.meetingsToday ?? meetingsToday.length;
+  const upcomingCount = data.workspaceSummary?.upcomingMeetings ?? upcomingMeetings.length;
   const salesOwners = data.filterOptions.owners
     .filter((owner) => SALES_REP_ORDER.has(owner.id))
     .sort((left, right) => (SALES_REP_ORDER.get(left.id) ?? 999) - (SALES_REP_ORDER.get(right.id) ?? 999));
@@ -278,11 +290,19 @@ export function MaritaWorkspace({
   }
 
   function openActivities(title: string, description: string, rows: ActivityRow[], url: string) {
-    onOpen({ kind: "activities", title, description, rows, hubspotUrl: url });
+    const taskList = title === "Tasks due today" || title === "High-priority tasks";
+    if (taskList && taskPreviewCountry) {
+      onOpen({ kind: "activities", title: `${title} · ${taskPreviewCountry} preview`, description: "Country-filtered loaded preview only. Open the full task queue above to inspect all records.", rows, hubspotUrl: url });
+      return;
+    }
+    const selection: RecordSelection = title === "Tasks due today" ? { kind: "activities", alert: "due-today" }
+      : title === "High-priority tasks" ? { kind: "activities", alert: "high-priority-tasks" }
+      : { kind: "activities", scope: title === "Meetings today" ? "workspace-meetings-today" : "workspace-upcoming-meetings" };
+    onOpen({ kind: "activities", title, description, rows: [], hubspotUrl: url, source: { filters, version: data.meta.generatedAt, selection } });
   }
 
-  function openContacts(title: string, description: string, rows: ContactRow[]) {
-    onOpen({ kind: "contacts", title, description, rows, hubspotUrl: data.meta.hubspotUrls.contacts });
+  function openContacts(title: string, description: string) {
+    onOpen({ kind: "contacts", title, description, rows: [], hubspotUrl: data.meta.hubspotUrls.contacts, source: { filters, version: data.meta.generatedAt, selection: { kind: "contacts", scope: title === "Online leads not contacted" ? "workspace-untouched-online" : "workspace-online" } } });
   }
 
   async function addContact() {
@@ -445,41 +465,41 @@ export function MaritaWorkspace({
     </section>
 
     <div className="workspace-stat-grid">
-      <WorkspaceStat icon={CalendarDays} label="Tasks due today" value={dueToday.length} helper="Open execution queue" tone="green" onClick={() => openActivities("Tasks due today", "Open tasks due today for the selected SDR.", dueToday, data.meta.hubspotUrls.tasks)}/>
-      <WorkspaceStat icon={AlertTriangle} label="High-priority tasks" value={highPriorityTasks.length} helper="Needs attention" tone="purple" onClick={() => openActivities("High-priority tasks", "Open tasks marked High priority.", highPriorityTasks, data.meta.hubspotUrls.tasks)}/>
+      <WorkspaceStat icon={CalendarDays} label="Tasks due today" value={dueTodayCount} helper={taskPreviewCountry ? "Country preview only" : "Full queue · open to inspect"} tone="green" onClick={() => openActivities("Tasks due today", "Open tasks due today for the selected SDR.", dueToday, data.meta.hubspotUrls.tasks)}/>
+      <WorkspaceStat icon={AlertTriangle} label="High-priority tasks" value={highPriorityCount} helper={taskPreviewCountry ? "Country preview only" : "Full queue · needs attention"} tone="purple" onClick={() => openActivities("High-priority tasks", "Open tasks marked High priority.", highPriorityTasks, data.meta.hubspotUrls.tasks)}/>
       <WorkspaceStat
   icon={Target}
   label="Online leads"
-  value={onlineLeads.length}
-  helper={`${untouchedOnlineLeads.length} not contacted`}
+  value={onlineCount}
+  helper={`${untouchedCount} not contacted`}
   tone="amber"
-  onClick={() => openContacts("Online leads", "Only selected SDR contacts whose Original Traffic Source is online. Offline Sources and unknown sources are excluded.", onlineLeads)}
-  helperOnClick={() => openContacts("Online leads not contacted", "Online leads with no logged Last Contacted value. Unqualified contacts are excluded.", untouchedOnlineLeads)}
+  onClick={() => openContacts("Online leads", "Only selected SDR contacts whose Original Traffic Source is online. Offline Sources and unknown sources are excluded.")}
+  helperOnClick={() => openContacts("Online leads not contacted", "Online leads with no logged Last Contacted value. Unqualified contacts are excluded.")}
 />
-      <WorkspaceStat icon={Video} label="Meetings today" value={meetingsToday.length} helper={upcomingMeetings.length + " upcoming"} tone="blue" onClick={() => openActivities("Meetings today", "Scheduled meetings starting today.", meetingsToday, data.meta.hubspotUrls.meetings)}/>
+      <WorkspaceStat icon={Video} label="Meetings today" value={meetingTodayCount} helper={upcomingCount + " upcoming"} tone="blue" onClick={() => openActivities("Meetings today", "Scheduled meetings starting today.", meetingsToday, data.meta.hubspotUrls.meetings)}/>
     </div>
 
     <div className="workspace-main-grid">
       <section className="workspace-card queue-card">
-        <div className="workspace-card-heading"><div><span>MY DAY</span><h3>Execution queue</h3><p>Work today’s tasks and newest online leads without leaving the dashboard.</p></div><Clock3 size={20}/></div>
+        <div className="workspace-card-heading"><div><span>MY DAY</span><h3>Execution queue</h3><p>Preview today’s tasks and newest online leads. Open a full list to search every matching record.</p></div><Clock3 size={20}/></div>
         <div className="queue-tabs">
-          <button className={queueMode === "tasks" ? "active" : ""} onClick={() => setQueueMode("tasks")}>Tasks <b>{dueToday.length}</b></button>
-          <button className={queueMode === "leads" ? "active" : ""} onClick={() => setQueueMode("leads")}>Online Leads <b>{Math.min(onlineLeads.length, 99)}</b></button>
-          <button className={queueMode === "meetings" ? "active" : ""} onClick={() => setQueueMode("meetings")}>Meetings <b>{upcomingMeetings.length}</b></button>
+          <button className={queueMode === "tasks" ? "active" : ""} onClick={() => setQueueMode("tasks")}>Tasks <b>{dueTodayCount}</b></button>
+          <button className={queueMode === "leads" ? "active" : ""} onClick={() => setQueueMode("leads")}>Online Leads <b>{onlineCount}</b></button>
+          <button className={queueMode === "meetings" ? "active" : ""} onClick={() => setQueueMode("meetings")}>Meetings <b>{upcomingCount}</b></button>
         </div>
         <div className="workspace-queue-list">
           {queueMode === "tasks" && dueToday.slice(0, 7).map((row) => <TaskQueueItem key={row.id} row={row} timezone={data.meta.timezone}/>) }
           {queueMode === "leads" && onlineLeads.slice(0, 7).map((row) => <LeadQueueItem key={row.id} row={row} timezone={data.meta.timezone}/>) }
           {queueMode === "meetings" && upcomingMeetings.slice(0, 7).map((row) => <MeetingQueueItem key={row.id} row={row} timezone={data.meta.timezone}/>) }
-          {queueMode === "tasks" && !dueToday.length && <QueueEmpty label="No tasks due today" helper="You are clear for today’s task queue."/>}
-          {queueMode === "leads" && !onlineLeads.length && <QueueEmpty label="No online leads" helper="No contacts with an online Original Traffic Source are assigned to this SDR."/>}
-          {queueMode === "meetings" && !upcomingMeetings.length && <QueueEmpty label="No upcoming meetings" helper="Use the composer to prepare a new meeting."/>}
+          {queueMode === "tasks" && !dueToday.length && <QueueEmpty label={dueTodayCount ? "No matching tasks in this preview" : "No tasks due today"} helper={taskPreviewCountry ? "Country filter covers the loaded preview only." : "Open the full list to inspect the complete queue."}/>}
+          {queueMode === "leads" && !onlineLeads.length && <QueueEmpty label="No online leads in this preview" helper="Open the full list to inspect all matching contacts."/>}
+          {queueMode === "meetings" && !upcomingMeetings.length && <QueueEmpty label="No upcoming meetings in this preview" helper="Open the full list to inspect all matching meetings."/>}
         </div>
         <button className="queue-view-all" onClick={() => {
           if (queueMode === "tasks") openActivities("Tasks due today", "All open tasks due today.", dueToday, data.meta.hubspotUrls.tasks);
-          if (queueMode === "leads") openContacts("Online leads", "Only selected SDR contacts whose Original Traffic Source is online, newest first.", onlineLeads);
+          if (queueMode === "leads") openContacts("Online leads", "Only selected SDR contacts whose Original Traffic Source is online.");
           if (queueMode === "meetings") openActivities("Upcoming meetings", "All upcoming scheduled meetings.", upcomingMeetings, data.meta.hubspotUrls.meetings);
-        }}>View full list<ChevronRight size={14}/></button>
+        }}>{queueMode === "tasks" && taskPreviewCountry ? "View country preview" : "View full list"}<ChevronRight size={14}/></button>
       </section>
 
       {bookingEnabled ? <section className="workspace-card meeting-composer">
@@ -618,11 +638,11 @@ function WorkspaceStat({ icon: Icon, label, value, helper, tone, onClick, helper
 }
 
 function TaskQueueItem({ row, timezone }: { row: ActivityRow; timezone: string }) {
-  return <article className="queue-item"><div className={"queue-icon " + (row.isHighPriority ? "urgent" : "")}><CheckCircle2 size={16}/></div><div className="queue-item-main"><strong>{row.subject}</strong><span>{row.relatedContactName ? row.relatedContactName + " · " : ""}{row.detail} · Due {shortTime(row.dueAt, timezone)}</span></div><span className={"queue-status " + (row.isHighPriority ? "high" : "")}>{row.isHighPriority ? "High" : row.status}</span><div className="queue-quick-actions">{row.relatedContactId && row.relatedContactHasPhone && <WhatsAppQuickAction contactId={row.relatedContactId}/>}<HubSpotButton href={row.url} label={row.relatedContactUrl ? "Timeline" : "Tasks"}/></div></article>;
+  return <article className="queue-item"><div className={"queue-icon " + (row.isHighPriority ? "urgent" : "")}><CheckCircle2 size={16}/></div><div className="queue-item-main"><strong>{row.subject}</strong><span>{row.relatedContactName ? row.relatedContactName + " · " : ""}{row.detail} · Due {shortTime(row.dueAt, timezone)}</span></div><span className={"queue-status " + (row.isHighPriority ? "high" : "")}>{row.isHighPriority ? "High" : row.status}</span><div className="queue-quick-actions">{row.relatedContactId && row.relatedContactHasPhone && <WhatsAppQuickAction contactId={row.relatedContactId}/>}<LinkedInQuickAction url={row.relatedContactLinkedinUrl} contactName={row.relatedContactName} compact/><HubSpotButton href={row.url} label={row.relatedContactUrl ? "Timeline" : "Tasks"}/></div></article>;
 }
 
 function LeadQueueItem({ row, timezone }: { row: ContactRow; timezone: string }) {
-  return <article className="queue-item"><div className="queue-avatar">{row.name.split(" ").map((part) => part[0]).join("").slice(0,2).toUpperCase()}</div><div className="queue-item-main"><strong>{row.name}</strong><span>{row.company || "No company"} · {row.originalSource} · Added {shortDate(row.createdAt, timezone)}</span></div><span className="queue-status score-pill">{row.lastContacted ? "Follow up" : "New"}</span><div className="queue-quick-actions">{row.phone && <a href={"tel:" + row.phone} aria-label="Call"><Phone size={13}/></a>}{row.phone && <WhatsAppQuickAction contactId={row.id} fallbackContact={{ phone: row.phone, country: row.country, name: row.name, company: row.company, title: row.title }}/>} {row.email && <a href={"mailto:" + row.email} aria-label="Email"><Mail size={13}/></a>}<HubSpotButton href={row.url} label="Lead"/></div></article>;
+  return <article className="queue-item"><div className="queue-avatar">{row.name.split(" ").map((part) => part[0]).join("").slice(0,2).toUpperCase()}</div><div className="queue-item-main"><strong>{row.name}</strong><span>{row.company || "No company"} · {row.originalSource} · Added {shortDate(row.createdAt, timezone)}</span></div><span className="queue-status score-pill">{row.lastContacted ? "Follow up" : "New"}</span><div className="queue-quick-actions">{row.phone && <a href={"tel:" + row.phone} aria-label="Call"><Phone size={13}/></a>}{row.phone && <WhatsAppQuickAction contactId={row.id} fallbackContact={{ phone: row.phone, country: row.country, name: row.name, company: row.company, title: row.title }}/>} {row.email && <a href={"mailto:" + row.email} aria-label="Email"><Mail size={13}/></a>}<LinkedInQuickAction url={row.linkedinUrl} contactName={row.name} compact/><HubSpotButton href={row.url} label="Lead"/></div></article>;
 }
 
 function MeetingQueueItem({ row, timezone }: { row: ActivityRow; timezone: string }) {

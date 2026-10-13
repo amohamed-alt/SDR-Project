@@ -31,9 +31,9 @@ for (const owner of ["marita", "daniel"]) {
       return control;
     };
 
-    const calls = await clickTool("Calls");
+    await sidebar.getByRole("button", { name: "Maqsam Calls", exact: true }).click();
     await expect(page).toHaveURL(/view=maqsam/);
-    await expect(calls).toHaveAttribute("aria-current", "page");
+    await expect(sidebar.getByRole("button", { name: "Maqsam Calls", exact: true })).toHaveAttribute("aria-current", "page");
     await page.keyboard.press("Escape");
     await page.locator(".content:visible").click({ position: { x: 10, y: 10 } });
     await expect(tools).toBeVisible();
@@ -60,7 +60,8 @@ for (const owner of ["marita", "daniel"]) {
 
     for (const width of [1440, 768, 390]) {
       await page.setViewportSize({ width, height: 1000 });
-      const callsControl = tools.getByRole("button", { name: /^Calls\b/ });
+      if (width <= 900 && await page.getByRole("button", { name: "Menu", exact: true }).isVisible()) await page.getByRole("button", { name: "Menu", exact: true }).click();
+      const callsControl = sidebar.getByRole("button", { name: "Maqsam Calls", exact: true });
       await callsControl.scrollIntoViewIfNeeded();
       await expect(callsControl).toBeVisible();
       const box = await callsControl.boundingBox();

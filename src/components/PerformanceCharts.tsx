@@ -4,14 +4,13 @@ import { useState } from "react";
 import { Area, Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { DashboardData } from "@/lib/types";
 import type { RecordSelection } from "@/lib/dashboard-records";
+import { outcomeDisplayLabel } from "@/lib/dashboard-values";
 import styles from "./DecisionStudio.module.css";
-
-const outcomeLabel = (name: string) => /^[a-f\d]{32}$/i.test(name.replace(/[\s-]/g, "")) ? "Unmapped outcome" : name;
 
 export function PerformanceCharts({ data, onInspect }: { data: DashboardData; onInspect: (title: string, selection: RecordSelection) => void }) {
   const [series, setSeries] = useState<"calls" | "meetingsBooked">("calls");
   const [outcome, setOutcome] = useState<"Call" | "Meeting">("Call");
-  const outcomes = (outcome === "Call" ? data.callOutcomes : data.meetingOutcomes).map(row => ({ ...row, displayName: outcomeLabel(row.name) }));
+  const outcomes = (outcome === "Call" ? data.callOutcomes : data.meetingOutcomes).map(row => ({ ...row, displayName: outcomeDisplayLabel(row.name, outcome) }));
   const days = data.dailyActivities;
   return <div className={styles.chartGrid}>
     <section className={`${styles.panel} ${styles.trend}`} aria-label="Activity trend">

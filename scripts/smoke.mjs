@@ -133,7 +133,7 @@ try {
   if (usage.tracking !== false || !Array.isArray(usage.users) || !Array.isArray(usage.topFeatures)) throw new Error("Usage analytics smoke fallback is invalid");
   if (acquisitionOwnerGateResponse.status !== 401 || acquisitionOwnerGate.code !== "TOOLS_LOCKED") throw new Error("Net-new acquisition admin password gate is not fail-closed when admin access is missing");
   if (!page.includes("SDR Command Center") || !page.includes("Inbound vs Outbound") || !page.includes("SDR Tools")) throw new Error("Dashboard analytics entries or compact tools launcher are missing");
-  if (!maritaCallsPage.includes("Maqsam Call Intelligence")) throw new Error("Marita calls page is missing");
+  if (!maritaCallsPage.includes("Maqsam Calls") || !maritaCallsPage.includes('aria-label="SDR agent"')) throw new Error("Marita calls page is missing");
   console.log("Smoke tests passed: dashboard snapshots/cache health, Dashboard V2 usage endpoint, acquisition admin password gate, compact SDR tools launcher, Marita calls route, Maqsam API, separate organizer status, inbound/outbound entry, task-country caching, WhatsApp data, and protected routes are operational.");
 } finally {
   server.kill("SIGTERM");

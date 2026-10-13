@@ -13,7 +13,7 @@ const field = z.enum(["bookedInPeriod", "heldInPeriod", "name", "id", "email", "
 const selectionSchema = z.object({
   callSegment: z.object({ field: z.enum(["title", "company", "country", "contact", "hour"]), value: z.string().max(1000) }).strict().optional(),
   kind: z.enum(["contacts", "activities", "companies", "deals"]),
-  scope: z.enum(["source", "created", "activity-period", "task-status"]).optional(),
+  scope: z.enum(["source", "created", "activity-period", "task-status", "workspace-online", "workspace-untouched-online", "workspace-meetings-today", "workspace-upcoming-meetings"]).optional(),
   where: z.array(z.object({ field, op: z.enum(["eq", "contains", "missing", "present", "pretty"]).optional(), value: z.union([z.string().max(200), z.number(), z.boolean()]).optional() })).max(10).optional(),
   signal: z.enum(["staleDeals", "dealsWithoutFutureActivity", "dealsWithOverdueCloseDate", "meetingsWithoutFollowUp", "completedMeetingsWithoutProgression", "noShowMeetings", "highEngagementAccountsWithoutMeeting", "contactsWithConnectedCallsWithoutMeeting", "response-overdue", "missing-contact-info"]).optional(),
   alert: z.enum(["meeting-outcomes", "outcomes", "due-today", "due-tomorrow", "due", "overdue", "high-priority-tasks", "untouched-24h", "no-next-activity", "response-time-missing", "response-time-known", "high-icp", "tier-a", "high-priority-untouched", "wrong-phone", "phones", "missing-source"]).optional(),
