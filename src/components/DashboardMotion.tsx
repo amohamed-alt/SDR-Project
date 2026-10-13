@@ -182,8 +182,12 @@ export function MotionDashboard({ onBack, sdr, initialSearch = "" }: { onBack: (
   const [error, setError] = useState("");
   const [drilldown, setDrilldown] = useState<Drilldown | null>(null);
   const refreshStartedAtRef = useRef(0);
+  const requestRef = useRef<AbortController | null>(null);
 
   const loadData = useCallback(async (forceRefresh = false) => {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
     if (forceRefresh) {
       refreshStartedAtRef.current = Date.now();
       setRefreshing(true);
@@ -200,9 +204,10 @@ export function MotionDashboard({ onBack, sdr, initialSearch = "" }: { onBack: (
       if (forceRefresh) query.set("refresh", "1");
       const response = await fetch(`/api/dashboard?${query.toString()}`, {
         cache: "no-store",
-        signal: AbortSignal.timeout(60_000),
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]),
       });
       const payload = await response.json();
+      if (controller.signal.aborted || requestRef.current !== controller) return;
       if (!response.ok) throw new Error(payload.details || payload.error || "Dashboard request failed");
       const nextData = payload as MotionDashboardData;
       if (nextData.meta.ownerId !== SDR_OWNERS[sdr].ownerId) throw new Error("Dashboard returned data for a different SDR owner");
@@ -213,14 +218,19 @@ export function MotionDashboard({ onBack, sdr, initialSearch = "" }: { onBack: (
       setRefreshing(serverRefreshing && !timedOut);
       if (timedOut) setError("The live refresh is taking longer than expected. The last complete snapshot remains visible; you can retry.");
     } catch (requestError) {
+      if (controller.signal.aborted || requestRef.current !== controller) return;
       setError(requestError instanceof Error ? requestError.message : "Unable to load inbound and outbound analytics");
       setRefreshing(false);
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted && requestRef.current === controller) setLoading(false);
     }
   }, [appliedRange, sdr, setData]);
 
-  useEffect(() => { void loadData(false); }, [loadData]);
+  useEffect(() => {
+    refreshStartedAtRef.current = 0;
+    void loadData(false);
+    return () => requestRef.current?.abort();
+  }, [loadData]);
 
   useEffect(() => {
     if (!refreshing || loading) return;
