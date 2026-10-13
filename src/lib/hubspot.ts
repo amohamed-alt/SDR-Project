@@ -379,6 +379,16 @@ export async function getPropertyDefinitions(
   );
 }
 
+// Discover optional mappings once per reference-cache window. Missing custom
+// properties are normal and should not break a dashboard contact search.
+export async function availablePropertyNames(objectType: string): Promise<Set<string>> {
+  const names = await cachedReference(`property-names:${objectType}`, async () => {
+    const response = await hubspotRequest<{ results: HubSpotPropertyDefinition[] }>(`/crm/v3/properties/${objectType}`);
+    return response.results.map((property) => property.name);
+  });
+  return new Set(names);
+}
+
 export interface CreateMeetingInput {
   contactIds: string[];
   ownerId: string;

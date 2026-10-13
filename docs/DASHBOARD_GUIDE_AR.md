@@ -87,7 +87,9 @@
 - Contacts التي لم يتم تسجيل تواصل معها.
 - Meetings المجدولة اليوم والاجتماعات القادمة.
 - My Day Queue يمكن التبديل فيها بين Tasks وLeads وMeetings.
+- أرقام الـWorkspace الأساسية تُحسب من الـsnapshot الكامل. قائمة التنفيذ تعرض preview خفيفة، وView full list يفتح بحثًا وترقيم صفحات من كل السجلات المطابقة. فلتر دولة الـTasks يخص الـpreview المحمّلة فقط ويُظهر عددها من إجمالي الـTasks؛ زر Open all tasks يفتح القائمة الكاملة دون فلتر دولة الـpreview. أسماء مثل KSA وksa تُدمج تحت Saudi Arabia.
 - اختصارات Call وEmail وفتح السجل في HubSpot.
+- زر LinkedIn بجانب WhatsApp في الـTasks، ومتاح أيضًا في قائمة الـLeads. يفتح رابط الشخص المحفوظ في HubSpot في تبويب جديد، ومنه تختار Message أو Connect حسب المتاح لحسابك. لا يرسل رسالة أو طلب اتصال تلقائيًا. الرابط الناقص أو غير الصالح يظهر كغير متاح؛ لا يتم تخمين رابط الشخص. تُقرأ حقول LinkedIn المتاحة فعليًا في الـportal، وتشمل `gtm_linkedin_url` والحقول القديمة `linkedin_profile_link` و`hs_linkedin_url` و`linkedin_url`.
 - Priority Leads مرتبة حسب الـpriority score.
 - Meeting Composer لاختيار الـSales Rep صاحب الاجتماع، والـContact، والموعد، والمدة، والمكان، والـagenda.
 

@@ -4,7 +4,7 @@ import { gzipSync } from "node:zlib";
 import { queryDashboardRecords, selectDashboardRecords, dashboardRecordsCsv } from "../src/lib/dashboard-records.ts";
 import { projectDashboardSummary } from "../src/lib/dashboard-payload.ts";
 import { DashboardSnapshotHistory } from "../src/lib/dashboard-snapshot-history.ts";
-import { responseMilliseconds, dashboardToday } from "../src/lib/dashboard-values.ts";
+import { responseMilliseconds, dashboardToday, outcomeDisplayLabel, qualityRateLabel } from "../src/lib/dashboard-values.ts";
 import { calculateGtmIntelligenceSignals } from "../src/lib/gtm-intelligence-signals.ts";
 import { parseDashboardFilters } from "../src/lib/dashboard-query.ts";
 import { readDashboardView } from "../src/lib/dashboard-url-state.ts";
@@ -15,6 +15,24 @@ function fixture() {
   intelligence.missingContactInfo.missingAny = { count: 151, ids: priorityContacts.map(row => row.id) };
   return { meta: { generatedAt: "2026-10-06T10:00:00Z", from: "2026-10-01", to: "2026-10-04", timezone: "Asia/Riyadh" }, kpis: { portfolioContacts: 151 }, priorityContacts, recentActivities: [], companies: [], deals: [], intelligence, dailyActivities: [] };
 }
+
+test("unmapped outcome labels retain separate source keys for exact drilldowns", () => {
+  const first = "2e7360c1 6b71 40e9 Ab2b 30ae98a4678c";
+  const second = "11111111-2222-3333-4444-555555555555";
+  assert.equal(outcomeDisplayLabel(first), "Unmapped call outcome");
+  assert.equal(outcomeDisplayLabel(second), "Unmapped call outcome");
+  assert.equal(outcomeDisplayLabel("Connected"), "Connected");
+  const data = fixture();
+  data.recentActivities = [{ id: "a", type: "Call", status: "Completed", detail: first }, { id: "b", type: "Call", status: "Completed", detail: second }];
+  assert.deepEqual(selectDashboardRecords(data, { kind: "activities", outcome: first }).map(row => row.id), ["a"]);
+  assert.deepEqual(selectDashboardRecords(data, { kind: "activities", outcome: second }).map(row => row.id), ["b"]);
+});
+
+test("empty quality cohorts are not reported as zero-percent coverage", () => {
+  assert.equal(qualityRateLabel(0, 0), "N/A");
+  assert.equal(qualityRateLabel(0, 10), "0%");
+  assert.equal(qualityRateLabel(75, 4), "75%");
+});
 
 test("portfolio pages, global search and CSV cover records beyond the old 120-row payload", () => {
   const data = fixture();

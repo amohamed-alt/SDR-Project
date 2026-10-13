@@ -9,7 +9,7 @@ export type RecordCondition = { field: string; op?: "eq" | "contains" | "missing
 export type RecordSelection = {
   kind: RecordKind;
   callSegment?: CallSegment;
-  scope?: "source" | "created" | "activity-period" | "task-status";
+  scope?: "source" | "created" | "activity-period" | "task-status" | "workspace-online" | "workspace-untouched-online" | "workspace-meetings-today" | "workspace-upcoming-meetings";
   where?: RecordCondition[];
   signal?: string;
   alert?: string;
@@ -55,6 +55,12 @@ export function selectDashboardRecords(data: DashboardData, selection: RecordSel
     const contacts = new Map(data.priorityContacts.map(contact => [contact.id, contact]));
     const segment = selection.callSegment;
     rows = rows.filter(row => "type" in row && row.type === "Call" && callSegmentValue(row, contacts.get(row.relatedContactId || ""), segment.field, data.meta.timezone || "Asia/Riyadh") === segment.value);
+  }
+  if (selection.scope === "workspace-online" || selection.scope === "workspace-untouched-online") {
+    rows = rows.filter(row => "originalSource" in row && row.originalSource !== "Offline Sources" && row.originalSource !== "Unknown" && (selection.scope !== "workspace-untouched-online" || (!row.lastContacted && row.leadStatus.trim().toLowerCase() !== "unqualified")));
+  }
+  if (selection.scope === "workspace-meetings-today" || selection.scope === "workspace-upcoming-meetings") {
+    rows = rows.filter(row => "type" in row && row.type === "Meeting" && row.isOpen && (selection.scope === "workspace-meetings-today" ? dayInZone(row.occurredAt, data.meta.timezone || "Asia/Riyadh") === dayInZone(data.meta.generatedAt, data.meta.timezone || "Asia/Riyadh") : Date.parse(row.occurredAt) >= now));
   }
   if (selection.scope === "activity-period") rows = rows.filter(row => "metricAt" in row && inPeriod(row.metricAt, data));
   if (selection.scope === "task-status") rows = rows.filter(row => "metricAt" in row && (row.isOpen || inPeriod(row.metricAt, data)));

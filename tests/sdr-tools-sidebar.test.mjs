@@ -3,13 +3,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 const shell = readFileSync(new URL("../src/components/DashboardShell.tsx", import.meta.url), "utf8");
 const core = readFileSync(new URL("../src/components/Dashboard.tsx", import.meta.url), "utf8");
+const sidebar = readFileSync(new URL("../src/components/DashboardSidebar.tsx", import.meta.url), "utf8");
 test("SDR tools have no open/close or outside-click state", () => {
   for (const source of [shell, core]) assert.doesNotMatch(source, /toolsOpen|setToolsOpen|onToggleTools|Close SDR Tools|closeOnOutside|toggleAdvanced/);
   assert.match(shell, /aria-label="SDR tools navigation"/);
 });
 test("both sidebar layouts place tools after the owner", () => {
   assert.match(core, /owner-card[\s\S]*?\{sidebarTools\}[\s\S]*?sync-card/);
-  assert.match(shell, /owner-card[\s\S]*?\{sidebarTools\}[\s\S]*?<\/aside>/);
+  assert.match(shell, /owner-card[\s\S]*?\{sidebarTools\}[\s\S]*?<\/DashboardSidebar>/);
+  assert.match(sidebar, /<aside\b[^>]*className="sidebar"[\s\S]*?\{children\}<\/aside>/);
   assert.match(shell, /sidebarTools=\{sidebarTools\}/);
 });
 test("admin tools remain password protected without an accordion", () => {

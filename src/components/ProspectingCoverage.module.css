@@ -1,7 +1,7 @@
 .page {
   min-height: 100vh;
   padding: 28px;
-  background: #f5f7fb;
+  background: var(--bg);
   color: #172033;
 }
 
@@ -39,14 +39,14 @@
   align-items: center;
   gap: 6px;
   color: #6a7893;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: .12em;
 }
 
 .header h1 {
   margin: 5px 0 5px;
-  font-size: clamp(28px, 4vw, 42px);
+  font-size: clamp(28px, 3vw, 34px);
   line-height: 1.05;
   letter-spacing: -.035em;
 }
@@ -75,7 +75,7 @@
   border-radius: 999px;
   background: #eefaf4;
   color: #20764b;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: .08em;
 }
@@ -109,10 +109,10 @@
   gap: 18px;
   padding: 24px;
   border: 1px solid #dfe5ef;
-  border-radius: 20px;
-  background: linear-gradient(135deg, #121c31, #1b2946 62%, #223958);
+  border-radius: 14px;
+  background: #1c3042;
   color: #fff;
-  box-shadow: 0 16px 40px rgba(21,31,51,.1);
+  box-shadow: none;
 }
 
 .heroMain > span {
@@ -120,7 +120,7 @@
   align-items: center;
   gap: 6px;
   color: #a9b9d3;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: .12em;
 }
@@ -156,7 +156,7 @@
   border-radius: 999px;
   background: rgba(255,255,255,.06);
   color: #dce6f4;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -167,7 +167,7 @@
   align-items: center;
   justify-content: center;
   border: 1px solid rgba(255,255,255,.14);
-  border-radius: 18px;
+  border-radius: 14px;
   background: rgba(255,255,255,.065);
   text-align: center;
 }
@@ -178,7 +178,7 @@
 }
 
 .coverageRing span { margin-top: 3px; color: #dce6f4; font-size: 12px; font-weight: 800; }
-.coverageRing small { margin-top: 5px; color: #92a7c7; font-size: 11px; }
+.coverageRing small { margin-top: 5px; color: #92a7c7; font-size: 12px; }
 
 .heroSide {
   display: grid;
@@ -196,7 +196,7 @@
   background: rgba(255,255,255,.07);
 }
 
-.heroSide span { color: #c7d3e4; font-size: 11px; }
+.heroSide span { color: #c7d3e4; font-size: 12px; }
 .heroSide strong { font-size: 20px; }
 .heroSide small { color: #92a7c7; line-height: 1.5; }
 
@@ -225,7 +225,7 @@
   align-items: center;
   gap: 7px;
   color: #6e7b93;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -237,14 +237,14 @@
   letter-spacing: -.035em;
 }
 
-.metrics small { color: #8792a5; line-height: 1.35; }
+.metrics small { color: var(--muted); line-height: 1.35; }
 
 .countries,
 .ledgerPanel {
   margin-top: 18px;
   padding: 20px;
   border: 1px solid #dfe5ef;
-  border-radius: 18px;
+  border-radius: 14px;
   background: #fff;
 }
 
@@ -264,7 +264,7 @@
   letter-spacing: -.02em;
 }
 
-.sectionTitle small { color: #8792a5; }
+.sectionTitle small { color: var(--muted); }
 
 .countryGrid {
   display: grid;
@@ -293,7 +293,7 @@
   background: #f1faf5;
 }
 
-.countryGrid span { min-height: 28px; color: #57657c; font-size: 11px; font-weight: 800; }
+.countryGrid span { min-height: 28px; color: #57657c; font-size: 12px; font-weight: 800; }
 .countryGrid strong { font-size: 23px; }
 .countryGrid small { color: #8a94a5; line-height: 1.4; }
 
@@ -350,7 +350,7 @@
   padding: 10px 12px;
   border-bottom: 1px solid #e5e9f0;
   color: #7e899c;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: .08em;
   text-align: left;
@@ -367,7 +367,7 @@
 }
 
 .tableWrap td:first-child strong { display: block; color: #18243a; font-size: 13px; }
-.tableWrap td:first-child small { display: block; margin-top: 2px; color: #8a95a7; }
+.tableWrap td:first-child small { display: block; margin-top: 2px; color: var(--muted); }
 
 .tier {
   display: inline-block;
@@ -376,7 +376,7 @@
   border-radius: 7px;
   background: #eef2f8;
   color: #52627a;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -385,7 +385,7 @@
   align-items: center;
   padding: 5px 8px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
   white-space: nowrap;
 }
@@ -406,7 +406,7 @@
 }
 
 .empty strong { margin-top: 8px; color: #344157; }
-.empty span { margin-top: 4px; font-size: 11px; }
+.empty span { margin-top: 4px; font-size: 12px; }
 
 .footer {
   display: flex;
@@ -414,7 +414,7 @@
   gap: 7px;
   margin-top: 16px;
   color: #64718a;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .footer small { margin-left: auto; color: #8b95a7; }
@@ -444,3 +444,6 @@
   .countryGrid { grid-template-columns: 1fr 1fr; }
   .sectionTitle, .ledgerHead { align-items: flex-start; flex-direction: column; }
 }
+
+.toolbar input, .toolbar select, .back, .bestAccounts { min-height: 40px; }
+@media (pointer: coarse) { .back, .bestAccounts { min-height: 44px; } }

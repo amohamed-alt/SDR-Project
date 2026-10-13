@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
       : await getDashboardSnapshot(filters, params.get("refresh") === "1");
 
     const snapshotMs = performance.now() - started;
-    const profile = params.get("profile") === "summary" ? "summary-v1" : "instant-v2.1";
+    const profile = params.get("profile") === "summary" ? "summary-v1" : "instant-v2.2";
     const payload = profile === "summary-v1" ? projectDashboardSummary(snapshot.data) : projectDashboardPayload(snapshot.data);
     const etagSeed = JSON.stringify({
       filters,

@@ -1,7 +1,7 @@
 .page {
   min-height: 100vh;
   padding: 28px;
-  background: #f4f7f5;
+  background: var(--bg);
   color: #17362a;
 }
 
@@ -44,14 +44,14 @@
   display: block;
   margin-bottom: 5px;
   color: #087a50;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: .13em;
 }
 
 .header h1 {
   margin: 0;
-  font-size: clamp(28px, 3vw, 40px);
+  font-size: clamp(28px, 3vw, 34px);
   letter-spacing: -.035em;
 }
 
@@ -97,7 +97,7 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  min-height: 38px;
+  min-height: 40px;
   padding: 0 14px;
   border-radius: 10px;
   background: #17362a;
@@ -143,7 +143,7 @@
 
 .field span {
   color: #6d8178;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: .05em;
@@ -268,7 +268,7 @@
   display: block;
   margin-top: 5px;
   color: #7a8d84;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .metricCritical .metricIcon {
@@ -307,8 +307,8 @@
 .panelHeader span {
   display: block;
   margin-bottom: 3px;
-  color: #82938b;
-  font-size: 10px;
+  color: var(--muted);
+  font-size: 12px;
   font-weight: 850;
   letter-spacing: .11em;
 }
@@ -321,7 +321,7 @@
 
 .panelHeader small {
   color: #7b8d85;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .legend {
@@ -330,7 +330,7 @@
   gap: 9px 14px;
   margin-top: 4px;
   color: #63776d;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .legend span {
@@ -403,7 +403,7 @@
   background: #f8faf9;
   color: #6a7e74;
   text-align: left;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 850;
   letter-spacing: .035em;
   text-transform: uppercase;
@@ -440,8 +440,8 @@
   display: block;
   max-width: 250px;
   margin-top: 3px;
-  color: #82938b;
-  font-size: 10px;
+  color: var(--muted);
+  font-size: 12px;
   line-height: 1.35;
 }
 
@@ -453,7 +453,7 @@
   border-radius: 999px;
   background: #eef4f1;
   color: #526b5f;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
   white-space: nowrap;
 }
@@ -474,7 +474,7 @@
 }
 
 .noDeal {
-  color: #94a39c;
+  color: var(--muted);
 }
 
 .empty {
@@ -530,3 +530,8 @@
   .metrics { grid-template-columns: 1fr; }
   .tableToolbar { align-items: flex-start; flex-direction: column; }
 }
+
+.metric::after { content: none; }
+.metric, .panel, .filters { box-shadow: var(--shadow); }
+.panelHeader { flex-wrap: wrap; }
+@media (pointer: coarse) { .back, .refresh, .apply, .reset { min-height: 44px; }.back { min-width: 44px; } }

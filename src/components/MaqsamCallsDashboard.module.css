@@ -3,7 +3,7 @@
   width: 100%;
   min-height: 100vh;
   padding-bottom: 64px;
-  background: #f2f6f4;
+  background: var(--bg);
   color: #10291f;
   font-family: var(--font-dm-sans), Arial, sans-serif;
 }
@@ -20,8 +20,7 @@
   top: 0;
   z-index: 50;
   border-bottom: 1px solid #dbe5e0;
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(16px);
+  background: #fff;
 }
 
 .titleGroup,
@@ -55,7 +54,7 @@
 
 .actions label span {
   color: #6e8178;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -65,7 +64,7 @@
 .actions input,
 .filters input,
 .filters select {
-  height: 36px;
+  height: 40px;
   border: 1px solid #dbe5e0;
   border-radius: 8px;
   background: #fff;
@@ -82,7 +81,7 @@
 .secondaryButton,
 .primaryButton,
 .expandButton {
-  min-height: 36px;
+  min-height: 40px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -140,9 +139,9 @@
   position: relative;
   overflow: hidden;
   border: 1px solid #bcdacb;
-  background: linear-gradient(125deg, #0e4b3e 0%, #087a50 58%, #14956a 100%);
+  background: #153e34;
   color: #fff;
-  box-shadow: 0 18px 42px rgba(14, 75, 62, 0.16);
+  box-shadow: none;
 }
 
 .hero > div::after {
@@ -161,7 +160,7 @@
   align-items: center;
   gap: 7px;
   color: #bbecd6;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.13em;
 }
@@ -189,7 +188,7 @@
   padding: 24px;
   border: 1px solid #dbe5e0;
   background: #fff;
-  box-shadow: 0 12px 34px rgba(23, 67, 50, 0.07);
+  box-shadow: var(--shadow);
 }
 
 .hero aside strong {
@@ -200,14 +199,14 @@
 .hero aside span {
   margin-top: 8px;
   color: #314b3f;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
 }
 
 .hero aside small {
   margin-top: 10px;
   color: #71847a;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .errorBanner {
@@ -279,7 +278,7 @@
 
 .metricCard small {
   color: #71847a;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -293,7 +292,7 @@
 .metricCard p {
   margin: 8px 0 0;
   color: #71847a;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -309,7 +308,7 @@
   border: 1px solid #dbe5e0;
   border-radius: 15px;
   background: #fff;
-  box-shadow: 0 12px 34px rgba(23, 67, 50, 0.07);
+  box-shadow: var(--shadow);
 }
 
 .panel {
@@ -334,14 +333,14 @@
 .tableHeader h2,
 .detailHeading h3 {
   margin: 0;
-  font: 800 14px/1.2 var(--font-manrope), sans-serif;
+  font: 700 16px/1.3 var(--font-manrope), sans-serif;
 }
 
 .panelHeading p,
 .tableHeader p {
   margin: 4px 0 0;
   color: #71847a;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tablePanel {
@@ -391,7 +390,7 @@
   border-bottom: 1px solid #e3ebe7;
   background: #f8faf9;
   color: #71847a;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.05em;
   text-align: left;
@@ -434,7 +433,7 @@
 .recordRow small {
   margin-top: 4px;
   color: #71847a;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .direction,
@@ -444,7 +443,7 @@
   width: fit-content;
   padding: 5px 7px;
   border-radius: 999px;
-  font-size: 11px !important;
+  font-size: 12px !important;
   font-weight: 800;
   text-transform: capitalize;
 }
@@ -538,7 +537,7 @@
   border-radius: 999px;
   background: #eef5f1;
   color: #5d7468;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -575,7 +574,7 @@
   border-radius: 7px;
   background: #f1f5f3;
   color: #667a70;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .detailGrid a {
@@ -585,7 +584,7 @@
   gap: 6px;
   margin-top: 14px;
   color: #087a50;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   text-decoration: none;
 }
@@ -627,3 +626,5 @@
 .actions input { width: 140px; }
 .metricCard { min-height: 104px; }
 @media (max-width: 620px) { .hero aside { min-height: 96px; } .actions label { flex: 1 1 130px; } .actions input, .actions select { width: 100%; } }
+
+@media (pointer: coarse) { .secondaryButton, .primaryButton, .expandButton { min-height: 44px; }.expandButton { min-width: 44px; } }

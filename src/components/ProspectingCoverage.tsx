@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft, BadgeCheck, Building2, CheckCircle2, CircleAlert, Database,
   Layers3, Radar, Search, Server, ShieldCheck, Target, UsersRound,
@@ -114,27 +114,34 @@ export function ProspectingCoverage({ onBack }: { onBack: () => void }) {
   const [country, setCountry] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
+  const request = useRef<AbortController | null>(null);
 
   const load = useCallback(async (silent = false) => {
+    if (document.hidden || (silent && request.current)) return;
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
     if (!silent) setLoading(true);
     try {
       const params = new URLSearchParams({ page: String(page), limit: "100", status });
       if (country) params.set("country", country);
       if (query.trim()) params.set("q", query.trim());
-      const response = await fetch(`/api/acquisition/coverage-status?${params.toString()}`, { cache: "no-store" });
+      const response = await fetch(`/api/acquisition/coverage-status?${params.toString()}`, { cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(45_000)]) });
       const data = await response.json() as CoveragePayload;
       if (!response.ok) throw new Error(data.error || "Unable to load market coverage.");
+      if (controller.signal.aborted) return;
       setPayload(data);
       setError("");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to load market coverage.");
+      if (!controller.signal.aborted) setError(requestError instanceof Error ? requestError.message : "Unable to load market coverage.");
     } finally {
-      if (!silent) setLoading(false);
+      if (request.current === controller) request.current = null;
+      if (!controller.signal.aborted) setLoading(false);
     }
   }, [country, page, query, status]);
 
   useEffect(() => {
-    const initial = window.setTimeout(() => void load(false), 120);
+    const initial = window.setTimeout(() => void load(false), 250);
     const interval = window.setInterval(() => void load(true), 30_000);
     const refreshVisible = () => {
       if (document.visibilityState === "visible") void load(true);
@@ -147,6 +154,8 @@ export function ProspectingCoverage({ onBack }: { onBack: () => void }) {
       window.clearInterval(interval);
       document.removeEventListener("visibilitychange", refreshVisible);
       window.removeEventListener("focus", refreshFocus);
+      request.current?.abort();
+      request.current = null;
     };
   }, [load]);
 

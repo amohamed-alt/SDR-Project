@@ -136,3 +136,34 @@ test("instant dashboard keeps the highest-signal companies for ATS/account intel
   assert.ok(companyIds.has("250"), "company with the largest associated-contact count should be retained");
   assert.ok(!companyIds.has("1"), "low-signal company should be omitted from the initial browser payload");
 });
+
+test("thousands of old high-priority tasks cannot displace today's task and meeting previews", () => {
+  const source = dashboard();
+  source.meta.timezone = "Asia/Riyadh";
+  source.recentActivities = [
+    ...Array.from({ length: 3000 }, (_, i) => activity(`old-${i}`, { type: "Task", isOpen: true, isHighPriority: true, dueAt: "2026-01-01T10:00:00Z" })),
+    activity("today-task", { type: "Task", isOpen: true, dueBucket: "Due today", dueAt: "2026-09-09T08:00:00Z" }),
+    activity("today-meeting", { type: "Meeting", isOpen: true, occurredAt: "2026-09-09T09:00:00Z" }),
+    activity("future-meeting", { type: "Meeting", isOpen: true, occurredAt: "2026-09-10T09:00:00Z" }),
+  ];
+  const projected = projectDashboardPayload(source);
+  assert.ok(projected.recentActivities.length <= 200);
+  for (const id of ["today-task", "today-meeting", "future-meeting"]) assert.ok(projected.recentActivities.some(row => row.id === id), id);
+  assert.equal(projected.workspaceSummary.onlineLeads, 250);
+  assert.equal(projected.workspaceSummary.untouchedOnlineLeads, 250);
+  assert.equal(projected.workspaceSummary.meetingsToday, 1);
+  assert.equal(projected.workspaceSummary.upcomingMeetings, 2);
+  assert.equal(source.recentActivities.length, 3003);
+});
+
+test("workspace scopes query full snapshot records beyond the browser preview", async () => {
+  const { selectDashboardRecords } = await import("../src/lib/dashboard-records.ts");
+  const source = dashboard();
+  source.priorityContacts[2].leadStatus = "Unqualified";
+  source.priorityContacts[3].lastContacted = "2026-09-01T10:00:00Z";
+  const projected = projectDashboardPayload(source);
+  assert.equal(selectDashboardRecords(source, { kind: "contacts", scope: "workspace-online" }).length, 250);
+  assert.equal(selectDashboardRecords(source, { kind: "contacts", scope: "workspace-untouched-online" }).length, 248);
+  assert.equal(projected.workspaceSummary.untouchedOnlineLeads, 248);
+  assert.ok(projected.priorityContacts.length < projected.workspaceSummary.onlineLeads);
+});

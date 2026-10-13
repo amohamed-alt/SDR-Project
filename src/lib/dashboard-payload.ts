@@ -1,3 +1,4 @@
+import { selectDashboardRecords } from "./dashboard-records.ts";
 import type { ActivityRow, CompanyRow, ContactRow, DashboardData } from "./types.ts";
 
 /** Aggregates only. Record evidence is queried separately against this version. */
@@ -79,14 +80,25 @@ export function projectDashboardPayload(data: DashboardData): DashboardData {
 
   for (const contact of newestOnlineContacts) contactIds.add(contact.id);
 
-  const activityIds = new Set(
-    data.recentActivities.slice(0, RECENT_ACTIVITY_LIMIT).map((activity) => activity.id),
-  );
-  const importantActivities = data.recentActivities
-    .filter(importantActivity)
-    .sort((left, right) => activitySortValue(left) - activitySortValue(right))
-    .slice(0, IMPORTANT_ACTIVITY_LIMIT);
-  for (const activity of importantActivities) activityIds.add(activity.id);
+  const key = (row: ActivityRow) => `${row.type}:${row.id}`;
+  const sortedImportant = data.recentActivities.filter(importantActivity).sort((left, right) => activitySortValue(left) - activitySortValue(right));
+  const todayTasks = sortedImportant.filter(row => row.type === "Task" && row.dueBucket === "Due today");
+  const upcoming = (selectDashboardRecords(data, { kind: "activities", scope: "workspace-upcoming-meetings" }) as ActivityRow[]).sort((left, right) => activitySortValue(left) - activitySortValue(right));
+  const meetingsToday = selectDashboardRecords(data, { kind: "activities", scope: "workspace-meetings-today" }) as ActivityRow[];
+  // Reserve independent previews so old high-priority work cannot crowd out today.
+  const importantPreview = [...todayTasks.slice(0, 40), ...meetingsToday.slice(0, 20), ...upcoming.slice(0, 20)];
+  const importantKeys = new Set(importantPreview.map(key));
+  for (const row of sortedImportant) {
+    if (importantKeys.size >= IMPORTANT_ACTIVITY_LIMIT) break;
+    importantKeys.add(key(row));
+  }
+  const activityIds = new Set([...importantKeys, ...data.recentActivities.slice(0, RECENT_ACTIVITY_LIMIT).map(key)]);
+  const workspaceSummary = {
+    onlineLeads: selectDashboardRecords(data, { kind: "contacts", scope: "workspace-online" }).length,
+    untouchedOnlineLeads: selectDashboardRecords(data, { kind: "contacts", scope: "workspace-untouched-online" }).length,
+    meetingsToday: meetingsToday.length,
+    upcomingMeetings: upcoming.length,
+  };
 
   const companies = [...data.companies]
     .sort((left, right) => {
@@ -99,7 +111,8 @@ export function projectDashboardPayload(data: DashboardData): DashboardData {
     ...data,
     hubspotMeetingEvidence: [],
     priorityContacts: data.priorityContacts.filter((contact) => contactIds.has(contact.id)),
-    recentActivities: data.recentActivities.filter((activity) => activityIds.has(activity.id)),
+    workspaceSummary,
+    recentActivities: data.recentActivities.filter((activity) => activityIds.has(key(activity))),
     companies,
   };
 }

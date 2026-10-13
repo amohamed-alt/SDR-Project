@@ -70,7 +70,9 @@ test("narrow analytics has accessible navigation and no page overflow", async ({
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/?acq=intelligence&studio=executive&from=2026-10-01&to=2026-10-04");
   await expect(page.getByRole("heading", { name: "Where to focus next" })).toBeVisible();
+  await page.getByRole("button", { name: "Menu", exact: true }).click();
   await expect(page.getByRole("button", { name: "Zein Talentera", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   await page.screenshot({ path: "test-results/studio-mobile.png", fullPage: true });
   await page.getByRole("button", { name: "Tool studio", exact: true }).click();

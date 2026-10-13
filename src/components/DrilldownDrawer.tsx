@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { X } from "lucide-react";
 import { GtmTable } from "@/components/GtmTable";
@@ -22,12 +22,12 @@ function exportFileName(title: string, kind: Drilldown["kind"]) {
 
 function ContactsTable({ drilldown }: { drilldown: Extract<Drilldown, { kind: "contacts" }> }) {
   if (drilldown.source) return <DashboardRecordsTable key={JSON.stringify(drilldown.source)} source={drilldown.source}/>;
-  return <GtmTable rows={drilldown.rows} columns={contactColumns} getRowId={(row) => row.id} getSearchText={(row) => JSON.stringify(row)} exportFileName={exportFileName(drilldown.title, drilldown.kind)} exportRow={(contact) => ({ Name: contact.name, Title: contact.title, Company: contact.company, Country: contact.country, Tier: contact.tier, Priority: contact.contactPriority, "Lead Status": contact.leadStatus, "Original Source": contact.originalSource, Created: contact.createdAt, "Next Activity": contact.nextActivity, "Priority Score": contact.priorityScore, "HubSpot URL": contact.url })}/>;
+  return <GtmTable rows={drilldown.rows} columns={contactColumns} getRowId={(row) => row.id} getSearchText={(row) => JSON.stringify(row)} exportFileName={exportFileName(drilldown.title, drilldown.kind)} exportRow={(contact) => ({ Name: contact.name, Title: contact.title, Company: contact.company, Country: contact.country, Tier: contact.tier, Priority: contact.contactPriority, "Lead Status": contact.leadStatus, "Original Source": contact.originalSource, Created: contact.createdAt, "Next Activity": contact.nextActivity, "Priority Score": contact.priorityScore, "LinkedIn URL": contact.linkedinUrl, "HubSpot URL": contact.url })}/>;
 }
 
 function ActivitiesTable({ drilldown }: { drilldown: Extract<Drilldown, { kind: "activities" }> }) {
   if (drilldown.source) return <DashboardRecordsTable key={JSON.stringify(drilldown.source)} source={drilldown.source}/>;
-  return <GtmTable rows={drilldown.rows} columns={activityColumns} getRowId={(row) => `${row.type}-${row.id}`} getSearchText={(row) => JSON.stringify(row)} exportFileName={exportFileName(drilldown.title, drilldown.kind)} exportRow={(activity) => ({ Type: activity.type, Subject: activity.subject, Status: activity.status, Detail: activity.detail, "Associated Contact": activity.relatedContactName, "Assigned To": activity.assignedTo, "Activity Date": activity.occurredAt, "Due Date": activity.dueAt, "Due Bucket": activity.dueBucket, Open: activity.isOpen, "HubSpot URL": activity.url })}/>;
+  return <GtmTable rows={drilldown.rows} columns={activityColumns} getRowId={(row) => `${row.type}-${row.id}`} getSearchText={(row) => JSON.stringify(row)} exportFileName={exportFileName(drilldown.title, drilldown.kind)} exportRow={(activity) => ({ Type: activity.type, Subject: activity.subject, Status: activity.status, Detail: activity.detail, "Associated Contact": activity.relatedContactName, "Assigned To": activity.assignedTo, "Activity Date": activity.occurredAt, "Due Date": activity.dueAt, "Due Bucket": activity.dueBucket, Open: activity.isOpen, "LinkedIn URL": activity.relatedContactLinkedinUrl, "HubSpot URL": activity.url })}/>;
 }
 
 function CompaniesTable({ drilldown }: { drilldown: Extract<Drilldown, { kind: "companies" }> }) {
@@ -41,36 +41,84 @@ function DealsTable({ drilldown }: { drilldown: Extract<Drilldown, { kind: "deal
 }
 
 export function DrilldownDrawer({ drilldown, onClose }: { drilldown: Drilldown; onClose: () => void }) {
+  const panelRef = useRef<HTMLElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
   useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    document.addEventListener("keydown", closeOnEscape);
+    const panel = panelRef.current;
+    if (!panel) return;
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const alreadyLocked = document.body.classList.contains("drawer-open");
+    const isTopDialog = () => {
+      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
+      return dialogs[dialogs.length - 1] === panel;
+    };
+    const focusableElements = () => Array.from(panel.querySelectorAll<HTMLElement>(
+      'a[href], button, input, select, textarea, [tabindex]',
+    )).filter((element) => element.tabIndex >= 0 && !element.matches(":disabled") && !element.closest('[inert], [aria-hidden="true"]') && element.getClientRects().length > 0);
+    const keepFocusInside = (event: FocusEvent) => {
+      if (isTopDialog() && event.target instanceof Node && !panel.contains(event.target)) closeRef.current?.focus({ preventScroll: true });
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isTopDialog()) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const elements = focusableElements();
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      if (!first) { event.preventDefault(); panel.focus({ preventScroll: true }); return; }
+      const active = document.activeElement;
+      if (!panel.contains(active) || active === panel || (event.shiftKey ? active === first : active === last)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus({ preventScroll: true });
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("focusin", keepFocusInside);
     document.body.classList.add("drawer-open");
-    return () => { document.removeEventListener("keydown", closeOnEscape); document.body.classList.remove("drawer-open"); };
-  }, [onClose]);
+    closeRef.current?.focus({ preventScroll: true });
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("focusin", keepFocusInside);
+      if (!alreadyLocked) document.body.classList.remove("drawer-open");
+      if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });
+    };
+  }, []);
 
   const table = drilldown.kind === "contacts" ? <ContactsTable drilldown={drilldown}/>
     : drilldown.kind === "activities" ? <ActivitiesTable drilldown={drilldown}/>
       : drilldown.kind === "companies" ? <CompaniesTable drilldown={drilldown}/>
         : <DealsTable drilldown={drilldown}/>;
 
-  return <div className="drilldown-layer" role="dialog" aria-modal="true" aria-label={drilldown.title}>
+  return <div className="drilldown-layer">
     <motion.button
       className="drilldown-backdrop"
       onClick={onClose}
-      aria-label="Close details"
+      aria-hidden="true"
+      tabIndex={-1}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.18 }}
     />
     <motion.aside
+      ref={panelRef}
       className="drilldown-drawer"
+      role="dialog"
+      aria-modal="true"
+      aria-label={drilldown.title}
+      tabIndex={-1}
       initial={{ x: "100%" }}
       animate={{ x: 0 }}
       exit={{ x: "100%" }}
       transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
     >
-      <header className="drilldown-header"><div><span>DRILL-DOWN · LIVE HUBSPOT DATA</span><h2>{drilldown.title}</h2><p>{drilldown.description}</p></div><button className="drawer-close" onClick={onClose} aria-label="Close"><X size={20}/></button></header>
+      <header className="drilldown-header"><div><span>DRILL-DOWN · LIVE HUBSPOT DATA</span><h2>{drilldown.title}</h2><p>{drilldown.description}</p></div><button ref={closeRef} className="drawer-close" onClick={onClose} aria-label="Close"><X size={20}/></button></header>
       <div className="drilldown-list">{table}</div>
       <footer className="drilldown-footer"><span>Sortable operational records behind the selected metric.</span>{externalLink(drilldown.hubspotUrl, "Open full object list")}</footer>
     </motion.aside>

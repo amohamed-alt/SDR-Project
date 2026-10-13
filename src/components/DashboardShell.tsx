@@ -1,4 +1,5 @@
 "use client";
+import { DashboardSidebar } from "./DashboardSidebar";
 
 import { SDR_OWNERS, type SdrDashboardProps } from "@/lib/sdr-owners";
 
@@ -93,6 +94,7 @@ export function Dashboard({
   workspaceNavigation,
 }: SdrDashboardProps & { initialSearch?: string; workspaceNavigation?: ReactNode }) {
   const [view, setView] = useState<ShellView>(() => viewFromSearch(initialSearch));
+  const [viewSearch, setViewSearch] = useState(initialSearch);
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminChecked, setAdminChecked] = useState(false);
   const [adminPrompt, setAdminPrompt] = useState(false);
@@ -101,7 +103,10 @@ export function Dashboard({
   const [adminBusy, setAdminBusy] = useState(false);
 
   useEffect(() => {
-    const syncFromUrl = () => setView(viewFromSearch(window.location.search));
+    const syncFromUrl = () => {
+      setView(viewFromSearch(window.location.search));
+      setViewSearch(window.location.search);
+    };
     syncFromUrl();
     window.addEventListener("popstate", syncFromUrl);
     return () => window.removeEventListener("popstate", syncFromUrl);
@@ -129,6 +134,7 @@ export function Dashboard({
     const url = new URL(window.location.href);
     url.searchParams.delete("view");
     window.history.replaceState({}, "", url);
+    setViewSearch(url.search);
     setView("core");
     setAdminPrompt(true);
   }, [adminChecked, adminUnlocked, view]);
@@ -168,6 +174,7 @@ export function Dashboard({
     if (next === "core") url.searchParams.delete("view");
     else url.searchParams.set("view", next);
     window.history.pushState({}, "", url);
+    setViewSearch(url.search);
     setView(next);
     trackFeature(next === "core" ? "dashboard" : next);
   }
@@ -254,7 +261,7 @@ export function Dashboard({
             </div> : null}
 
             {!adminUnlocked ? <div className={styles.advancedList}>
-              {adminToolLabels.map(([label, description]) => <button className={`${styles.toolItem} ${styles.lockedTool}`} type="button" key={label} onClick={() => setAdminPrompt(true)}>
+              {adminToolLabels.map(([label, description]) => <button className={`${styles.toolItem} ${styles.lockedTool}`} type="button" data-keep-navigation-open key={label} onClick={() => setAdminPrompt(true)}>
                 <span className={`${styles.toolIcon} ${styles.salesIcon}`}><LockKeyhole size={16}/></span>
                 <span className={styles.toolCopy}><strong>{label}</strong><small>{description}</small></span>
               </button>)}
@@ -266,7 +273,7 @@ export function Dashboard({
     <ExistingDashboard
       sdr={sdr}
       active={active}
-      initialSearch={initialSearch}
+      initialSearch={viewSearch}
       workspaceNavigation={workspaceNavigation}
       onOpenMotion={() => changeView("motion")}
       onOpenMaqsam={() => changeView("maqsam")}
@@ -277,19 +284,19 @@ export function Dashboard({
   let toolContent: ReactNode;
   switch (view) {
     case "motion": toolContent = <MotionDashboard sdr={sdr} onBack={() => changeView("core")}/>; break;
-    case "maqsam": toolContent = <MaqsamCallsDashboard initialSearch={initialSearch} initialAgent={sdr === "daniel" ? "daniel" : "marita"} onBack={() => changeView("core")}/>; break;
+    case "maqsam": toolContent = <MaqsamCallsDashboard initialSearch={viewSearch} initialAgent={sdr === "daniel" ? "daniel" : "marita"} onBack={() => changeView("core")}/>; break;
     case "marita-priority": toolContent = <MaritaPriorityQueue onBack={() => changeView("core")}/>; break;
     case "team-activity": toolContent = <TeamActivity onBack={() => changeView("core")}/>; break;
     case "inventory": toolContent = <LeadInventory inventory onBack={() => changeView("core")}/>; break;
     case "net-new": toolContent = <ProspectingCoverage onBack={() => changeView("core")}/>; break;
     case "gtm-brain": toolContent = <TalenteraIntelligenceWorkspace onBack={() => changeView("core")}/>; break;
-    case "sales-handoff": toolContent = <SalesHandoffDashboard initialSearch={initialSearch} initialSdr={sdr === "daniel" ? "daniel" : "marita"} onBack={() => changeView("core")}/>; break;
+    case "sales-handoff": toolContent = <SalesHandoffDashboard initialSearch={viewSearch} initialSdr={sdr === "daniel" ? "daniel" : "marita"} onBack={() => changeView("core")}/>; break;
   }
 
   return <div className={styles.shell}>
     <div className={styles.toolFrame}>
       <div className="workspace">
-        <aside className="sidebar">
+        <DashboardSidebar>
           <div className="brand">
             {sdr === "daniel" ? <><span className="evalufy-brand-mark"><Image src="/evalufy-transparent.png" sizes="176px" alt="Evalufy" width={2048} height={688} className="evalufy-logo" priority/><Image src="/evalufy-transparent.png" sizes="176px" alt="" aria-hidden="true" width={2048} height={688} className="evalufy-logo evalufy-symbol" priority/></span><span className="brand-subtitle">SDR Intelligence</span></> : <><div className="brand-logo" role="img" aria-label="Talentera ATS"/><span className="brand-subtitle">SDR Intelligence</span></>}
           </div>
@@ -301,7 +308,7 @@ export function Dashboard({
           <div className="nav-label owner-label">SDR OWNER</div>
           <div className="owner-card"><div className="avatar">{owner.initials}</div><div><span>Reporting for</span><strong>{owner.name}</strong></div><BadgeCheck size={17}/></div>
           {sidebarTools}
-        </aside>
+        </DashboardSidebar>
         <div className={`content ${styles.toolContent}`}>
           <WorkspaceErrorBoundary key={view} onBack={() => changeView("core")}>
             {view === "maqsam" ? toolContent : <ToolAccessGate>{toolContent}</ToolAccessGate>}

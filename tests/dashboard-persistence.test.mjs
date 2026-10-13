@@ -10,7 +10,7 @@ test("persisted snapshots keep every record and signal ID through the compressed
   const data = {
     meta: { generatedAt: "2026-10-06T12:00:00Z" },
     priorityContacts: Array.from({ length: 300 }, (_, i) => ({ id: String(i), name: `Full contact ${i}` })),
-    recentActivities: Array.from({ length: 400 }, (_, i) => ({ id: String(i), type: "Task" })),
+    recentActivities: Array.from({ length: 400 }, (_, i) => ({ id: String(i), type: "Task", relatedContactLinkedinUrl: `https://www.linkedin.com/in/contact-${i}` })),
     companies: [], deals: [], intelligence: { missing: { ids: ["299"] } },
   };
   let saved;

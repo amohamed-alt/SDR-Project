@@ -13,6 +13,7 @@ import type { RecordSelection } from "@/lib/dashboard-records";
 import type { Drilldown } from "@/components/DrilldownDrawer";
 import { PerformanceCharts } from "./PerformanceCharts";
 import { ReportingRange } from "./ReportingRange";
+import { DashboardDisclosure } from "./DashboardDisclosure";
 import { TalentMarketWatch } from "./TalentMarketWatch";
 import { CallIntelligencePanel, CallSegmentTable } from "./CallIntelligencePanel";
 import { ToolStudio } from "./ToolStudio";
@@ -53,28 +54,43 @@ export function DecisionStudio({ initialSearch }: { initialSearch: string }) {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let force = forceRef.current; forceRef.current = false;
-    const started = Date.now();
+    let refreshStartedAt = 0;
+    let running = false;
     const hit = cache.get(query);
     if (hit) setLoaded({ key: query, data: hit.data });
     async function load() {
+      if (controller.signal.aborted || running) return;
+      clearTimeout(timer);
       if (document.hidden) { timer = setTimeout(load, 30_000); return; }
-      setBusy(true); setError("");
+      running = true;
+      let delay = 30_000;
+      setBusy(true);
       try {
-        const response = await fetch(`/api/dashboard/insights?${query}${force ? "&refresh=1" : ""}`, { signal: controller.signal });
+        const response = await fetch(`/api/dashboard/insights?${query}${force ? "&refresh=1" : ""}`, { cache: force ? "no-store" : "default", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]) });
         force = false;
-        const result = await response.json();
+        const result = await response.json() as Payload & { error?: string };
         if (!response.ok) throw new Error(result.error || "Analytics could not load.");
         if (controller.signal.aborted) return;
-        cache.delete(query); cache.set(query, { data: result, at: Date.now() });
+        if (result.refreshing && !refreshStartedAt) refreshStartedAt = Date.now();
+        const refreshTimedOut = result.refreshing && Date.now() - refreshStartedAt >= 90_000;
+        const visibleResult = refreshTimedOut ? { ...result, refreshing: false } : result;
+        if (!result.refreshing) refreshStartedAt = 0;
+        cache.delete(query); cache.set(query, { data: visibleResult, at: Date.now() });
         while (cache.size > 12) cache.delete(cache.keys().next().value!);
-        setLoaded({ key: query, data: result });
-        timer = setTimeout(load, result.refreshing && Date.now() - started < 90_000 ? 3000 : 60_000);
-      } catch (err) { if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "Analytics unavailable"); }
-      finally { if (!controller.signal.aborted) setBusy(false); }
+        setLoaded({ key: query, data: visibleResult });
+        setError(refreshTimedOut ? "The live refresh is taking longer than expected. The last complete snapshot remains visible; you can retry." : "");
+        delay = result.refreshing && !refreshTimedOut ? 3000 : 60_000;
+      } catch (err) { if (!controller.signal.aborted) setError(err instanceof Error && err.name === "TimeoutError" ? "Analytics took too long to respond. Your last snapshot is still available; retry when ready." : err instanceof Error ? err.message : "Analytics unavailable"); }
+      finally {
+        running = false;
+        if (!controller.signal.aborted) { setBusy(false); timer = setTimeout(load, delay); }
+      }
     }
     if (!force && hit && Date.now() - hit.at < 30_000) timer = setTimeout(load, 30_000);
     else void load();
-    return () => { controller.abort(); clearTimeout(timer); };
+    const onVisible = () => { if (!document.hidden) void load(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { controller.abort(); clearTimeout(timer); document.removeEventListener("visibilitychange", onVisible); };
   }, [query, refresh, showAnalytics]);
 
   function navigate(key: string, value: string) {
@@ -95,10 +111,10 @@ export function DecisionStudio({ initialSearch }: { initialSearch: string }) {
     {active === "tools" ? <ToolStudio ownerKey={ownerKey}/> : active === "agent" ? <TalentMarketWatch/> : <>
       <ReportingRange key={`${filters.from}:${filters.to}`} filters={filters}/>
       {error ? <div role="alert" className={styles.error}>{error} <button type="button" onClick={refreshData}>Retry</button></div> : null}
-      {!data ? <div className={styles.loading} role="status"><BarChart3 size={30}/><strong>Preparing your decision workspace…</strong><span>Reading the existing HubSpot snapshot.</span></div> : null}
+      {!data && !error ? <div className={styles.loading} role="status"><BarChart3 size={30}/><strong>Preparing your decision workspace…</strong><span>Reading the existing HubSpot snapshot.</span></div> : null}
       {data && insights ? <>
         <div className={styles.freshness}><span>{data.meta.isDemo ? "DEMO DATA" : "HUBSPOT SNAPSHOT"} · {owner.brand} · {data.meta.timezone}</span><span>Updated {new Date(data.meta.generatedAt).toLocaleString("en-GB", { timeZone: data.meta.timezone })}</span><button type="button" disabled={busy || payload?.refreshing} onClick={refreshData}><RefreshCw size={12}/> {busy || payload?.refreshing ? "Updating…" : "Refresh data"}</button></div>
-        {data.meta.warnings.length ? <div role="status" className={styles.notice}>Some sources are incomplete: {data.meta.warnings.join(" · ")}</div> : null}
+        {data.meta.warnings.length ? <div className={styles.notice}><DashboardDisclosure title={`${data.meta.warnings.length} data source notices · review details`}><ul>{data.meta.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></DashboardDisclosure></div> : null}
         {active === "executive" ? <>
           <section className={styles.stats} aria-label="Executive metrics">{[
             ["Calls connected", `${data.kpis.connectionRate}%`, `${number(data.kpis.connectedCalls)} of ${number(data.kpis.calls)} calls`],
