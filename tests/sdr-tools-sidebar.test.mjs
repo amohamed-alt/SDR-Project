@@ -19,5 +19,5 @@ test("admin tools remain password protected without an accordion", () => {
   assert.doesNotMatch(shell, /advancedOpen/);
 });
 test("the selected internal tool is marked as the current page", () => {
-  assert.equal((shell.match(/aria-current=\{view ===/g) || []).length, 8);
+  assert.equal((shell.match(/aria-current=\{view ===/g) || []).length, 7);
 });

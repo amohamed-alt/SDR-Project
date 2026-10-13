@@ -203,10 +203,7 @@ export function Dashboard({
               <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Target size={17}/></span>
               <span className={styles.toolCopy}><strong>Prospecting</strong><small>Persistent market coverage · Apollo universe · HubSpot dedupe</small></span>
             </button>
-            <button className={`${styles.toolItem} ${view === "maqsam" ? styles.activeTool : ""}`} type="button" aria-current={view === "maqsam" ? "page" : undefined} onClick={() => changeView("maqsam")}>
-              <span className={`${styles.toolIcon} ${styles.callsIcon}`}><PhoneCall size={17}/></span>
-              <span className={styles.toolCopy}><strong>Calls</strong><small>Maqsam call intelligence · transcripts · sync</small></span>
-            </button>
+
             <button className={`${styles.toolItem} ${view === "team-activity" ? styles.activeTool : ""}`} type="button" aria-current={view === "team-activity" ? "page" : undefined} onClick={() => changeView("team-activity")}>
               <span className={`${styles.toolIcon} ${styles.gtmIcon}`}><Activity size={17}/></span>
               <span className={styles.toolCopy}><strong>Team Activity {!adminUnlocked ? <LockKeyhole size={12}/> : null}</strong><small>Usage · adoption · workspace health</small></span>
@@ -307,7 +304,7 @@ export function Dashboard({
         </aside>
         <div className={`content ${styles.toolContent}`}>
           <WorkspaceErrorBoundary key={view} onBack={() => changeView("core")}>
-            <ToolAccessGate>{toolContent}</ToolAccessGate>
+            {view === "maqsam" ? toolContent : <ToolAccessGate>{toolContent}</ToolAccessGate>}
           </WorkspaceErrorBoundary>
         </div>
       </div>

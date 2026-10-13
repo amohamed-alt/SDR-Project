@@ -239,7 +239,7 @@ export function MaqsamCallsDashboard({ onBack, initialAgent = "marita", initialS
       <div className={styles.titleGroup}>
         <button type="button" className={styles.secondaryButton} onClick={onBack}><ArrowLeft size={15}/>Analytics Dashboard</button>
         <div>
-          <strong>Maqsam Call Intelligence</strong>
+          <strong>Maqsam Calls</strong>
           <span>Marita & Daniel · calls, summaries, transcripts, and HubSpot matches</span>
         </div>
       </div>
@@ -259,8 +259,8 @@ export function MaqsamCallsDashboard({ onBack, initialAgent = "marita", initialS
       <section className={styles.hero}>
         <div>
           <span><PhoneCall size={15}/>CALL OPERATIONS</span>
-          <h1>Maqsam calls for Marita and Daniel, from the first available call.</h1>
-          <p>Choose an SDR to see calls, duration, available AI summaries and transcripts. Historical calls appear as the sync worker imports them; missing summaries remain visible.</p>
+          <h1>Call activity & conversation insights</h1>
+          <p>Track call attempts, completed calls, transcripts and HubSpot matches for the selected SDR.</p>
         </div>
         <aside>
           <strong>{data?.meta.totalStored ?? 0}</strong>

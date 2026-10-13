@@ -4,7 +4,7 @@ import { toolAccessResponse, isProtectedToolPage } from "../src/lib/tool-access.
 import { sdrAdminCookieToken, validateSdrAdminPassword } from "../src/lib/sdr-admin-auth.ts";
 const request = (path, method = "GET", headers = {}, cookie = "") => ({ nextUrl: new URL(path, "https://sdr.dashboardtalentera.tech"), method, headers: new Headers(headers), cookies: { get: () => ({ value: cookie }) } });
 test("tool reads and mutations fail closed while public dashboard and tracking remain available", () => {
-  for (const path of ["/api/usage", "/api/%75sage", "/api/maqsam/calls", "/api/acquisition", "/api/lead-inventory/engine", "/api/prospecting/signalhire/companion", "/api/company-enrichment", "/api/dashboard/sales-handoff"]) {
+  for (const path of ["/api/usage", "/api/%75sage", "/api/acquisition", "/api/lead-inventory/engine", "/api/prospecting/signalhire/companion", "/api/company-enrichment", "/api/dashboard/sales-handoff"]) {
     assert.equal(toolAccessResponse(request(path))?.status, 401, path);
     assert.equal(toolAccessResponse(request(path, "GET", { "authorization": "Bearer fake", "x-acquisition-owner-token": "fake", "x-acquisition-worker-key": "fake" }))?.status, 401, path);
   }
@@ -43,4 +43,12 @@ test("server cookie and verified machine secrets unlock only intended paths", ()
   } finally {
     for (const key of ["SDR_ADMIN_PASSWORD", "DASHBOARD_PASSWORD", "MAQSAM_INGEST_SECRET", "SIGNALHIRE_API_KEY"]) delete process.env[key];
   }
+});
+
+test("Maqsam call reads and pages open without unlocking; ingestion remains protected", () => {
+  assert.equal(toolAccessResponse(request("/api/maqsam/calls")), null);
+  assert.equal(toolAccessResponse(request("/api/maqsam/calls", "POST"))?.status, 401);
+  assert.equal(toolAccessResponse(request("/?view=maqsam&acq=daniel")), null);
+  assert.equal(toolAccessResponse(request("/marita-calls")), null);
+  assert.equal(toolAccessResponse(request("/?view=team-activity"))?.status, 307);
 });
