@@ -15,6 +15,7 @@ for (const width of [390, 800]) {
     await menu.click();
     const sidebar = page.locator("aside.sidebar");
     await expect(sidebar).toBeVisible();
+    await expect(page.getByRole("button", { name: "Open GTM command palette", exact: true })).toBeHidden();
     // The menu must cover the whole viewport, including a wrapped topbar.
     // A fixed 64px top inset leaves part of the mobile toolbar outside the modal.
     if (width === 390) {

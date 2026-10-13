@@ -15,7 +15,7 @@
 | Check | Result |
 | --- | --- |
 | TypeScript | Passed |
-| Unit tests | 251 passed, zero failed |
+| Unit tests | 252 passed, zero failed in release CI |
 | Production build | Passed |
 | ESLint | Zero errors; four pre-existing warnings |
 | API / standalone-server smoke | Passed; updated stale Maqsam page-title assertion |
@@ -23,16 +23,16 @@
 | Existing production public screens | Reviewed Marita analytics sections, workspace, Ursula KPIs and call drawer, Daniel overview, team comparison metric switching, Maqsam search/details, and Intelligence Studio executive/ICP views |
 | Protected production tools | Confirmed password gates; authenticated data and write flows remain unverified; a secure login attempt was rejected as incorrect password |
 
-New browser tests cover mobile navigation, LinkedIn links, keyboard drawer behavior, workspace completeness, and request failure/race recovery. The first PR CI browser run passed 33/37 cases. Four assertions were corrected: an absent demo footer link, the Next route-announcer alert collision, an obsolete protected-Maqsam read expectation, and the country selector accessible name. A fresh complete CI run is required for the final revision. The cloud browser cannot reach the local preview server.
+New browser tests cover mobile navigation, LinkedIn links, keyboard drawer behavior, workspace completeness, and request failure/race recovery. Release CI run `38469366240` passed all 37 browser tests after resolving four initial assertion failures. The cloud browser cannot reach the local preview server; live verification uses the deployed site.
 
-## Release gates still pending
+## Deployment and live verification
 
-1. User explicitly authorized publication to `amohamed-alt/SDR-Project` and deployment on 14 October 2026 (Cairo). Publish through the connected GitHub API because the shell has no GitHub credentials.
-2. Run pull-request CI, including browser tests; resolve failures before merging.
-3. Deploy only through the repository's canonical main-branch CI and Hostinger workflow.
-4. Verify the deployed `/api/health` build reference and visually inspect the new responsive UI in the live browser.
-5. Authenticate through the browser's secure login flow to complete protected-tool verification. Do not create production outreach, enrichment purchases or calendar invitations solely for QA.
+1. Authorized PR #277 was merged to main as `b9e3cce452960a60278683545f775d0198d7086a`.
+2. Main CI and canonical Hostinger deploy run `38469987724` completed successfully, including its public advisory check. `/api/health` reported the exact deployed commit.
+3. Live Ursula KPIs loaded real data; connected-call records, empty search, expandable pipeline/risk sections and daily activity pulse were verified. Actual scrolling reached the page bottom. Marita workspace loaded the full task total and saved LinkedIn actions. A task's LinkedIn action opened the correct profile; Message and Connect were visible in its More menu. No outreach was sent.
+4. The full task drawer loaded its complete count and server pagination. Manual clicking found the floating GTM launcher obscuring its Next button, missed by previous browser coverage. A follow-up hides that launcher while a drawer is open, preserves keyboard palette access and adds an interaction regression test. The RM SLA tile also needs N/A when its denominator is empty or unavailable.
+5. Protected-tool data and write flows remain unverified: the secure login attempt was rejected as incorrect password. A working authenticated session is required. Google Calendar is not connected. Do not create production outreach, enrichment purchases or calendar invitations solely for QA.
 
 Source-data notices include malformed tracker links. UI changes do not repair the underlying source sheet. Google Calendar connection must also be completed before booking can be verified.
 
-The production site has not been updated by this branch. There is no measured production speed improvement claim. Claude reviewed exact PR head `44988725311cd82262b322a32c03aa8a8f460a07` through the signed-in web session. Its source review found no data-correctness blockers and identified four pre-deploy fixes: LinkedIn unavailable/compact CSS specificity and accessibility, valid mobile/localized profile URL support, the E2E alert collision, and mobile overlay/topbar overlap. All four were addressed. Small follow-ups also preserve presentation mode on drawer Escape, return mobile focus, avoid periodic usage-refresh spinners, stabilize timeout notices and version the payload profile. Completed-task contact hydration remains intentional because historical task actions also need LinkedIn data. Claude did not run the live site or build.
+The initial post-deploy cache rebuild took noticeable time before data appeared; there is no measured production speed improvement claim. Claude reviewed exact PR head `44988725311cd82262b322a32c03aa8a8f460a07` through the signed-in web session. Its source review found no data-correctness blockers and identified four pre-deploy fixes: LinkedIn unavailable/compact CSS specificity and accessibility, valid mobile/localized profile URL support, the E2E alert collision, and mobile overlay/topbar overlap. All four were addressed. Claude re-reviewed final head `0045f7ac9731bf83b5616ca9ff221e0450b4e524`, ran the LinkedIn unit cases and reported no remaining blocker. Small follow-ups also preserve presentation mode on drawer Escape, return mobile focus, avoid periodic usage-refresh spinners, stabilize timeout notices and version the payload profile. Completed-task contact hydration remains intentional because historical task actions also need LinkedIn data. Claude did not run the live site or full build/browser suite.

@@ -371,11 +371,15 @@ function RepKpiDashboard({
     },
     {
       label: "Response SLA met",
-      value: data.intelligence.leadResponseSla.rate + "%",
-      helper: `${data.intelligence.leadResponseSla.met} of ${data.intelligence.leadResponseSla.eligible} within 24h`,
+      value: data.intelligence.leadResponseSla.eligible > data.intelligence.leadResponseSla.missing ? data.intelligence.leadResponseSla.rate + "%" : "N/A",
+      helper: data.intelligence.leadResponseSla.eligible === 0
+        ? "No eligible inbound contacts"
+        : data.intelligence.leadResponseSla.eligible === data.intelligence.leadResponseSla.missing
+          ? `Response timing missing for ${data.intelligence.leadResponseSla.missing} inbound contacts`
+          : `${data.intelligence.leadResponseSla.met} of ${data.intelligence.leadResponseSla.eligible - data.intelligence.leadResponseSla.missing} within 24h · ${data.intelligence.leadResponseSla.missing} unknown timing`,
       icon: ShieldCheck,
       tone: "blue",
-      onClick: () => showContacts(`${owner.name} · SLA not met`, "Reporting-period contacts missing first-response timing or above the 24-hour SLA.", { signal: "response-overdue" }),
+      onClick: () => showContacts(`${owner.name} · SLA not met`, "Reporting-period inbound contacts with known first-response timing above the 24-hour SLA. Missing timing is reported separately.", { signal: "response-overdue" }),
     },
     {
       label: "Missing contact info",

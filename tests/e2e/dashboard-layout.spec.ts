@@ -34,3 +34,13 @@ test("comparison metric, source details and owner navigation remain usable on mo
   await page.getByRole("button", { name: "Open Daniel workspace" }).click();
   await expect(page).toHaveURL(/acq=daniel/);
 });
+
+
+test("presentation toolbar uses the full canvas after sidebar is hidden", async ({ page }) => {
+  await page.goto("/?from=2026-07-01&to=2026-07-19");
+  await page.getByRole("button", { name: "Presentation", exact: true }).click();
+  await expect(page.locator(".topbar")).toHaveCSS("margin-left", "0px");
+  await expect(page.locator("aside.sidebar")).toBeHidden();
+  await page.getByRole("button", { name: "Exit presentation", exact: true }).click();
+  await expect(page.locator("aside.sidebar")).toBeVisible();
+});
