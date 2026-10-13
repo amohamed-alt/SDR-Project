@@ -11,8 +11,10 @@ export function safeLinkedInProfileUrl(value: unknown): string {
   try {
     const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.port) return "";
-    if (!/^(?:(?:www|[a-z]{2,3})\.)?linkedin\.com$/i.test(url.hostname)) return "";
-    const path = url.pathname.replace(/\/+$/, "");
+    if (!/^(?:(?:www|m|[a-z]{2,3})\.)?linkedin\.com$/i.test(url.hostname)) return "";
+    // LinkedIn person profiles can carry a two-letter language suffix. Remove
+    // only that suffix, before the same strict person-path validation below.
+    const path = url.pathname.replace(/\/+$/, "").replace(/^(\/in\/[^/]+)\/[a-z]{2}$/i, "$1");
     if (!/^\/in\/[\p{L}\p{N}%._~-]+$/u.test(path) && !/^\/sales\/lead\/[A-Za-z0-9_,%-]+$/.test(path)) return "";
     // Encoded separators/control characters must not turn a profile into another route.
     const decoded = decodeURIComponent(path);

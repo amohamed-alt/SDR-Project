@@ -36,6 +36,10 @@ test("task actions open a saved LinkedIn profile and expose missing profiles wit
   await expect(popup).toHaveURL("https://www.linkedin.com/in/qa-contact");
   await popup.close();
   const unavailable = drawer.getByRole("row").filter({ hasText: "LinkedIn unavailable task" });
-  await expect(unavailable.getByLabel("LinkedIn profile unavailable")).toBeVisible();
+  const unavailableAction = unavailable.getByRole("img", { name: "LinkedIn profile unavailable" });
+  await expect(unavailableAction).toBeVisible();
+  await expect(unavailableAction).toHaveCSS("cursor", "default");
+  await unavailableAction.hover();
+  await expect(unavailableAction).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(unavailable.getByRole("link", { name: /LinkedIn/ })).toHaveCount(0);
 });

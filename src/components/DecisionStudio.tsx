@@ -64,7 +64,7 @@ export function DecisionStudio({ initialSearch }: { initialSearch: string }) {
       if (document.hidden) { timer = setTimeout(load, 30_000); return; }
       running = true;
       let delay = 30_000;
-      setBusy(true); setError("");
+      setBusy(true);
       try {
         const response = await fetch(`/api/dashboard/insights?${query}${force ? "&refresh=1" : ""}`, { cache: force ? "no-store" : "default", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]) });
         force = false;
@@ -78,9 +78,9 @@ export function DecisionStudio({ initialSearch }: { initialSearch: string }) {
         cache.delete(query); cache.set(query, { data: visibleResult, at: Date.now() });
         while (cache.size > 12) cache.delete(cache.keys().next().value!);
         setLoaded({ key: query, data: visibleResult });
-        if (refreshTimedOut) setError("The live refresh is taking longer than expected. The last complete snapshot remains visible; you can retry.");
+        setError(refreshTimedOut ? "The live refresh is taking longer than expected. The last complete snapshot remains visible; you can retry." : "");
         delay = result.refreshing && !refreshTimedOut ? 3000 : 60_000;
-      } catch (err) { if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "Analytics unavailable"); }
+      } catch (err) { if (!controller.signal.aborted) setError(err instanceof Error && err.name === "TimeoutError" ? "Analytics took too long to respond. Your last snapshot is still available; retry when ready." : err instanceof Error ? err.message : "Analytics unavailable"); }
       finally {
         running = false;
         if (!controller.signal.aborted) { setBusy(false); timer = setTimeout(load, delay); }

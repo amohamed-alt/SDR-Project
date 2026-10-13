@@ -27,7 +27,10 @@ export function DashboardSidebar({ children }: { children: ReactNode }) {
     <aside id={id} className="sidebar" data-mobile-open={open} onClickCapture={(event) => {
       if (!(event.target instanceof Element)) return;
       const action = event.target.closest("nav button, nav a");
-      if (action && !action.closest("form, [data-keep-navigation-open]")) setOpen(false);
+      if (action && !action.closest("form, [data-keep-navigation-open]")) {
+        setOpen(false);
+        if (toggle.current?.getClientRects().length) toggle.current.focus({ preventScroll: true });
+      }
     }}>{children}</aside>
   </>;
 }

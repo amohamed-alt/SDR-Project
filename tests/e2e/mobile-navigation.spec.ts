@@ -15,8 +15,28 @@ for (const width of [390, 800]) {
     await menu.click();
     const sidebar = page.locator("aside.sidebar");
     await expect(sidebar).toBeVisible();
+    // The menu must cover the whole viewport, including a wrapped topbar.
+    // A fixed 64px top inset leaves part of the mobile toolbar outside the modal.
+    if (width === 390) {
+      expect((await page.locator(".topbar").boundingBox())!.height).toBeGreaterThan(64);
+    }
+    const sidebarBounds = (await sidebar.boundingBox())!;
+    const backdrop = page.getByRole("button", { name: "Close navigation", exact: true });
+    const backdropBounds = (await backdrop.boundingBox())!;
+    expect(sidebarBounds.y).toBe(0);
+    expect(sidebarBounds.height).toBe(844);
+    expect(backdropBounds).toEqual({ x: 0, y: 0, width, height: 844 });
+    const closeBounds = (await page.getByRole("button", { name: "Close menu", exact: true }).boundingBox())!;
+    const brandBounds = (await sidebar.locator(".brand").boundingBox())!;
+    expect(brandBounds.y).toBeGreaterThanOrEqual(closeBounds.y + closeBounds.height);
     await expect(page.getByRole("button", { name: "Zein Talentera", exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
+    await expect(sidebar).toBeHidden();
+    await expect(menu).toBeFocused();
+    await menu.click();
+    // Clicking the formerly exposed top-right toolbar region now dismisses
+    // the menu through its backdrop rather than activating a covered control.
+    await backdrop.click({ position: { x: width - 8, y: 20 } });
     await expect(sidebar).toBeHidden();
     await expect(menu).toBeFocused();
     await menu.click();

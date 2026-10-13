@@ -9,6 +9,24 @@ test("opens existing person URLs and removes tracking without inventing an ident
   assert.equal(safeLinkedInProfileUrl("https://www.linkedin.com/sales/lead/ACwAA123,NAME_SEARCH,456?trk=abc"), "https://www.linkedin.com/sales/lead/ACwAA123,NAME_SEARCH,456");
 });
 
+test("mobile and localized person links preserve the saved profile identity", () => {
+  for (const input of [
+    "https://m.linkedin.com/in/ahmed-123",
+    "m.linkedin.com/in/ahmed-123/ar",
+    "https://www.linkedin.com/in/ahmed-123/en/?trk=task#about",
+    "https://sa.linkedin.com/in/ahmed-123/ar",
+  ]) assert.equal(safeLinkedInProfileUrl(input), "https://www.linkedin.com/in/ahmed-123", input);
+  for (const input of [
+    "https://m.linkedin.com.evil.test/in/ahmed-123/ar",
+    "https://m.linkedin.com/in/ahmed-123/details/ar",
+    "https://m.linkedin.com/in/ahmed-123/arabic",
+    "https://m.linkedin.com/in/ahmed-123%2Fevil/ar",
+    "https://m.linkedin.com/in/ahmed-123/%61%72",
+    "https://m.linkedin.com/sales/lead/ACwAA123/en",
+    "https://www.linkedin.com/pub/ahmed-123/1/2/3",
+  ]) assert.equal(safeLinkedInProfileUrl(input), "", input);
+});
+
 test("rejects unsafe destinations, non-person URLs and malformed encoded paths", () => {
   for (const input of [
     "", null, "Ahmed Mohamed", "https://linkedin.com", "https://linkedin.com/company/example",

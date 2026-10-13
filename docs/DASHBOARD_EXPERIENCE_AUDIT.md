@@ -21,9 +21,9 @@
 | API / standalone-server smoke | Passed; updated stale Maqsam page-title assertion |
 | Patch whitespace | Passed |
 | Existing production public screens | Reviewed Marita analytics sections, workspace, Ursula KPIs and call drawer, Daniel overview, team comparison metric switching, Maqsam search/details, and Intelligence Studio executive/ICP views |
-| Protected production tools | Confirmed password gates; authenticated data and write flows remain unverified |
+| Protected production tools | Confirmed password gates; authenticated data and write flows remain unverified; a secure login attempt was rejected as incorrect password |
 
-New browser tests cover mobile navigation, LinkedIn links, keyboard drawer behavior, workspace completeness, and request failure/race recovery. These tests have been authored but have not run in this environment. The cloud browser cannot reach the local preview server.
+New browser tests cover mobile navigation, LinkedIn links, keyboard drawer behavior, workspace completeness, and request failure/race recovery. The first PR CI browser run passed 33/37 cases. Four assertions were corrected: an absent demo footer link, the Next route-announcer alert collision, an obsolete protected-Maqsam read expectation, and the country selector accessible name. A fresh complete CI run is required for the final revision. The cloud browser cannot reach the local preview server.
 
 ## Release gates still pending
 
@@ -35,4 +35,4 @@ New browser tests cover mobile navigation, LinkedIn links, keyboard drawer behav
 
 Source-data notices include malformed tracker links. UI changes do not repair the underlying source sheet. Google Calendar connection must also be completed before booking can be verified.
 
-The production site has not been updated by this branch. There is no measured production speed improvement claim. Claude was unavailable in this environment; independent implementation/review agents were used instead.
+The production site has not been updated by this branch. There is no measured production speed improvement claim. Claude reviewed exact PR head `44988725311cd82262b322a32c03aa8a8f460a07` through the signed-in web session. Its source review found no data-correctness blockers and identified four pre-deploy fixes: LinkedIn unavailable/compact CSS specificity and accessibility, valid mobile/localized profile URL support, the E2E alert collision, and mobile overlay/topbar overlap. All four were addressed. Small follow-ups also preserve presentation mode on drawer Escape, return mobile focus, avoid periodic usage-refresh spinners, stabilize timeout notices and version the payload profile. Completed-task contact hydration remains intentional because historical task actions also need LinkedIn data. Claude did not run the live site or build.

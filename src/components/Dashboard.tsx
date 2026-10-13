@@ -101,7 +101,7 @@ export function Dashboard({
   useEffect(() => {
     if (presenting) document.body.dataset.presentation = "true";
     else delete document.body.dataset.presentation;
-    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") { setPresenting(false); const url = new URL(window.location.href); url.searchParams.delete("present"); window.history.replaceState({}, "", url); } };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.defaultPrevented) { setPresenting(false); const url = new URL(window.location.href); url.searchParams.delete("present"); window.history.replaceState({}, "", url); } };
     window.addEventListener("keydown", escape);
     return () => { delete document.body.dataset.presentation; window.removeEventListener("keydown", escape); };
   }, [presenting]);

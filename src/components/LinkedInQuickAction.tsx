@@ -10,7 +10,7 @@ export function LinkedInQuickAction({ url, contactName, compact = false }: {
   const profile = safeLinkedInProfileUrl(url);
   const label = `Open ${contactName ? `${contactName}’s ` : ""}LinkedIn profile to message or connect`;
   const className = `${styles.action} ${compact ? styles.compact : ""}`;
-  if (!profile) return <span className={`${className} ${styles.unavailable}`} aria-label="LinkedIn profile unavailable" title="No valid LinkedIn profile saved for this contact">
+  if (!profile) return <span className={`${className} ${styles.unavailable}`} role="img" aria-label="LinkedIn profile unavailable" title="No valid LinkedIn profile saved for this contact">
     <Linkedin size={13} aria-hidden="true"/>{!compact && <span>LinkedIn unavailable</span>}
   </span>;
   // Message/Connect availability depends on the signed-in account and relationship.

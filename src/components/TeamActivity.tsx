@@ -82,11 +82,11 @@ export function TeamActivity({ onBack }: { onBack: () => void }) {
   const [updatedAt, setUpdatedAt] = useState<number>(0);
   const request = useRef<AbortController | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (manual = false) => {
     if (document.hidden || request.current) return;
     const controller = new AbortController();
     request.current = controller;
-    setLoading(true);
+    if (manual) setLoading(true);
     try {
       const response = await fetch("/api/usage", { cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]) });
       const payload = await response.json() as UsageSummary;
@@ -103,7 +103,7 @@ export function TeamActivity({ onBack }: { onBack: () => void }) {
   }, []);
 
   useEffect(() => {
-    const initial = window.setTimeout(() => void load(), 0);
+    const initial = window.setTimeout(() => void load(true), 0);
     const timer = window.setInterval(() => void load(), 15_000);
     const onVisible = () => { if (!document.hidden) void load(); };
     document.addEventListener("visibilitychange", onVisible);
@@ -133,7 +133,7 @@ export function TeamActivity({ onBack }: { onBack: () => void }) {
           <span className={`${styles.health} ${data.tracking ? styles.healthy : styles.offline}`}>
             <span/>{data.tracking ? "PostgreSQL tracking live" : data.unavailable ? "Tracking unavailable" : "Tracking warming up"}
           </span>
-          <button type="button" className={styles.refresh} onClick={() => void load()} disabled={loading}>
+          <button type="button" className={styles.refresh} onClick={() => void load(true)} disabled={loading}>
             <RefreshCw size={15} className={loading ? styles.spinning : ""}/> Refresh
           </button>
         </div>
