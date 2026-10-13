@@ -102,3 +102,23 @@ test("narrow analytics has accessible navigation and no page overflow", async ({
   expect(await page.getByLabel("To", { exact: true }).inputValue()).toBe(from);
   await expect(page).toHaveURL(new RegExp(`from=${from}`));
 });
+
+for (const scenario of [
+  { label: "no eligible contacts", eligible: 0, met: 0, missing: 0, rate: 0, display: "N/A", helper: "No eligible inbound contacts" },
+  { label: "all timing missing", eligible: 2, met: 0, missing: 2, rate: 0, display: "N/A", helper: "Response timing missing for 2 inbound contacts" },
+  { label: "known zero success rate", eligible: 2, met: 0, missing: 1, rate: 0, display: "0%", helper: "0 of 1 within 24h · 1 unknown timing" },
+]) {
+  test(`RM SLA correctly renders ${scenario.label}`, async ({ page }) => {
+    await page.route("**/api/dashboard?**", async route => {
+      const response = await route.fetch();
+      const data = await response.json();
+      data.intelligence.leadResponseSla = { eligible: scenario.eligible, met: scenario.met, missing: scenario.missing, rate: scenario.rate, overdueIds: [] };
+      await route.fulfill({ json: data });
+    });
+    await page.goto("/?acq=ursula&from=2026-07-01&to=2026-07-19");
+    await page.getByText("More workload, risk & data-quality metrics", { exact: true }).click();
+    const card = page.getByRole("button", { name: /^Response SLA met/ });
+    await expect(card.locator("strong")).toHaveText(scenario.display);
+    await expect(card).toContainText(scenario.helper);
+  });
+}

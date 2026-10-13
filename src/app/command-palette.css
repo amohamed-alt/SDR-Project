@@ -19,6 +19,11 @@
   transition: transform 180ms cubic-bezier(.22,1,.36,1), box-shadow 180ms ease, border-color 180ms ease;
 }
 
+/* The launcher lives outside DashboardShell's isolated stacking context.
+   Remove it while a record modal owns focus, so it cannot cover pagination.
+   The palette itself remains available through Ctrl/Cmd+K above that modal. */
+body.drawer-open .gtm-command-trigger { display: none; }
+
 .gtm-command-trigger span { font-size: 11px; font-weight: 700; }
 .gtm-command-trigger svg { color: var(--green); }
 .gtm-command-trigger kbd,
