@@ -2,7 +2,7 @@
 
 import { SDR_OWNERS, type SdrKey } from "@/lib/sdr-owners";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence } from "motion/react";
 import {
   AlertTriangle,
@@ -35,30 +35,9 @@ import {
 } from "recharts";
 import { DrilldownDrawer, type Drilldown } from "@/components/DrilldownDrawer";
 import styles from "@/components/DashboardMotion.module.css";
-import type { ActivityRow, ChartDatum, ContactRow, DashboardData } from "@/lib/types";
-
-type Motion = "Inbound" | "Outbound" | "Unknown";
-type MotionMetrics = {
-  contacts: number;
-  calls: number;
-  connected: number;
-  connectionRate: number;
-  meetings: number;
-  completedTasks: number;
-  emails: number;
-  whatsApp: number;
-  dealContacts: number;
-  openDealContacts: number;
-};
-type MotionDailyDatum = {
-  date: string;
-  inboundCalls: number;
-  outboundCalls: number;
-  inboundConnected: number;
-  outboundConnected: number;
-  inboundActivities: number;
-  outboundActivities: number;
-};
+import type { ActivityRow, ChartDatum } from "@/lib/types";
+import type { Motion, MotionMetrics, MotionDailyDatum, MotionDashboardData } from "@/lib/dashboard-motion";
+import type { RecordSelection } from "@/lib/dashboard-records";
 
 type MetricButtonProps = {
   label: string;
@@ -80,44 +59,9 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(value);
 }
 
-function zonedDay(value: string, timezone: string) {
-  if (!value) return "";
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date(value));
-}
-
 function displayDate(value: string) {
   if (!value) return "—";
   return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(`${value}T12:00:00Z`));
-}
-
-function eachDay(from: string, to: string) {
-  const days: string[] = [];
-  const cursor = new Date(`${from}T12:00:00Z`);
-  const end = new Date(`${to}T12:00:00Z`);
-  while (cursor <= end && days.length < 370) {
-    days.push(cursor.toISOString().slice(0, 10));
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-  }
-  return days;
-}
-
-function contactMotion(row: ContactRow): Motion {
-  const contactSource = row.contactSource.trim().toLowerCase();
-  const leadSource = row.leadSource.trim().toLowerCase();
-  const explicit = `${contactSource} ${leadSource}`;
-
-  if (/inbound|marketing/.test(explicit)) return "Inbound";
-  if (/outbound|sales generated|prospecting|sdr/.test(explicit)) return "Outbound";
-
-  const originalSource = row.originalSource.trim().toLowerCase();
-  if (!originalSource || originalSource === "unknown") return "Unknown";
-  if (originalSource === "offline sources") return "Outbound";
-  return "Inbound";
 }
 
 function selectedDatum(entry: unknown) {
@@ -227,11 +171,12 @@ function FunnelPanel({
   </section>;
 }
 
-export function MotionDashboard({ onBack, sdr }: { onBack: () => void; sdr: SdrKey }) {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [from, setFrom] = useState(defaultStart);
-  const [to, setTo] = useState(today);
-  const [appliedRange, setAppliedRange] = useState({ from: defaultStart, to: today });
+export function MotionDashboard({ onBack, sdr, initialSearch = "" }: { onBack: () => void; sdr: SdrKey; initialSearch?: string }) {
+  const initial = new URLSearchParams(initialSearch);
+  const [data, setData] = useState<MotionDashboardData | null>(null);
+  const [from, setFrom] = useState(initial.get("from") || defaultStart);
+  const [to, setTo] = useState(initial.get("to") || today);
+  const [appliedRange, setAppliedRange] = useState({ from: initial.get("from") || defaultStart, to: initial.get("to") || today });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -250,6 +195,7 @@ export function MotionDashboard({ onBack, sdr }: { onBack: () => void; sdr: SdrK
         from: appliedRange.from,
         to: appliedRange.to,
         ownerId: SDR_OWNERS[sdr].ownerId,
+        profile: "motion",
       });
       if (forceRefresh) query.set("refresh", "1");
       const response = await fetch(`/api/dashboard?${query.toString()}`, {
@@ -258,7 +204,7 @@ export function MotionDashboard({ onBack, sdr }: { onBack: () => void; sdr: SdrK
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.details || payload.error || "Dashboard request failed");
-      const nextData = payload as DashboardData;
+      const nextData = payload as MotionDashboardData;
       if (nextData.meta.ownerId !== SDR_OWNERS[sdr].ownerId) throw new Error("Dashboard returned data for a different SDR owner");
       setData(nextData);
       const serverRefreshing = response.headers.get("X-Dashboard-Refreshing") === "1";
@@ -272,7 +218,7 @@ export function MotionDashboard({ onBack, sdr }: { onBack: () => void; sdr: SdrK
     } finally {
       setLoading(false);
     }
-  }, [appliedRange, sdr]);
+  }, [appliedRange, sdr, setData]);
 
   useEffect(() => { void loadData(false); }, [loadData]);
 
@@ -282,167 +228,40 @@ export function MotionDashboard({ onBack, sdr }: { onBack: () => void; sdr: SdrK
     return () => window.clearTimeout(timer);
   }, [loadData, loading, refreshing]);
 
-  const model = useMemo(() => {
-    if (!data) return null;
+  const model = data?.motion;
 
-    const contactMotionMap = new Map(data.priorityContacts.map((row) => [row.id, contactMotion(row)]));
-    const contactsByMotion: Record<Motion, ContactRow[]> = { Inbound: [], Outbound: [], Unknown: [] };
-    for (const contact of data.priorityContacts) contactsByMotion[contactMotion(contact)].push(contact);
-
-    const activityMotion = (row: ActivityRow): Motion => {
-      if (!row.relatedContactId) return "Unknown";
-      return contactMotionMap.get(row.relatedContactId) ?? "Unknown";
-    };
-
-    const activitiesByMotion: Record<Motion, ActivityRow[]> = { Inbound: [], Outbound: [], Unknown: [] };
-    for (const activity of data.recentActivities) activitiesByMotion[activityMotion(activity)].push(activity);
-
-    const metricsFor = (motion: Motion): MotionMetrics => {
-      const contacts = contactsByMotion[motion];
-      const activities = activitiesByMotion[motion];
-      const calls = activities.filter((row) => row.type === "Call");
-      const connected = calls.filter((row) => row.status === "Connected");
-      return {
-        contacts: contacts.length,
-        calls: calls.length,
-        connected: connected.length,
-        connectionRate: calls.length ? Math.round((connected.length / calls.length) * 1000) / 10 : 0,
-        meetings: activities.filter((row) => row.type === "Meeting").length,
-        completedTasks: activities.filter((row) => row.type === "Task" && !row.isOpen).length,
-        emails: activities.filter((row) => row.type === "Email").length,
-        whatsApp: activities.filter((row) => row.type === "WhatsApp").length,
-        dealContacts: contacts.filter((row) => row.hasDeal).length,
-        openDealContacts: contacts.filter((row) => row.hasOpenDeal).length,
-      };
-    };
-
-    const funnelFor = (motion: Motion): ChartDatum[] => {
-      const contacts = contactsByMotion[motion];
-      return [
-        { name: "Portfolio", value: contacts.length },
-        { name: "Contacted", value: contacts.filter((row) => Boolean(row.lastContacted)).length },
-        { name: "Connected", value: contacts.filter((row) => row.hasConnectedCall).length },
-        { name: "Meeting", value: contacts.filter((row) => row.hasMeeting).length },
-        { name: "Deal", value: contacts.filter((row) => row.hasDeal).length },
-        { name: "Open Deal", value: contacts.filter((row) => row.hasOpenDeal).length },
-      ];
-    };
-
-    const dailyMap = new Map<string, MotionDailyDatum>(eachDay(data.meta.from, data.meta.to).map((date) => [date, {
-      date,
-      inboundCalls: 0,
-      outboundCalls: 0,
-      inboundConnected: 0,
-      outboundConnected: 0,
-      inboundActivities: 0,
-      outboundActivities: 0,
-    }]));
-
-    for (const activity of data.recentActivities) {
-      if (!activity.metricAt) continue;
-      if (activity.type === "Task" && activity.isOpen) continue;
-      const day = zonedDay(activity.metricAt, data.meta.timezone);
-      const point = dailyMap.get(day);
-      if (!point) continue;
-      const motion = activityMotion(activity);
-      if (motion === "Unknown") continue;
-      if (motion === "Inbound") point.inboundActivities += 1;
-      if (motion === "Outbound") point.outboundActivities += 1;
-      if (activity.type === "Call") {
-        if (motion === "Inbound") {
-          point.inboundCalls += 1;
-          if (activity.status === "Connected") point.inboundConnected += 1;
-        } else {
-          point.outboundCalls += 1;
-          if (activity.status === "Connected") point.outboundConnected += 1;
-        }
-      }
-    }
-
-    return {
-      contactsByMotion,
-      activitiesByMotion,
-      activityMotion,
-      inboundMetrics: metricsFor("Inbound"),
-      outboundMetrics: metricsFor("Outbound"),
-      unknownMetrics: metricsFor("Unknown"),
-      inboundFunnel: funnelFor("Inbound"),
-      outboundFunnel: funnelFor("Outbound"),
-      daily: [...dailyMap.values()],
-    };
-  }, [data]);
-
-  function showContacts(title: string, description: string, rows: ContactRow[]) {
+  function showRecords(title: string, description: string, selection: RecordSelection, type: ActivityRow["type"] = "Call") {
     if (!data) return;
-    setDrilldown({ kind: "contacts", title, description, rows, hubspotUrl: data.meta.hubspotUrls.contacts });
+    const source = { filters: { from: data.meta.from, to: data.meta.to, ownerId: data.meta.ownerId }, version: data.meta.generatedAt, selection };
+    const url = type === "Task" ? data.meta.hubspotUrls.tasks : type === "Meeting" ? data.meta.hubspotUrls.meetings : type === "Email" ? data.meta.hubspotUrls.emails : type === "WhatsApp" ? data.meta.hubspotUrls.communications : data.meta.hubspotUrls.calls;
+    if (selection.kind === "contacts") setDrilldown({ kind: "contacts", title, description, rows: [], source, hubspotUrl: data.meta.hubspotUrls.contacts });
+    else setDrilldown({ kind: "activities", title, description, rows: [], source, hubspotUrl: url });
   }
 
-  function activityUrl(type: ActivityRow["type"]) {
-    if (!data) return "#";
-    if (type === "Task") return data.meta.hubspotUrls.tasks;
-    if (type === "Meeting") return data.meta.hubspotUrls.meetings;
-    if (type === "Email") return data.meta.hubspotUrls.emails;
-    if (type === "WhatsApp") return data.meta.hubspotUrls.communications;
-    return data.meta.hubspotUrls.calls;
-  }
-
-  function showActivities(title: string, description: string, rows: ActivityRow[], type: ActivityRow["type"] = "Call") {
-    if (!data) return;
-    setDrilldown({ kind: "activities", title, description, rows, hubspotUrl: activityUrl(type) });
-  }
-
-  function openMotionMetric(motion: "Inbound" | "Outbound", metric: keyof MotionMetrics) {
-    if (!model) return;
-    const contacts = model.contactsByMotion[motion];
-    const activities = model.activitiesByMotion[motion];
+  function openMotionMetric(motion: Motion, metric: keyof MotionMetrics) {
     const prefix = `${motion} · `;
-
-    if (metric === "contacts") return showContacts(`${prefix}portfolio contacts`, `Contacts classified as ${motion.toLowerCase()}.`, contacts);
-    if (metric === "calls") return showActivities(`${prefix}calls`, `${motion} calls in the selected period.`, activities.filter((row) => row.type === "Call"), "Call");
-    if (metric === "connected") return showActivities(`${prefix}connected calls`, `${motion} calls with the Connected disposition.`, activities.filter((row) => row.type === "Call" && row.status === "Connected"), "Call");
-    if (metric === "meetings") return showActivities(`${prefix}meetings`, `${motion} meetings in the selected period.`, activities.filter((row) => row.type === "Meeting"), "Meeting");
-    if (metric === "completedTasks") return showActivities(`${prefix}completed tasks`, `${motion} tasks completed in the selected period.`, activities.filter((row) => row.type === "Task" && !row.isOpen), "Task");
-    if (metric === "emails") return showActivities(`${prefix}emails`, `${motion} outgoing email activities.`, activities.filter((row) => row.type === "Email"), "Email");
-    if (metric === "whatsApp") return showActivities(`${prefix}WhatsApp messages`, `${motion} WhatsApp communications.`, activities.filter((row) => row.type === "WhatsApp"), "WhatsApp");
-    if (metric === "dealContacts") return showContacts(`${prefix}deal contacts`, `${motion} contacts associated with a deal.`, contacts.filter((row) => row.hasDeal));
-    if (metric === "openDealContacts") return showContacts(`${prefix}open-deal contacts`, `${motion} contacts associated with an open deal.`, contacts.filter((row) => row.hasOpenDeal));
+    if (metric === "contacts" || metric === "dealContacts" || metric === "openDealContacts") {
+      const funnel = metric === "dealContacts" ? "Deal" : metric === "openDealContacts" ? "Open Deal" : "Portfolio";
+      return showRecords(`${prefix}${funnel.toLowerCase()} contacts`, `${motion} contacts in the complete current portfolio.`, { kind: "contacts", motion, funnel });
+    }
+    const type: ActivityRow["type"] = metric === "meetings" ? "Meeting" : metric === "completedTasks" ? "Task" : metric === "emails" ? "Email" : metric === "whatsApp" ? "WhatsApp" : "Call";
+    showRecords(`${prefix}${metric === "connected" ? "connected calls" : type + " activities"}`, `${motion} execution in the selected reporting period.`, { kind: "activities", motion, where: [{ field: "type", value: type }, ...(metric === "connected" ? [{ field: "status", value: "Connected" }] : [])] }, type);
   }
 
-  function funnelContacts(motion: "Inbound" | "Outbound", stage: string) {
-    if (!model) return;
-    const contacts = model.contactsByMotion[motion].filter((row) =>
-      stage === "Portfolio"
-      || (stage === "Contacted" && Boolean(row.lastContacted))
-      || (stage === "Connected" && row.hasConnectedCall)
-      || (stage === "Meeting" && row.hasMeeting)
-      || (stage === "Deal" && row.hasDeal)
-      || (stage === "Open Deal" && row.hasOpenDeal),
-    );
-    showContacts(`${motion} funnel · ${stage}`, `${motion} contacts contributing to the ${stage} stage.`, contacts);
+  function funnelContacts(motion: Motion, stage: string) {
+    showRecords(`${motion} funnel · ${stage}`, `${motion} contacts contributing to the ${stage} stage.`, { kind: "contacts", motion, funnel: stage });
   }
 
-  function openDailyCalls(entry: unknown, motion: "Inbound" | "Outbound", connectedOnly: boolean) {
-    if (!data || !model) return;
+  function openDailyCalls(entry: unknown, motion: Motion, connectedOnly: boolean) {
     const point = selectedPoint(entry);
     if (!point) return;
-    const rows = model.activitiesByMotion[motion].filter((row) =>
-      row.type === "Call"
-      && zonedDay(row.metricAt, data.meta.timezone) === point.date
-      && (!connectedOnly || row.status === "Connected"),
-    );
-    showActivities(`${motion} ${connectedOnly ? "connected calls" : "calls"} · ${displayDate(point.date)}`, "Calls behind the selected chart point.", rows, "Call");
+    showRecords(`${motion} ${connectedOnly ? "connected calls" : "calls"} · ${displayDate(point.date)}`, "Calls behind the selected chart point.", { kind: "activities", motion, day: point.date, where: [{ field: "type", value: "Call" }, ...(connectedOnly ? [{ field: "status", value: "Connected" }] : [])] });
   }
 
-  function openDailyActivities(entry: unknown, motion: "Inbound" | "Outbound") {
-    if (!data || !model) return;
+  function openDailyActivities(entry: unknown, motion: Motion) {
     const point = selectedPoint(entry);
     if (!point) return;
-    const rows = model.activitiesByMotion[motion].filter((row) =>
-      row.metricAt
-      && zonedDay(row.metricAt, data.meta.timezone) === point.date
-      && !(row.type === "Task" && row.isOpen),
-    );
-    showActivities(`${motion} activities · ${displayDate(point.date)}`, "Calls, meetings, completed tasks, emails, and WhatsApp activities behind the selected bar.", rows);
+    showRecords(`${motion} activities · ${displayDate(point.date)}`, "Period calls, booked meetings, completed tasks, emails, and WhatsApp activities.", { kind: "activities", motion, day: point.date });
   }
 
   const summaryRows = model ? [
@@ -519,10 +338,10 @@ export function MotionDashboard({ onBack, sdr }: { onBack: () => void; sdr: SdrK
           <section className={styles.panel}>
             <div className={styles.panelHeading}><div><h2>Motion data quality</h2><p>Records that could not be confidently classified.</p></div></div>
             <div className={styles.unknownGrid}>
-              <button type="button" className={styles.unknownCard} onClick={() => showContacts("Unknown-motion contacts", "Contacts with no reliable inbound or outbound classification.", model.contactsByMotion.Unknown)}><span><UsersRound size={12}/>Unknown contacts</span><strong>{model.unknownMetrics.contacts}</strong><small>Review Contact Source</small></button>
-              <button type="button" className={styles.unknownCard} onClick={() => showActivities("Unknown-motion activities", "Activities with no associated classified contact.", model.activitiesByMotion.Unknown)}><span><AlertTriangle size={12}/>Unknown activities</span><strong>{model.activitiesByMotion.Unknown.length}</strong><small>Review associations</small></button>
+              <button type="button" className={styles.unknownCard} onClick={() => showRecords("Unknown-motion contacts", "Contacts with no reliable inbound or outbound classification.", { kind: "contacts", motion: "Unknown" })}><span><UsersRound size={12}/>Unknown contacts</span><strong>{model.unknownMetrics.contacts}</strong><small>Review Contact Source</small></button>
+              <button type="button" className={styles.unknownCard} onClick={() => showRecords("Unknown-motion activities", "Execution in the selected period with no classified contact or tracker motion.", { kind: "activities", motion: "Unknown" })}><span><AlertTriangle size={12}/>Unknown period activities</span><strong>{model.unknownActivities}</strong><small>Review associations</small></button>
             </div>
-            <div className={styles.coverageNote}><strong>{data.kpis.portfolioContacts ? Math.round(((model.inboundMetrics.contacts + model.outboundMetrics.contacts) / data.kpis.portfolioContacts) * 1000) / 10 : 0}% classification coverage.</strong> Click either card to clean the records that remain outside inbound and outbound reporting.</div>
+            <div className={styles.coverageNote}><strong>{model.classificationCoverage === null ? "N/A" : `${model.classificationCoverage}%`} classification coverage.</strong> Click either card to clean the records that remain outside inbound and outbound reporting.</div>
           </section>
         </div>
 

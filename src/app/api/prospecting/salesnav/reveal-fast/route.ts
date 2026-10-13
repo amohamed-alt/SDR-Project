@@ -3,6 +3,8 @@ import { z } from "zod";
 import { POST as resolveCompanion } from "@/app/api/prospecting/resolve-companion/route";
 import { POST as hubspotPrecheckV2 } from "@/app/api/prospecting/salesnav/precheck-v2/route";
 import { lookupSalesNavLead, saveSalesNavReveal } from "@/lib/salesnav-lead-ledger";
+import { normalizePersonUrl } from "@/lib/ai-sdr-qualification";
+import { cachedSalesNavIdentityMismatch, salesNavNameMismatch } from "@/lib/salesnav-identity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -64,9 +66,15 @@ export async function POST(request: NextRequest) {
     const parsed = schema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: "Invalid Sales Nav reveal payload." }, { status: 400 });
     const { lead, runId } = parsed.data;
+    const publicProfile = normalizePersonUrl(lead.linkedinUrl);
+    if (!publicProfile) return NextResponse.json({ error: "A verified public LinkedIn person URL is required before reveal. No contact credits were used.", creditUsed: false }, { status: 422 });
+    lead.linkedinUrl = publicProfile;
 
     const cached = await lookupSalesNavLead(lead);
     if (cached?.revealAttemptedAt) {
+      const cachedMismatch = cachedSalesNavIdentityMismatch(publicProfile, cached)
+        || (cached.cachedProspect ? salesNavNameMismatch(lead, cached.cachedProspect) : "");
+      if (cachedMismatch) return NextResponse.json({ error: cachedMismatch, creditUsed: false }, { status: 409 });
       if (cached.cachedProspect) {
         const prospect = cached.cachedProspect as JsonObject;
         const check = await postRevealCheck(request, lead, prospect);
@@ -115,6 +123,8 @@ export async function POST(request: NextRequest) {
     // enriched later during downstream company workflows; phone/email are available now.
     const prospect = revealPayload.prospect as JsonObject;
     await saveSalesNavReveal({ identity: lead, prospect, runId, attempted: true });
+    const nameMismatch = salesNavNameMismatch(lead, prospect);
+    if (nameMismatch) return NextResponse.json({ error: nameMismatch, creditUsed: true }, { status: 409 });
     const check = await postRevealCheck(request, lead, prospect);
 
     return NextResponse.json({

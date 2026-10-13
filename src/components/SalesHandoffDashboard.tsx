@@ -312,7 +312,7 @@ export function SalesHandoffDashboard({ onBack, initialSearch = "", initialSales
 
   const metrics = [
     { label: `${sourceName(applied.sdr)} meetings`, value: formatNumber(computed.meetings), helper: `${computed.completed} completed`, icon: CalendarDays },
-    { label: "Sales follow-up", value: `${computed.followUpRate}%`, helper: `${computed.followedUp} meetings followed up`, icon: Activity },
+    { label: "Sales follow-up", value: filteredRows.length ? `${computed.followUpRate}%` : "N/A", helper: filteredRows.length ? `${computed.followedUp} meetings followed up` : "No attributed meetings in this view", icon: Activity },
     { label: "Associated deals", value: formatNumber(computed.deals), helper: `${computed.openDeals} currently open`, icon: BriefcaseBusiness },
     { label: "Open pipeline", value: formatCurrency(computed.pipelineValue), helper: "Unique open deals", icon: CircleDollarSign },
     { label: "Closed won", value: formatNumber(computed.closedWon), helper: "Unique won deals", icon: CheckCircle2 },
@@ -371,7 +371,7 @@ export function SalesHandoffDashboard({ onBack, initialSearch = "", initialSales
             <ResponsiveContainer width="100%" height={300}><BarChart data={funnel} layout="vertical" margin={{ left: 18, right: 18 }}><CartesianGrid horizontal={false} stroke="#e5ece8"/><XAxis type="number" allowDecimals={false}/><YAxis type="category" dataKey="name" width={112} tick={{ fontSize: 11 }}/><Tooltip/><Bar dataKey="value" name="Records" fill="#087a50" radius={[0, 6, 6, 0]}/></BarChart></ResponsiveContainer>
           </section>
           <section className={styles.panel}>
-            <div className={styles.panelHeader}><div><span>FOLLOW-UP SLA</span><h2>How fast Sales moved</h2></div><small>{computed.followUpRate}% coverage</small></div>
+            <div className={styles.panelHeader}><div><span>FOLLOW-UP SLA</span><h2>How fast Sales moved</h2></div><small>{filteredRows.length ? `${computed.followUpRate}% coverage` : "Coverage unavailable"}</small></div>
             {sla.length ? <ResponsiveContainer width="100%" height={250}><PieChart><Pie data={sla} dataKey="value" nameKey="name" innerRadius={58} outerRadius={90} paddingAngle={3}>{sla.map((item, index) => <Cell key={item.name} fill={COLORS[index % COLORS.length]}/>)}</Pie><Tooltip/></PieChart></ResponsiveContainer> : <div className={styles.empty}>No SLA data for these filters.</div>}
             <div className={styles.legend}>{sla.map((item, index) => <span key={item.name}><i style={{ background: COLORS[index % COLORS.length] }}/>{item.name}: <strong>{item.value}</strong></span>)}</div>
           </section>

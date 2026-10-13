@@ -188,6 +188,7 @@ export async function POST(request: NextRequest) {
         linkedinUrl,
         source: parsed.data.source,
         fullName: candidate.fullName || parsed.data.name,
+        providerFullName: candidate.fullName || "",
         headline: candidate.headLine || "",
         location,
         title,
