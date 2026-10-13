@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { workspaceWhatsAppFallback } from "@/lib/whatsapp-outreach";
 import { LoaderCircle, MessageCircle } from "lucide-react";
 
 type WhatsAppPayload = {
@@ -26,6 +27,9 @@ type WhatsAppPayload = {
 
 const requestCache = new Map<string, Promise<WhatsAppPayload>>();
 const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
+class WhatsAppPreparationError extends Error {
+  constructor(message: string, public fallbackAllowed: boolean) { super(message); }
+}
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -37,6 +41,7 @@ async function requestWhatsAppPayload(contactId: string, attempt = 0): Promise<W
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ contactId }),
     cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
   });
 
   const raw = await response.text();
@@ -56,7 +61,7 @@ async function requestWhatsAppPayload(contactId: string, attempt = 0): Promise<W
 
   if (!response.ok || (!payload.whatsappWebUrl && !payload.whatsappUrl)) {
     const fallbackError = `WhatsApp preparation failed (HTTP ${response.status})`;
-    throw new Error(payload.error || fallbackError);
+    throw new WhatsAppPreparationError(payload.error || fallbackError, RETRYABLE_STATUS.has(response.status) && !/DEMO_MODE/.test(payload.error || ""));
   }
 
   return payload;
@@ -87,8 +92,12 @@ function destinationUrl(payload: WhatsAppPayload) {
   return payload.whatsappWebUrl || payload.whatsappUrl || payload.whatsappMobileUrl || "";
 }
 
-export function WhatsAppQuickAction({ contactId }: { contactId: string }) {
+export function WhatsAppQuickAction({ contactId, fallbackContact }: {
+  contactId: string;
+  fallbackContact?: { phone: string; country?: string; name?: string; company?: string; title?: string };
+}) {
   const [loading, setLoading] = useState(false);
+  const [usedFallback, setUsedFallback] = useState(false);
 
   async function openWhatsApp(event: React.MouseEvent<HTMLAnchorElement>) {
     event.preventDefault();
@@ -114,24 +123,28 @@ export function WhatsAppQuickAction({ contactId }: { contactId: string }) {
         window.location.assign(destination);
       }
     } catch (error) {
-      if (popup && !popup.closed) popup.close();
-      window.alert(error instanceof Error ? error.message : "Unable to prepare WhatsApp message");
+      const temporaryFailure = error instanceof WhatsAppPreparationError ? error.fallbackAllowed
+        : error instanceof TypeError || (error instanceof DOMException && error.name === "TimeoutError");
+      const fallback = temporaryFailure && fallbackContact ? workspaceWhatsAppFallback(fallbackContact) : null;
+      if (fallback) {
+        setUsedFallback(true);
+        const destination = destinationUrl(fallback);
+        if (popup && !popup.closed) popup.location.replace(destination);
+        else window.location.assign(destination);
+      } else {
+        if (popup && !popup.closed) popup.close();
+        window.alert(error instanceof Error ? error.message : "Unable to prepare WhatsApp message");
+      }
     } finally {
       setLoading(false);
     }
   }
 
-  function prefetch() {
-    if (!loading) void whatsappPayload(contactId).catch(() => undefined);
-  }
-
   return <a
     href="#"
     aria-label="Open WhatsApp with AI message"
-    title="Open WhatsApp with a ready AI message"
+    title={usedFallback ? "Prepared from loaded contact details while the message service was unavailable" : "Open WhatsApp with a ready message"}
     onClick={(event) => void openWhatsApp(event)}
-    onMouseEnter={prefetch}
-    onFocus={prefetch}
   >
     {loading ? <LoaderCircle className="spin" size={13}/> : <MessageCircle size={13}/>} 
   </a>;

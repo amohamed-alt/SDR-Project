@@ -1,5 +1,7 @@
 "use client";
 
+import { distinctProspectPhones } from "@/lib/prospect-phone-details";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
@@ -185,6 +187,10 @@ async function enrichSignalHireLead(lead: SignalHireLead, listName: string) {
   if (!fastResponse.ok || !fast.prospect) {
     throw new Error(fast.error || "SignalHire could not enrich this lead.");
   }
+
+  // Keep numbers already revealed in the list alongside enrichment results.
+  fast.prospect.phones = distinctProspectPhones([fast.prospect.phone, ...fast.prospect.phones, lead.phone, ...lead.phones]);
+  fast.prospect.phone = fast.prospect.phones[0] || "";
 
   const intelResponse = await fetch("/api/prospecting/intelligence", {
     method: "POST",

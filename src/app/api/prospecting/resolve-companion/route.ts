@@ -128,7 +128,7 @@ export async function POST(request: NextRequest) {
       });
       const searchPayload = await searchResponse.json().catch(() => null) as { profiles?: SearchProfile[]; error?: string } | null;
       if (!searchResponse.ok) {
-        return NextResponse.json({ error: searchPayload?.error || `SignalHire Search API returned HTTP ${searchResponse.status}.` }, { status: searchResponse.status });
+        return NextResponse.json({ error: searchResponse.status === 402 ? "SignalHire daily search quota is exhausted. Contact credits may still be available. Sync a public LinkedIn profile URL to resolve this person without name/company search." : searchPayload?.error || `SignalHire Search API returned HTTP ${searchResponse.status}.` }, { status: searchResponse.status });
       }
       const match = bestSearchMatch(searchPayload?.profiles || [], parsed.data.name, parsed.data.company);
       if (!match?.uid) return NextResponse.json({ error: "SignalHire could not match this Sales Nav person by name + company." }, { status: 404 });
@@ -211,6 +211,7 @@ export async function POST(request: NextRequest) {
         email: email?.value || "",
         emails,
         emailConfidence: email?.rating || null,
+        mobilephone: phoneContacts.find(entry => entry.subType?.toLowerCase() === "mobile")?.value || "",
         phone: phone?.value || "",
         phones,
         phoneConfidence: phone?.rating || null,

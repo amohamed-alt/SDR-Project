@@ -9,6 +9,7 @@ import {
   selectWhatsAppPhone,
   whatsappFallbackStyle,
   whatsappStyleForCountry,
+  workspaceWhatsAppFallback,
 } from "../src/lib/whatsapp-outreach.ts";
 
 test("prefers a Saudi mobilephone over a landline phone", () => {
@@ -143,4 +144,14 @@ test("builds a direct WhatsApp Web link with encoded message text", () => {
 test("builds a wa.me mobile link separately", () => {
   const url = buildWhatsAppMobileUrl("966551234567", "Hello");
   assert.match(url, /^https:\/\/wa\.me\/966551234567\?text=/);
+});
+
+test("workspace outage fallback prepares a real loaded number without claiming verified hiring", () => {
+  const result = workspaceWhatsAppFallback({phone:"+966551234567",country:"Saudi Arabia",name:"Ahmed",company:"Acme",title:"HR Director"});
+  assert.match(result.whatsappWebUrl, /966551234567/);
+  assert.match(result.message, /Ahmed/);
+  assert.equal(/saw.*hiring|active hiring/i.test(result.message), false);
+});
+test("workspace outage fallback cannot guess the country of a local number", () => {
+  assert.equal(workspaceWhatsAppFallback({phone:"0551234567",country:""}),null);
 });
