@@ -46,7 +46,8 @@ test("RM charts expose source records and keep handoff scope isolated", async ({
   expect(new URL(handoffUrl).searchParams.get("salesRepId")).toBe("31558980");
   expect(new URL(handoffUrl).searchParams.get("from")).toBe("2026-07-01");
   await page.getByLabel("Booking SDR").selectOption("daniel");
-  await page.getByRole("button", { name: "Apply dates" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Changes pending" })).toBeVisible();
+  await page.getByRole("button", { name: "Apply filters" }).click();
   await expect.poll(() => new URL(handoffUrl).searchParams.get("sdr")).toBe("daniel");
 });
 

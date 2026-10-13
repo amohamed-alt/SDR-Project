@@ -29,6 +29,7 @@ import {
   YAxis,
 } from "recharts";
 import { SDR_OWNERS } from "@/lib/sdr-owners";
+import { handoffAttributionMessage, type HandoffAttributionDiagnostics } from "@/lib/handoff-attribution";
 import { dashboardToday } from "@/lib/dashboard-values";
 import { readDashboardView } from "@/lib/dashboard-url-state";
 import styles from "@/components/SalesHandoffDashboard.module.css";
@@ -99,6 +100,7 @@ type HandoffPayload = {
     salesRep: { id: string; name: string };
     salesReps: Array<{ id: string; name: string }>;
     followUpDays: number;
+    attribution?: HandoffAttributionDiagnostics;
     cache: "hit" | "miss";
   };
   kpis: {
@@ -187,6 +189,7 @@ export function SalesHandoffDashboard({ onBack, initialSearch = "", initialSales
   const sourceName = (key: string) => key === "daniel" ? "Daniel" : "Marita";
   const [draft, setDraft] = useState(initial);
   const [applied, setApplied] = useState(initial);
+  const hasPendingFilters = draft.from !== applied.from || draft.to !== applied.to || draft.salesRepId !== applied.salesRepId || draft.sdr !== applied.sdr;
   const [filters, setFilters] = useState<ClientFilters>(EMPTY_FILTERS);
   const [data, setData] = useState<HandoffPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -309,7 +312,7 @@ export function SalesHandoffDashboard({ onBack, initialSearch = "", initialSales
 
   const metrics = [
     { label: `${sourceName(applied.sdr)} meetings`, value: formatNumber(computed.meetings), helper: `${computed.completed} completed`, icon: CalendarDays },
-    { label: "Sales follow-up", value: `${computed.followUpRate}%`, helper: `${computed.followedUp} meetings followed up`, icon: Activity },
+    { label: "Sales follow-up", value: filteredRows.length ? `${computed.followUpRate}%` : "N/A", helper: filteredRows.length ? `${computed.followedUp} meetings followed up` : "No attributed meetings in this view", icon: Activity },
     { label: "Associated deals", value: formatNumber(computed.deals), helper: `${computed.openDeals} currently open`, icon: BriefcaseBusiness },
     { label: "Open pipeline", value: formatCurrency(computed.pipelineValue), helper: "Unique open deals", icon: CircleDollarSign },
     { label: "Closed won", value: formatNumber(computed.closedWon), helper: "Unique won deals", icon: CheckCircle2 },
@@ -345,14 +348,19 @@ export function SalesHandoffDashboard({ onBack, initialSearch = "", initialSales
         <label className={styles.field}><span>Deal stage</span><select value={filters.dealStage} onChange={(event) => setFilters({ ...filters, dealStage: event.target.value })}><option value="">All</option>{options.dealStages.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
         <label className={styles.field}><span>Attention</span><select value={filters.attention} onChange={(event) => setFilters({ ...filters, attention: event.target.value })}><option value="">All</option><option value="needs">Needs attention</option><option value="critical">Critical only</option></select></label>
         <label className={`${styles.field} ${styles.fieldWide}`}><span>Search company / contact</span><input type="search" placeholder="Company, contact, deal..." value={filters.search} onChange={(event) => setFilters({ ...filters, search: event.target.value })}/></label>
-        <div className={styles.filterActions}><button type="button" className={styles.reset} onClick={() => setFilters(EMPTY_FILTERS)}>Clear view filters</button><button type="button" className={styles.apply} onClick={() => setApplied({ ...draft })}><Search size={14}/> Apply dates</button></div>
+        <div className={styles.filterActions}><button type="button" className={styles.reset} onClick={() => setFilters(EMPTY_FILTERS)}>Clear view filters</button><button type="button" className={styles.apply} onClick={() => setApplied({ ...draft })}><Search size={14}/> Apply filters</button></div>
       </section>
+      {hasPendingFilters && <p className={styles.cacheBadge} role="status">Changes pending. Apply filters to update the booking SDR, date range and Sales Rep. Results still show the applied selection.</p>}
 
       {error ? <div className={styles.error}><AlertTriangle size={18}/><div><strong>Sales Handoff could not load</strong><div>{error}</div></div></div> : null}
 
       {loading && !data ? <div className={styles.loading}><RefreshCw size={24} className={styles.spinning}/><strong>Loading post-meeting intelligence…</strong><span>The main SDR dashboard stays untouched while this view loads independently.</span></div> : null}
 
       {data ? <>
+        {data.meta.attribution && <div aria-label="Booking attribution coverage">
+          <p className={styles.cacheBadge}>{handoffAttributionMessage(data.meta.attribution)}</p>
+          {!data.meta.attribution.creatorMappingAvailable && <p className={styles.error} role="alert">SDR creator mapping is unavailable. Only explicit booking markers can be attributed; this report may be incomplete.</p>}
+        </div>}
         <section className={styles.metrics}>
           {metrics.map(({ label, value, helper, icon: Icon, critical }) => <article className={`${styles.metric} ${critical ? styles.metricCritical : ""}`} key={label}><div className={styles.metricTop}><span>{label}</span><span className={styles.metricIcon}><Icon size={16}/></span></div><strong>{value}</strong><small>{helper}</small></article>)}
         </section>
@@ -363,7 +371,7 @@ export function SalesHandoffDashboard({ onBack, initialSearch = "", initialSales
             <ResponsiveContainer width="100%" height={300}><BarChart data={funnel} layout="vertical" margin={{ left: 18, right: 18 }}><CartesianGrid horizontal={false} stroke="#e5ece8"/><XAxis type="number" allowDecimals={false}/><YAxis type="category" dataKey="name" width={112} tick={{ fontSize: 11 }}/><Tooltip/><Bar dataKey="value" name="Records" fill="#087a50" radius={[0, 6, 6, 0]}/></BarChart></ResponsiveContainer>
           </section>
           <section className={styles.panel}>
-            <div className={styles.panelHeader}><div><span>FOLLOW-UP SLA</span><h2>How fast Sales moved</h2></div><small>{computed.followUpRate}% coverage</small></div>
+            <div className={styles.panelHeader}><div><span>FOLLOW-UP SLA</span><h2>How fast Sales moved</h2></div><small>{filteredRows.length ? `${computed.followUpRate}% coverage` : "Coverage unavailable"}</small></div>
             {sla.length ? <ResponsiveContainer width="100%" height={250}><PieChart><Pie data={sla} dataKey="value" nameKey="name" innerRadius={58} outerRadius={90} paddingAngle={3}>{sla.map((item, index) => <Cell key={item.name} fill={COLORS[index % COLORS.length]}/>)}</Pie><Tooltip/></PieChart></ResponsiveContainer> : <div className={styles.empty}>No SLA data for these filters.</div>}
             <div className={styles.legend}>{sla.map((item, index) => <span key={item.name}><i style={{ background: COLORS[index % COLORS.length] }}/>{item.name}: <strong>{item.value}</strong></span>)}</div>
           </section>
@@ -399,7 +407,7 @@ export function SalesHandoffDashboard({ onBack, initialSearch = "", initialSales
                     <td><span className={styles.primary}>{shortDate(row.nextActivity)}</span></td>
                     <td><span className={`${styles.badge} ${attentionClass(row.attention.level)}`}>{row.attention.reason}</span></td>
                   </tr>;
-                }) : <tr><td colSpan={9}><div className={styles.empty}><Target size={22}/><span>No meetings match the selected filters.</span></div></td></tr>}
+                }) : <tr><td colSpan={9}><div className={styles.empty}><Target size={22}/><span>No attributed HubSpot meetings match the selected filters.</span></div></td></tr>}
               </tbody>
             </table>
           </div>

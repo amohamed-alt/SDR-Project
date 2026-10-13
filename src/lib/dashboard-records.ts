@@ -1,3 +1,4 @@
+import { contactMotion, isMotionActivity, motionActivityClassifier, type Motion } from "./dashboard-motion.ts";
 import { acquisitionMotion } from "./meeting-performance.ts";
 import type { ActivityRow, CompanyRow, ContactRow, DashboardData, DashboardFilters, DealRow } from "./types.ts";
 
@@ -8,6 +9,7 @@ export type DashboardRecord = ContactRow | ActivityRow | CompanyRow | DealRow;
 export type RecordCondition = { field: string; op?: "eq" | "contains" | "missing" | "present" | "pretty"; value?: string | number | boolean };
 export type RecordSelection = {
   kind: RecordKind;
+  motion?: Motion;
   callSegment?: CallSegment;
   scope?: "source" | "created" | "activity-period" | "task-status" | "workspace-online" | "workspace-untouched-online" | "workspace-meetings-today" | "workspace-upcoming-meetings";
   where?: RecordCondition[];
@@ -51,6 +53,13 @@ export function selectDashboardRecords(data: DashboardData, selection: RecordSel
     : selection.kind === "activities" ? data.recentActivities
       : selection.kind === "companies" ? data.companies : data.deals;
   if (selection.kind === "activities" && selection.signal && ["meetingsWithoutFollowUp", "completedMeetingsWithoutProgression", "noShowMeetings"].includes(selection.signal) && data.hubspotMeetingEvidence) rows = data.hubspotMeetingEvidence;
+  if (selection.motion) {
+    if (selection.kind === "contacts") rows = rows.filter(row => "originalSource" in row && contactMotion(row) === selection.motion);
+    else if (selection.kind === "activities") {
+      const classify = motionActivityClassifier(data);
+      rows = rows.filter(row => "type" in row && isMotionActivity(row, data) && classify(row) === selection.motion);
+    } else rows = [];
+  }
   if (selection.callSegment) {
     const contacts = new Map(data.priorityContacts.map(contact => [contact.id, contact]));
     const segment = selection.callSegment;

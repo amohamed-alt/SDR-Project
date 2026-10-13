@@ -4,6 +4,7 @@ import { POST as pushProspect } from "@/app/api/prospecting/push/route";
 import { POST as hubspotPrecheckV2 } from "@/app/api/prospecting/salesnav/precheck-v2/route";
 import { manualTaskOwners } from "@/lib/acquisition-routing";
 import { saveSalesNavPush } from "@/lib/salesnav-lead-ledger";
+import { salesNavNameMismatch } from "@/lib/salesnav-identity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -104,6 +105,8 @@ export async function POST(request: NextRequest) {
     const parsed = schema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: "Invalid Ready push payload." }, { status: 400 });
     const input = parsed.data;
+    const nameMismatch = salesNavNameMismatch(input.lead, input.prospect);
+    if (nameMismatch) return NextResponse.json({ error: nameMismatch }, { status: 409 });
     const owner = manualTaskOwners().find((item) => item.id === input.taskOwnerId);
     if (!owner) return NextResponse.json({ error: "Selected task owner is not enabled." }, { status: 400 });
     const dueAt = dueIso(input.taskDueAt);

@@ -15,6 +15,15 @@ test('signalhire queue uses the net-new Sales Nav pipeline', () => {
   assert.match(pipeline, /isExistingPerson\(row\)/);
 });
 
+test('both saved Sales Nav entrypoints use the same canonical net-new pipeline', () => {
+  const fullRunPage = fs.readFileSync('src/app/salesnav-full-run/page.tsx', 'utf8');
+  for (const source of [page, fullRunPage]) {
+    assert.match(source, /import \{ SalesNavPipelineV2 \} from "@\/components\/SalesNavPipelineV2"/);
+    assert.match(source, /<SalesNavPipelineV2\/>/);
+    assert.doesNotMatch(source, /<SalesNavPipeline\/>/);
+  }
+});
+
 test('Ready gate blocks existing people, Retention and meetings but allows connected calls without meetings', () => {
   assert.match(gate, /Existing HubSpot person/);
   assert.match(gate, /Retention account/);

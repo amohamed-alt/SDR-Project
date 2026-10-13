@@ -69,3 +69,37 @@ test("inventory CRM actions reject unauthenticated requests", async ({ request }
   const response = await request.post("/api/lead-inventory", { data: { source: "Clay", companies: [{ name: "Example", domain: "example.com" }], execute: true } });
   expect(response.status()).toBe(401);
 });
+
+
+test("inventory company drawer closes with Escape and restores keyboard focus", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mutations: string[] = [];
+  await page.route("**/api/acquisition?**", route => {
+    if (route.request().method() !== "GET") mutations.push(route.request().method());
+    if (new URL(route.request().url()).searchParams.has("domain")) return route.fulfill({ json: { people: [] } });
+    return route.fulfill({ json: { accounts: [{ ...account, hubspotCompanyId: "modal-qa" }], summary: { eligible: 1, needs_people: 1 }, pagination: { filteredTotal: 1 }, configuration: {} } });
+  });
+  await page.goto("/?view=inventory");
+  const opener = page.getByRole("button").filter({ hasText: "Example company" }).first();
+  await opener.focus();
+  await page.keyboard.press("Enter");
+  const drawer = page.getByRole("dialog", { name: "Company details", exact: true });
+  const close = drawer.getByRole("button", { name: "Close company details", exact: true });
+  await expect(close).toBeFocused();
+  await expect(page.locator("body")).toHaveCSS("overflow", "hidden");
+  await expect(page.getByRole("button", { name: "Open GTM command palette", exact: true })).toBeHidden();
+  await page.keyboard.press("Shift+Tab");
+  await expect(drawer.getByRole("link", { name: "HubSpot", exact: true })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(close).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(drawer).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  await expect(page.locator("body")).not.toHaveClass(/drawer-open/);
+  await page.keyboard.press("Enter");
+  await expect(close).toBeFocused();
+  await close.click();
+  await expect(drawer).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  expect(mutations).toEqual([]);
+});

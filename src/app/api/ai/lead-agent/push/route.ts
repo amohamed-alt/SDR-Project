@@ -6,6 +6,7 @@ import { assessAiSdrLead, normalizePersonUrl, type AiCrmCheck, type AiLead, AI_S
 import { batchRead, readAssociations } from "@/lib/hubspot";
 import { sdrAdminAuthorized } from "@/lib/sdr-admin-auth";
 import { originMatchesRequestHosts } from "@/lib/request-origin";
+import { salesNavNameMismatch } from "@/lib/salesnav-identity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -90,6 +91,8 @@ export async function POST(request: NextRequest) {
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Invalid AI SDR push request." }, { status: 400 });
   const { lead, prospect, taskDueAt, runId } = parsed.data;
+  const nameMismatch = salesNavNameMismatch(lead, prospect);
+  if (nameMismatch) return NextResponse.json({ error: nameMismatch }, { status: 409 });
   if (!normalizePersonUrl(lead.linkedinUrl)) return NextResponse.json({ error: "Verified public LinkedIn person URL required." }, { status: 422 });
   if (!phoneAvailable(prospect)) return NextResponse.json({ error: "Phone required. Reveal through approved SignalHire path first." }, { status: 422 });
   const prospectProfile = normalizePersonUrl(prospect.linkedinUrl || lead.linkedinUrl);

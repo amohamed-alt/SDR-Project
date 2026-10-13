@@ -8,8 +8,11 @@ import {
 } from "lucide-react";
 import {
   AI_SDR_BATCH_LIMIT, aiLeadKey, assessAiSdrLead, parseAiSdrBatch,
+  normalizePersonUrl,
   type AiAssessment, type AiCrmCheck, type AiLead,
 } from "@/lib/ai-sdr-qualification";
+import { readSavedAiSdrLeads } from "@/lib/ai-sdr-saved-source";
+import { safeLinkedInProfileUrl } from "@/lib/linkedin-profile";
 import styles from "./AiSdrAgentWorkspace.module.css";
 
 type LeadStage = "pending" | "checking" | "checked" | "revealing" | "revealed" | "pushed" | "error";
@@ -109,9 +112,10 @@ export function AiSdrAgentWorkspace() {
   function addLeads(leads: AiLead[], runId = "") {
     setRows(current => {
       const map = new Map(current.map(row => [row.key, row]));
+      const identities = new Set(current.map(row => aiLeadKey(row.lead)));
       for (const lead of leads) {
         const key = aiLeadKey(lead);
-        if (!map.has(key) && map.size < AI_SDR_BATCH_LIMIT) map.set(key, rowFromLead(lead, runId));
+        if (!identities.has(key) && !map.has(key) && map.size < AI_SDR_BATCH_LIMIT) { map.set(key, rowFromLead(lead, runId)); identities.add(key); }
       }
       return [...map.values()];
     });
@@ -133,26 +137,22 @@ export function AiSdrAgentWorkspace() {
 
   async function loadSalesNav() {
     if (busy) return;
-    setBusy("source"); setError("");
+    setBusy("source"); setError(""); setNotice("");
     try {
-      const response = await fetch("/api/prospecting/salesnav/full-run", { cache: "no-store" });
+      const response = await fetch("/api/prospecting/salesnav/full-run", { cache: "no-store", signal: AbortSignal.timeout(30_000) });
       const result = await responseJson<{ run?: SalesNavRun | null; error?: string }>(response);
       if (!response.ok) throw new Error(response.status === 401
         ? "Unlock Sales Navigator Companion settings first, then reload this batch."
         : result.error || "Could not load the saved Sales Navigator run.");
       if (!result.run?.leads?.length) throw new Error("No saved Sales Navigator batch found. Open Sales Nav Source to prepare one.");
-      const leads = result.run.leads
-        .filter(lead => String(lead.connectionDegree || "").toLowerCase() !== "1st")
-        .slice(0, AI_SDR_BATCH_LIMIT)
-        .map(lead => ({
-          name: lead.name, title: lead.title, company: lead.company, location: lead.location,
-          linkedinUrl: lead.linkedinUrl, salesLeadUrl: lead.salesLeadUrl,
-          companyDomain: "", companyCountry: "", employeeCount: null,
-          detectedAts: "", atsStatus: "unknown" as const, atsEvidence: "", sector: "",
-        }))
-        .filter(lead => lead.name && lead.company && lead.linkedinUrl);
-      addLeads(leads, result.run.id);
-      setNotice("Loaded " + leads.length + " people from the saved Sales Nav batch. Verify company country, headcount and ATS before any reveal.");
+      const intake = readSavedAiSdrLeads(result.run.leads, rows.map(row => row.lead));
+      if (!intake.leads.length && intake.invalid + intake.firstDegree === intake.total) throw new Error(`No usable candidates in ${intake.total} saved rows: ${intake.invalid} missing valid identity or profile, ${intake.firstDegree} first-degree connections excluded.`);
+      addLeads(intake.leads, result.run.id);
+      setNotice((intake.leads.length ? `Loaded ${intake.leads.length} new people` : "No new people added")
+        + ` from ${intake.total} saved Sales Nav rows. `
+        + `${intake.duplicates} already loaded/duplicate · ${intake.invalid + intake.firstDegree} excluded · ${intake.overLimit} beyond the ${AI_SDR_BATCH_LIMIT}-person review limit. `
+        + (intake.needsPublicProfile ? `${intake.needsPublicProfile} need a verified public LinkedIn profile before reveal or push. ` : "")
+        + "Verify company country, headcount and ATS before any reveal.");
     } catch (err) { setError(err instanceof Error ? err.message : "Unable to read Sales Nav batch."); }
     finally { setBusy(""); }
   }
@@ -161,7 +161,8 @@ export function AiSdrAgentWorkspace() {
     setRows(current => current.map(row => {
       if (row.key !== key) return row;
       // A changed company domain invalidates the previous CRM match.
-      const changedIdentity = patch.companyDomain !== undefined && patch.companyDomain !== row.lead.companyDomain;
+      const changedIdentity = (patch.companyDomain !== undefined && patch.companyDomain !== row.lead.companyDomain)
+        || (patch.linkedinUrl !== undefined && patch.linkedinUrl !== row.lead.linkedinUrl);
       return {
         ...row, lead: { ...row.lead, ...patch },
         ...(changedIdentity ? { stage: "pending" as const, check: undefined, prospect: undefined, error: undefined } : {}),
@@ -386,9 +387,10 @@ export function AiSdrAgentWorkspace() {
               {rows.map(row => {
                 const result = assessment(row);
                 const canSelect = selectable(row);
+                const salesProfile = safeLinkedInProfileUrl(row.lead.salesLeadUrl);
                 return <tr key={row.key}>
                   <td><input type="checkbox" aria-label={"Select " + row.lead.name} checked={selected.has(row.key)} disabled={Boolean(busy) || !canSelect} onChange={() => toggleSelected(row.key)}/></td>
-                  <td className={styles.identity}><strong>{row.lead.name}</strong><span>{row.lead.title || "Title missing"}</span><b>{row.lead.company}</b><small>{row.lead.location || "Location unknown"}</small><a href={row.lead.linkedinUrl} target="_blank" rel="noopener noreferrer">LinkedIn profile <ExternalLink size={11}/></a></td>
+                  <td className={styles.identity}><strong>{row.lead.name}</strong><span>{row.lead.title || "Title missing"}</span><b>{row.lead.company}</b><small>{row.lead.location || "Location unknown"}</small>{normalizePersonUrl(row.lead.linkedinUrl) ? <a href={normalizePersonUrl(row.lead.linkedinUrl)} target="_blank" rel="noopener noreferrer">LinkedIn profile <ExternalLink size={11}/></a> : salesProfile ? <a href={salesProfile} target="_blank" rel="noopener noreferrer">Sales Nav profile <ExternalLink size={11}/></a> : null}{salesProfile ? <label className={styles.fields}>Verified public profile<input aria-label={"Public LinkedIn profile for " + row.lead.name} value={row.lead.linkedinUrl} placeholder="https://www.linkedin.com/in/…" disabled={Boolean(busy) || row.stage === "pushed"} onChange={event => updateLead(row.key, { linkedinUrl: event.target.value })}/></label> : null}</td>
                   <td className={styles.fields}>
                     <label>Country <input aria-label={"Company country for " + row.lead.name} value={row.lead.companyCountry} placeholder="Saudi Arabia" onChange={event => updateLead(row.key, { companyCountry: event.target.value })}/></label>
                     <label>Employees <input type="number" min={0} aria-label={"Headcount for " + row.lead.name} value={row.lead.employeeCount ?? ""} placeholder="250+" onChange={event => updateLead(row.key, { employeeCount: event.target.value ? Math.floor(Number(event.target.value)) : null })}/></label>

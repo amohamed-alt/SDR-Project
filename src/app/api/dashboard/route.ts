@@ -1,3 +1,4 @@
+import { buildDashboardMotion } from "@/lib/dashboard-motion";
 import { NextRequest, NextResponse } from "next/server";
 import { parseDashboardFilters } from "@/lib/dashboard-query";
 import { createHash } from "node:crypto";
@@ -30,6 +31,13 @@ export async function GET(request: NextRequest) {
         }
       : await getDashboardSnapshot(filters, params.get("refresh") === "1");
 
+    if (params.get("profile") === "motion") {
+      return compressedJsonResponse(request, { meta: snapshot.data.meta, motion: buildDashboardMotion(snapshot.data) }, {
+        "Cache-Control": "private, no-store",
+        "X-Dashboard-Refreshing": snapshot.refreshing ? "1" : "0",
+        "X-Dashboard-Payload": "motion-v1",
+      });
+    }
     const snapshotMs = performance.now() - started;
     const profile = params.get("profile") === "summary" ? "summary-v1" : "instant-v2.2";
     const payload = profile === "summary-v1" ? projectDashboardSummary(snapshot.data) : projectDashboardPayload(snapshot.data);

@@ -11,6 +11,7 @@ export const runtime = "nodejs";
 
 const field = z.enum(["bookedInPeriod", "heldInPeriod", "name", "id", "email", "phone", "linkedinUrl", "title", "company", "country", "originalSource", "originalSourceDetail", "latestSource", "recordSource", "recordSourceDetail", "leadSource", "contactSource", "leadStatus", "lifecycleStage", "tier", "contactPriority", "persona", "emailStatus", "phoneStatus", "createdAt", "lastContacted", "nextActivity", "leadResponseTimeHours", "hasConnectedCall", "hasMeeting", "hasDeal", "hasOpenDeal", "qualityIssues", "priorityScore", "type", "subject", "status", "detail", "assignedTo", "occurredAt", "metricAt", "dueAt", "dueBucket", "isOpen", "isHighPriority", "opened", "clicked", "replied", "relatedContactName", "domain", "industry", "employees", "ats", "atsConfidence", "associatedContacts", "stage", "owner", "amount", "closeDate"]);
 const selectionSchema = z.object({
+  motion: z.enum(["Inbound", "Outbound", "Unknown"]).optional(),
   callSegment: z.object({ field: z.enum(["title", "company", "country", "contact", "hour"]), value: z.string().max(1000) }).strict().optional(),
   kind: z.enum(["contacts", "activities", "companies", "deals"]),
   scope: z.enum(["source", "created", "activity-period", "task-status", "workspace-online", "workspace-untouched-online", "workspace-meetings-today", "workspace-upcoming-meetings"]).optional(),
