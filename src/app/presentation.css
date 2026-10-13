@@ -3,3 +3,5 @@
 
 /* Presentation retains its intentionally hidden navigation on every viewport. */
 .presentation-mode .mobile-nav-toggle, .presentation-mode .mobile-nav-backdrop, .presentation-mode .workspace > .sidebar[data-mobile-open] { display: none; }
+
+.presentation-mode .topbar { margin-left: 0; }
