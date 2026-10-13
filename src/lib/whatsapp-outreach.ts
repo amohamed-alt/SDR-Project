@@ -246,3 +246,16 @@ export function buildWhatsAppMobileUrl(digits: string, message: string) {
 export function buildWhatsAppUrl(digits: string, message: string) {
   return buildWhatsAppWebUrl(digits, message);
 }
+
+// A service outage must not discard contact details already loaded in the workspace.
+export function workspaceWhatsAppFallback(input: { phone: string; country?: string; name?: string; company?: string; title?: string }) {
+  const selected = selectWhatsAppPhone({ phone: input.phone, country: input.country });
+  if (!selected) return null;
+  const style = whatsappFallbackStyle({ country: input.country || "", fullName: input.name || "", title: input.title || "" });
+  const message = deterministicWhatsAppMessage({ fullName: input.name || "", company: input.company || "", title: input.title || "", style, verifiedHiring: null });
+  return {
+    whatsappWebUrl: buildWhatsAppWebUrl(selected.digits, message),
+    whatsappMobileUrl: buildWhatsAppMobileUrl(selected.digits, message),
+    message,
+  };
+}

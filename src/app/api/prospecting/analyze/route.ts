@@ -372,6 +372,7 @@ export async function POST(request: NextRequest) {
         email: email?.value || "",
         emails,
         emailConfidence: email?.rating || null,
+        mobilephone: phoneContacts.find(entry => entry.subType?.toLowerCase() === "mobile")?.value || "",
         phone: phone?.value || "",
         phones,
         phoneConfidence: phone?.rating || null,

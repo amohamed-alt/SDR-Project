@@ -1,3 +1,4 @@
+import { distinctProspectPhones, missingProspectPhoneProperties } from "@/lib/prospect-phone-details";
 import { atsProduct, SAUDI_DAILY_LIMIT, usablePhone, type InventoryAts } from "@/lib/saudi-ats-policy";
 import { createScheduledMaritaTask, MaritaScheduleError } from "@/lib/marita-task-scheduler";
 import { timingSafeEqual } from "node:crypto";
@@ -55,6 +56,7 @@ const prospectSchema = z.object({
   email: z.string().trim().max(320).default(""),
   emails: z.array(z.string().trim().max(320)).max(20).default([]),
   phone: z.string().trim().max(120).default(""),
+  mobilephone: z.string().trim().max(120).default(""),
   phones: z.array(z.string().trim().max(120)).max(20).default([]),
   score: z.number().min(0).max(100),
   priority: z.enum(["high", "medium", "normal"]),
@@ -122,7 +124,7 @@ function uniqueValues(values: string[]) {
 }
 
 function allEmails(prospect: Prospect) { return uniqueValues([prospect.email, ...prospect.emails]); }
-function allPhones(prospect: Prospect) { return uniqueValues([prospect.phone, ...prospect.phones]); }
+function allPhones(prospect: Prospect) { return distinctProspectPhones([prospect.phone, prospect.mobilephone, ...prospect.phones]); }
 
 async function contactHasLinkedInProperty() {
   try {
@@ -147,32 +149,46 @@ async function findContact(emails: string[], linkedinUrl: string) {
   return "";
 }
 
+async function verifyContactPhones(contactId: string, expected: Record<string, string>) {
+  const keys = ["phone", "mobilephone"].filter(key => Boolean(expected[key]));
+  if (!keys.length) return;
+  const stored = (await batchRead("contacts", [contactId], keys))[0];
+  const digits = (value: string) => value.replace(/\D/g, "").replace(/^00/, "");
+  if (!stored || keys.some(key => digits(String(stored.properties[key] || "")) !== digits(expected[key]))) {
+    throw new Error(`Contact ${contactId} was written but phone verification failed. Reconcile before another push.`);
+  }
+}
+
 async function createContact(prospect: Prospect, ownerId: string) {
   const name = splitName(prospect.fullName);
   const properties: Record<string, string> = { firstname: name.firstname, lastname: name.lastname, hubspot_owner_id: ownerId };
   if (prospect.inventoryBusinessLine) { properties.business_name = prospect.inventoryBusinessLine === "Evalufy" ? "Evalufy" : "ATS"; properties.sdr_owner = ownerId; }
   if (prospect.email) properties.email = prospect.email.toLowerCase();
-  if (prospect.phone) properties.phone = prospect.phone;
+  Object.assign(properties, missingProspectPhoneProperties(prospect));
   if (prospect.title) properties.jobtitle = prospect.title;
   if (prospect.company) properties.company = prospect.company;
   if (prospect.companyWebsite) properties.website = prospect.companyWebsite;
   if (prospect.linkedinUrl && await contactHasLinkedInProperty()) properties.gtm_linkedin_url = prospect.linkedinUrl;
   const created = await hubspotRequest<{ id: string }>("/crm/v3/objects/contacts", { method: "POST", body: JSON.stringify({ properties }) });
+  await verifyContactPhones(String(created.id), properties);
   return String(created.id);
 }
 
 async function syncMissingContactDetails(contactId: string, prospect: Prospect, ownerId: string) {
-  const current = (await batchRead("contacts", [contactId], ["email", "phone", "gtm_linkedin_url", "company", "jobtitle", "hubspot_owner_id"]))[0];
+  const current = (await batchRead("contacts", [contactId], ["email", "phone", "mobilephone", "gtm_linkedin_url", "company", "jobtitle", "hubspot_owner_id"]))[0];
   if (!current) return [] as string[];
   const properties: Record<string, string> = {};
   if (prospect.email && !String(current.properties.email || "").trim()) properties.email = prospect.email.toLowerCase();
-  if (prospect.phone && !String(current.properties.phone || "").trim()) properties.phone = prospect.phone;
+  Object.assign(properties, missingProspectPhoneProperties(prospect, current.properties));
   if (prospect.company && !String(current.properties.company || "").trim()) properties.company = prospect.company;
   if (prospect.title && !String(current.properties.jobtitle || "").trim()) properties.jobtitle = prospect.title;
   if (!String(current.properties.hubspot_owner_id || "").trim()) properties.hubspot_owner_id = ownerId;
   if (prospect.linkedinUrl && !String(current.properties.gtm_linkedin_url || "").trim() && await contactHasLinkedInProperty()) properties.gtm_linkedin_url = prospect.linkedinUrl;
   const updated = Object.keys(properties);
-  if (updated.length) await hubspotRequest(`/crm/v3/objects/contacts/${contactId}`, { method: "PATCH", body: JSON.stringify({ properties }) });
+  if (updated.length) {
+    await hubspotRequest(`/crm/v3/objects/contacts/${contactId}`, { method: "PATCH", body: JSON.stringify({ properties }) });
+    await verifyContactPhones(contactId, properties);
+  }
   return updated;
 }
 
@@ -380,6 +396,7 @@ export async function POST(request: Request) {
     const parsed = prospectSchema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: "Invalid prospect payload.", details: parsed.error.flatten() }, { status: 400 });
     const prospect = parsed.data;
+    if (!allPhones(prospect).length) return NextResponse.json({ error: "SDR call tasks require a usable phone number." }, { status: 409 });
     const requestedOwner = requestedAssignment(prospect, request);
     if (prospect.inventoryBusinessLine) {
       if (!allPhones(prospect).some(usablePhone)) return NextResponse.json({ error: "Inventory SDR call tasks require a phone number." }, { status: 409 });
