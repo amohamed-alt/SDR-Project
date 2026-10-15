@@ -112,9 +112,10 @@ export function SalesNavPipelineV2() {
 
   useEffect(() => {
     if (!run?.id || processing || revealing || pushing) return;
-    let active = true, syncing = false;
+    let active = true, syncing = false, syncAgain = false;
     const sync = async () => {
-      if (syncing) return;
+      if (!active) return;
+      if (syncing) { syncAgain = true; return; }
       syncing = true;
       try {
         const response = await fetch(`/api/prospecting/salesnav/full-run?id=${encodeURIComponent(run.id)}`, { cache: "no-store" });
@@ -140,7 +141,10 @@ export function SalesNavPipelineV2() {
           }
         }));
       } catch { /* Keep the saved queue visible; the next status change retries. */ }
-      finally { syncing = false; }
+      finally {
+        syncing = false;
+        if (active && syncAgain) { syncAgain = false; void sync(); }
+      }
     };
     const onSync = () => { void sync(); };
     window.addEventListener("salesnav:profiles-synced", onSync);
@@ -342,3 +346,4 @@ export function SalesNavPipelineV2() {
     </tbody></table></div></section>
   </div></main>;
 }
+
