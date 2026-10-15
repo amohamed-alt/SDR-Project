@@ -9,6 +9,7 @@ type LatestFullRun = {
   total: number;
   complete: boolean;
   updatedAt?: string;
+  profilesAvailable?: number;
 };
 
 type CompanionStatus = {
@@ -19,7 +20,7 @@ type CompanionStatus = {
   latestFullRun?: LatestFullRun | null;
 };
 
-type SeenState = { id: string; complete: boolean };
+type SeenState = { id: string; complete: boolean; profiles: number };
 
 function shortTime(value?: string) {
   if (!value) return "never";
@@ -47,7 +48,7 @@ export function SalesNavLiveListener() {
         setError("");
 
         const latest = payload.latestFullRun || null;
-        const next: SeenState = { id: latest?.id || "", complete: Boolean(latest?.complete) };
+        const next: SeenState = { id: latest?.id || "", complete: Boolean(latest?.complete), profiles: latest?.profilesAvailable || 0 };
         if (seen.current === null) {
           seen.current = next;
           return;
@@ -55,7 +56,9 @@ export function SalesNavLiveListener() {
 
         const newRunArrived = Boolean(next.id && next.id !== seen.current.id);
         const currentRunFinished = Boolean(next.id && next.id === seen.current.id && next.complete && !seen.current.complete);
+        const profilesChanged = next.id === seen.current.id && next.profiles !== seen.current.profiles;
         seen.current = next;
+        if (profilesChanged) window.dispatchEvent(new CustomEvent("salesnav:profiles-synced", { detail: { runId: next.id } }));
 
         if ((newRunArrived || currentRunFinished) && !reloading.current) {
           const eventKey = `${next.id}:${next.complete ? "complete" : "started"}`;
@@ -83,7 +86,7 @@ export function SalesNavLiveListener() {
   const latest = status?.latestFullRun || null;
   const connected = Boolean(status?.paired);
   const serverText = latest
-    ? `${latest.pagesRead || 0} page${latest.pagesRead === 1 ? "" : "s"} · ${latest.total || 0} leads · ${latest.complete ? "finished" : "capturing"}`
+    ? `${latest.pagesRead || 0} page${latest.pagesRead === 1 ? "" : "s"} · ${latest.total || 0} leads · ${latest.complete ? `${latest.profilesAvailable || 0}/${latest.total || 0} public profile URLs` : "capturing"}`
     : "waiting for first full-search page";
 
   return <aside style={{

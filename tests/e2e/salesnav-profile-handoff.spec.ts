@@ -17,11 +17,11 @@ test("captured people without public URLs stay out of paid reveal until a checke
   await expect(page.getByRole("button", { name: "Reveal selected (0)", exact: true })).toBeDisabled();
   await expect(page.getByText("Missing public profile URLs: 1", { exact: true })).toBeVisible();
   expect(reveals).toBe(0);
-  // Simulate the completed free Companion handoff, then reload the same saved run.
+  // Free Companion handoff updates the visible queue without a manual reload.
   synced = true;
-  await page.reload();
-  await page.getByRole("button", { name: "HubSpot Check", exact: true }).click();
-  await expect(page.getByText("Needs reveal", { exact: true })).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("salesnav:profiles-synced")));
+  await page.getByRole("button", { name: /^All \d+$/ }).click();
+  await expect(page.getByRole("table").getByText("Needs reveal", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "LinkedIn", exact: true })).toHaveAttribute("href", "https://www.linkedin.com/in/profile-qa");
   await page.getByRole("button", { name: "Select visible", exact: true }).click();
   await expect(page.getByRole("button", { name: "Reveal selected (1)", exact: true })).toBeEnabled();

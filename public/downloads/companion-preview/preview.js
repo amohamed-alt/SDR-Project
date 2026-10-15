@@ -1,7 +1,7 @@
 // Read-only visual preview. No Chrome APIs, requests or real contact data.
 const byId = (id) => document.getElementById(id);
 byId('workQueueCard').hidden = false;
-byId('versionStatus').textContent = 'Companion v1.6.2';
+byId('versionStatus').textContent = 'Companion v1.6.3';
 byId('workQueueStatus').textContent = 'Sample page loaded. Select people to see the intended workflow.';
 byId('workQueueStatus').className = 'status muted';
 byId('workQueueSource').textContent = 'Sample search page · design preview only';

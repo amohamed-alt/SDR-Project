@@ -1,3 +1,4 @@
+import { publicPersonProfile } from "@/lib/salesnav-profile-sync";
 import { handleCompanionProfileAction } from "@/lib/companion-profile-actions";
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
@@ -158,6 +159,7 @@ export async function GET(request: NextRequest) {
       sourceUrl: fullRun.sourceUrl,
       pagesRead: fullRun.pagesRead,
       total: fullRun.leads.length,
+      profilesAvailable: fullRun.leads.filter(lead => publicPersonProfile(lead.linkedinUrl)).length,
       clientVersion: fullRun.clientVersion,
       parserVersion: fullRun.parserVersion,
     } : null,
@@ -189,12 +191,14 @@ export async function POST(request: NextRequest) {
   if (["profile_options", "profile_check", "profile_reveal", "profile_push"].includes(String(body.action || "")) && !(await companionStatus()).profileActionsEnabled) {
     return NextResponse.json({ error: "Generate a new pairing token in Companion setup to enable on-page checks and SDR pushes. Your existing token still works for capture." }, { status: 403, headers: corsHeaders() });
   }
+  // Save the verified profile independently of optional CRM availability.
+  const checkedProfile = body.action === "profile_check" ? leadSchema.safeParse(body.lead) : null;
+  const profileSynced = checkedProfile?.success ? await syncCompanionProfile(checkedProfile.data) : false;
   const profileAction = await handleCompanionProfileAction(request, body);
   if (profileAction) {
     const payload = await profileAction.json();
     if (profileAction.ok && body.action === "profile_check") {
-      const lead = leadSchema.safeParse(body.lead);
-      if (lead.success) payload.profileSynced = await syncCompanionProfile(lead.data);
+      payload.profileSynced = profileSynced;
     }
     await touchCompanionToken();
     return NextResponse.json(payload, { status: profileAction.status, headers: corsHeaders() });

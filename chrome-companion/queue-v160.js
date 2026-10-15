@@ -44,6 +44,19 @@ importScripts('profile-dom.js');
       return { ...lead, ...result.lead, location: result.lead.location || lead.location };
     } finally { await chrome.tabs.remove(tab.id).catch(() => {}); }
   }
+  globalThis.startCapturedProfileChecks = async (leads, sourceUrl) => {
+    const stored = (await chrome.storage.local.get([KEY]))[KEY];
+    if (busy || stored?.pending?.length) throw new Error('Wait for the current profile checks to finish before starting another capture.');
+    const rows = dedupe(leads.filter(lead => lead.connectionDegree !== '1st'), 2500).map(lead => ({ key: identity(lead), lead, status: 'pending' }));
+    const queue = { sourceUrl, rows, action: 'check', pending: rows.map(row => row.key), done: 0, total: rows.length, paused: false };
+    await persist(queue);
+    chrome.alarms.create(ALARM, { when: Date.now() + 1000 }); setTimeout(() => void step(), 100);
+    return queue;
+  };
+  globalThis.ensureCapturedProfileQueueIdle = async () => {
+    const stored = (await chrome.storage.local.get([KEY]))[KEY];
+    if (busy || stored?.pending?.length) throw new Error('Profile checks are still running. Wait or stop them before capturing another search.');
+  };
   async function step() {
     if (busy) return;
     busy = true;
@@ -69,7 +82,7 @@ importScripts('profile-dom.js');
           const payload = await api({ action: 'profile_push', lead: row.lead, taskOwnerId: queue.ownerId, taskDueAt: queue.dueAt, pushConfirmed: true });
           row.status = 'pushed'; row.previousPush = payload; row.message = `Task ${payload.taskId} → ${payload.ownerName}`;
         }
-      } catch (error) { row.status = 'error'; row.error = error instanceof Error ? error.message : 'Queue operation failed.'; if (/verification|sign-in|unusual traffic/i.test(row.error)) { queue.paused = true; queue.pending = [key]; } }
+      } catch (error) { row.status = 'error'; row.error = error instanceof Error ? error.message : 'Queue operation failed.'; if (/verification|sign-in|unusual traffic|pairing token/i.test(row.error)) queue.paused = true; }
       queue.pending.shift(); queue.done = (queue.done || 0) + 1;
       const stopped = (await chrome.storage.local.get([KEY]))[KEY]?.paused;
       if (stopped) { queue.paused = true; queue.pending = []; }
@@ -86,13 +99,19 @@ importScripts('profile-dom.js');
         let { [KEY]: queue } = await chrome.storage.local.get([KEY]);
         if (message.type === 'work_queue_capture') {
           if (!(await chrome.storage.local.get(['pairingToken'])).pairingToken) throw new Error('Save pairing before working this page.');
+          if ((await chrome.storage.local.get(['salesNavFullRunV1'])).salesNavFullRunV1?.complete === false) throw new Error('Full-search capture is running. Wait for it to finish before loading Current 25.');
           if (busy || queue?.pending?.length) throw new Error('Finish or pause the current operation before loading another page.');
+          if (message.readProfiles === true) await api({ action: 'profile_options' });
           const values = await chrome.scripting.executeScript({ target: { tabId: message.tabId }, func: extractCurrentSalesNavPageV154 });
           const captured = values?.[0]?.result;
           if (!captured?.ok || !captured.leads?.length) throw new Error(captured?.error || 'No lead cards found.');
           const previous = new Map((queue?.rows || []).map((row) => [row.key, row]));
           queue = { sourceUrl: captured.sourceUrl, rows: dedupe(captured.leads.filter((lead) => lead.connectionDegree !== '1st'), 25).map((lead) => ({ ...previous.get(identity(lead)), key: identity(lead), lead: { ...lead, ...(previous.get(identity(lead))?.lead?.linkedinUrl ? previous.get(identity(lead)).lead : {}) }, status: previous.get(identity(lead))?.status || 'pending' })), pending: [], done: 0, paused: false };
           await persist(queue);
+          if (message.readProfiles === true) {
+            await api({ action: 'import', sourceUrl: captured.sourceUrl, pagesRead: 1, clientVersion: chrome.runtime.getManifest().version, parserVersion: 'card-v6-public-profile-handoff', leads: queue.rows.map(row => row.lead) });
+            queue = await globalThis.startCapturedProfileChecks(queue.rows.map(row => row.lead), captured.sourceUrl);
+          }
         } else if (message.type === 'work_queue_start') {
           if (busy || !queue?.rows?.length || queue.pending?.length) throw new Error('Load a page first or wait for the current operation.');
           if (!['check','reveal','push'].includes(message.action)) throw new Error('Invalid queue action.');

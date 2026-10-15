@@ -77,7 +77,7 @@
     const stored = await chrome.storage.local.get([KEY]); render(stored[KEY]);
     el('workQueueCapture').addEventListener('click', async () => {
       rendering = true; updateButtons(); status('Reading the current page…');
-      try { const result = await send({ type: 'work_queue_capture', tabId: tab.id }); selected = new Set(); render(result.queue); }
+      try { const granted = await chrome.permissions.request({ origins: ['https://www.linkedin.com/sales/*'] }); if (!granted) throw new Error('Allow profile reading to capture public LinkedIn URLs.'); const result = await send({ type: 'work_queue_capture', tabId: tab.id, readProfiles: true }); selected = new Set(); render(result.queue); }
       catch (error) { status(error.message, 'bad'); }
       finally { rendering = false; updateButtons(); }
     });

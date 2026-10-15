@@ -7,7 +7,7 @@ const DASHBOARD_DEFAULT = 'https://sdr.dashboardtalentera.tech';
 const MAX_PAGES = 100;
 const MAX_LEADS = 2500;
 const CLIENT_VERSION = chrome.runtime.getManifest().version;
-const PARSER_VERSION = 'card-v5-title-profile-queue';
+const PARSER_VERSION = 'card-v6-public-profile-handoff';
 const NORMAL_DELAY_MS = 6500;
 const RETRY_DELAY_MS = 3000;
 const MAX_STALE_RETRIES = 8;
@@ -304,6 +304,10 @@ async function markComplete(run, stopReason) {
   await setRun(complete);
   await chrome.storage.local.remove([CONTINUATION_TAB_KEY]);
   await chrome.alarms.clear(CONTINUE_ALARM);
+  if (complete.profileLeads?.length) {
+    await globalThis.startCapturedProfileChecks(complete.profileLeads, complete.sourceUrl);
+    await setRun({ ...complete, backgroundStatus: 'Capture saved · reading public profile URLs in the persistent work queue' });
+  }
 }
 
 async function persistCurrentPage(run, current) {
@@ -313,6 +317,7 @@ async function persistCurrentPage(run, current) {
   const payload = await savePage(run, nextPageNumber, clean);
   const updated = {
     ...run,
+    profileLeads: dedupe([...(run.profileLeads || []), ...clean], MAX_LEADS),
     pagesRead: nextPageNumber,
     total: Number(payload.total || run.total || 0),
     signatures: [...(run.signatures || []), signature].slice(-MAX_PAGES),
@@ -344,6 +349,8 @@ async function advance(run, tabId) {
 }
 
 async function startOrResume(tabId) {
+  await globalThis.ensureCapturedProfileQueueIdle();
+  await dashboardPost({ action: 'profile_options' });
   if (!await verifySalesNavTab(tabId)) throw new Error('Open a Sales Navigator People Search tab first.');
   const current = await extractPage(tabId);
   if (!current.ok) throw new Error(current.error || 'Could not read Sales Navigator.');
