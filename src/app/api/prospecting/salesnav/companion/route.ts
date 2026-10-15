@@ -13,6 +13,7 @@ import {
   saveCompanionBatch,
   saveCompanionFullRunPage,
   touchCompanionToken,
+  syncCompanionProfile,
   verifyCompanionToken,
 } from "@/lib/salesnav-companion";
 
@@ -189,7 +190,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Generate a new pairing token in Companion setup to enable on-page checks and SDR pushes. Your existing token still works for capture." }, { status: 403, headers: corsHeaders() });
   }
   const profileAction = await handleCompanionProfileAction(request, body);
-  if (profileAction) { await touchCompanionToken(); return new NextResponse(profileAction.body, { status: profileAction.status, headers: { ...corsHeaders(), "Content-Type": "application/json" } }); }
+  if (profileAction) {
+    const payload = await profileAction.json();
+    if (profileAction.ok && body.action === "profile_check") {
+      const lead = leadSchema.safeParse(body.lead);
+      if (lead.success) payload.profileSynced = await syncCompanionProfile(lead.data);
+    }
+    await touchCompanionToken();
+    return NextResponse.json(payload, { status: profileAction.status, headers: corsHeaders() });
+  }
 
   const fullRunPage = fullRunPageSchema.safeParse(body);
   if (fullRunPage.success) {

@@ -84,3 +84,9 @@ Rebuild the versioned download after extension changes with `python3 scripts/pac
 ## v1.6.2: dashboard visual system
 
 The popup now shares the SDR dashboard green palette, compact table hierarchy, semantic status badges, four live queue counters and a dedicated dispatch panel. Full capture, list sync and pairing settings use progressive disclosure. Existing permissions, confirmation prompts and server safety gates are unchanged. The hosted design preview uses explicitly labeled sample data and cannot perform CRM or enrichment actions.
+
+## Recover captured people missing a public LinkedIn URL
+
+Full-search capture can contain only Sales Navigator lead links. These are not public `/in/` URLs and cannot be used for contact reveal. The dashboard now labels these rows **Needs profile URL** and excludes them from paid reveal.
+
+After the latest capture finishes, open each captured search page in Companion, choose **Load current 25**, then **Read profiles + HubSpot Check**. Successful free profile checks sync the actual public URL and current role back to the matching person in the latest saved run. Return to the dashboard, choose **Reload**, then **HubSpot Check**. Existing people and protected companies remain blocked. The sync matches the Sales Navigator person ID and name; it never guesses a public URL or spends contact credits. No extension upgrade is required for this server-side handoff.
