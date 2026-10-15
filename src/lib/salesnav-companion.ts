@@ -1,3 +1,4 @@
+import { mergeCapturedProfile, type CapturedProfile } from "./salesnav-profile-sync.ts";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { chmod, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -58,7 +59,7 @@ function sha256(value: string) {
 }
 
 function leadKey(lead: CompanionLead) {
-  return lead.linkedinUrl || lead.salesLeadUrl || `${lead.name.toLowerCase()}:${lead.company.toLowerCase()}`;
+  return lead.salesLeadUrl || lead.linkedinUrl || `${lead.name.toLowerCase()}:${lead.company.toLowerCase()}`;
 }
 
 function historyPath(id: string) {
@@ -204,7 +205,7 @@ export async function listCompanionFullRuns(limit = 50): Promise<CompanionFullRu
     .slice(0, Math.max(1, limit));
 }
 
-export async function saveCompanionFullRunPage(input: {
+async function saveCompanionFullRunPageUnsafe(input: {
   id: string;
   sourceUrl: string;
   searchFingerprint: string;
@@ -255,7 +256,7 @@ export async function saveCompanionFullRunPage(input: {
   return next;
 }
 
-export async function finishCompanionFullRun(id: string, stopReason: string) {
+async function finishCompanionFullRunUnsafe(id: string, stopReason: string) {
   const existing = await getCompanionFullRun(id);
   if (!existing) return null;
   const now = new Date().toISOString();
@@ -268,4 +269,29 @@ export async function finishCompanionFullRun(id: string, stopReason: string) {
   };
   await persistFullRun(next);
   return next;
+}
+
+// Capture and free profile sync share one write queue so neither loses the other's changes.
+let runWriteQueue: Promise<unknown> = Promise.resolve();
+function withRunWrite<T>(write: () => Promise<T>): Promise<T> {
+  const next = runWriteQueue.then(write);
+  runWriteQueue = next.catch(() => undefined);
+  return next;
+}
+export function saveCompanionFullRunPage(input: Parameters<typeof saveCompanionFullRunPageUnsafe>[0]) {
+  return withRunWrite(() => saveCompanionFullRunPageUnsafe(input));
+}
+export function finishCompanionFullRun(id: string, stopReason: string) {
+  return withRunWrite(() => finishCompanionFullRunUnsafe(id, stopReason));
+}
+export function syncCompanionProfile(profile: CapturedProfile) {
+  return withRunWrite(async () => {
+    const run = await getLatestCompanionFullRun();
+    // Never interfere with a capture that is still collecting pages.
+    if (!run?.complete) return false;
+    const result = mergeCapturedProfile(run.leads, profile);
+    if (!result.synced) return false;
+    await persistFullRun({ ...run, leads: result.leads, updatedAt: new Date().toISOString() });
+    return true;
+  });
 }

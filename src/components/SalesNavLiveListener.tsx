@@ -102,10 +102,10 @@ export function SalesNavLiveListener() {
     lineHeight: 1.45,
   }}>
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-      <strong style={{ fontSize: 12.5 }}>{error ? "Companion status error" : connected ? "● Companion live" : "● Companion not paired"}</strong>
+      <strong style={{ fontSize: 12.5 }}>{error ? "Companion status error" : connected ? "● Companion paired" : "● Companion not paired"}</strong>
       <Link href="/salesnav-prospecting" style={{ color: "#08795c", fontWeight: 800, textDecoration: "none" }}>Setup / token</Link>
     </div>
     <div style={{ marginTop: 4, color: error ? "#a23c34" : "#54736c" }}>{error || `Server: ${serverText}`}</div>
-    <div style={{ marginTop: 2, color: "#6e8781" }}>Last Companion contact: {shortTime(status?.lastUsedAt)} · auto-refresh every 3s</div>
+    <div style={{ marginTop: 2, color: "#6e8781" }}>Last Companion contact: {shortTime(status?.lastUsedAt)} · capture status checked every 3s</div>
   </aside>;
 }
