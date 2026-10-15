@@ -7,7 +7,7 @@ const DASHBOARD_DEFAULT = 'https://sdr.dashboardtalentera.tech';
 const MAX_PAGES = 100;
 const MAX_LEADS = 2500;
 const CLIENT_VERSION = chrome.runtime.getManifest().version;
-const PARSER_VERSION = 'card-v6-public-profile-handoff';
+const PARSER_VERSION = 'card-v7-streaming-profiles';
 const NORMAL_DELAY_MS = 6500;
 const RETRY_DELAY_MS = 3000;
 const MAX_STALE_RETRIES = 8;
@@ -304,10 +304,7 @@ async function markComplete(run, stopReason) {
   await setRun(complete);
   await chrome.storage.local.remove([CONTINUATION_TAB_KEY]);
   await chrome.alarms.clear(CONTINUE_ALARM);
-  if (complete.profileLeads?.length) {
-    await globalThis.startCapturedProfileChecks(complete.profileLeads, complete.sourceUrl);
-    await setRun({ ...complete, backgroundStatus: 'Capture saved · reading public profile URLs in the persistent work queue' });
-  }
+  await setRun({ ...complete, backgroundStatus: 'Search cards saved · profile reading continues in the saved work queue' });
 }
 
 async function persistCurrentPage(run, current) {
@@ -329,6 +326,7 @@ async function persistCurrentPage(run, current) {
     backgroundStatus: `Saved page ${nextPageNumber} · ${Number(payload.total || run.total || 0)} unique leads`,
   };
   await setRun(updated);
+  await globalThis.appendCapturedProfileChecks(clean, updated.sourceUrl, updated.runId);
   return updated;
 }
 
@@ -349,7 +347,6 @@ async function advance(run, tabId) {
 }
 
 async function startOrResume(tabId) {
-  await globalThis.ensureCapturedProfileQueueIdle();
   await dashboardPost({ action: 'profile_options' });
   if (!await verifySalesNavTab(tabId)) throw new Error('Open a Sales Navigator People Search tab first.');
   const current = await extractPage(tabId);
@@ -373,6 +370,9 @@ async function startOrResume(tabId) {
     };
   }
 
+  await globalThis.ensureCapturedProfileQueueIdle(run.runId);
+  // Also recover cards already saved by v1.6.3 before resuming pagination.
+  if (run.profileLeads?.length) await globalThis.appendCapturedProfileChecks(run.profileLeads, run.sourceUrl, run.runId);
   if (!run.signatures?.includes(signature)) run = await persistCurrentPage(run, current);
   else {
     run = {

@@ -284,11 +284,11 @@ export function saveCompanionFullRunPage(input: Parameters<typeof saveCompanionF
 export function finishCompanionFullRun(id: string, stopReason: string) {
   return withRunWrite(() => finishCompanionFullRunUnsafe(id, stopReason));
 }
-export function syncCompanionProfile(profile: CapturedProfile) {
+export function syncCompanionProfile(profile: CapturedProfile, expectedRunId?: string) {
   return withRunWrite(async () => {
     const run = await getLatestCompanionFullRun();
-    // Never interfere with a capture that is still collecting pages.
-    if (!run?.complete) return false;
+    // The shared write queue preserves page captures and profile updates while running.
+    if (!run || (expectedRunId && run.id !== expectedRunId)) return false;
     const result = mergeCapturedProfile(run.leads, profile);
     if (!result.synced) return false;
     await persistFullRun({ ...run, leads: result.leads, updatedAt: new Date().toISOString() });

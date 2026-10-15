@@ -20,7 +20,7 @@ type CompanionStatus = {
   latestFullRun?: LatestFullRun | null;
 };
 
-type SeenState = { id: string; complete: boolean; profiles: number };
+type SeenState = { id: string; complete: boolean; profiles: number; pages: number };
 
 function shortTime(value?: string) {
   if (!value) return "never";
@@ -32,6 +32,7 @@ function shortTime(value?: string) {
 export function SalesNavLiveListener() {
   const [status, setStatus] = useState<CompanionStatus | null>(null);
   const [error, setError] = useState("");
+  const [checkedAt, setCheckedAt] = useState(0);
   const seen = useRef<SeenState | null>(null);
   const reloading = useRef(false);
 
@@ -45,10 +46,11 @@ export function SalesNavLiveListener() {
         if (!response.ok) throw new Error(payload.error || `Companion status HTTP ${response.status}`);
         if (!active) return;
         setStatus(payload);
+        setCheckedAt(Date.now());
         setError("");
 
         const latest = payload.latestFullRun || null;
-        const next: SeenState = { id: latest?.id || "", complete: Boolean(latest?.complete), profiles: latest?.profilesAvailable || 0 };
+        const next: SeenState = { id: latest?.id || "", complete: Boolean(latest?.complete), profiles: latest?.profilesAvailable || 0, pages: latest?.pagesRead || 0 };
         if (seen.current === null) {
           seen.current = next;
           return;
@@ -56,7 +58,7 @@ export function SalesNavLiveListener() {
 
         const newRunArrived = Boolean(next.id && next.id !== seen.current.id);
         const currentRunFinished = Boolean(next.id && next.id === seen.current.id && next.complete && !seen.current.complete);
-        const profilesChanged = next.id === seen.current.id && next.profiles !== seen.current.profiles;
+        const profilesChanged = next.id === seen.current.id && (next.profiles !== seen.current.profiles || next.pages !== seen.current.pages);
         seen.current = next;
         if (profilesChanged) window.dispatchEvent(new CustomEvent("salesnav:profiles-synced", { detail: { runId: next.id } }));
 
@@ -85,8 +87,9 @@ export function SalesNavLiveListener() {
 
   const latest = status?.latestFullRun || null;
   const connected = Boolean(status?.paired);
+  const captureStale = Boolean(latest && !latest.complete && checkedAt - Date.parse(status?.lastUsedAt || latest.updatedAt || "") > 180000);
   const serverText = latest
-    ? `${latest.pagesRead || 0} page${latest.pagesRead === 1 ? "" : "s"} · ${latest.total || 0} leads · ${latest.complete ? `${latest.profilesAvailable || 0}/${latest.total || 0} public profile URLs` : "capturing"}`
+    ? `${latest.pagesRead || 0} page${latest.pagesRead === 1 ? "" : "s"} · ${latest.total || 0} leads · ${latest.complete ? `${latest.profilesAvailable || 0}/${latest.total || 0} public profile URLs` : `${captureStale ? "no recent capture update · Resume in Companion" : "capturing"} · ${latest.profilesAvailable || 0} public profile URLs`}`
     : "waiting for first full-search page";
 
   return <aside style={{

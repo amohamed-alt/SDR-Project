@@ -23,11 +23,15 @@ test('free checks repair a finished saved run without duplicates, losing pages, 
   process.env.SALESNAV_COMPANION_FULL_RUN_PATH=join(dir,'latest.json');process.env.SALESNAV_COMPANION_HISTORY_DIR=join(dir,'history');
   const store=await import('../src/lib/salesnav-companion.ts?profile-sync-test');
   const input={id:'00000000-0000-4000-8000-000000000001',sourceUrl:'https://www.linkedin.com/sales/search/people',searchFingerprint:'sample',pageNumber:1,leads:[lead]};
-  await store.saveCompanionFullRunPage(input);assert.equal(await store.syncCompanionProfile(profile),false,'active capture must not be rewritten');
+  await store.saveCompanionFullRunPage(input);assert.equal(await store.syncCompanionProfile(profile,'00000000-0000-4000-8000-000000000099'),false,'a stale repair cannot change another run');assert.equal(await store.syncCompanionProfile(profile),true,'profiles sync during active capture');
+  assert.equal((await store.getLatestCompanionFullRun()).complete,false);
+  await Promise.all([store.saveCompanionFullRunPage({...input,pageNumber:2,leads:[{...lead,name:'Next Page Person',salesLeadUrl:'https://www.linkedin.com/sales/lead/NEXT'}]}),store.syncCompanionProfile(profile)]);
+  const activeRun=await store.getLatestCompanionFullRun();assert.equal(activeRun.pagesRead,2);assert.equal(activeRun.leads.length,2);assert.equal(activeRun.leads[0].linkedinUrl,'https://www.linkedin.com/in/test-person');
+
   await store.finishCompanionFullRun(input.id,'No next page');
   await Promise.all([store.syncCompanionProfile(profile),store.syncCompanionProfile(profile)]);
-  const run=await store.getLatestCompanionFullRun();assert.equal(run.leads.length,1);assert.equal(run.leads[0].linkedinUrl,'https://www.linkedin.com/in/test-person');assert.equal(run.complete,true);assert.equal(run.pagesRead,1);assert.equal(run.stopReason,'No next page');
-  await store.saveCompanionFullRunPage(input);assert.equal((await store.getLatestCompanionFullRun()).leads.length,1);assert.equal((await store.getLatestCompanionFullRun()).leads[0].linkedinUrl,'https://www.linkedin.com/in/test-person');await store.finishCompanionFullRun(input.id,'No next page');
+  const run=await store.getLatestCompanionFullRun();assert.equal(run.leads.length,2);assert.equal(run.leads[0].linkedinUrl,'https://www.linkedin.com/in/test-person');assert.equal(run.complete,true);assert.equal(run.pagesRead,2);assert.equal(run.stopReason,'No next page');
+  await store.saveCompanionFullRunPage(input);assert.equal((await store.getLatestCompanionFullRun()).leads.length,2);assert.equal((await store.getLatestCompanionFullRun()).leads[0].linkedinUrl,'https://www.linkedin.com/in/test-person');await store.finishCompanionFullRun(input.id,'No next page');
   const archived=await store.getCompanionFullRun(input.id);assert.equal(archived.leads[0].linkedinUrl,run.leads[0].linkedinUrl);
   await store.saveCompanionFullRunPage({...input,id:'00000000-0000-4000-8000-000000000002',leads:[{...lead,name:'Other Person',salesLeadUrl:'https://www.linkedin.com/sales/lead/OTHER'}]});await store.finishCompanionFullRun('00000000-0000-4000-8000-000000000002','Done');
   assert.equal(await store.syncCompanionProfile(profile),false);assert.equal((await store.getLatestCompanionFullRun()).id,'00000000-0000-4000-8000-000000000002');
