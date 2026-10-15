@@ -14,10 +14,10 @@ async function readVisibleLinkedInProfile() {
   if (!root) return { ok: false, error: 'Profile is still loading.' };
   let linkedinUrl = normalizePublic(location.href);
   if (sales) {
-    const menu = document.querySelector('button[aria-label="Open actions overflow menu"]');
+    const menu = document.querySelector('button[aria-label="Open actions overflow menu"], button[aria-label="More actions"], button[aria-label="المزيد من الإجراءات"]');
     if (menu && menu.getAttribute('aria-expanded') !== 'true') menu.click();
     for (let attempt = 0; attempt < 15 && !linkedinUrl; attempt++) {
-      const link = Array.from(document.querySelectorAll('a[href*="/in/"]')).find((node) => /view linkedin profile/i.test(text(node)));
+      const link = Array.from(document.querySelectorAll('a[href*="/in/"]')).find((node) => /view.*linkedin.*profile|linkedin.*profile|عرض.*ملف.*لينكد|عرض.*linkedin/i.test([text(node), node.getAttribute('aria-label'), node.getAttribute('title')].filter(Boolean).join(' ')));
       linkedinUrl = normalizePublic(link?.getAttribute('href') || '');
       if (!linkedinUrl) await new Promise((resolve) => setTimeout(resolve, 200));
     }
@@ -47,6 +47,7 @@ async function readVisibleLinkedInProfile() {
     if (match) { title = title || match[1].trim(); company = company || match[2].trim(); }
   }
   const locationText = text(root.querySelector('[data-anonymize="location"]'));
-  if (!name || !company || !title || !linkedinUrl) return { ok: false, error: 'Could not read the public URL and current role. Keep this profile open, wait for it to load, and retry.' };
+  if (!linkedinUrl) return { ok: false, error: 'Public LinkedIn URL was not found in the profile actions menu. Open this Sales Nav profile and check View LinkedIn profile, then retry.' };
+  if (!name || !company || !title) return { ok: false, error: 'Could not read the name and current role. Keep this profile open, wait for it to load, and retry.' };
   return { ok: true, lead: { name, title, company, location: locationText, linkedinUrl, salesLeadUrl: sales ? location.href : '' } };
 }

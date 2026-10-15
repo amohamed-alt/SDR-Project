@@ -14,11 +14,11 @@
     </header>
 
     <section class="card" id="workQueueCard" hidden>
-      <div class="sectionHead"><div><div class="sectionEyebrow">CURRENT SEARCH PAGE</div><h2>Turn people into pipeline</h2></div><button id="workQueueCapture" class="primary captureButton">Load current 25 <span aria-hidden="true">↗</span></button></div>
+      <div class="sectionHead"><div><div class="sectionEyebrow">CURRENT SEARCH PAGE</div><h2>Turn people into pipeline</h2></div><button id="workQueueCapture" class="primary captureButton">Capture current 25 <span aria-hidden="true">↗</span></button></div>
       <div class="queueMetrics" aria-label="Page queue overview"><div><span>Captured</span><strong id="queueMetricTotal">0</strong></div><div><span>Eligible</span><strong id="queueMetricEligible">0</strong></div><div class="metricReady"><span>Phone-ready</span><strong id="queueMetricReady">0</strong></div><div><span>Blocked</span><strong id="queueMetricBlocked">0</strong></div></div>
       <p class="small" id="workQueueSource"></p>
       <div id="workQueueStatus" class="status muted" role="status" aria-live="polite">No page loaded</div>
-      <div class="queueToolbar"><button id="workQueueSelect" class="quietButton">Select all</button><p id="workQueueSelection">0 selected</p><button id="workQueueCheck" class="secondary checkButton" disabled>Read profiles + HubSpot Check</button></div>
+      <div class="queueToolbar"><button id="workQueueSelect" class="quietButton">Select all</button><p id="workQueueSelection">0 selected</p><button id="workQueueCheck" class="secondary checkButton" disabled>Retry profiles + HubSpot Check</button></div>
       <div class="workQueueTable"><table><thead><tr><th aria-label="Select lead"></th><th>PERSON & COMPANY</th><th>ELIGIBILITY & CONTACT</th></tr></thead><tbody id="workQueueRows"></tbody></table></div>
       <div class="dispatchPanel"><div class="dispatchHead"><span class="sectionEyebrow">HANDOFF TO YOUR SDR</span><button id="workQueueStop" class="quietButton" disabled>Stop after current lead</button></div>
       <div class="dispatchFields"><div><label for="workQueueOwner">Task owner</label><select id="workQueueOwner"><option value="">Loading owners…</option></select></div><div><label for="workQueueDate">Due date</label><input id="workQueueDate" type="date" /></div><div><label for="workQueueTime">Time · local</label><input id="workQueueTime" type="time" value="09:00" /></div></div>
@@ -29,7 +29,7 @@
     <section class="card">
       <details class="secondaryFeature"><summary><span>Full-search capture</span><small>Up to 2,500 leads</small></summary>
       <p class="small">For normal prospecting use the full-search button below. One background engine saves each page, waits for fresh cards, then moves to Next. You can close this popup after starting.</p>
-      <button id="extractFull" class="primary">Capture FULL search · up to 2,500</button>
+      <button id="extractFull" class="primary">Capture FULL search + profile URLs</button>
       <div id="fullRunStatus" class="status muted">Recommended · up to 100 pages / 2,500 leads</div>
       <p class="small">Quick extracts are only for testing. They now go to the same persistent queue too.</p>
       <button id="extract25" class="secondary">Quick test · current 25</button>

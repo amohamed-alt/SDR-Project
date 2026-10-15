@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { publicPersonProfile } from "@/lib/salesnav-profile-sync";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft, CalendarClock, CheckCircle2, CircleAlert, Download, ExternalLink, History,
   LoaderCircle, Phone, RefreshCw, Search, Send, ShieldCheck, Sparkles, UserRoundCheck, UsersRound,
@@ -73,7 +73,9 @@ export function SalesNavPipelineV2() {
   const [dueDate, setDueDate] = useState(tomorrowLocal());
   const [dueTime, setDueTime] = useState("09:00");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [view, setView] = useState<View>("ready");
+  const [view, setView] = useState<View>("all");
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
@@ -93,7 +95,7 @@ export function SalesNavPipelineV2() {
       if (!response.ok) throw new Error(payload.error || "Could not load Sales Nav runs.");
       setUnauthorized(false); setRun(payload.run || null); setHistory(payload.history || []);
       setRows((payload.run?.leads || []).map((lead) => ({ key: keyFor(lead), lead, stage: "pending" })));
-      setSelected(new Set()); setView("ready");
+      setSelected(new Set()); setView("all");
       setMessage(payload.run ? `${payload.run.total} leads loaded. HubSpot Check will keep Ready strictly net-new people.` : "No Sales Navigator full-search run found yet.");
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not load Sales Nav runs."); }
     finally { setLoading(false); }
@@ -107,6 +109,44 @@ export function SalesNavPipelineV2() {
       setOwners(payload.owners || []); if (payload.defaultOwner?.id) setOwnerId(payload.defaultOwner.id);
     }).catch((requestError) => setError(requestError instanceof Error ? requestError.message : "Could not load task owners."));
   }, []);
+
+  useEffect(() => {
+    if (!run?.id || processing || revealing || pushing) return;
+    let active = true, syncing = false;
+    const sync = async () => {
+      if (syncing) return;
+      syncing = true;
+      try {
+        const response = await fetch(`/api/prospecting/salesnav/full-run?id=${encodeURIComponent(run.id)}`, { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await readJson<{ run?: Run }>(response);
+        if (!active || payload.run?.id !== run.id) return;
+        const changed = payload.run.leads.filter(lead => {
+          const previous = rowsRef.current.find(row => row.key === keyFor(lead));
+          return previous && publicPersonProfile(lead.linkedinUrl) && JSON.stringify(previous.lead) !== JSON.stringify(lead) && previous.stage !== "pushed";
+        });
+        setRun(payload.run);
+        const pending = [...changed];
+        await Promise.all(Array.from({ length: Math.min(4, pending.length) }, async () => {
+          while (active && pending.length) {
+            const lead = pending.shift()!;
+            try {
+              const checked = await precheckLead(lead);
+              if (!active) return;
+              setRows(current => current.map(row => row.key === keyFor(lead) ? { ...row, lead, precheck: checked, stage: checked.company.protected || checked.contact.inHubSpot ? "blocked" : "needs-reveal", error: undefined } : row));
+            } catch (requestError) {
+              if (active) setRows(current => current.map(row => row.key === keyFor(lead) ? { ...row, lead, stage: "error", error: requestError instanceof Error ? requestError.message : "Profile check failed." } : row));
+            }
+          }
+        }));
+      } catch { /* Keep the saved queue visible; the next status change retries. */ }
+      finally { syncing = false; }
+    };
+    const onSync = () => { void sync(); };
+    window.addEventListener("salesnav:profiles-synced", onSync);
+    void sync();
+    return () => { active = false; window.removeEventListener("salesnav:profiles-synced", onSync); };
+  }, [run?.id, processing, revealing, pushing]);
 
   async function runPrecheck() {
     if (!rows.length || processing) return;
@@ -295,7 +335,7 @@ export function SalesNavPipelineV2() {
     <section className={styles.toolbar}><div className={styles.tabs}><button data-active={view === "ready"} onClick={() => setView("ready")}>Ready NEW <b>{counts.ready}</b></button><button data-active={view === "needs-reveal"} onClick={() => setView("needs-reveal")}>Need reveal <b>{counts.reveal}</b></button><button data-active={view === "blocked"} onClick={() => setView("blocked")}>Blocked <b>{counts.blocked}</b></button><button data-active={view === "pushed"} onClick={() => setView("pushed")}>Pushed <b>{counts.pushed}</b></button><button data-active={view === "review"} onClick={() => setView("review")}>Review <b>{counts.review}</b></button><button data-active={view === "all"} onClick={() => setView("all")}>All <b>{counts.total}</b></button></div><label className={styles.search}><Search size={14}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search person, company, status, ATS…"/></label></section>
     <section className={styles.selection}><button onClick={toggleVisible}>{allSelected ? "Unselect visible" : "Select visible"}</button><span><b>{selected.size}</b> selected · {selectedReveal} reveal · {selectedPush} NEW push-ready</span></section>
 
-    <section className={styles.tablePanel}><div className={styles.tableHeader}><div><h2>Review queue</h2><p>Existing person = block · Retention = block · Meeting = block · Connected call without meeting = eligible · Ready = NEW person with phone.</p></div><span>{visible.length} visible</span></div>{counts.profiles > 0 && <section className={styles.warning} role="status"><CircleAlert size={18}/><div><strong>Missing public profile URLs: {counts.profiles}</strong><span>In Companion, use Load current 25 → Read profiles + HubSpot Check on each captured search page. Checked profiles sync to this saved run without contact credits. Then choose Reload and run HubSpot Check here.</span></div></section>}
+    <section className={styles.tablePanel}><div className={styles.tableHeader}><div><h2>Review queue</h2><p>Existing person = block · Retention = block · Meeting = block · Connected call without meeting = eligible · Ready = NEW person with phone.</p></div><span>{visible.length} visible</span></div>{counts.profiles > 0 && <section className={styles.warning} role="status"><CircleAlert size={18}/><div><strong>Missing public profile URLs: {counts.profiles}</strong><span>Companion v1.6.3 reads public URLs automatically for Current 25 and Full Search. Keep Chrome open while the saved queue runs. Links appear here automatically. For failed profiles, select them in Companion and retry Read profiles + HubSpot Check. No contact credits are used.</span></div></section>}
     <div className={styles.tableWrap}><table><thead><tr><th/><th>Person</th><th>Company</th><th>HubSpot gate</th><th>Contact</th><th>ATS / Career</th><th>Status</th></tr></thead><tbody>
       {visible.map((row) => { const company = row.precheck?.company; const phone = readyPhone(row); const canSelect = (row.stage === "ready" && Boolean(phone)) || row.stage === "needs-reveal"; const ats = String(row.prospect?.detectedAts || company?.detectedAts || ""); const career = String(row.prospect?.careerPageUrl || company?.careerPageUrl || ""); return <tr key={row.key} data-blocked={row.stage === "blocked"}><td><input type="checkbox" disabled={!canSelect} checked={selected.has(row.key)} onChange={() => setSelected((current) => { const next = new Set(current); if (next.has(row.key)) next.delete(row.key); else next.add(row.key); return next; })}/></td><td><strong>{String(row.prospect?.fullName || row.lead.name)}</strong><span>{String(row.prospect?.title || row.lead.title || "—")}</span><small>{String(row.prospect?.location || row.lead.location || "—")}</small><div className={styles.links}>{row.lead.salesLeadUrl && <a href={row.lead.salesLeadUrl} target="_blank" rel="noreferrer">Sales Nav <ExternalLink size={10}/></a>}{(row.prospect?.linkedinUrl || row.lead.linkedinUrl) && <a href={String(row.prospect?.linkedinUrl || row.lead.linkedinUrl)} target="_blank" rel="noreferrer">LinkedIn <ExternalLink size={10}/></a>}</div></td><td><strong>{String(row.prospect?.company || company?.name || row.lead.company || "—")}</strong><span>{String(row.prospect?.companyDomain || company?.domain || "")}</span><small>{company?.inHubSpot ? `${company.accountType || "Existing"}${company.accountStatus ? ` · ${company.accountStatus}` : ""}` : row.precheck ? "Net-new company" : "Not checked"}</small></td><td>{row.stage === "checking" ? <span className={styles.badge}><LoaderCircle className={styles.spin} size={11}/>Checking</span> : company?.protected || isExistingPerson(row) ? <><span className={styles.blockedBadge}><ShieldCheck size={11}/>Blocked</span><small>{company?.protectedReason || "Existing HubSpot person"}</small></> : row.precheck ? <><span className={styles.goodBadge}><CheckCircle2 size={11}/>Eligible</span><small>{company?.gateReason || "No blocker found"}</small></> : <span>Pending</span>}</td><td>{phone ? <strong className={styles.phone}><Phone size={11}/>{phone}</strong> : <span>No phone yet</span>}<small>{String(row.prospect?.email || existingEmail(row) || "") || (isExistingPerson(row) ? "Existing HubSpot contact" : "")}</small></td><td><strong>{ats || "—"}</strong>{career && <a href={career} target="_blank" rel="noreferrer">Career <ExternalLink size={10}/></a>}<small>{row.prospect && !ats && !career ? "Deferred for faster reveal" : ""}</small></td><td><strong>{row.stage === "needs-profile" ? "Needs profile URL" : row.stage === "ready" ? "Ready NEW" : row.stage === "needs-reveal" ? "Needs reveal" : row.stage === "revealing" ? "Revealing" : row.stage === "no-phone" ? "No phone" : row.stage === "pushed" ? "Pushed" : row.stage === "blocked" ? "Blocked" : row.stage === "error" ? "Error" : row.stage}</strong><small>{row.stage === "needs-profile" ? "Read the public profile in Companion before reveal. No credits used." : row.cachedReveal ? "Cached reveal · 0 credit" : row.message || row.error || ""}</small></td></tr>; })}
       {!visible.length && <tr><td colSpan={7}><div className={styles.empty}>{loading ? "Loading…" : "No rows in this view."}</div></td></tr>}

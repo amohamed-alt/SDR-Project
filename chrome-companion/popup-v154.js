@@ -13,7 +13,7 @@
     if (run && !run.complete && run.runId) {
       return `Resume FULL search · ${Number(run.pagesRead || 0)} pages / ${Number(run.total || 0)} leads`;
     }
-    return 'Capture FULL search · up to 2,500';
+    return 'Capture FULL search + read profile URLs';
   }
 
   async function refreshFromStorage() {
@@ -25,7 +25,7 @@
     if (run.backgroundError) {
       setFullStatus(`${run.backgroundStatus || 'Paused'} · ${run.backgroundError}`, 'bad');
     } else if (run.complete) {
-      setFullStatus(`Finished · ${Number(run.pagesRead || 0)} pages · ${Number(run.total || 0)} unique leads · ${run.stopReason || 'complete'}.`, 'ok');
+      setFullStatus(`Finished · ${Number(run.pagesRead || 0)} pages · ${Number(run.total || 0)} leads saved · see the profile queue above for reading progress · ${run.stopReason || 'complete'}.`, 'ok');
     } else {
       setFullStatus(`${run.backgroundStatus || 'Capture running'} · ${Number(run.pagesRead || 0)} pages / ${Number(run.total || 0)} leads.`, 'ok');
     }
@@ -45,6 +45,8 @@
     if (button) button.disabled = true;
     setFullStatus('Handing the search to the background capture engine…');
     try {
+      const granted = await chrome.permissions.request({ origins: ['https://www.linkedin.com/sales/*'] });
+      if (!granted) throw new Error('Allow profile reading to capture public LinkedIn URLs.');
       const tab = await activeSalesNavTab();
       const response = await chrome.runtime.sendMessage({ type: 'salesnav_v154_start', tabId: tab.id });
       if (!response?.ok) throw new Error(response?.error || 'Could not start full capture.');

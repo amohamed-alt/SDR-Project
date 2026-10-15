@@ -8,7 +8,7 @@ This is the Talentera SDR Chrome companion for user-triggered prospecting workfl
 2. Open `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Click **Load unpacked** and select the `chrome-companion` folder.
-5. Confirm the extension shows version **1.6.2**.
+5. Confirm the extension shows version **1.6.3**.
 6. In the SDR Dashboard, open **Sales Nav → Companion setup**.
 7. Unlock admin settings and click **Enable profile actions / rotate token**.
 8. Paste that token into the extension and click **Test connection**.
@@ -68,8 +68,8 @@ This is not an anti-detection tool. Websites can observe normal page loads and n
 
 1. Reload the unpacked extension to install v1.6.0. In Companion setup, enable profile actions / rotate token once, then save the new token in the extension. Previous capture tokens deliberately cannot reveal or push via the new controls.
 2. Stay on the Sales Navigator People Search page and open the extension.
-3. Click **Load current page · up to 25**. This reads the cards only and uses no contact credits.
-4. Select the people to review and click **Read profiles + HubSpot Check**. Chrome asks for optional LinkedIn host access on the first click. This allows the companion to open ordinary temporary Sales Navigator profile tabs, read the current role and **View LinkedIn profile** link, then close them. The search tab stays in place. No cookie access or hidden profile API is used.
+3. Click **Capture current 25**. This saves the cards and automatically reads profiles without contact credits.
+4. Profile checks start automatically after capture. Chrome asks for optional LinkedIn host access on the capture click. This allows the companion to open ordinary temporary Sales Navigator profile tabs, read the current role and **View LinkedIn profile** link, then close them. The search tab stays in place. No cookie access or hidden profile API is used.
 5. Existing HubSpot people, Retention companies, meaningful meetings, incomplete communication checks and mismatched provider identities are blocked. The current queue policy continues to allow connected calls without a meeting.
 6. Select eligible people and click **Reveal selected**. Confirm credit use. The server reuses the reveal ledger; it does not accept arbitrary client-supplied phone data for push.
 7. Choose **Marita or Daniel**, the date and the local time. Select the ready people and click **Push + CALL tasks**. Confirm the exact owner/time. The server rechecks eligibility and rereads the written task, its owner/time and contact association before reporting success.
@@ -77,7 +77,7 @@ This is not an anti-detection tool. Websites can observe normal page loads and n
 
 Search captures now read `data-anonymize="title"`; `job-title` contains tenure on current search cards. Plain `/in/` URLs are absent from these cards, so they are completed during the explicit profile-reading step rather than invented or inferred.
 
-The page queue is limited to the loaded page. Full-search capture remains available separately and uses the persistent dashboard queue.
+Current 25 reads the loaded page; Full Search enqueues all captured profiles in the same persistent queue.
 
 Rebuild the versioned download after extension changes with `python3 scripts/package-companion.py` from the repository root.
 
@@ -85,8 +85,8 @@ Rebuild the versioned download after extension changes with `python3 scripts/pac
 
 The popup now shares the SDR dashboard green palette, compact table hierarchy, semantic status badges, four live queue counters and a dedicated dispatch panel. Full capture, list sync and pairing settings use progressive disclosure. Existing permissions, confirmation prompts and server safety gates are unchanged. The hosted design preview uses explicitly labeled sample data and cannot perform CRM or enrichment actions.
 
-## Recover captured people missing a public LinkedIn URL
+## v1.6.3: automatic public profile handoff
 
-Full-search capture can contain only Sales Navigator lead links. These are not public `/in/` URLs and cannot be used for contact reveal. The dashboard now labels these rows **Needs profile URL** and excludes them from paid reveal.
+Both **Capture current 25** and **Capture FULL search** now save the capture in dashboard history and automatically start free public profile reads + HubSpot checks in the persistent queue. Full Search saves all pages first, then reads the captured profiles. Chrome asks for optional LinkedIn profile access on the capture click. Keep Chrome open; the popup may close. The search tab stays in place while ordinary temporary profile tabs open and close. No guessed URLs, paid reveals, or CRM writes run automatically.
 
-After the latest capture finishes, open each captured search page in Companion, choose **Load current 25**, then **Read profiles + HubSpot Check**. Successful free profile checks sync the actual public URL and current role back to the matching person in the latest saved run. Return to the dashboard, choose **Reload**, then **HubSpot Check**. Existing people and protected companies remain blocked. The sync matches the Sales Navigator person ID and name; it never guesses a public URL or spends contact credits. No extension upgrade is required for this server-side handoff.
+Dashboard opens All records and updates public links as checks finish. The Companion queue shows progress and per-person errors. Select failed people and use **Retry profiles + HubSpot Check**. Sign-in/verification pauses the queue. Allow LinkedIn access and use a token with profile actions enabled. If an old token is rejected, generate and save a new pairing token from Setup. Install v1.6.3 using Reload in chrome://extensions after replacing the unpacked files, then refresh the search page.
