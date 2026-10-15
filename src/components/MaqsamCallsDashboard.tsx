@@ -328,7 +328,7 @@ export function MaqsamCallsDashboard({ onBack, initialAgent = "marita", initialS
           <div className={styles.tableHeader}>
             <div><h2>Call records</h2><p>Click a row to open the AI summary and complete transcript.</p></div>
             <div className={styles.filters}>
-              <label><input type="checkbox" checked={transcriptOnly} onChange={(event) => { setTranscriptOnly(event.target.checked); resetPage(); }}/> With transcript</label>
+              <label className={styles.transcriptFilter}><input type="checkbox" checked={transcriptOnly} onChange={(event) => { setTranscriptOnly(event.target.checked); resetPage(); }}/> With transcript</label>
               <label className={styles.searchBox}><Search size={14}/><input value={search} onChange={(event) => { setSearch(event.target.value); resetPage(); }} aria-label="Search call records" placeholder="Search phone, contact, agent, summary…"/></label>
               <select value={matchStatus} aria-label="HubSpot match status" onChange={(event) => { setMatchStatus(event.target.value as "all" | MaqsamMatchStatus); resetPage(); }}>
                 <option value="all">All match statuses</option>
