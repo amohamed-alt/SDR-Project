@@ -328,6 +328,7 @@ function dedupe(leads, limit = 50) {
   return [...map.values()].slice(0, limit);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function importBatch(leads, sourceUrl, pagesRead) {
   const { dashboardUrl, pairingToken } = await settings();
   if (!pairingToken) throw new Error('Pair the companion with the SDR Dashboard first.');
@@ -401,6 +402,10 @@ async function run(twoPages) {
   $('extractFull').disabled = true;
   setStatus('runStatus', 'Reading the visible Sales Navigator result cards…');
   try {
+    const granted = await chrome.permissions.request({ origins: ['https://www.linkedin.com/sales/*'] });
+    if (!granted) throw new Error('Allow profile reading to capture public LinkedIn URLs.');
+    const prepared = await chrome.runtime.sendMessage({ type: 'work_queue_prepare_capture' });
+    if (!prepared?.ok) throw new Error(prepared?.error || 'Could not prepare profile reading.');
     const tab = await activeTab();
     const first = await extractPage(tab.id);
     if (!first.ok) throw new Error(first.error || 'Could not read Sales Navigator.');
@@ -428,8 +433,9 @@ async function run(twoPages) {
     const directProfiles = clean.filter((lead) => Boolean(lead.linkedinUrl)).length;
     const withCompany = clean.filter((lead) => Boolean(lead.company)).length;
     setStatus('runStatus', `Importing ${clean.length} leads · ${withCompany} companies parsed · ${directProfiles} direct profile URLs visible…`);
-    const payload = await importBatch(clean, first.sourceUrl, pagesRead);
-    setStatus('runStatus', `Done · ${payload.imported} sent · v${CLIENT_VERSION}.`, 'ok');
+    const payload = await chrome.runtime.sendMessage({ type: 'work_queue_import_capture', sourceUrl: first.sourceUrl, pagesRead, leads: clean });
+    if (!payload?.ok) throw new Error(payload?.error || 'Could not queue profile reading.');
+    setStatus('runStatus', `${payload.queue.rows.length} saved · reading public profiles in the queue above · v${CLIENT_VERSION}.`, 'ok');
   } catch (error) {
     setStatus('runStatus', error instanceof Error ? error.message : 'Extraction failed.', 'bad');
   } finally {

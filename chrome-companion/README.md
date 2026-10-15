@@ -8,7 +8,7 @@ This is the Talentera SDR Chrome companion for user-triggered prospecting workfl
 2. Open `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Click **Load unpacked** and select the `chrome-companion` folder.
-5. Confirm the extension shows version **1.6.3**.
+5. Confirm the extension shows version **1.6.4**.
 6. In the SDR Dashboard, open **Sales Nav → Companion setup**.
 7. Unlock admin settings and click **Enable profile actions / rotate token**.
 8. Paste that token into the extension and click **Test connection**.
@@ -90,3 +90,11 @@ The popup now shares the SDR dashboard green palette, compact table hierarchy, s
 Both **Capture current 25** and **Capture FULL search** now save the capture in dashboard history and automatically start free public profile reads + HubSpot checks in the persistent queue. Full Search saves all pages first, then reads the captured profiles. Chrome asks for optional LinkedIn profile access on the capture click. Keep Chrome open; the popup may close. The search tab stays in place while ordinary temporary profile tabs open and close. No guessed URLs, paid reveals, or CRM writes run automatically.
 
 Dashboard opens All records and updates public links as checks finish. The Companion queue shows progress and per-person errors. Select failed people and use **Retry profiles + HubSpot Check**. Sign-in/verification pauses the queue. Allow LinkedIn access and use a token with profile actions enabled. If an old token is rejected, generate and save a new pairing token from Setup. Install v1.6.3 using Reload in chrome://extensions after replacing the unpacked files, then refresh the search page.
+
+## v1.6.4: read profiles during full capture
+
+Full Search enqueues each saved page immediately; it no longer waits for the entire search to finish before reading URLs. The persistent queue keeps results and errors across pages, and serializes page appends with in-flight profile results so neither can erase the other. Profiles sync to the active dashboard run and newly captured pages appear without reloading. Missing links during capture show Awaiting profile read and do not trigger redundant CRM checks.
+
+To resume v1.6.3 progress, update the same unpacked folder, Reload the extension, then press Resume FULL search. Previously saved cards are queued for profile reading before pagination resumes. Keep the original search tab and Chrome open. No paid reveal or CRM push runs automatically.
+
+The smaller capture buttons inside Full-search capture (25 and 50) now use the same automatic profile queue too. They no longer create card-only imports. For an urgent saved-person repair, open their Sales Nav link, copy View LinkedIn profile, and use Add profile URL in the latest dashboard run. This saves only the public URL and runs a free eligibility check; it never reveals paid contact data or pushes to CRM.

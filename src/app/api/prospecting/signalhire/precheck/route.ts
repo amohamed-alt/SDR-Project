@@ -407,6 +407,6 @@ export async function POST(request: NextRequest) {
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("SignalHire HubSpot precheck failed", error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : "HubSpot precheck failed." }, { status: 500 });
+    return NextResponse.json({ error: error instanceof HubSpotApiError ? `HubSpot check failed (HTTP ${error.status}). Retry this check; reveal and push remain disabled.` : error instanceof Error ? error.message : "HubSpot precheck failed." }, { status: 500 });
   }
 }

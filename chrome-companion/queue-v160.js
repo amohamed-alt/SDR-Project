@@ -4,6 +4,13 @@ importScripts('profile-dom.js');
   const KEY = 'salesNavWorkQueueV160', ALARM = 'salesnav-work-queue-v160';
   const API = 'https://sdr.dashboardtalentera.tech/api/prospecting/salesnav/companion';
   let busy = false;
+  // Page appends and a worker result must not overwrite each other's saved snapshot.
+  let queueWrites = Promise.resolve();
+  function withQueueWrite(work) {
+    const next = queueWrites.then(work);
+    queueWrites = next.catch(() => undefined);
+    return next;
+  }
   const identity = (lead) => {
     try { const url = new URL(lead.salesLeadUrl || lead.linkedinUrl); return url.pathname.split(',')[0]; }
     catch { return `${lead.name}:${lead.company}`; }
@@ -53,11 +60,29 @@ importScripts('profile-dom.js');
     chrome.alarms.create(ALARM, { when: Date.now() + 1000 }); setTimeout(() => void step(), 100);
     return queue;
   };
-  globalThis.ensureCapturedProfileQueueIdle = async () => {
+  globalThis.appendCapturedProfileChecks = (leads, sourceUrl, captureRunId) => withQueueWrite(async () => {
     const stored = (await chrome.storage.local.get([KEY]))[KEY];
+    const sameRun = stored?.captureRunId === captureRunId;
+    if (stored?.pending?.length && (!sameRun || stored.action !== 'check')) throw new Error('Another queue operation is running. Finish it before continuing this capture.');
+    const queue = sameRun ? stored : { sourceUrl, captureRunId, rows: [], action: 'check', pending: [], done: 0, total: 0, paused: false };
+    const keys = new Set(queue.rows.map(row => row.key));
+    for (const lead of dedupe(leads.filter(lead => lead.connectionDegree !== '1st'), 2500)) {
+      const key = identity(lead);
+      if (keys.has(key)) continue;
+      keys.add(key); queue.rows.push({ key, lead, status: 'pending' }); queue.pending.push(key);
+    }
+    queue.total = queue.rows.length;
+    await persist(queue);
+    if (queue.pending.length && !queue.paused) { chrome.alarms.create(ALARM, { when: Date.now() + 1000 }); setTimeout(() => void step(), 100); }
+    return queue;
+  });
+  globalThis.ensureCapturedProfileQueueIdle = async (captureRunId) => {
+    const stored = (await chrome.storage.local.get([KEY]))[KEY];
+    if (captureRunId && stored?.captureRunId === captureRunId && stored.action === 'check') return;
     if (busy || stored?.pending?.length) throw new Error('Profile checks are still running. Wait or stop them before capturing another search.');
   };
-  async function step() {
+  function step() { return withQueueWrite(stepUnsafe); }
+  async function stepUnsafe() {
     if (busy) return;
     busy = true;
     try {
@@ -97,23 +122,24 @@ importScripts('profile-dom.js');
     void (async () => {
       try {
         let { [KEY]: queue } = await chrome.storage.local.get([KEY]);
-        if (message.type === 'work_queue_capture') {
+        if (['work_queue_capture', 'work_queue_import_capture', 'work_queue_prepare_capture'].includes(message.type)) {
+          const readProfiles = message.readProfiles === true || message.type !== 'work_queue_capture';
           if (!(await chrome.storage.local.get(['pairingToken'])).pairingToken) throw new Error('Save pairing before working this page.');
           if ((await chrome.storage.local.get(['salesNavFullRunV1'])).salesNavFullRunV1?.complete === false) throw new Error('Full-search capture is running. Wait for it to finish before loading Current 25.');
           if (busy || queue?.pending?.length) throw new Error('Finish or pause the current operation before loading another page.');
-          if (message.readProfiles === true) await api({ action: 'profile_options' });
-          const values = await chrome.scripting.executeScript({ target: { tabId: message.tabId }, func: extractCurrentSalesNavPageV154 });
-          const captured = values?.[0]?.result;
+          if (readProfiles) await api({ action: 'profile_options' });
+          if (message.type === 'work_queue_prepare_capture') { respond({ ok: true }); return; }
+          const captured = message.type === 'work_queue_import_capture' ? { ok: true, sourceUrl: message.sourceUrl, leads: (message.leads || []).slice(0, 50) } : (await chrome.scripting.executeScript({ target: { tabId: message.tabId }, func: extractCurrentSalesNavPageV154 }))?.[0]?.result;
           if (!captured?.ok || !captured.leads?.length) throw new Error(captured?.error || 'No lead cards found.');
           const previous = new Map((queue?.rows || []).map((row) => [row.key, row]));
-          queue = { sourceUrl: captured.sourceUrl, rows: dedupe(captured.leads.filter((lead) => lead.connectionDegree !== '1st'), 25).map((lead) => ({ ...previous.get(identity(lead)), key: identity(lead), lead: { ...lead, ...(previous.get(identity(lead))?.lead?.linkedinUrl ? previous.get(identity(lead)).lead : {}) }, status: previous.get(identity(lead))?.status || 'pending' })), pending: [], done: 0, paused: false };
+          queue = { sourceUrl: captured.sourceUrl, rows: dedupe(captured.leads.filter((lead) => lead.connectionDegree !== '1st'), message.type === 'work_queue_import_capture' ? 50 : 25).map((lead) => ({ ...previous.get(identity(lead)), key: identity(lead), lead: { ...lead, ...(previous.get(identity(lead))?.lead?.linkedinUrl ? previous.get(identity(lead)).lead : {}) }, status: previous.get(identity(lead))?.status || 'pending' })), pending: [], done: 0, paused: false };
           await persist(queue);
-          if (message.readProfiles === true) {
-            await api({ action: 'import', sourceUrl: captured.sourceUrl, pagesRead: 1, clientVersion: chrome.runtime.getManifest().version, parserVersion: 'card-v6-public-profile-handoff', leads: queue.rows.map(row => row.lead) });
+          if (readProfiles) {
+            await api({ action: 'import', sourceUrl: captured.sourceUrl, pagesRead: message.pagesRead === 2 ? 2 : 1, clientVersion: chrome.runtime.getManifest().version, parserVersion: 'card-v7-streaming-profiles', leads: queue.rows.map(row => row.lead) });
             queue = await globalThis.startCapturedProfileChecks(queue.rows.map(row => row.lead), captured.sourceUrl);
           }
         } else if (message.type === 'work_queue_start') {
-          if (busy || !queue?.rows?.length || queue.pending?.length) throw new Error('Load a page first or wait for the current operation.');
+          if (busy || !queue?.rows?.length || (queue.pending?.length && !queue.paused)) throw new Error('Load a page first or wait for the current operation.');
           if (!['check','reveal','push'].includes(message.action)) throw new Error('Invalid queue action.');
           if (['reveal','push'].includes(message.action) && message.confirmed !== true) throw new Error('Confirm this action first.');
           const selected = queue.rows.filter((row) => message.keys?.includes(row.key));

@@ -6,7 +6,7 @@
   const status = (message, state = 'muted') => setStatus('workQueueStatus', message, state);
   function render(value) {
     queue = value || null;
-    const rows = queue?.rows || [], running = Boolean(queue?.pending?.length);
+    const rows = queue?.rows || [], running = Boolean(queue?.pending?.length && !queue.paused);
     if (queue?.sourceUrl) { try { const page = new URL(queue.sourceUrl).searchParams.get('page') || '1'; el('workQueueSource').textContent = `Saved search page ${page}. Load current page to replace this list.`; } catch {} }
     el('queueMetricTotal').textContent = rows.length;
     el('queueMetricEligible').textContent = rows.filter((row) => row.check?.eligible && row.status !== 'pushed').length;
@@ -33,12 +33,13 @@
     }
     if (!rows.length) { const tr = document.createElement('tr'), td = document.createElement('td'), title = document.createElement('strong'), hint = document.createElement('span'); td.colSpan = 3; td.className = 'queueEmpty'; title.textContent = 'Your next conversations start here'; hint.textContent = 'Load the current 25 to review eligibility and prepare SDR tasks.'; td.append(title,hint); tr.append(td); el('workQueueRows').append(tr); }
     el('workQueueSelect').textContent = rows.filter((row) => row.status !== 'pushed').length && rows.filter((row) => row.status !== 'pushed').every((row) => selected.has(row.key)) ? 'Clear selection' : 'Select all';
-    if (running) status(`${queue.action}: ${queue.done || 0}/${queue.total} completed. You can close the popup; progress is saved.`);
+    if (queue?.paused) status('Profile reading paused. Select the people to retry, then choose Retry profiles + HubSpot Check.', 'bad');
+    else if (running) status(`${queue.action}: ${queue.done || 0}/${queue.total} completed. You can close the popup; progress is saved.`);
     else if (rows.length) status(`${rows.length} captured · ${rows.filter((row) => row.status === 'ready').length} ready · ${rows.filter((row) => row.status === 'pushed').length} pushed`, 'ok');
     updateButtons();
   }
   function updateButtons() {
-    const rows = (queue?.rows || []).filter((row) => selected.has(row.key)), running = Boolean(queue?.pending?.length);
+    const rows = (queue?.rows || []).filter((row) => selected.has(row.key)), running = Boolean(queue?.pending?.length && !queue.paused);
     el('workQueueCapture').disabled = running || rendering;
     el('workQueueCheck').disabled = running || !rows.some((row) => row.status !== 'pushed');
     const reveal = rows.filter((row) => row.status === 'needs-reveal' && row.check?.eligible).length;

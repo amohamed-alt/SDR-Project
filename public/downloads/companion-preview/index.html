@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
+  <aside style="padding:10px;text-align:center;background:#fff8e8;color:#73591b">DESIGN PREVIEW · Sample data · CRM and enrichment actions disabled</aside>
   <main>
     <header class="appHeader">
       <div class="brandRow"><img class="brandLogo" src="talentera-logo.svg" alt="Talentera ATS" width="136" height="37" /><div class="brandCopy"><div class="eyebrow">SDR WORKSPACE</div><h1>Prospecting Companion<span class="headerAccent">.</span></h1></div><span class="workspaceBadge">SALES NAV</span></div>
@@ -31,9 +32,9 @@
       <p class="small">For normal prospecting use the full-search button below. One background engine saves each page, waits for fresh cards, then moves to Next. You can close this popup after starting.</p>
       <button id="extractFull" class="primary">Capture FULL search + profile URLs</button>
       <div id="fullRunStatus" class="status muted">Recommended · up to 100 pages / 2,500 leads</div>
-      <p class="small">Quick extracts are only for testing. They now go to the same persistent queue too.</p>
-      <button id="extract25" class="secondary">Quick test · current 25</button>
-      <button id="extract50" class="secondary">Quick test · up to 50</button>
+      <p class="small">Smaller captures also save to history and automatically read public profile URLs.</p>
+      <button id="extract25" class="secondary">Capture current 25 + profiles</button>
+      <button id="extract50" class="secondary">Capture up to 50 + profiles</button>
       <div class="row">
         <a class="secondaryLink" href="https://sdr.dashboardtalentera.tech/signalhire-queue" target="_blank" rel="noreferrer">Open persistent queue</a>
         <button id="resetFull" class="secondary">Reset local resume state</button>
