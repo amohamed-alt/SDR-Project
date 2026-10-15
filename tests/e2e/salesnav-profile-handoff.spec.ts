@@ -31,7 +31,7 @@ test("an active capture receives new pages and usable public URLs before the sea
   expect((await page.request.post("/api/prospecting/salesnav/full-run", { data: {} })).status()).toBe(401);
   await page.addInitScript(() => { localStorage.setItem("sdr_v2_visitor_id", "stream_handoff_qa"); localStorage.setItem("sdr_v2_visitor_name", "Stream QA"); });
   await page.request.post("/api/sdr-admin", { data: { password: "playwright-tools-only-password" } });
-  expect((await page.request.post("/api/prospecting/salesnav/full-run", { headers: { origin: "https://external.example", "sec-fetch-site": "cross-site" }, data: {} })).status()).toBe(403);
+  expect((await page.request.post("/api/prospecting/salesnav/full-run", { headers: { origin: "https://external.example", "sec-fetch-site": "cross-site", "x-acquisition-owner-token": "playwright-tools-only-password" }, data: {} })).status()).toBe(403);
   let streamed = false, checks = 0, reveals = 0, repairs = 0;
   const first = { name: "Stream First Person", title: "HR Director", company: "Example A", location: "Riyadh", connectionDegree: "2nd", salesLeadUrl: "https://www.linkedin.com/sales/lead/STREAM1,SEARCH,x", linkedinUrl: "" };
   const second = { ...first, name: "Stream Second Person", company: "Example B", salesLeadUrl: "https://www.linkedin.com/sales/lead/STREAM2,SEARCH,x" };
