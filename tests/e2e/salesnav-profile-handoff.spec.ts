@@ -67,7 +67,7 @@ test("HubSpot checks all 100 captured people without skipping missing URLs or hi
   await page.addInitScript(() => { localStorage.setItem("sdr_v2_visitor_id", "hundred_check_qa"); localStorage.setItem("sdr_v2_visitor_name", "Check QA"); });
   await page.request.post("/api/sdr-admin", { data: { password: "playwright-tools-only-password" } });
   const leads = Array.from({ length: 100 }, (_, index) => ({ name: `Check Person ${index}`, company: `Example ${index}`, title: "HR Director", location: "Riyadh", connectionDegree: "2nd", salesLeadUrl: `https://www.linkedin.com/sales/lead/CHECK${index},SEARCH,x`, linkedinUrl: index < 8 ? `https://www.linkedin.com/in/check-person-${index}` : "" }));
-  const run = { id: "00000000-0000-4000-8000-000000000004", startedAt: "2026-10-15T10:00:00Z", updatedAt: "2026-10-15T10:00:00Z", completedAt: "", complete: false, stopReason: "", sourceUrl: "https://www.linkedin.com/sales/search/people", searchFingerprint: "hundred-check-qa", pagesRead: 4, total: 100 };
+  const run = { id: "00000000-0000-4000-8000-000000000004", startedAt: "2026-10-15T10:00:00Z", updatedAt: "2026-10-15T10:00:00Z", completedAt: "", complete: false, stopReason: "", sourceUrl: "https://www.linkedin.com/sales/search/people", searchFingerprint: "hundred-check-qa", clientVersion: "1.6.4", pagesRead: 4, total: 100 };
   let calls = 0, paidActions = 0;
   let releaseFirst!: () => void, releaseLast!: () => void;
   const firstGate = new Promise<void>(resolve => { releaseFirst = resolve; });
@@ -88,6 +88,7 @@ test("HubSpot checks all 100 captured people without skipping missing URLs or hi
   await page.route(/\/api\/prospecting\/salesnav\/(reveal-fast|push-v2)/, route => { paidActions += 1; return route.fulfill({ status: 500, json: { error: "No paid actions or CRM writes in this fixture." } }); });
   await page.goto("/signalhire-queue");
   await page.getByRole("button", { name: "HubSpot Check", exact: true }).click();
+  await expect(page.getByText(/4 pages · 100 unique leads · capture can resume · Companion 1.6.4/)).toBeVisible();
   await expect.poll(() => calls).toBe(4);
   await expect(page.getByText("HubSpot check 0/100", { exact: true })).toBeVisible();
   await expect(page.getByRole("combobox").first()).toBeDisabled();
