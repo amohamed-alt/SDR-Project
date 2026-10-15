@@ -36,11 +36,9 @@ test("comparison metric, source details and owner navigation remain usable on mo
 });
 
 
-test("presentation toolbar uses the full canvas after sidebar is hidden", async ({ page }) => {
-  await page.goto("/?from=2026-07-01&to=2026-07-19");
-  await page.getByRole("button", { name: "Presentation", exact: true }).click();
-  await expect(page.locator(".topbar")).toHaveCSS("margin-left", "0px");
-  await expect(page.locator("aside.sidebar")).toBeHidden();
-  await page.getByRole("button", { name: "Exit presentation", exact: true }).click();
+test("dashboard toolbar keeps navigation and sharing without presentation mode", async ({ page }) => {
+  await page.goto("/?from=2026-07-01&to=2026-07-19&present=1");
+  await expect(page.getByRole("button", { name: "Presentation", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Copy link to current dashboard view" })).toBeVisible();
   await expect(page.locator("aside.sidebar")).toBeVisible();
 });

@@ -14,7 +14,7 @@ export function ToolAccessGate({ children }: { children: ReactNode }) {
     const controller = new AbortController();
     async function check() {
       try {
-        const response = await fetch("/api/sdr-admin", { cache: "no-store", signal: controller.signal });
+        const response = await fetch("/api/sdr-admin", { cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]) });
         const status = await response.json();
         if (!controller.signal.aborted) { setUnlocked(response.ok && Boolean(status.unlocked)); setChecked(true); }
       } catch { if (!controller.signal.aborted) { setUnlocked(false); setChecked(true); } }
@@ -27,7 +27,7 @@ export function ToolAccessGate({ children }: { children: ReactNode }) {
   async function unlock(event: React.FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
     try {
-      const response = await fetch("/api/sdr-admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
+      const response = await fetch("/api/sdr-admin", { method: "POST", signal: AbortSignal.timeout(15_000), headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
       const status = await response.json();
       if (!response.ok || !status.unlocked) throw new Error(status.error || "Unable to unlock tools.");
       setPassword(""); setUnlocked(true); window.dispatchEvent(new Event("sdr:admin-auth-changed"));
@@ -37,7 +37,7 @@ export function ToolAccessGate({ children }: { children: ReactNode }) {
   async function lock() {
     setBusy(true); setError("");
     try {
-      const response = await fetch("/api/sdr-admin", { method: "DELETE" });
+      const response = await fetch("/api/sdr-admin", { method: "DELETE", signal: AbortSignal.timeout(15_000) });
       if (!response.ok) throw new Error("Unable to lock tools. Please retry.");
       setUnlocked(false); window.dispatchEvent(new Event("sdr:admin-auth-changed"));
     } catch (err) { setError(err instanceof Error ? err.message : "Unable to lock tools."); }
