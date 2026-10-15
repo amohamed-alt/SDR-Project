@@ -21,7 +21,7 @@ test("captured people without public URLs stay out of paid reveal until a checke
   synced = true;
   await page.evaluate(() => window.dispatchEvent(new CustomEvent("salesnav:profiles-synced")));
   await page.getByRole("button", { name: /^All \d+$/ }).click();
-  await expect(page.getByText("Needs reveal", { exact: true })).toBeVisible();
+  await expect(page.getByRole("table").getByText("Needs reveal", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "LinkedIn", exact: true })).toHaveAttribute("href", "https://www.linkedin.com/in/profile-qa");
   await page.getByRole("button", { name: "Select visible", exact: true }).click();
   await expect(page.getByRole("button", { name: "Reveal selected (1)", exact: true })).toBeEnabled();
