@@ -91,20 +91,6 @@ export function Dashboard({
   const [pageMode, setPageMode] = useState<PageMode>(initialView.mode);
   const [organizerId, setOrganizerId] = useState<CalendarOrganizerId>(() => calendarOrganizerId(new URLSearchParams(initialSearch).get("organizer")));
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [presenting, setPresenting] = useState(new URLSearchParams(initialSearch).get("present") === "1");
-  function togglePresentation() {
-    const next = !presenting; setPresenting(next);
-    const url = new URL(window.location.href);
-    if (next) url.searchParams.set("present", "1"); else url.searchParams.delete("present");
-    window.history.replaceState({}, "", url);
-  }
-  useEffect(() => {
-    if (presenting) document.body.dataset.presentation = "true";
-    else delete document.body.dataset.presentation;
-    const escape = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.defaultPrevented) { setPresenting(false); const url = new URL(window.location.href); url.searchParams.delete("present"); window.history.replaceState({}, "", url); } };
-    window.addEventListener("keydown", escape);
-    return () => { delete document.body.dataset.presentation; window.removeEventListener("keydown", escape); };
-  }, [presenting]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [drilldown, setDrilldown] = useState<Drilldown | null>(null);
   const [draft, setDraft] = useState<DashboardFilters>(initialView.filters);
@@ -236,8 +222,8 @@ export function Dashboard({
     { label: "Missing contact info", value: formatNumber(data.intelligence.missingContactInfo.missingAny.count), helper: `${data.intelligence.missingContactInfo.missingPhone.count} phone · ${data.intelligence.missingContactInfo.missingEmail.count} email · ${data.intelligence.missingContactInfo.missingLinkedIn.count} LinkedIn`, icon: ShieldCheck, tone: "purple", onClick: () => showContacts("Missing contact information", "Contacts missing phone, email, or LinkedIn information.", { signal: "missing-contact-info" }) },
   ] : [];
 
-  return <main className={"app-shell" + (presenting ? " presentation-mode" : "")}>
-    <header className="topbar"><div className="top-title"><strong>SDR Command Center</strong><span>Live HubSpot performance & attribution</span></div><div className="top-actions"><span className={"status-pill " + (data?.meta.isDemo ? "demo" : "live")}><i/>{data?.meta.isDemo ? "Demo data" : refreshBusy ? "UPDATING · HUBSPOT" : "HUBSPOT SNAPSHOT"}</span><button className="refresh-button presentation-toggle" aria-pressed={presenting} onClick={togglePresentation}><Target size={16}/>{presenting ? "Exit presentation" : "Presentation"}</button><ShareViewButton/>{pageMode === "analytics" && <button className="icon-button" onClick={() => setFiltersOpen(!filtersOpen)} aria-label="Toggle filters"><Filter size={18}/></button>}<button className="refresh-button" onClick={() => setRefreshKey((key) => key + 1)} disabled={refreshBusy}><RefreshCw size={16} className={refreshBusy ? "spin" : ""}/>{refreshBusy ? "Refreshing…" : "Refresh data"}</button></div></header>
+  return <main className="app-shell">
+    <header className="topbar"><div className="top-title"><strong>SDR Command Center</strong><span>Live HubSpot performance & attribution</span></div><div className="top-actions"><span className={"status-pill " + (data?.meta.isDemo ? "demo" : "live")}><i/>{data?.meta.isDemo ? "Demo data" : refreshBusy ? "UPDATING · HUBSPOT" : "HUBSPOT SNAPSHOT"}</span><ShareViewButton/>{pageMode === "analytics" && <button className="icon-button" onClick={() => setFiltersOpen(!filtersOpen)} aria-label="Toggle filters"><Filter size={18}/></button>}<button className="refresh-button" onClick={() => setRefreshKey((key) => key + 1)} disabled={refreshBusy}><RefreshCw size={16} className={refreshBusy ? "spin" : ""}/>{refreshBusy ? "Refreshing…" : "Refresh data"}</button></div></header>
 
     <div className="workspace">
       <DashboardSidebar><div className="brand">{sdr === "daniel" ? <span className="evalufy-brand-mark"><Image src="/evalufy-transparent.png" sizes="176px" alt="Evalufy" width={2048} height={688} className="evalufy-logo" priority/><Image src="/evalufy-transparent.png" sizes="176px" alt="" aria-hidden="true" width={2048} height={688} className="evalufy-logo evalufy-symbol" priority/></span> : <div className="brand-logo" role="img" aria-label="Talentera ATS"/>}<span className="brand-subtitle">SDR Intelligence</span></div><div className="nav-label">MAIN</div><nav>{tabs.map(({ id, label, icon: Icon }) => <button key={id} className={pageMode === "analytics" && activeTab === id ? "active" : ""} onClick={() => selectTab(id)}><Icon size={17}/><span>{label}</span>{pageMode === "analytics" && activeTab === id && <ChevronRight size={15}/>}</button>)}</nav>{onOpenMotion ? <><div className="nav-label">ANALYSIS</div><nav><button type="button" onClick={onOpenMotion}><PhoneIncoming size={17}/><span>Inbound vs Outbound</span></button>{onOpenMaqsam ? <button type="button" onClick={onOpenMaqsam}><Phone size={17}/><span>Maqsam Calls</span></button> : null}</nav></> : null}{workspaceNavigation}<div className="nav-label owner-label">SDR OWNER</div><div className="owner-card"><div className="avatar">{owner.initials}</div><div><span>Reporting for</span><strong>{data?.meta.ownerName ?? owner.name}</strong></div><BadgeCheck size={17}/></div>{sidebarTools}<div className="sync-card"><Database size={18}/><div><strong>Last sync</strong><span>{data ? new Date(data.meta.generatedAt).toLocaleString("en-GB") : "Loading…"}</span></div></div></DashboardSidebar>

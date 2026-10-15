@@ -128,6 +128,8 @@ export function MaqsamCallsDashboard({ onBack, initialAgent = "marita", initialS
   const [appliedRange, setAppliedRange] = useState(initialRange);
   const [search, setSearch] = useState("");
   const [matchStatus, setMatchStatus] = useState<"all" | MaqsamMatchStatus>("all");
+  const [transcriptOnly, setTranscriptOnly] = useState(false);
+  const [page, setPage] = useState(0);
   const [callStatus, setCallStatus] = useState<"all" | "completed" | "other">("all");
   const [expandedCallKey, setExpandedCallKey] = useState<string>("");
   const [loading, setLoading] = useState(true);
@@ -169,6 +171,7 @@ export function MaqsamCallsDashboard({ onBack, initialAgent = "marita", initialS
   const model = useMemo(() => {
     const calls = data?.calls ?? [];
     const filtered = calls.filter((record) => {
+      if (transcriptOnly && !record.transcription?.trim()) return false;
       if (matchStatus !== "all" && record.matchStatus !== matchStatus) return false;
       if (callStatus === "completed" && !isCompletedCall(record)) return false;
       if (callStatus === "other" && isCompletedCall(record)) return false;
@@ -230,8 +233,13 @@ export function MaqsamCallsDashboard({ onBack, initialAgent = "marita", initialS
       daily: [...dailyMap.values()].sort((left, right) => left.date.localeCompare(right.date)),
       sentiments: [...sentimentMap.entries()].map(([name, value]) => ({ name, value })),
     };
-  }, [callStatus, data, matchStatus, search]);
+  }, [callStatus, data, matchStatus, search, transcriptOnly]);
 
+  const pageSize = 50;
+  const pageCount = Math.max(1, Math.ceil(model.filtered.length / pageSize));
+  const currentPage = Math.min(page, pageCount - 1);
+  const visibleCalls = model.filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+  function resetPage() { setPage(0); setExpandedCallKey(""); }
   const portalId = data?.meta.portalId ?? "145742477";
 
   return <main className={styles.page}>
@@ -320,14 +328,15 @@ export function MaqsamCallsDashboard({ onBack, initialAgent = "marita", initialS
           <div className={styles.tableHeader}>
             <div><h2>Call records</h2><p>Click a row to open the AI summary and complete transcript.</p></div>
             <div className={styles.filters}>
-              <label className={styles.searchBox}><Search size={14}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search phone, contact, agent, summary…"/></label>
-              <select value={matchStatus} onChange={(event) => setMatchStatus(event.target.value as "all" | MaqsamMatchStatus)}>
+              <label><input type="checkbox" checked={transcriptOnly} onChange={(event) => { setTranscriptOnly(event.target.checked); resetPage(); }}/> With transcript</label>
+              <label className={styles.searchBox}><Search size={14}/><input value={search} onChange={(event) => { setSearch(event.target.value); resetPage(); }} aria-label="Search call records" placeholder="Search phone, contact, agent, summary…"/></label>
+              <select value={matchStatus} aria-label="HubSpot match status" onChange={(event) => { setMatchStatus(event.target.value as "all" | MaqsamMatchStatus); resetPage(); }}>
                 <option value="all">All match statuses</option>
                 <option value="matched">Matched</option>
                 <option value="unmatched">Unmatched</option>
                 <option value="ambiguous">Ambiguous</option>
               </select>
-              <select value={callStatus} onChange={(event) => setCallStatus(event.target.value as "all" | "completed" | "other")}>
+              <select value={callStatus} aria-label="Call status" onChange={(event) => { setCallStatus(event.target.value as "all" | "completed" | "other"); resetPage(); }}>
                 <option value="all">All call states</option>
                 <option value="completed">Completed calls</option>
                 <option value="other">Other states</option>
@@ -335,11 +344,17 @@ export function MaqsamCallsDashboard({ onBack, initialAgent = "marita", initialS
             </div>
           </div>
 
+          <nav className={styles.pagination} aria-label="Call records pages">
+            <span>{model.filtered.length ? currentPage * pageSize + 1 : 0}–{Math.min((currentPage + 1) * pageSize, model.filtered.length)} of {formatNumber(model.filtered.length)} calls</span>
+            <button className={styles.secondaryButton} disabled={currentPage === 0} onClick={() => { setPage(currentPage - 1); setExpandedCallKey(""); }}>Previous</button>
+            <span>Page {currentPage + 1} of {pageCount}</span>
+            <button className={styles.secondaryButton} disabled={currentPage + 1 >= pageCount} onClick={() => { setPage(currentPage + 1); setExpandedCallKey(""); }}>Next</button>
+          </nav>
           <div className={styles.tableWrap}>
             <table>
               <thead><tr><th>Call</th><th>Contact</th><th>Direction</th><th>Status</th><th>Duration</th><th>Sentiment</th><th>HubSpot match</th><th>Note</th><th/></tr></thead>
               <tbody>
-                {model.filtered.map((record) => {
+                {visibleCalls.map((record) => {
                   const expanded = expandedCallKey === record.callKey;
                   const contactUrl = record.hubspotContactId
                     ? `https://app-eu1.hubspot.com/contacts/${portalId}/record/0-1/${record.hubspotContactId}`
@@ -366,8 +381,8 @@ export function MaqsamCallsDashboard({ onBack, initialAgent = "marita", initialS
                           {contactUrl ? <a href={contactUrl} target="_blank" rel="noreferrer"><Link2 size={14}/>Open HubSpot contact<ExternalLink size={12}/></a> : null}
                         </article>
                         <article>
-                          <div className={styles.detailHeading}><h3>Transcript</h3><span>{record.transcription ? "AVAILABLE" : "MISSING"}</span></div>
-                          <pre>{record.transcription || "Maqsam did not return a transcript for this call."}</pre>
+                          <div className={styles.detailHeading}><h3>Transcript</h3><span>{record.transcription?.trim() ? "AVAILABLE" : "NOT AVAILABLE YET"}</span></div>
+                          <pre>{record.transcription || "No transcript received from Maqsam yet. Recent calls may still be processing; unanswered calls may have no transcript."}</pre>
                         </article>
                       </div>
                     </td></tr>}
