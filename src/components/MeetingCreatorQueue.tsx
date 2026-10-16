@@ -105,8 +105,8 @@ export function MeetingCreatorQueue() {
   },[offset]);
   useEffect(()=>{
     const controller=new AbortController();
-    void load(controller.signal);
-    return ()=>controller.abort();
+    const scheduled=window.setTimeout(()=>{void load(controller.signal);},0);
+    return ()=>{window.clearTimeout(scheduled);controller.abort();};
   },[load,refresh]);
 
   const shown=useMemo(()=>{
