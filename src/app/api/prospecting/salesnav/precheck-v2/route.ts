@@ -42,12 +42,11 @@ export async function POST(request: NextRequest) {
     const connectedCallCount = Math.max(0, Number(company.connectedCallCount || 0) || 0);
     const communicationUnknown = companyExists && company.engagementChecked === false;
 
-    // Ready-to-Push policy requested by Abdullah:
-    // 1) Person must be net-new in HubSpot.
-    // 2) Retention companies are always excluded.
-    // 3) Any meaningful meeting blocks the company.
-    // 4) Connected calls WITHOUT a meeting remain eligible, regardless of age.
-    // 5) Existing company with no call/meeting is eligible.
+    // Canonical safety policy for Meeting Creator and Sales Navigator:
+    // Protect existing people, Retention accounts, meetings and any connected call.
+    // Reactivation is only a candidate after unsuccessful attempts, with a
+    // different verified decision maker and no open owner follow-up.
+    // A separate CRM task check is still required before final execution.
     if (existingPerson) {
       company.protected = true;
       company.protectedReason = `Existing HubSpot person${contact.matchedBy ? ` · matched by ${String(contact.matchedBy)}` : ""} — Ready to Push is for net-new people only.`;
@@ -60,6 +59,10 @@ export async function POST(request: NextRequest) {
       company.protected = true;
       company.protectedReason = `${meetingCount} existing meeting${meetingCount === 1 ? "" : "s"} — do not push another SDR prospect from this search.`;
       company.gateReason = "Meeting blocked";
+    } else if (connectedCallCount > 0) {
+      company.protected = true;
+      company.protectedReason = `${connectedCallCount} connected call${connectedCallCount === 1 ? "" : "s"} logged — account belongs to its existing owner.`;
+      company.gateReason = "Connected conversation blocked";
     } else if (communicationUnknown) {
       company.protected = true;
       company.protectedReason = String(company.engagementError || company.protectedReason || "Company communication could not be verified. Review before Push.");
@@ -69,9 +72,6 @@ export async function POST(request: NextRequest) {
       company.protectedReason = "";
       if (!companyExists) {
         company.gateReason = "Net-new company";
-      } else if (connectedCallCount > 0) {
-        const age = company.connectedCallAgeDays === null || company.connectedCallAgeDays === undefined ? "" : ` · latest ${String(company.connectedCallAgeDays)}d ago`;
-        company.gateReason = `Connected call allowed · no meeting${age}`;
       } else {
         company.gateReason = "Existing company · no connected call or meeting";
       }
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
         readyPerson: "net-new-only",
         retention: "blocked",
         meeting: "blocked",
-        connectedCallWithoutMeeting: "eligible",
+        connectedCallWithoutMeeting: "blocked",
         existingCompanyNoCommunication: "eligible",
       },
     }, { headers: { "Cache-Control": "no-store" } });
