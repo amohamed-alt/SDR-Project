@@ -9,6 +9,7 @@ import {
   type CreatorTask, type CreatorMeeting, type CreatorDeal,
 } from "@/lib/meeting-creator-queue";
 import { normalizedCompanyDomain } from "@/lib/company-dedupe";
+import { planCreatorDay } from "@/lib/meeting-creator-daily-plan";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -240,6 +241,7 @@ export async function GET(request: NextRequest) {
       sdrId:"",sdrName:"",contactId:"",contactName:"",contactTitle:"",
       contactPhone:"",phoneEvidence:"missing" as const,contactLinkedIn:"",attemptedCalls:0,connectedCalls:0,openTasks:0,
     }));
+    const dailyPlans=planCreatorDay(evaluated);
     const ready=evaluated.filter((x)=>x.status==="call_ready");
     const review=evaluated.filter((x)=>x.status==="needs_research");
     const blocked=evaluated.filter((x)=>x.status==="protected");
@@ -258,6 +260,11 @@ export async function GET(request: NextRequest) {
         maritaReady:ready.filter((x)=>x.sdrName==="Marita").length,
         danielReady:ready.filter((x)=>x.sdrName==="Daniel").length,
       },
+      dailyPlans:dailyPlans.map((p)=>({
+        ownerId:p.ownerId, name:p.name,target:p.target,total:p.total,
+        newAccounts:p.newAccounts,reactivationAccounts:p.reactivationAccounts,
+        maxReactivation:p.maxReactivation,shortfall:p.shortfall,
+      })),
       pagination:{offset,scan,nextOffset:offset + inventory.accounts.length,sourceTotal:inventory.pagination?.filteredTotal||0},
       accounts:[...ready,...review,...identityReview,...blocked].slice(0,limit),
     },{headers:{"Cache-Control":"private, no-store"}});
