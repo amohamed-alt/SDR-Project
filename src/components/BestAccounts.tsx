@@ -63,6 +63,19 @@ type BestAccount = {
   researched: boolean;
   researchConfidence: "high" | "medium" | "low";
   aiBrief: AiBrief | null;
+  recommendedProduct: "Talentera" | "Evalufy" | "Talentera + Evalufy";
+  productConfidence: "high" | "medium" | "low";
+  meetingScore: number;
+  talenteraScore: number;
+  evalufyScore: number;
+  productReason: string;
+  productPersonas?: {
+    primary: string;
+    secondary: string;
+    economicBuyer: string;
+    technicalInfluencer: string;
+    reason: string;
+  };
 };
 
 type OpenRouterStatus = {
@@ -292,9 +305,9 @@ export function BestAccounts({ onBack }: { onBack: () => void }) {
         <div className={styles.headerLeft}>
           <button type="button" className={styles.back} onClick={onBack}><ArrowLeft size={15}/> Dashboard</button>
           <div>
-            <span className={styles.eyebrow}><Radar size={13}/> ACCOUNT PRIORITY ENGINE</span>
-            <h1>Best Accounts</h1>
-            <p>Evidence-first ranking for Talentera · deterministic score · AI explanation · human-controlled execution</p>
+            <span className={styles.eyebrow}><Radar size={13}/> MEETING CREATOR · ACCOUNT PRIORITY ENGINE</span>
+            <h1>AI Meeting Creator</h1>
+            <p>Evidence-first ranking for Talentera + Evalufy · product routing · decision-maker targeting · human-controlled execution</p>
           </div>
         </div>
         <div className={styles.headerActions}>
@@ -307,12 +320,12 @@ export function BestAccounts({ onBack }: { onBack: () => void }) {
         <div className={styles.heroGlow}/>
         <div className={styles.heroCopy}>
           <span><Sparkles size={14}/> TODAY&apos;S PRIORITY</span>
-          <h2>Start with the accounts showing real recruiting pressure.</h2>
-          <p>Hiring volume, market fit, ATS opportunity, growth and reachability decide the rank. OpenRouter only turns verified evidence into a sharp SDR brief.</p>
+          <h2>Start with the accounts most likely to become qualified meetings.</h2>
+          <p>Hiring pressure, market fit, ATS context, assessment need and reachability decide the rank. The engine routes each account to Talentera, Evalufy, or a combined discovery motion.</p>
           <div className={styles.heroBadges}>
             <span><ShieldCheck size={12}/> HubSpot exclusions</span>
             <span><Flame size={12}/> Hiring signals</span>
-            <span><Target size={12}/> Talentera ICP</span>
+            <span><Target size={12}/> Talentera + Evalufy routing</span>
           </div>
         </div>
         <div className={styles.heroScore}>
@@ -345,7 +358,7 @@ export function BestAccounts({ onBack }: { onBack: () => void }) {
             <div className={styles.spotlightTop}><span className={styles.rank}>0{index + 1}</span><span className={`${styles.tier} ${tierClass(account.priorityTier)}`}>{account.priorityTier}</span></div>
             <div className={styles.companyIdentity}><span className={styles.companyMark}>{account.name.slice(0, 2).toUpperCase()}</span><div><strong>{account.name}</strong><small>{account.country || "Market unknown"} · {account.employeeCount ? `${fmt(account.employeeCount)} employees` : "Size pending"}</small></div></div>
             <p>{account.aiBrief?.whyNow || account.strongestSignal || account.recommendedAngle}</p>
-            <div className={styles.chips}>{account.evidenceChips.slice(0, 3).map((chip) => <span key={chip}>{chip}</span>)}</div>
+            <div className={styles.chips}><span>{account.recommendedProduct}</span>{account.evidenceChips.slice(0, 3).map((chip) => <span key={chip}>{chip}</span>)}</div>
             <div className={styles.spotlightFoot}><div><small>Priority</small><strong>{account.priorityScore}</strong></div><span>{account.recommendation}<ChevronRight size={13}/></span></div>
           </button>)}
         </div>
@@ -371,10 +384,10 @@ export function BestAccounts({ onBack }: { onBack: () => void }) {
             {filtered.map((account, index) => <button type="button" key={account.domain} className={styles.accountRow} onClick={() => setSelectedDomain(account.domain)}>
               <div className={styles.rowRank}>{index + 1}</div>
               <div className={styles.rowCompany}><span className={styles.companyMark}>{account.name.slice(0, 2).toUpperCase()}</span><div><strong>{account.name}</strong><small>{account.domain} · {account.country || "Market unknown"}</small></div></div>
-              <div className={styles.rowWhy}><span>{account.aiBrief ? <><BrainCircuit size={11}/> AI BRIEF</> : <><Flame size={11}/> WHY NOW</>}</span><strong>{account.aiBrief?.whyNow || account.strongestSignal || "Hiring signal available"}</strong><div className={styles.chips}>{account.evidenceChips.slice(0, 4).map((chip) => <em key={chip}>{chip}</em>)}</div></div>
+              <div className={styles.rowWhy}><span>{account.aiBrief ? <><BrainCircuit size={11}/> {account.recommendedProduct} · AI BRIEF</> : <><Flame size={11}/> {account.recommendedProduct} · WHY NOW</>}</span><strong>{account.aiBrief?.whyNow || account.strongestSignal || "Hiring signal available"}</strong><div className={styles.chips}>{account.evidenceChips.slice(0, 4).map((chip) => <em key={chip}>{chip}</em>)}</div></div>
               <div className={styles.rowSignal}><span>Hiring</span><strong>{fmt(account.activeJobs)}</strong><small>active jobs</small></div>
               <div className={styles.rowSignal}><span>ATS</span><strong>{account.detectedAts || "Verify"}</strong><small>{account.atsOpportunityScore}/100 opportunity</small></div>
-              <div className={styles.rowScore}><span className={`${styles.tier} ${tierClass(account.priorityTier)}`}>{account.priorityTier}</span><strong>{account.priorityScore}</strong><small>{account.recommendation}</small></div>
+              <div className={styles.rowScore}><span className={`${styles.tier} ${tierClass(account.priorityTier)}`}>{account.priorityTier}</span><strong>{account.priorityScore}</strong><small>{account.recommendedProduct} · {account.recommendation}</small></div>
               <ChevronRight className={styles.rowChevron} size={16}/>
             </button>)}
             {!loading && !filtered.length ? <div className={styles.empty}><Database size={24}/><strong>No accounts match this view</strong><span>Change the filters or discover fresh accounts.</span></div> : null}
@@ -384,8 +397,8 @@ export function BestAccounts({ onBack }: { onBack: () => void }) {
 
         <aside className={styles.sidePanel}>
           <div className={styles.aiCard}>
-            <div className={styles.aiHeader}><span className={styles.aiIcon}><BrainCircuit size={17}/></span><div><span>OPENROUTER ANALYST</span><strong>{config?.openRouterConfigured ? "Evidence summarizer ready" : "Optional AI layer"}</strong></div></div>
-            <p>The score stays deterministic. Nano only writes the <b>Why now</b>, opener, risk and next action from verified evidence.</p>
+            <div className={styles.aiHeader}><span className={styles.aiIcon}><BrainCircuit size={17}/></span><div><span>OPENROUTER ANALYST</span><strong>{config?.openRouterConfigured ? "Product-aware evidence analyst ready" : "Optional AI layer"}</strong></div></div>
+            <p>The score and product route stay deterministic. OpenRouter only writes the <b>Why now</b>, opener, risk and next action from verified evidence.</p>
             <div className={styles.aiStats}>
               <div><span>Model</span><strong>{config?.openRouterModel?.split("/").pop() || "Nano"}</strong></div>
               <div><span>Today</span><strong>{openRouter ? `${openRouter.today.fastRequests}/${openRouter.limits.fastDaily}` : "—"}</strong></div>
@@ -401,6 +414,10 @@ export function BestAccounts({ onBack }: { onBack: () => void }) {
             <label className={styles.discoverySelect}><span>Fresh discovery</span><select value={discoveryPages} onChange={(event) => setDiscoveryPages(Number(event.target.value))}>{[1,2,3].map((value) => <option key={value} value={value}>{value * 100} companies · up to {value} credit{value === 1 ? "" : "s"}</option>)}</select></label>
             <button type="button" className={styles.primaryButton} onClick={() => void discover()} disabled={busy === "discover" || !ownerToken}>{busy === "discover" ? <LoaderCircle className={styles.spin} size={14}/> : <Zap size={14}/>} Discover & rank</button>
           </div>
+
+          <Link href="/meeting-creator" className={styles.fullWorkspace}>
+            <span><Phone size={16}/></span><div><strong>Daily Lead Queue</strong><small>Call-ready · reactivate · SDR split · zero credit preview</small></div><ArrowUpRight size={14}/>
+          </Link>
 
           <Link href="/net-new-accounts" className={styles.fullWorkspace}>
             <span><UsersRound size={16}/></span><div><strong>Full Acquisition Workspace</strong><small>SignalHire people · enrichment · HubSpot push</small></div><ArrowUpRight size={14}/>
@@ -418,19 +435,19 @@ export function BestAccounts({ onBack }: { onBack: () => void }) {
 
         <div className={styles.drawerScore}>
           <div className={styles.scoreOrb}><span>{selected.priorityTier}</span><strong>{selected.priorityScore}</strong><small>Priority</small></div>
-          <div><span>GTM fit</span><strong>{selected.gtmScore}</strong><small>Deterministic</small></div>
-          <div><span>Intent</span><strong>{selected.intentScore}</strong><small>{selected.activeJobs} jobs</small></div>
-          <div><span>ATS opp.</span><strong>{selected.atsOpportunityScore}</strong><small>{selected.detectedAts || "Unverified"}</small></div>
+          <div><span>Product</span><strong>{selected.recommendedProduct}</strong><small>{selected.productConfidence} confidence</small></div>
+          <div><span>Talentera</span><strong>{selected.talenteraScore}</strong><small>ATS / workflow fit</small></div>
+          <div><span>Evalufy</span><strong>{selected.evalufyScore}</strong><small>Assessment fit</small></div>
         </div>
 
         <section className={styles.drawerSection}>
-          <div className={styles.drawerSectionHead}><BrainCircuit size={15}/><div><span>AI ACCOUNT BRIEF</span><strong>{selected.aiBrief ? "Grounded in the evidence below" : "Research to generate a grounded brief"}</strong></div></div>
+          <div className={styles.drawerSectionHead}><BrainCircuit size={15}/><div><span>AI ACCOUNT BRIEF</span><strong>{selected.recommendedProduct} · {selected.aiBrief ? "grounded in the evidence below" : "research to generate a grounded brief"}</strong></div></div>
           {selected.aiBrief ? <div className={styles.briefGrid}>
             <div className={styles.briefPrimary}><span>WHY NOW</span><p>{selected.aiBrief.whyNow}</p></div>
             <div><span>OPENER</span><p>{selected.aiBrief.opener || selected.recommendedAngle}</p></div>
             <div><span>RISK / UNKNOWN</span><p>{selected.aiBrief.risk || "Validate the current recruitment setup before making a displacement claim."}</p></div>
             <div><span>NEXT STEP</span><p>{selected.aiBrief.nextStep || selected.recommendation}</p></div>
-          </div> : <p className={styles.placeholderBrief}>{selected.recommendedAngle}</p>}
+          </div> : <p className={styles.placeholderBrief}>{selected.productReason} {selected.recommendedAngle}</p>}
         </section>
 
         <section className={styles.drawerSection}>
@@ -447,10 +464,10 @@ export function BestAccounts({ onBack }: { onBack: () => void }) {
         <section className={styles.drawerSection}>
           <div className={styles.drawerSectionHead}><UsersRound size={15}/><div><span>BUYING COMMITTEE</span><strong>Start close to the recruiting pain</strong></div></div>
           <div className={styles.personaGrid}>
-            <div><span>Primary</span><strong>{selected.primaryPersona}</strong></div>
-            <div><span>Secondary</span><strong>{selected.secondaryPersona}</strong></div>
-            <div><span>Economic buyer</span><strong>{selected.economicBuyer}</strong></div>
-            <div><span>Technical</span><strong>{selected.technicalInfluencer}</strong></div>
+            <div><span>Primary</span><strong>{selected.productPersonas?.primary || selected.primaryPersona}</strong></div>
+            <div><span>Secondary</span><strong>{selected.productPersonas?.secondary || selected.secondaryPersona}</strong></div>
+            <div><span>Economic buyer</span><strong>{selected.productPersonas?.economicBuyer || selected.economicBuyer}</strong></div>
+            <div><span>Technical</span><strong>{selected.productPersonas?.technicalInfluencer || selected.technicalInfluencer}</strong></div>
           </div>
         </section>
 

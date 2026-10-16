@@ -11,6 +11,12 @@ import { openRouterCompletion, getOpenRouterStatus } from "@/lib/openrouter-low-
 import { inspectProspectCompany } from "@/lib/prospecting-company-intelligence-gemini";
 import { normalizeCompanyDomain } from "@/lib/prospecting-company-intelligence";
 import { scoreTalenteraAccount } from "@/lib/talentera-intelligence";
+import {
+  scoreMeetingCreatorAccount,
+  type MeetingCreatorAccountScore,
+  type MeetingCreatorConfidence,
+  type MeetingCreatorProduct,
+} from "@/lib/meeting-creator";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,6 +44,13 @@ type BestAccount = AcquisitionAccount & {
   researched: boolean;
   researchConfidence: "high" | "medium" | "low";
   aiBrief: AiBrief | null;
+  recommendedProduct: MeetingCreatorProduct;
+  productConfidence: MeetingCreatorConfidence;
+  meetingScore: number;
+  talenteraScore: number;
+  evalufyScore: number;
+  productReason: string;
+  productPersonas: MeetingCreatorAccountScore["personas"];
 };
 
 function clean(value: unknown, max = 1000) {
@@ -98,9 +111,37 @@ function recentlyResearched(account: AcquisitionAccount, hours = 12) {
   return Number.isFinite(checkedAt) && Date.now() - checkedAt < hours * 60 * 60 * 1000;
 }
 
-function priorityScore(account: AcquisitionAccount) {
+function meetingCreatorScore(account: AcquisitionAccount) {
   const research = researchEvidence(account);
-  let score = Number(account.gtmScore || 0);
+  const jobsSample = Array.isArray(research.jobsSample)
+    ? research.jobsSample.filter((value): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value)))
+    : [];
+  const jobs = jobsSample.map((job) => ({
+    title: clean(job.title, 300),
+    location: clean(job.location, 300),
+  }));
+  const topLocations = [...new Set(jobs.map((job) => job.location).filter(Boolean))];
+  return scoreMeetingCreatorAccount({
+    companyId: account.sourceId || account.domain,
+    name: account.name,
+    domain: account.domain,
+    country: account.country,
+    employeeCount: account.employeeCount,
+    industry: account.industry,
+    careerPageUrl: clean(research.careerPageUrl, 1000) || account.careerPageUrl,
+    ats: clean(research.ats, 300) || account.detectedAts,
+    activeJobs: Math.max(Number(account.activeJobs || 0), Number(research.activeJobs || 0)),
+    hiringScore: Number(research.hiringScore || 0),
+    hrHeadcount: account.hrHeadcount,
+    topDepartments: research.hasHrJobs === true ? ["Human Resources / Talent Acquisition"] : [],
+    topLocations,
+    jobs,
+  });
+}
+
+function priorityScore(account: AcquisitionAccount, baseScore = Number(account.gtmScore || 0)) {
+  const research = researchEvidence(account);
+  let score = Number(baseScore || 0);
 
   if (account.phoneReadyCount && account.phoneReadyCount > 0) score += 5;
   else if (account.enrichedCount && account.enrichedCount > 0) score += 2;
@@ -148,7 +189,8 @@ function recommendation(account: AcquisitionAccount) {
 }
 
 function asBestAccount(account: AcquisitionAccount): BestAccount {
-  const score = priorityScore(account);
+  const product = meetingCreatorScore(account);
+  const score = priorityScore(account, product.meetingScore);
   const research = researchEvidence(account);
   const confidenceRaw = String(research.confidence || "").toLowerCase();
   const researchConfidence: BestAccount["researchConfidence"] = confidenceRaw === "high"
@@ -163,6 +205,13 @@ function asBestAccount(account: AcquisitionAccount): BestAccount {
     researched: Boolean(research.checkedAt),
     researchConfidence,
     aiBrief: storedAiBrief(account),
+    recommendedProduct: product.recommendedProduct,
+    productConfidence: product.productConfidence,
+    meetingScore: product.meetingScore,
+    talenteraScore: product.talenteraScore,
+    evalufyScore: product.evalufyScore,
+    productReason: product.productReason,
+    productPersonas: product.personas,
   };
 }
 
@@ -181,7 +230,7 @@ function parseAiJson(content: string) {
   }
 }
 
-async function generateAiBrief(account: AcquisitionAccount, research: Record<string, unknown>) {
+async function generateAiBrief(account: AcquisitionAccount, research: Record<string, unknown>, product: MeetingCreatorAccountScore) {
   if (!String(process.env.OPENROUTER_API_KEY || "").trim()) return null;
 
   const evidence = {
@@ -199,23 +248,28 @@ async function generateAiBrief(account: AcquisitionAccount, research: Record<str
     intentScore: account.intentScore,
     atsOpportunityScore: account.atsOpportunityScore,
     strongestSignal: account.strongestSignal,
-    recommendedAngle: account.recommendedAngle,
+    recommendedAngle: product.recommendedAngle,
+    recommendedProduct: product.recommendedProduct,
+    talenteraScore: product.talenteraScore,
+    evalufyScore: product.evalufyScore,
+    productReason: product.productReason,
+    targetPersona: product.personas.primary,
     research,
   };
 
   const result = await openRouterCompletion({
-    cacheKey: `best-account:${account.domain}:${account.gtmScore}:${account.activeJobs}:${account.detectedAts}:${clean(research.checkedAt, 30)}`,
+    cacheKey: `meeting-creator:${account.domain}:${product.recommendedProduct}:${product.talenteraScore}:${product.evalufyScore}:${account.activeJobs}:${account.detectedAts}:${clean(research.checkedAt, 30)}`,
     mode: "fast",
     maxOutputTokens: 190,
     temperature: 0.1,
     system: [
-      "You are Talentera's evidence-first GCC account analyst.",
+      "You are the evidence-first GCC account analyst for Talentera and Evalufy.",
       "Use ONLY the supplied facts. Never invent funding, projects, stakeholders, tech, jobs, or pain.",
       "Return compact JSON only with keys whyNow, opener, risk, nextStep.",
       "whyNow: one sentence explaining why this company deserves SDR attention now.",
       "opener: one natural Saudi/GCC business-English or neutral Arabic-friendly sales angle, no fake personalization.",
       "risk: the main uncertainty or reason not to over-prioritize.",
-      "nextStep: the single best SDR action.",
+      "nextStep: the single best SDR action for the recommended product; do not pitch both unless the supplied route says Talentera + Evalufy.",
     ].join(" "),
     user: JSON.stringify(evidence),
   });
@@ -301,6 +355,24 @@ async function researchAccount(input: AcquisitionAccount) {
     jobs,
   });
 
+  const product = scoreMeetingCreatorAccount({
+    companyId: input.sourceId || input.domain,
+    name: input.name,
+    domain: intelligence.domain || input.domain,
+    country: input.country,
+    employeeCount: input.employeeCount,
+    industry: input.industry,
+    careerPageUrl: intelligence.careerPageUrl,
+    ats: intelligence.detectedAts,
+    activeJobs,
+    newJobs30d: 0,
+    hiringScore: intelligence.hiring.hiringScore,
+    hrHeadcount: input.hrHeadcount,
+    topDepartments: departments,
+    topLocations: locations,
+    jobs,
+  });
+
   const confidence = intelligence.careerConfidence >= 80 && intelligence.atsConfidence
     ? "high"
     : intelligence.careerConfidence >= 55 || intelligence.hiring.status === "Hiring Now" ? "medium" : "low";
@@ -349,11 +421,21 @@ async function researchAccount(input: AcquisitionAccount) {
     evidence: {
       ...record(input.evidence),
       bestAccountsResearch: research,
+      meetingCreator: {
+        recommendedProduct: product.recommendedProduct,
+        productConfidence: product.productConfidence,
+        meetingScore: product.meetingScore,
+        talenteraScore: product.talenteraScore,
+        evalufyScore: product.evalufyScore,
+        productReason: product.productReason,
+        recommendedAngle: product.recommendedAngle,
+        personas: product.personas,
+      },
     },
   };
 
   try {
-    const aiBrief = await generateAiBrief(updated, research);
+    const aiBrief = await generateAiBrief(updated, research, product);
     if (aiBrief) {
       updated = {
         ...updated,
@@ -375,7 +457,7 @@ async function researchTop(limit: number) {
   const data = await listAcquisitionAccounts({ limit: 1000, includeExcluded: false });
   const queue = data.accounts
     .filter((account) => account.exclusionStatus === "eligible" && account.status !== "pushed" && !recentlyResearched(account))
-    .sort((a, b) => priorityScore(b) - priorityScore(a) || b.gtmScore - a.gtmScore || b.activeJobs - a.activeJobs)
+    .sort((a, b) => priorityScore(b, meetingCreatorScore(b).meetingScore) - priorityScore(a, meetingCreatorScore(a).meetingScore) || b.gtmScore - a.gtmScore || b.activeJobs - a.activeJobs)
     .slice(0, limit);
 
   const pending = [...queue];
