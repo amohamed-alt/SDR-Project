@@ -67,7 +67,9 @@ function fmt(n: number) {
 }
 function csvEscape(v: unknown) {
   const value = String(v ?? "");
-  return `"${value.replace(/"/g,'""')}"`;
+  // Escaping quotation marks is not enough to prevent CSV formula injection.
+  const safe = /^[\\s]*[=+\\-@]/.test(value) ? `'${value}` : value;
+  return `"${safe.replace(/"/g,'""')}"`;
 }
 function humanStatus(status: Status) {
   if(status==="call_ready")return "Call-ready · review";
@@ -95,7 +97,10 @@ export function MeetingCreatorQueue() {
       if(!response.ok) throw new Error(payload.error || "Unable to load Meeting Creator preview.");
       if(!signal.aborted)setData(payload);
     }catch(cause) {
-      if(!signal.aborted)setError(cause instanceof Error?cause.message:"Read-only queue request failed.");
+      if(!signal.aborted){
+        setData(null);
+        setError(cause instanceof Error?cause.message:"Read-only queue request failed.");
+      }
     }finally {if(!signal.aborted)setLoading(false);}
   },[offset]);
   useEffect(()=>{
