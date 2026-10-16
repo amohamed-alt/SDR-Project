@@ -43,16 +43,12 @@ function validSaudi(value: string) {
 const companyProps = [
   "name","domain","country","gtm_country","industry","gtm_industry","numberofemployees",
   "gtm_employee_count","hubspot_owner_id","hs_num_open_deals","account_type","account_status",
-  "detected_ats","hs_last_booked_meeting_date",
+  "detected_ats","hs_last_booked_meeting_date","hs_last_open_task_date",
 ] as const;
 const contactProps = [
   "firstname","lastname","jobtitle","phone","mobilephone","hubspot_owner_id",
   "gtm_linkedin_url","hs_sales_email_last_replied",
 ] as const;
-
-function rowObject<T>(properties: Record<string, unknown> | undefined, key: string, fallback: T) {
-  return properties && properties[key] !== undefined ? properties[key] : fallback;
-}
 
 export async function GET(request: NextRequest) {
   if (!sdrAdminAuthorized(request)) {
@@ -70,7 +66,7 @@ export async function GET(request: NextRequest) {
     const seed = inventory.accounts
       .filter((a) => a.domain && validSaudi(a.country) && Number(a.employeeCount || 0) >= 250)
       .filter((a) => a.exclusionStatus !== "excluded" || /already exists in hubspot/i.test(a.exclusionReason))
-      .filter((a) => !a.domain.endsWith(".invalid"))
+      .filter((a) => !a.domain.endsWith(".invalid") && a.status !== "pushed")
       .slice(0, scan);
 
     if (!seed.length) {
@@ -124,7 +120,6 @@ export async function GET(request: NextRequest) {
       readAssociations("companies","deals",matchedIds),
     ]);
 
-    const knownContacts = flatten(companyContacts,matchedIds);
     const maxContactsPerCompany = 30;
     const scannedContacts = unique(matchedIds.flatMap((companyId) => (companyContacts.get(companyId)||[]).slice(0,maxContactsPerCompany)));
     const [contactCalls,contactMeetings,contactTasks,contacts] = await Promise.all([
@@ -182,6 +177,9 @@ export async function GET(request: NextRequest) {
       const allCompanyMeetings=companyMeetingsById.get(id)||[];
       const allCompanyDeals=companyDeals.get(id)||[];
       const completelyRead=contactIds.length<=maxContactsPerCompany
+        && contactIds.every(x=>contactsById.has(x))
+        && !(clean(p.hs_last_booked_meeting_date) && !allCompanyMeetings.length)
+        && !(clean(p.hs_last_open_task_date) && !allCompanyTasks.length)
         && allCompanyCalls.every(x=>callsById.has(x))
         && allCompanyTasks.every(x=>tasksById.has(x))
         && allCompanyMeetings.every(x=>meetingsById.has(x))
