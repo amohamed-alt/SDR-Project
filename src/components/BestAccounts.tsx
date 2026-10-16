@@ -415,6 +415,10 @@ export function BestAccounts({ onBack }: { onBack: () => void }) {
             <button type="button" className={styles.primaryButton} onClick={() => void discover()} disabled={busy === "discover" || !ownerToken}>{busy === "discover" ? <LoaderCircle className={styles.spin} size={14}/> : <Zap size={14}/>} Discover & rank</button>
           </div>
 
+          <Link href="/meeting-creator" className={styles.fullWorkspace}>
+            <span><Phone size={16}/></span><div><strong>Daily Lead Queue</strong><small>Call-ready · reactivate · SDR split · zero credit preview</small></div><ArrowUpRight size={14}/>
+          </Link>
+
           <Link href="/net-new-accounts" className={styles.fullWorkspace}>
             <span><UsersRound size={16}/></span><div><strong>Full Acquisition Workspace</strong><small>SignalHire people · enrichment · HubSpot push</small></div><ArrowUpRight size={14}/>
           </Link>
