@@ -197,7 +197,7 @@ export function buildMeetingCreatorQueue(input: CreatorQueueInput): CreatorQueue
     const calledIds = new Set(allCalls.flatMap((call) => call.contactIds));
     const calledNumbers = new Set(allCalls.map((call) => normalizeSaudiMobile(call.toNumber)).filter(Boolean));
     const rankedPeople = [...sourcePeople]
-      .filter((p) => !p.ownerId || p.ownerId === owner.id || [MEETING_CREATOR_MARITA_OWNER,MEETING_CREATOR_DANIEL_OWNER].includes(p.ownerId))
+      .filter((p) => !p.ownerId || p.ownerId === owner.id)
       .map((p) => {
         const phone = normalizeSaudiMobile(p.mobilePhone) || normalizeSaudiMobile(p.phone);
         const persona = titleFit(p.title);
