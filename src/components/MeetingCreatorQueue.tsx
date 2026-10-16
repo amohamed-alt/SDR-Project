@@ -88,6 +88,8 @@ export function MeetingCreatorQueue() {
   const [status,setStatus] = useState<Status|"all">("all");
   const [owner,setOwner] = useState("all");
   const [mode,setMode] = useState<"all"|"new_contact"|"reactivation">("all");
+  const [selectedKeys,setSelectedKeys] = useState<string[]>([]);
+  const [pushing,setPushing] = useState(false);
 
   const load = useCallback(async (signal: AbortSignal)=>{
     setLoading(true);setError("");
@@ -133,6 +135,29 @@ export function MeetingCreatorQueue() {
     URL.revokeObjectURL(href);
     setNotice(`Exported ${rows.length} call-ready review candidates from this page. No HubSpot tasks were created.`);
   }
+  function toggleLead(key:string,checked:boolean) {
+    setSelectedKeys((previous)=>checked? [...new Set([...previous,key])].slice(0,10): previous.filter((item)=>item!==key));
+  }
+  async function pushSelected() {
+    const candidates=(data?.accounts||[]).filter((item)=>selectedKeys.includes(item.key)&&item.status==="call_ready").slice(0,10);
+    if(!candidates.length) {setError("Select a call-ready contact first.");return;}
+    if(!window.confirm(`Create ${candidates.length} HubSpot CALL task(s) after a fresh live check of contacts, CRM history, ownership and duplicates? No Apollo or SignalHire credits will be spent.`))return;
+    setError("");setNotice("");setPushing(true);
+    try {
+      const response=await fetch("/api/meeting-creator/push",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"push_selected",offset,choices:candidates.map((x)=>({companyId:x.companyId,contactId:x.contactId}))}),
+      });
+      const result=await response.json() as {error?:string;created?:number;skipped?:number;results?:Array<{companyId:string;status:string;reason?:string}>};
+      if(!response.ok)throw new Error(result.error||"HubSpot push was rejected.");
+      setSelectedKeys([]);
+      setNotice(`HubSpot: ${result.created||0} created, ${result.skipped||0} held for review. Only confirmed writes count.`);
+      if((result.skipped||0)>0)setError((result.results||[]).filter((x)=>x.status!=="created").map(x=>x.reason||"Needs review").slice(0,3).join(" · "));
+      setRefresh(n=>n+1);
+    }catch(cause) {
+      setError(cause instanceof Error?cause.message:"Push failed. Reconcile before retrying.");
+    }finally {setPushing(false);}
+  }
   async function copy(number:string) {
     try{await navigator.clipboard.writeText(number);setNotice("Phone copied.");}
     catch{setNotice("Copy failed. You can select the phone number manually.");}
@@ -148,7 +173,7 @@ export function MeetingCreatorQueue() {
           <p>Saudi Arabia · Talentera + Evalufy · real HubSpot history · protected-account gating</p>
         </div>
         <div className={styles.actions}>
-          <span className={styles.readOnly}><LockKeyhole size={14}/> Review only</span>
+          <span className={styles.readOnly}><LockKeyhole size={14}/> Admin-approved push</span>
           <button className={styles.refresh} type="button" disabled={loading} onClick={()=>setRefresh(n=>n+1)}><RefreshCw size={15} className={loading?styles.spin:""}/> Refresh</button>
         </div>
       </header>
@@ -178,7 +203,10 @@ export function MeetingCreatorQueue() {
       <section className={styles.panel}>
         <div className={styles.panelHead}>
           <div><span><Filter size={13}/> QUEUE CONTROL</span><h3>Research candidates</h3><small>Reviewed from existing cached sources · No CRM writes</small></div>
-          <button type="button" className={styles.export} onClick={csv} disabled={loading||!shown.some(x=>x.status==="call_ready")}><Download size={15}/> Export call-ready review</button>
+          <div className={styles.batchActions}>
+            <button type="button" className={styles.export} onClick={csv} disabled={loading||!shown.some(x=>x.status==="call_ready")}><Download size={15}/> Export call-ready review</button>
+            <button type="button" className={styles.push} onClick={()=>void pushSelected()} disabled={loading||pushing||selectedKeys.length===0}><CheckCircle2 size={15}/> {pushing?"Rechecking CRM…":`Push ${selectedKeys.length} selected to HubSpot`}</button>
+          </div>
         </div>
         <div className={styles.filters}>
           <label className={styles.search}><Search size={15}/><input aria-label="Search companies or contacts" placeholder="Company, domain, title, product…" value={query} onChange={e=>setQuery(e.target.value)}/></label>
@@ -189,30 +217,31 @@ export function MeetingCreatorQueue() {
 
         <div className={styles.tableScroll}>
           <table className={styles.table}>
-            <thead><tr><th>ACCOUNT / ROUTE</th><th>DECISION MAKER</th><th>PHONE</th><th>QUALIFICATION</th><th>STATUS</th></tr></thead>
+            <thead><tr><th>SELECT</th><th>ACCOUNT / ROUTE</th><th>DECISION MAKER</th><th>PHONE</th><th>QUALIFICATION</th><th>STATUS</th></tr></thead>
             <tbody>
               {shown.map((lead)=><tr key={lead.key}>
+                <td><input type="checkbox" className={styles.selectLead} aria-label={`Select ${lead.contactName} at ${lead.companyName} for HubSpot task`} checked={selectedKeys.includes(lead.key)} disabled={lead.status!=="call_ready"||pushing||(!selectedKeys.includes(lead.key)&&selectedKeys.length>=10)} onChange={(event)=>toggleLead(lead.key,event.target.checked)}/></td>
                 <td><strong>{lead.companyName}</strong><small>{lead.domain} · {fmt(lead.employeeCount)} employees</small><span className={styles.tinyPill}>{lead.recommendedProduct}</span><small>Talentera {lead.talenteraScore} · Evalufy {lead.evalufyScore} · Priority {lead.priority}</small></td>
                 <td><strong>{lead.contactName||"Find HR decision maker"}</strong><small>{lead.contactTitle||"Profile pending"}</small><small>{lead.sdrName||"Owner under review"}</small></td>
                 <td>{lead.contactPhone?<div className={styles.number}><span>{lead.contactPhone}</span><button type="button" onClick={()=>void copy(lead.contactPhone)} title="Copy phone"><ClipboardCopy size={14}/></button></div>:<span className={styles.muted}>Not verified for review</span>}<small>{lead.contactPhone?"Saudi mobile format · not dial-verified":""}</small></td>
                 <td><small>{lead.reason}</small><span className={styles.context}>{lead.attemptedCalls} unanswered attempts · {lead.connectedCalls} connected · {lead.openTasks} open tasks</span></td>
                 <td><span className={styles.status} data-kind={lead.status}>{humanStatus(lead.status)}</span>{lead.companyId?<a className={styles.crm} href={`https://app.hubspot.com/contacts/145742477/company/${lead.companyId}?utm_source=meeting_creator&utm_medium=dashboard`} target="_blank" rel="noopener noreferrer">HubSpot <Eye size={12}/></a>:null}</td>
               </tr>)}
-              {!loading&&!shown.length?<tr><td colSpan={5} className={styles.empty}>No matching records on this inventory page. Adjust filters or scan the next batch.</td></tr>:null}
-              {loading?<tr><td colSpan={5} className={styles.empty}>Checking existing company associations and SDR history…</td></tr>:null}
+              {!loading&&!shown.length?<tr><td colSpan={6} className={styles.empty}>No matching records on this inventory page. Adjust filters or scan the next batch.</td></tr>:null}
+              {loading?<tr><td colSpan={6} className={styles.empty}>Checking existing company associations and SDR history…</td></tr>:null}
             </tbody>
           </table>
         </div>
         <footer className={styles.footer}>
           <small>Inventory page {Math.floor(offset/60)+1} · scanned {data?.summary.scanned||0} · total stored {fmt(data?.pagination.sourceTotal||0)} · page phone data is protected by the admin session</small>
           <div>
-            <button type="button" onClick={()=>setOffset(Math.max(0,offset-60))} disabled={loading||offset===0}><ArrowLeft size={14}/> Previous</button>
-            <button type="button" onClick={()=>setOffset(data?.pagination.nextOffset||offset+60)} disabled={loading||!data?.pagination||data.pagination.nextOffset>=data.pagination.sourceTotal}>Next batch <ArrowRight size={14}/></button>
+            <button type="button" onClick={()=>{setSelectedKeys([]);setOffset(Math.max(0,offset-60));}} disabled={loading||offset===0}><ArrowLeft size={14}/> Previous</button>
+            <button type="button" onClick={()=>{setSelectedKeys([]);setOffset(data?.pagination.nextOffset||offset+60);}} disabled={loading||!data?.pagination||data.pagination.nextOffset>=data.pagination.sourceTotal}>Next batch <ArrowRight size={14}/></button>
           </div>
         </footer>
       </section>
 
-      <p className={styles.disclaimer}><ShieldCheck size={14}/> This is an internal review queue. No task creation, emails, LinkedIn requests, phone reveals, or paid enrichment run from this page. Do not treat a formatted Saudi number as confirmed reachable without a test call.</p>
+      <p className={styles.disclaimer}><ShieldCheck size={14}/> Only contacts explicitly selected by the admin can create tasks, after fresh CRM checks. This page never sends emails, LinkedIn requests, phone reveals or paid enrichment. Phone format is not proof of reachability.</p>
     </div>
   </main>;
 }
