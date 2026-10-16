@@ -3,6 +3,7 @@ import { evaluateReactivation } from "./meeting-creator-reactivation.ts";
 
 export const MEETING_CREATOR_MARITA_OWNER = "31644369";
 export const MEETING_CREATOR_DANIEL_OWNER = "37624223";
+export const MEETING_CREATOR_OPS_OWNER = "31594536";
 
 export type CreatorCompany = {
   id: string;
@@ -178,7 +179,7 @@ export function buildMeetingCreatorQueue(input: CreatorQueueInput): CreatorQueue
     const unknownCalledPerson = allCalls.some((c) => !c.contactIds.length && !normalizeSaudiMobile(c.toNumber));
     const meaningfulMeeting = allMeetings.some((m) => m.outcome.toUpperCase() !== "CANCELED" && m.outcome.toUpperCase() !== "NO_SHOW" && m.outcome.toUpperCase() !== "RESCHEDULED");
     const positiveReplies = sourcePeople.filter((p) => clean(p.salesEmailLastReplied)).length;
-    const protectedOwner = Boolean(company.ownerId && ![MEETING_CREATOR_MARITA_OWNER,MEETING_CREATOR_DANIEL_OWNER].includes(company.ownerId));
+    const protectedOwner = Boolean(company.ownerId && ![MEETING_CREATOR_MARITA_OWNER,MEETING_CREATOR_DANIEL_OWNER,MEETING_CREATOR_OPS_OWNER].includes(company.ownerId));
     const protectedAccount = !eligibleCountry(company.country)
       || company.employeeCount < 250
       || NON_TARGET_PATTERN.test(company.name)
@@ -197,7 +198,7 @@ export function buildMeetingCreatorQueue(input: CreatorQueueInput): CreatorQueue
     const calledIds = new Set(allCalls.flatMap((call) => call.contactIds));
     const calledNumbers = new Set(allCalls.map((call) => normalizeSaudiMobile(call.toNumber)).filter(Boolean));
     const rankedPeople = [...sourcePeople]
-      .filter((p) => !p.ownerId || p.ownerId === owner.id)
+      .filter((p) => !p.ownerId || p.ownerId === owner.id || p.ownerId === MEETING_CREATOR_OPS_OWNER)
       .map((p) => {
         const phone = normalizeSaudiMobile(p.mobilePhone) || normalizeSaudiMobile(p.phone);
         const persona = titleFit(p.title);
