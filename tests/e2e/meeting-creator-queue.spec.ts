@@ -1,6 +1,14 @@
 import { expect, test } from "@playwright/test";
 
-test("Meeting Creator queue displays review-only SDR candidates and never offers auto-push", async ({page}) => {
+test("Meeting Creator shows review-only leads and pushes selected tasks only after explicit confirmation", async ({page}) => {
+  let pushes=0;
+  await page.route("**/api/meeting-creator/push",async(route)=>{
+    pushes+=1;
+    const requestBody=route.request().postDataJSON() as {choices:Array<{companyId:string;contactId:string}>;action:string};
+    expect(requestBody.action).toBe("push_selected");
+    expect(requestBody.choices).toEqual([{companyId:"123",contactId:"456"}]);
+    await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({created:1,skipped:0,results:[{companyId:"123",status:"created",taskId:"987"}]})});
+  });
   await page.route("**/api/meeting-creator/queue?**", async (route) => {
     await route.fulfill({ status:200, contentType:"application/json", body: JSON.stringify({
       generatedAt:"2026-10-17T08:00:00Z",previewOnly:true,
@@ -24,6 +32,13 @@ test("Meeting Creator queue displays review-only SDR candidates and never offers
   await expect(page.getByText("Call-ready · review")).toBeVisible();
   await expect(page.getByRole("table").getByText("Marita",{exact:true})).toBeVisible();
   await expect(page.getByRole("button",{name:/Export call-ready review/})).toBeEnabled();
-  await expect(page.getByText("No task creation, emails, LinkedIn requests, phone reveals")).toBeVisible();
-  await expect(page.getByRole("button",{name:/Push to HubSpot|Create task/i})).toHaveCount(0);
+  const push=page.getByRole("button",{name:/Push .* selected to HubSpot/});
+  await expect(push).toBeDisabled();
+  await expect(page.getByText("Only contacts explicitly selected by the admin can create tasks")).toBeVisible();
+  await page.getByRole("checkbox",{name:"Select Example Director at Saudi Sample Logistics for HubSpot task"}).check();
+  await expect(push).toBeEnabled();
+  page.on("dialog",async(dialog)=>{await dialog.accept();});
+  await push.click();
+  await expect(page.getByText("HubSpot: 1 created, 0 held for review. Only confirmed writes count.")).toBeVisible();
+  expect(pushes).toBe(1);
 });
