@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 
 test("Meeting Creator shows review-only leads and pushes selected tasks only after explicit confirmation", async ({page}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("sdr_v2_visitor_id", "visitor_meeting_creator_ci");
+    localStorage.setItem("sdr_v2_visitor_name", "Meeting Creator CI");
+    sessionStorage.setItem("sdr_v2_session_id", "session_meeting_creator_ci");
+  });
   let pushes=0;
   await page.route("**/api/meeting-creator/push",async(route)=>{
     pushes+=1;
