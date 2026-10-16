@@ -10,7 +10,7 @@ test("reviewed task push is admin-only and requires an explicit selected batch",
   assert.match(api,/sameOrigin\(request\)/);
   assert.match(api,/action: z\.literal\("push_selected"\)/);
   assert.match(api,/\.min\(1\)\.max\(10\)/);
-  assert.match(api,/row\.status==="call_ready"/);
+  assert.match(api,/x\.status==="call_ready"/);
   assert.match(api,/row\.phoneEvidence!=="saudi_mobile_format_unverified"/);
 });
 
