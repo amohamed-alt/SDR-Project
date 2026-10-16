@@ -22,7 +22,7 @@ test("Meeting Creator queue displays review-only SDR candidates and never offers
   await expect(page.getByText("Saudi Sample Logistics")).toBeVisible();
   await expect(page.getByText("+966552223344")).toBeVisible();
   await expect(page.getByText("Call-ready · review")).toBeVisible();
-  await expect(page.getByText("Marita")).toBeVisible();
+  await expect(page.getByText("Marita",{exact:true})).toBeVisible();
   await expect(page.getByRole("button",{name:/Export call-ready review/})).toBeEnabled();
   await expect(page.getByText("No task creation, emails, LinkedIn requests, phone reveals")).toBeVisible();
   await expect(page.getByRole("button",{name:/Push to HubSpot|Create task/i})).toHaveCount(0);
