@@ -69,7 +69,7 @@ type BestAccount = {
   talenteraScore: number;
   evalufyScore: number;
   productReason: string;
-  productPersonas: {
+  productPersonas?: {
     primary: string;
     secondary: string;
     economicBuyer: string;
@@ -460,10 +460,10 @@ export function BestAccounts({ onBack }: { onBack: () => void }) {
         <section className={styles.drawerSection}>
           <div className={styles.drawerSectionHead}><UsersRound size={15}/><div><span>BUYING COMMITTEE</span><strong>Start close to the recruiting pain</strong></div></div>
           <div className={styles.personaGrid}>
-            <div><span>Primary</span><strong>{selected.productPersonas.primary}</strong></div>
-            <div><span>Secondary</span><strong>{selected.productPersonas.secondary}</strong></div>
-            <div><span>Economic buyer</span><strong>{selected.productPersonas.economicBuyer}</strong></div>
-            <div><span>Technical</span><strong>{selected.productPersonas.technicalInfluencer}</strong></div>
+            <div><span>Primary</span><strong>{selected.productPersonas?.primary || selected.primaryPersona}</strong></div>
+            <div><span>Secondary</span><strong>{selected.productPersonas?.secondary || selected.secondaryPersona}</strong></div>
+            <div><span>Economic buyer</span><strong>{selected.productPersonas?.economicBuyer || selected.economicBuyer}</strong></div>
+            <div><span>Technical</span><strong>{selected.productPersonas?.technicalInfluencer || selected.technicalInfluencer}</strong></div>
           </div>
         </section>
 
