@@ -184,7 +184,9 @@ export function buildMeetingCreatorQueue(input: CreatorQueueInput): CreatorQueue
       || NON_TARGET_PATTERN.test(company.name)
       || protectedOwner
       || /retention|customer|churned|active customer/i.test(company.accountType + " " + company.accountStatus)
-      || safeNumber(company.openDeals) > 0 || allDeals.some((d) => !["closedwon","closedlost"].includes(d.stage.toLowerCase()))
+      || safeNumber(company.openDeals) > 0
+      || allDeals.some((d) => d.pipeline === "1026934003" || d.stage.toLowerCase() === "closedwon"
+        || !["closedwon","closedlost"].includes(d.stage.toLowerCase()))
       || meaningfulMeeting || connectedCalls > 0 || positiveReplies > 0 || openTasks > 0;
     const product = scoreMeetingCreatorAccount({
       companyId: company.id, name: company.name, domain, country: company.country,
