@@ -24,12 +24,14 @@ test('both saved Sales Nav entrypoints use the same canonical net-new pipeline',
   }
 });
 
-test('Ready gate blocks existing people, Retention and meetings but allows connected calls without meetings', () => {
+test('Ready gate blocks existing people, Retention, meetings and connected calls', () => {
   assert.match(gate, /Existing HubSpot person/);
   assert.match(gate, /Retention account/);
   assert.match(gate, /meetingCount > 0/);
-  assert.match(gate, /Connected call allowed · no meeting/);
-  assert.match(gate, /connectedCallWithoutMeeting: "eligible"/);
+  assert.match(gate, /connectedCallCount > 0/);
+  assert.match(gate, /Connected conversation blocked/);
+  assert.match(gate, /connectedCallWithoutMeeting: "blocked"/);
+  assert.doesNotMatch(gate, /Connected call allowed · no meeting/);
   assert.doesNotMatch(gate, /recentConnectedCall\).*protected/);
 });
 
