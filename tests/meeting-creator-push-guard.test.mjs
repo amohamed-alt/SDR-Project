@@ -49,3 +49,16 @@ test("operations-owned companies are eligible for owner-based SDR routing, RM ow
  const [rm]=buildMeetingCreatorQueue({...x,companies:[{...base,ownerId:"76369997"}]});
  assert.equal(rm.status,"protected");
 });
+
+test("Meeting Creator push rechecks colleague calls and allows bounded 100/day task plan",()=>{
+  assert.match(api,/readAssociations\("contacts","calls",allCompanyContacts\)/);
+  assert.match(api,/WRONG_NUMBER_DISPOSITION/);
+  assert.match(api,/dailyCapOverride:100/);
+  assert.match(api,/elevatusTargetOverride:0/);
+  assert.match(api,/source:\s*z\.enum\(\["inventory","wrong_number"\]\)/);
+});
+
+test("push reads contact's actual phone_number_status, not merely numeric formatting",()=>{
+  assert.match(api,/phone_number_status/);
+  assert.match(api,/Selected contact has invalid or exhausted phone status/);
+});

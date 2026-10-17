@@ -124,6 +124,8 @@ export async function createScheduledMaritaTask<T extends { id: string }>(input:
   now?: Date;
   stateDirectory?: string;
   ownerId?: "31644369" | "37624223";
+  dailyCapOverride?: number;
+  elevatusTargetOverride?: number;
 }) {
   const ownerId = input.ownerId || "31644369";
   const directory = input.stateDirectory || (ownerId === "37624223" ? "/app/data/daniel-task-schedule" : "/app/data/marita-task-schedule");
@@ -147,7 +149,14 @@ export async function createScheduledMaritaTask<T extends { id: string }>(input:
     const existing = journal.reservations.find((r) => r.contactId === input.contactId || (input.companyId && r.companyId === input.companyId));
     if (existing) throw new MaritaScheduleError(`A Marita task is already reserved for this contact/company${existing.taskId ? ` (task ${existing.taskId})` : "; reconcile the previous uncertain write"}.`);
     const tasks = await input.readTasks();
-    const dueAt = planMaritaTask(tasks, journal.reservations, input.elevatus, now, { ownerId, dailyCap: ownerId === "37624223" ? 50 : MARITA_DAILY_CAP, elevatusTarget: ownerId === "37624223" ? 0 : ELEVATUS_DAILY_TARGET });
+    const defaultDailyCap = ownerId === "37624223" ? 50 : MARITA_DAILY_CAP;
+    const dailyCap = input.dailyCapOverride === undefined
+      ? defaultDailyCap : Math.min(100, Math.max(1, Math.trunc(input.dailyCapOverride)));
+    const elevatusTarget = input.elevatusTargetOverride === undefined
+      ? (ownerId === "37624223" ? 0 : ELEVATUS_DAILY_TARGET)
+      : Math.min(dailyCap, Math.max(0, Math.trunc(input.elevatusTargetOverride)));
+    const dueAt = planMaritaTask(tasks, journal.reservations, input.elevatus, now,
+      { ownerId, dailyCap, elevatusTarget });
     const reservation: Reservation = { contactId: input.contactId, companyId: input.companyId, dueAt, elevatus: input.elevatus };
     journal.reservations.push(reservation);
     await saveJournal(file, journal);

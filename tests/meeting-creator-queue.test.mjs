@@ -55,9 +55,9 @@ test("reactivation uses a different decision maker, not the old attempted contac
   assert.equal(rows[0].sdrId, MEETING_CREATOR_MARITA_OWNER);
 });
 
-test("an old contact cannot be presented as alternate", () => {
+test("a company with only an already-called person enters alternate discovery", () => {
   const [row] = queue({ contacts: [oldPerson] });
-  assert.equal(row.status, "needs_research");
+  assert.equal(row.status, "needs_alternate");
   assert.equal(row.contactPhone, "");
 });
 
@@ -102,4 +102,70 @@ test("new never-called company with an HR leader and phone is call-ready", () =>
 
 test("same company domain is emitted once even if duplicate company records exist", () => {
   assert.equal(queue({companies:[company,{...company,id:"c2"}]}).length,1);
+});
+
+test("single wrong-number contact with completed task becomes alternate-research, never call-ready", () => {
+  const wrong={...noAnswer,disposition:"17b47fee-58de-441e-a44c-c6300d46f273",title:"Call with Old Contact"};
+  const [row]=queue({calls:[wrong],contacts:[oldPerson],tasks:[{id:"t1",companyId:"c1",status:"COMPLETED",subject:"Call Old Contact"}]});
+  assert.equal(row.status,"needs_alternate");
+  assert.equal(row.wrongNumberCalls,1);
+  assert.equal(row.contactPhone,"");
+  assert.match(row.reason,/Wrong number/i);
+});
+
+test("a matched called-name title excludes the old wrong number after a new HR person is found", () => {
+  const wrong={...noAnswer, contactIds:[], toNumber:"", title:"Call with Old Contact",
+    disposition:"17b47fee-58de-441e-a44c-c6300d46f273"};
+  const [row]=queue({calls:[wrong],contacts:[oldPerson,newPerson]});
+  assert.equal(row.status,"call_ready");
+  assert.equal(row.contactId,"p2");
+  assert.equal(row.contactPhone,"+966552223344");
+  assert.equal(row.wrongNumberCalls,1);
+});
+
+test("a different person reusing the known wrong-number mobile is not call-ready", () => {
+  const wrong={...noAnswer,disposition:"17b47fee-58de-441e-a44c-c6300d46f273",title:"Call with Old Contact"};
+  const [row]=queue({calls:[wrong],contacts:[oldPerson,{...newPerson,phone:oldPerson.phone}]});
+  assert.equal(row.status,"needs_alternate");
+  assert.equal(row.contactPhone,"");
+});
+
+test("connected call or open future task blocks wrong-number reactivation", () => {
+  const wrong={...noAnswer,disposition:"17b47fee-58de-441e-a44c-c6300d46f273"};
+  assert.equal(queue({calls:[wrong,{...wrong,id:"c2",disposition:"f240bbac-87c9-4f6e-bf70-924b57d47db7"}],contacts:[oldPerson]})[0].status,"protected");
+  assert.equal(queue({calls:[wrong],contacts:[oldPerson],tasks:[{id:"t2",companyId:"c1",status:"NOT_STARTED",subject:"Future task"}]})[0].status,"protected");
+});
+
+test("the original SDR remains the owner for a wrong-number account in Ops queue", () => {
+  const wrong={...noAnswer,title:"Call with Old Contact",
+    disposition:"17b47fee-58de-441e-a44c-c6300d46f273"};
+  const prior={...oldPerson,ownerId:"37624223"};
+  const [row]=queue({companies:[{...company,ownerId:"31594536"}],contacts:[prior],calls:[wrong]});
+  assert.equal(row.status,"needs_alternate");
+  assert.equal(row.sdrId,"37624223");
+  assert.equal(row.sdrName,"Daniel");
+});
+
+test("conflicting SDR historical owners require review instead of task redistribution", () => {
+  const calledOther={...newPerson,ownerId:"37624223"};
+  const otherCall={...noAnswer,id:"call2",contactIds:["p2"],toNumber:calledOther.phone};
+  const [row]=queue({companies:[{...company,ownerId:"31594536"}],
+    contacts:[oldPerson,calledOther],calls:[noAnswer,otherCall]});
+  assert.equal(row.status,"needs_research");
+  assert.match(row.reason,/Different SDRs/);
+});
+
+test("HubSpot phone_number_status Wrong Number with only one contact starts alternate research",()=>{
+  const [row]=queue({calls:[],contacts:[{...oldPerson,phoneNumberStatus:"Wrong Number"}]});
+  assert.equal(row.status,"needs_alternate");
+  assert.equal(row.wrongNumberContacts,1);
+  assert.equal(row.motion,"reactivation");
+  assert.equal(row.contactPhone,"");
+  assert.match(row.reason,/Phone Number Status = Wrong Number/);
+});
+test("a new HR person can replace an old CRM contact flagged wrong number",()=>{
+  const [row]=queue({calls:[],contacts:[{...oldPerson,phoneNumberStatus:"Wrong Number"},newPerson]});
+  assert.equal(row.status,"call_ready");
+  assert.equal(row.contactId,"p2");
+  assert.equal(row.contactPhone,"+966552223344");
 });

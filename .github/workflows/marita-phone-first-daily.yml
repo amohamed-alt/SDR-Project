@@ -1,322 +1,268 @@
-name: Marita Phone-First Priority
+# Consolidates the old Marita-only paid phone-first cron into one owner-safe,
+# dual-SDR Meeting Creator. Keeps the existing workflow file (no competing cron).
+name: Meeting Creator Saudi Daily 200
 
 on:
   schedule:
-    - cron: '15 6 * * *'
+    # 09:15 Saudi time, Sunday through Thursday; GitHub may run a little late.
+    - cron: '15 6 * * 0-4'
   push:
     branches: [main]
     paths:
       - '.github/workflows/marita-phone-first-daily.yml'
   workflow_dispatch:
     inputs:
-      target_phones:
-        description: New Marita phone-ready CALL tasks to create
+      dry_run:
+        description: Preview only; no HubSpot writes or alternate searches
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+      target_per_sdr:
+        description: Target per SDR per Saudi working day (hard maximum 100)
+        required: false
+        default: '100'
+      max_inventory_pages:
+        description: Existing acquisition-inventory pages to scan (each <=100)
+        required: false
+        default: '12'
+      max_free_alternate_searches:
+        description: Search-only Wrong Number company searches (0 paid reveals)
         required: false
         default: '20'
-      max_enrichments:
-        description: Maximum SignalHire person enrichments
-        required: false
-        default: '30'
 
 permissions:
   contents: read
 
 concurrency:
-  group: marita-phone-first-daily
+  group: meeting-creator-saudi-daily
   cancel-in-progress: false
 
 jobs:
-  enrich-and-push:
+  produce-and-assign:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     env:
       BASE_URL: https://sdr.dashboardtalentera.tech
-      OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN || secrets.DASHBOARD_PASSWORD }}
-      DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
-      TARGET_PHONES: ${{ inputs.target_phones || '20' }}
-      MAX_ENRICHMENTS: ${{ inputs.max_enrichments || '30' }}
+      OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN || secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD }}
+      DASHBOARD_PASSWORD: ${{ secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD }}
+      DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || inputs.dry_run || 'true' }}
+      TARGET_PER_SDR: ${{ inputs.target_per_sdr || '100' }}
+      MAX_INVENTORY_PAGES: ${{ github.event_name == 'push' && '3' || inputs.max_inventory_pages || '12' }}
+      MAX_ALTERNATE_SEARCHES: ${{ inputs.max_free_alternate_searches || '20' }}
     steps:
-      - name: Validate required secrets
+      - name: Validate credentials and bounded zero-credit policy
         run: |
           set -euo pipefail
-          test -n "$OWNER_TOKEN" || { echo "::error::ACQUISITION_OWNER_TOKEN or DASHBOARD_PASSWORD is required"; exit 1; }
-          test -n "$DASHBOARD_PASSWORD" || { echo "::error::DASHBOARD_PASSWORD is required"; exit 1; }
+          test -n "$OWNER_TOKEN" || { echo "::error::Meeting Creator admin token is missing"; exit 1; }
+          test -n "$DASHBOARD_PASSWORD" || { echo "::error::Dashboard access credential is missing"; exit 1; }
+          echo 'Paid provider reveals: disabled (0 Apollo / SignalHire contact credits).'
+          echo 'This workflow never sends emails or WhatsApp.'
 
-      - name: Build Marita phone-ready priority queue
+      - name: Research and schedule verified existing HubSpot contacts
         uses: actions/github-script@v7
-        env:
-          DASHBOARD_USERNAME: talentera
         with:
           script: |
-            const base = process.env.BASE_URL;
-            const ownerToken = process.env.OWNER_TOKEN;
-            const username = process.env.DASHBOARD_USERNAME || 'talentera';
-            const password = process.env.DASHBOARD_PASSWORD;
-            const targetPhones = Math.max(1, Math.min(40, Number(process.env.TARGET_PHONES || 20)));
-            const maxEnrichments = Math.max(targetPhones, Math.min(60, Number(process.env.MAX_ENRICHMENTS || 30)));
-            const auth = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
-            const headers = { Authorization: auth, 'x-acquisition-owner-token': ownerToken, 'Content-Type': 'application/json' };
+            const base=process.env.BASE_URL;
+            const token=process.env.OWNER_TOKEN;
+            const password=process.env.DASHBOARD_PASSWORD;
+            const dryRun=process.env.DRY_RUN!=='false';
+            const target=Math.max(1,Math.min(100,Number(process.env.TARGET_PER_SDR||100)));
+            const maxInventoryPages=Math.max(1,Math.min(20,Number(process.env.MAX_INVENTORY_PAGES||12)));
+            const maxAlt=Math.max(0,Math.min(20,Number(process.env.MAX_ALTERNATE_SEARCHES||20)));
+            const auth='Basic '+Buffer.from('talentera:'+password).toString('base64');
+            const headers={Authorization:auth,'x-acquisition-owner-token':token,'Content-Type':'application/json'};
+            const ownerNames={'31644369':'Marita','37624223':'Daniel'};
+            const owners=Object.keys(ownerNames);
 
-            async function request(path, init = {}) {
-              const maxAttempts = Number(init.maxAttempts || 4);
-              const requestInit = { ...init };
-              delete requestInit.maxAttempts;
-
-              let lastError;
-              for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-                const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 45000);
-                try {
-                  const response = await fetch(`${base}${path}`, {
-                    ...requestInit,
-                    signal: controller.signal,
-                    headers: { ...headers, ...(requestInit.headers || {}) },
-                  });
-                  const text = await response.text();
-                  let body = {};
-                  try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text.slice(0, 1000) }; }
-                  if (!response.ok) throw new Error(`${path} failed ${response.status}: ${JSON.stringify(body).slice(0, 1200)}`);
+            async function read(path) {
+              for(let attempt=1;attempt<=3;attempt++){
+                const controller=new AbortController();
+                const timer=setTimeout(()=>controller.abort(),90000);
+                try{
+                  const response=await fetch(base+path,{headers,signal:controller.signal});
+                  const body=await response.json().catch(()=>({}));
+                  if(!response.ok)throw new Error('GET '+path+' HTTP='+response.status+' '+String(body.error||'').slice(0,150));
                   return body;
-                } catch (error) {
-                  lastError = error;
-                  const transient = /timeout|abort|fetch failed|ECONNRESET|ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT/i.test(String(error?.message || error));
-                  if (!transient || attempt === maxAttempts) break;
-                  await new Promise((resolve) => setTimeout(resolve, attempt * 5000));
-                } finally {
-                  clearTimeout(timeout);
-                }
+                }catch(error){
+                  if(attempt===3)throw error;
+                  await new Promise(resolve=>setTimeout(resolve,attempt*3000));
+                }finally{clearTimeout(timer);}
               }
-              throw lastError;
             }
-
-            const marketRank = new Map([
-              ['Saudi Arabia', 100],
-              ['United Arab Emirates', 96],
-              ['Egypt', 90],
-              ['South Africa', 88],
-              ['Morocco', 78],
-              ['Qatar', 76],
-              ['Kuwait', 74],
-              ['Jordan', 65],
-              ['Oman', 62],
-              ['Bahrain', 60],
-              ['Iraq', 58],
-            ]);
-
-            function accountScore(account) {
-              const explicit = Number(account.priorityScore || account.gtmScore || account.fitScore || 0);
-              const market = marketRank.get(String(account.country || '')) || 0;
-              const researched = account.researched ? 8 : 0;
-              const confidence = account.researchConfidence === 'high' ? 6 : account.researchConfidence === 'medium' ? 3 : 0;
-              return explicit * 10 + market + researched + confidence;
-            }
-
-            function personaStrength(title = '') {
-              const value = String(title).toLowerCase();
-              if (/chief human resources|\bchro\b|chief people/.test(value)) return 95;
-              if (/talent acquisition/.test(value) && /head|director|vp|vice president/.test(value)) return 100;
-              if (/recruit/.test(value) && /head|director|vp|vice president/.test(value)) return 96;
-              if (/human resources|\bhr\b|people/.test(value) && /head|director|vp|vice president/.test(value)) return 88;
-              if (/talent acquisition|recruit/.test(value) && /manager|lead/.test(value)) return 80;
-              return 50;
-            }
-
-            function normalizedScore(person = {}) {
-              return Number(person.score || person.rankScore || 0);
-            }
-
-            function reason(person = {}) {
-              return String(person.reason || person.fitReason || '');
-            }
-
-            function chooseCandidate(people = []) {
-              return [...people]
-                .filter((person) => normalizedScore(person) >= 60)
-                .filter((person) => /current company confirmed/i.test(reason(person)))
-                .filter((person) => !/assistant|coordinator|intern|trainee|specialist/i.test(String(person.title || '')))
-                .sort((a, b) => {
-                  const left = normalizedScore(a) * 10 + personaStrength(a.title);
-                  const right = normalizedScore(b) * 10 + personaStrength(b.title);
-                  return right - left;
-                })[0] || null;
-            }
-
-            function phoneList(person) {
-              return [...new Set((Array.isArray(person?.phones) ? person.phones : []).map(String).map((v) => v.trim()).filter(Boolean))];
-            }
-
-            function emailList(person) {
-              return [...new Set((Array.isArray(person?.emails) ? person.emails : []).map(String).map((v) => v.trim()).filter(Boolean))];
-            }
-
-            async function pushPhoneReady(account, person) {
-              const phones = phoneList(person);
-              if (!phones.length) return { pushed: false, reason: 'no_phone' };
-              const emails = emailList(person);
-              const score = Math.max(0, Math.min(100, Number(account.priorityScore || account.gtmScore || normalizedScore(person) || 60)));
-              const payload = {
-                source: 'Target Account Pool → SignalHire',
-                signalHireUid: String(person.uid || ''),
-                assignmentMode: 'marita',
-                fullName: String(person.fullName || '').trim(),
-                title: String(person.title || '').trim(),
-                company: String(account.name || '').trim(),
-                companyDomain: String(account.domain || '').trim(),
-                companyWebsite: String(account.evidence?.officialWebsite || `https://${account.domain || ''}`).trim(),
-                careerPageUrl: String(account.careerPageUrl || '').trim(),
-                detectedAts: String(account.detectedAts || '').trim(),
-                atsConfidence: String(account.evidence?.atsConfidence || '').trim(),
-                companyEvidenceUrl: String(account.evidence?.careerEvidenceUrl || account.careerPageUrl || '').trim(),
-                companyVerificationReason: String(account.evidence?.verificationReason || account.strongestSignal || '').trim(),
-                hiring: {
-                  status: 'Unknown',
-                  activeJobs: 0,
-                  hiringScore: 0,
-                  hiringLabel: 'Verified hiring required',
-                  hasHrJobs: false,
-                  source: 'Target Account Pool',
-                  sourceUrl: String(account.careerPageUrl || '').trim(),
-                  checkedAt: new Date().toISOString(),
-                  jobsSample: [],
-                },
-                location: String(person.location || account.country || '').trim(),
-                linkedinUrl: String(person.linkedinUrl || '').trim(),
-                email: emails[0] || '',
-                emails,
-                phone: phones[0],
-                phones,
-                score,
-                priority: score >= 75 ? 'high' : 'medium',
-              };
-              if (!payload.fullName || !payload.companyDomain) return { pushed: false, reason: 'identity_incomplete' };
-              return request('/api/prospecting/push', { method: 'POST', body: JSON.stringify(payload) });
-            }
-
-            const excludedAccountPattern = /binzagr/i;
-
-            const queue = await request('/api/acquisition?limit=1000');
-            const accounts = (Array.isArray(queue.accounts) ? queue.accounts : [])
-              .filter((account) => account && !excludedAccountPattern.test(String(account.name || account.domain || '')))
-              .filter((account) => account && account.exclusionStatus === 'eligible')
-              .filter((account) => account.status !== 'pushed')
-              .filter((account) => account.evidence?.feedMaritaRequested === true)
-              .filter((account) => ['A', 'B', 'A+', ''].includes(String(account.priorityTier || account.gtmTier || '')) || Number(account.gtmScore || 0) >= 55)
-              .sort((a, b) => accountScore(b) - accountScore(a));
-
-            const result = {
-              generatedAt: new Date().toISOString(),
-              targetPhones,
-              maxEnrichments,
-              eligibleAccounts: accounts.length,
-              companiesChecked: 0,
-              signalHireEnrichments: 0,
-              phoneReady: 0,
-              pushed: 0,
-              duplicates: 0,
-              noCandidate: 0,
-              noPhone: 0,
-              maxTwoRevealsReached: 0,
-              errors: [],
-              prospects: [],
-            };
-
-            for (const account of accounts) {
-              if (result.pushed >= targetPhones || result.signalHireEnrichments >= maxEnrichments) break;
-              const domain = String(account.domain || '').trim();
-              if (!domain) continue;
-              result.companiesChecked += 1;
-
-              try {
-                const peoplePayload = await request(`/api/acquisition?domain=${encodeURIComponent(domain)}`);
-                const storedPeople = Array.isArray(peoplePayload.people) ? peoplePayload.people : [];
-                let person = storedPeople
-                  .filter((candidate) => candidate.enrichmentStatus === 'enriched' && candidate.meta?.verifiedCurrentCompany === true)
-                  .filter((candidate) => phoneList(candidate).length > 0)
-                  .sort((a, b) => normalizedScore(b) - normalizedScore(a))[0] || null;
-
-                if (!person) {
-                  const paidAttempts = storedPeople.filter((candidate) => candidate.enrichmentStatus === 'enriched').length;
-                  if (paidAttempts >= 2) {
-                    result.maxTwoRevealsReached += 1;
-                    result.noPhone += 1;
-                    continue;
-                  }
-
-                  let candidate = chooseCandidate(storedPeople.filter((candidate) => candidate.enrichmentStatus === 'search_only'));
-                  if (!candidate && storedPeople.length === 0) {
-                    const found = await request('/api/acquisition', {
-                      method: 'POST',
-                      body: JSON.stringify({ action: 'find_people', domain }),
-                    });
-                    candidate = chooseCandidate(found.people || []);
-                  }
-                  if (!candidate) {
-                    result.noCandidate += 1;
-                    continue;
-                  }
-
-                  result.signalHireEnrichments += 1;
-                  const enriched = await request('/api/acquisition', {
-                    method: 'POST',
-                    body: JSON.stringify({ action: 'enrich_person', domain, uid: candidate.uid }),
-                  });
-                  person = enriched.person || null;
-                }
-
-                const phones = phoneList(person);
-                if (!person || !phones.length || person.meta?.verifiedCurrentCompany !== true) {
-                  result.noPhone += 1;
-                  continue;
-                }
-
-                result.phoneReady += 1;
-                const pushed = await pushPhoneReady(account, person);
-                if (pushed.duplicate) result.duplicates += 1;
-                if (pushed.pushed) result.pushed += 1;
-                if (pushed.pushed || pushed.duplicate) {
-                  await request('/api/target-account-pool', {
-                    method: 'POST',
-                    body: JSON.stringify({ action: 'complete_feed', domain, taskId: String(pushed.taskId || '') }),
-                  });
-                }
-                result.prospects.push({
-                  company: account.name,
-                  country: account.country,
-                  person: person.fullName,
-                  title: person.title,
-                  phones: phones.length,
-                  score: account.priorityScore || account.gtmScore || normalizedScore(person) || 0,
-                  taskId: pushed.taskId || '',
-                  duplicate: Boolean(pushed.duplicate),
+            // HubSpot task writes are intentionally NOT retried: a timed-out POST
+            // can still have created the task, and must be reconciled first.
+            async function write(path,body){
+              const controller=new AbortController();
+              const timer=setTimeout(()=>controller.abort(),110000);
+              try{
+                const response=await fetch(base+path,{
+                  method:'POST',headers,body:JSON.stringify(body),signal:controller.signal,
                 });
-              } catch (error) {
-                result.errors.push({ domain, error: String(error?.message || error).slice(0, 500) });
+                const payload=await response.json().catch(()=>({}));
+                if(!response.ok)throw new Error('POST '+path+' HTTP='+response.status+' '+String(payload.error||'').slice(0,160));
+                return payload;
+              }finally{clearTimeout(timer);}
+            }
+
+            const reports=[];
+            const seen=new Set();
+            const candidates=[];
+            const alternatives=[];
+            let scanned=0,protectedCount=0,needsResearch=0,sourceFailures=0;
+
+            async function scanSource(source,maxPages){
+              let offset=0;
+              for(let page=0;page<maxPages;page++){
+                const path='/api/meeting-creator/queue?source='+source+'&offset='+offset+'&scan=100&limit=100';
+                let payload;
+                try{payload=await read(path);}
+                catch(error){
+                  reports.push({source,offset,error:String(error?.message||error).slice(0,200)});
+                  sourceFailures++;
+                  break;
+                }
+                if(payload.previewOnly!==true)throw new Error('Unsafe queue response: previewOnly was not true.');
+                const list=Array.isArray(payload.accounts)?payload.accounts:[];
+                scanned+=Number(payload.summary?.scanned||0);
+                for(const row of list){
+                  const key=String(row.domain||'').toLowerCase().replace(/^www\./,'');
+                  if(!key || seen.has(key))continue;
+                  seen.add(key);
+                  const record={...row,source,offset,scan:100,limit:100};
+                  if(row.status==='call_ready'
+                    && owners.includes(String(row.sdrId))
+                    && String(row.contactPhone||'').startsWith('+9665')
+                    && row.phoneEvidence==='saudi_mobile_format_unverified'){
+                    candidates.push(record);
+                  }else if(row.status==='needs_alternate' && row.companyId){
+                    alternatives.push(record);
+                  }else if(row.status==='protected')protectedCount++;
+                  else needsResearch++;
+                }
+                const next=Number(payload.pagination?.nextOffset||0);
+                const total=Number(payload.pagination?.sourceTotal||0);
+                if(next<=offset || next>=total)break;
+                offset=next;
+              }
+            }
+            // Search the recovery source FIRST, so a company with Wrong Number
+            // does not get hidden by a weaker generic inventory classification.
+            await scanSource('wrong_number',5);
+            await scanSource('inventory',maxInventoryPages);
+            candidates.sort((a,b)=>Number(b.priority||0)-Number(a.priority||0));
+            alternatives.sort((a,b)=>Number(b.priority||0)-Number(a.priority||0));
+
+            const plan={};
+            const globallySelected=new Set();
+            for(const owner of owners){
+              const personal=candidates.filter(row=>String(row.sdrId)===owner);
+              const fresh=personal.filter(row=>row.motion==='new_contact');
+              const reactivated=personal.filter(row=>row.motion==='reactivation');
+              const selected=[];
+              let recoveryCount=0;
+              for(const row of fresh){
+                if(selected.length>=target)break;
+                if(globallySelected.has(row.domain))continue;
+                selected.push(row);globallySelected.add(row.domain);
+              }
+              for(const row of reactivated){
+                if(selected.length>=target || recoveryCount>=Math.floor(target*.25))break;
+                if(globallySelected.has(row.domain))continue;
+                selected.push(row);globallySelected.add(row.domain);recoveryCount++;
+              }
+              plan[owner]={ownerId:owner,name:ownerNames[owner],target,selected,
+                selectedNew:selected.filter(r=>r.motion==='new_contact').length,
+                selectedReactivated:recoveryCount,created:0,skipped:0,errors:[],results:[]};
+            }
+
+            if(!dryRun){
+              for(const owner of owners){
+                const selected=plan[owner].selected;
+                // POST selected contacts only after fresh CRM verification.
+                // The application's scheduler maintains a persistent lock and
+                // 100/day cap inclusive of other open SDR tasks and overdue work.
+                const byPage=new Map();
+                for(const row of selected){
+                  const key=row.source+'|'+row.offset;
+                  if(!byPage.has(key))byPage.set(key,[]);
+                  byPage.get(key).push(row);
+                }
+                for(const rows of byPage.values()){
+                  for(let i=0;i<rows.length;i+=10){
+                    const batch=rows.slice(i,i+10);
+                    try{
+                      const result=await write('/api/meeting-creator/push',{
+                        action:'push_selected',source:batch[0].source,scan:100,limit:100,
+                        offset:batch[0].offset,
+                        choices:batch.map(row=>({companyId:row.companyId,contactId:row.contactId})),
+                      });
+                      const actual=Number(result.created||0),held=Number(result.skipped||0);
+                      plan[owner].created+=actual;
+                      plan[owner].skipped+=held;
+                      plan[owner].results.push(...(Array.isArray(result.results)?result.results:[]).map(r=>({
+                        status:r.status,reason:r.reason||'',ownerId:r.ownerId||'',dueAt:r.dueAt||'',
+                      })));
+                    }catch(error){
+                      plan[owner].errors.push(String(error?.message||error).slice(0,200));
+                      // No retry after uncertain POST; prevents duplicate task creation.
+                    }
+                    await new Promise(resolve=>setTimeout(resolve,500));
+                  }
+                }
+              }
+
+              // Free search-only research on wrong numbers; do not reveal any paid
+              // phone/email, create a contact or push a task without a new number.
+              const researched=new Set();
+              for(const row of alternatives){
+                if(researched.size>=maxAlt)break;
+                if(researched.has(row.domain))continue;
+                researched.add(row.domain);
+                try{
+                  const result=await write('/api/meeting-creator/alternate',{
+                    action:'find_alternate',source:row.source,offset:row.offset,
+                    scan:row.scan,companyId:row.companyId,
+                  });
+                  reports.push({company:row.companyName,alternateSearchMatches:Number(result.matchedAlternates||0)});
+                }catch(error){
+                  reports.push({company:row.companyName,alternateSearchError:String(error?.message||error).slice(0,160)});
+                }
               }
             }
 
-            core.summary
-              .addHeading('Marita Phone-First Daily')
-              .addTable([
-                [{ data: 'Metric', header: true }, { data: 'Result', header: true }],
-                ['Explicitly queued accounts', String(result.eligibleAccounts)],
-                ['Companies checked', String(result.companiesChecked)],
-                ['SignalHire paid reveal attempts', String(result.signalHireEnrichments)],
-                ['Phone-ready personas', String(result.phoneReady)],
-                ['New Marita tasks', String(result.pushed)],
-                ['Existing/duplicate tasks', String(result.duplicates)],
-                ['No safe persona', String(result.noCandidate)],
-                ['No phone after enrichment', String(result.noPhone)],
-                ['Two-reveal cap reached', String(result.maxTwoRevealsReached)],
-                ['Errors', String(result.errors.length)],
-              ]);
-
-            if (result.prospects.length) {
-              core.summary.addHeading('Phone-ready prospects', 3).addTable([
-                [{ data: 'Company', header: true }, { data: 'Market', header: true }, { data: 'Persona', header: true }, { data: 'Title', header: true }, { data: 'Phones', header: true }, { data: 'Task', header: true }],
-                ...result.prospects.slice(0, 25).map((item) => [item.company, item.country || '', item.person, item.title || '', String(item.phones), item.taskId || (item.duplicate ? 'existing' : '')]),
-              ]);
+            core.summary.addHeading('Meeting Creator · Saudi Daily 200');
+            core.summary.addTable([
+              [{data:'Metric',header:true},{data:'Outcome',header:true}],
+              ['Date (UTC)',new Date().toISOString().slice(0,10)],
+              ['Execution mode',dryRun?'Read-only preview':'Auto-push approved CRM tasks'],
+              ['Target','100 Marita + 100 Daniel'],
+              ['Companies scanned',String(scanned)],
+              ['Ready candidates found',String(candidates.length)],
+              ['Wrong-number cases requiring a new person',String(alternatives.length)],
+              ['Protected accounts',String(protectedCount)],
+              ['Other cases needing research',String(needsResearch)],
+              ['Paid contact reveals','0'],
+            ]);
+            core.summary.addTable([
+              [{data:'SDR',header:true},{data:'Target',header:true},{data:'Selected candidates',header:true},
+               {data:'Fresh',header:true},{data:'Reactivations',header:true},{data:'HubSpot tasks confirmed',header:true},{data:'Shortfall',header:true}],
+              ...owners.map(id=>{
+                const p=plan[id];
+                return [p.name,String(p.target),String(p.selected.length),String(p.selectedNew),String(p.selectedReactivated),
+                  String(p.created),String(Math.max(0,p.target-(dryRun?p.selected.length:p.created)))];
+              }),
+            ]);
+            for(const message of reports.slice(0,35)){
+              if(message.error||message.alternateSearchError)core.warning(JSON.stringify(message));
             }
             await core.summary.write();
-
-            console.log(JSON.stringify(result, null, 2));
-            if (result.errors.length && result.phoneReady === 0) core.setFailed(`Daily phone-first run produced no phone-ready prospects and ${result.errors.length} errors.`);
+            const counts=Object.fromEntries(owners.map(id=>[ownerNames[id],{
+              target:plan[id].target,selected:plan[id].selected.length,
+              created:plan[id].created,shortfall:Math.max(0,target-(dryRun?plan[id].selected.length:plan[id].created)),
+              skipped:plan[id].skipped,errors:plan[id].errors.length,
+            }]));
+            // CRM names and phone numbers never enter Actions logs.
+            console.log(JSON.stringify({dryRun,scanned,ready:candidates.length,needsAlternate:alternatives.length,
+              protected:protectedCount,needsResearch,sourceFailures,owners:counts,paidContactReveals:0}));
+            if(sourceFailures===2)core.setFailed('Neither inventory nor wrong-number CRM source was available.');
