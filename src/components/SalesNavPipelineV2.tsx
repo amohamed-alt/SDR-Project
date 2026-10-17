@@ -54,7 +54,7 @@ async function readJson<T>(response: Response): Promise<T> {
   const text = await response.text(); if (!text.trim()) return {} as T;
   try { return JSON.parse(text) as T; } catch { throw new Error(`Server returned non-JSON: ${text.slice(0, 160)}`); }
 }
-async function precheckLead(lead: Lead) {
+async function fetchPrecheckLead(lead: Lead) {
   const response = await fetch("/api/prospecting/salesnav/precheck-v2", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: lead.name, company: lead.company, linkedinUrl: lead.linkedinUrl, email: "", emails: [], phone: "", phones: [] }),
@@ -63,6 +63,18 @@ async function precheckLead(lead: Lead) {
   const payload = await readJson<Precheck & { error?: string }>(response);
   if (!response.ok) throw new Error(payload.error || "HubSpot precheck failed.");
   return payload;
+}
+
+// Manual and streaming checks can overlap. Share only the active request;
+// completed or failed checks are never cached here, so Retry always revalidates.
+const inFlightPrechecks = new Map<string, Promise<Precheck>>();
+function precheckLead(lead: Lead) {
+  const key = JSON.stringify([lead.name, lead.company, lead.linkedinUrl]);
+  const existing = inFlightPrechecks.get(key);
+  if (existing) return existing;
+  const request = fetchPrecheckLead(lead).finally(() => inFlightPrechecks.delete(key));
+  inFlightPrechecks.set(key, request);
+  return request;
 }
 
 export function SalesNavPipelineV2() {
