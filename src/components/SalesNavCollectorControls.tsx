@@ -16,7 +16,7 @@ export function SalesNavCollectorControls({ runId, missing, captureLocked, readL
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const currentRun = useRef(runId);
-  currentRun.current = runId;
+  useEffect(() => { currentRun.current = runId; }, [runId]);
   const lastProgress = useRef("");
   const pending = useRef(new Map<string, { resolve: (value: CollectorState) => void; timer: ReturnType<typeof setTimeout> }>());
   function request(action: string) {
