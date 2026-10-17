@@ -51,6 +51,7 @@ test("an active capture receives new pages and usable public URLs before the sea
   await page.goto("/signalhire-queue");
   await expect(page.getByRole("table").getByText("Awaiting profile read", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "HubSpot Check", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Export CSV (1)", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: /^All 1$/ })).toHaveAttribute("data-active", "true");
   expect(checks).toBe(0);
   await page.getByRole("row").filter({ hasText: "Stream First Person" }).getByRole("button", { name: "Add profile URL", exact: true }).click();
@@ -67,7 +68,7 @@ test("HubSpot checks all 100 captured people without skipping missing URLs or hi
   await page.addInitScript(() => { localStorage.setItem("sdr_v2_visitor_id", "hundred_check_qa"); localStorage.setItem("sdr_v2_visitor_name", "Check QA"); });
   await page.request.post("/api/sdr-admin", { data: { password: "playwright-tools-only-password" } });
   const leads = Array.from({ length: 100 }, (_, index) => ({ name: `Check Person ${index}`, company: `Example ${index}`, title: "HR Director", location: "Riyadh", connectionDegree: "2nd", salesLeadUrl: `https://www.linkedin.com/sales/lead/CHECK${index},SEARCH,x`, linkedinUrl: index < 8 ? `https://www.linkedin.com/in/check-person-${index}` : "" }));
-  const run = { id: "00000000-0000-4000-8000-000000000004", startedAt: "2026-10-15T10:00:00Z", updatedAt: "2026-10-15T10:00:00Z", completedAt: "2026-10-15T10:02:00Z", complete: true, stopReason: "Profile URL reading attempted", sourceUrl: "https://www.linkedin.com/sales/search/people", searchFingerprint: "hundred-check-qa", clientVersion: "1.8.0", pagesRead: 4, total: 100 };
+  const run = { id: "00000000-0000-4000-8000-000000000004", startedAt: "2026-10-15T10:00:00Z", updatedAt: "2026-10-15T10:00:00Z", completedAt: "2026-10-15T10:02:00Z", complete: true, stopReason: "Profile URL reading attempted", sourceUrl: "https://www.linkedin.com/sales/search/people", searchFingerprint: "hundred-check-qa", clientVersion: "1.8.1", pagesRead: 4, total: 100 };
   let calls = 0, paidActions = 0;
   let releaseFirst!: () => void, releaseLast!: () => void;
   const firstGate = new Promise<void>(resolve => { releaseFirst = resolve; });
@@ -88,7 +89,7 @@ test("HubSpot checks all 100 captured people without skipping missing URLs or hi
   await page.route(/\/api\/prospecting\/salesnav\/(reveal-fast|push-v2)/, route => { paidActions += 1; return route.fulfill({ status: 500, json: { error: "No paid actions or CRM writes in this fixture." } }); });
   await page.goto("/signalhire-queue");
   await page.getByRole("button", { name: "HubSpot Check", exact: true }).click();
-  await expect(page.getByText(/4 pages · 100 unique leads · Profile URL reading attempted · Companion 1.8.0/)).toBeVisible();
+  await expect(page.getByText(/4 pages · 100 unique leads · Profile URL reading attempted · Companion 1.8.1/)).toBeVisible();
   await expect.poll(() => calls).toBe(4);
   await expect(page.getByText("HubSpot check 0/100", { exact: true })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Search history", exact: true })).toBeDisabled();

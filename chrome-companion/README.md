@@ -1,4 +1,4 @@
-# Talentera Sales Nav Collector 1.8.0
+# Talentera Sales Nav Collector 1.8.1
 
 The extension again owns capture. HubSpot checks, contact reveals and CRM tasks stay in the dashboard.
 

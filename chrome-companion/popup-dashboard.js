@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       el('profileStatus').textContent = run.backgroundStatus || '';
     } else if (run?.complete) {
       const failed = (queue?.rows || []).filter(row => row.status === 'error').length;
-      setStatus(failed ? `Dashboard ready · ${failed} profile URL${failed === 1 ? '' : 's'} need retry.` : `Dashboard ready · ${run.total || 0} people with profile reading completed.`, failed ? 'bad' : 'ok');
+      setStatus(failed ? `${failed} LinkedIn URL${failed === 1 ? '' : 's'} need retry before the batch is ready.` : `Dashboard ready · ${run.total || 0} people with LinkedIn URLs.`, failed ? 'bad' : 'ok');
       el('profileStatus').textContent = run.backgroundStatus || '';
     } else if (run?.paused) {
       setStatus(run.backgroundError || 'Capture paused. Start the same size to resume.', 'bad');

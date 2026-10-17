@@ -10,8 +10,8 @@ const popupController = fs.readFileSync('chrome-companion/popup-v154.js', 'utf8'
 const background = fs.readFileSync('chrome-companion/background-v154.js', 'utf8');
 const popupLiveProfile = fs.readFileSync('chrome-companion/popup-live-profile.js', 'utf8');
 
-test('Chrome Companion v1.8.0 restores extension capture sizes on one safe background engine', () => {
-  assert.equal(manifest.version, '1.8.0');
+test('Chrome Companion v1.8.1 restores extension capture sizes on one safe background engine', () => {
+  assert.equal(manifest.version, '1.8.1');
   assert.equal(manifest.background?.service_worker, 'background-v154.js');
   assert.match(popupHtml, /popup-dashboard\.js/);
   assert.match(popupHtml, /capture25/); assert.match(popupHtml, /capture50/); assert.match(popupHtml, /captureFull/);

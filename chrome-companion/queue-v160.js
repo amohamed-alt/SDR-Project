@@ -83,8 +83,17 @@ importScripts('profile-dom.js');
     starting = true; stopRequested = false;
     try {
     const capture = (await chrome.storage.local.get(['salesNavFullRunV1'])).salesNavFullRunV1;
-    const finishingSameCapture = afterCapture && capture?.complete && capture.runId === captureRunId;
-    if ((!finishingSameCapture && globalThis.isSalesNavCaptureBusy?.()) || (capture && !capture.complete && !capture.paused)) throw new Error('Search capture is running. Stop it before reading profile URLs.');
+    // markComplete deliberately leaves the server run open while its URLs are
+    // read. Treat that cards-complete handoff as part of the same capture,
+    // even though the capture's startOrResume call has not returned yet.
+    const finishingSameCapture = afterCapture
+      && capture?.runId === captureRunId
+      && capture?.cardsComplete === true
+      && !capture?.paused;
+    if ((!finishingSameCapture && globalThis.isSalesNavCaptureBusy?.())
+      || (capture && !capture.complete && !capture.paused && !finishingSameCapture)) {
+      throw new Error('Search capture is running. Stop it before reading profile URLs.');
+    }
     const previous = (await chrome.storage.local.get([KEY]))[KEY];
     if (previous?.pending?.length && !previous.paused && previous.action === 'read') throw new Error('URL reading is already running. Stop or wait before starting another run.');
     const rows = [...new Map(leads.filter(lead => lead.connectionDegree !== '1st').map(lead => [identity(lead), lead])).entries()].slice(0,2500).map(([key, lead]) => ({ key, lead, status: 'pending' }));

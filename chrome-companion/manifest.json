@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Talentera Prospecting Companion",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "description": "Capture 25, 50 or a full Sales Navigator search in the extension, then continue with HubSpot checks, reveals and CRM tasks in the dashboard.",
   "permissions": [
     "activeTab",

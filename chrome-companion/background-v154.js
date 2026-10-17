@@ -335,10 +335,21 @@ async function markComplete(run, stopReason) {
 globalThis.finalizeSalesNavCapture = async (runId, { attempted = 0, failed = 0 } = {}) => {
   const saved = (await chrome.storage.local.get([FULL_RUN_KEY]))[FULL_RUN_KEY];
   if (!saved || saved.runId !== runId || saved.complete) return;
+  if (failed > 0) {
+    await setRun({
+      ...saved,
+      complete: false,
+      cardsComplete: true,
+      paused: true,
+      backgroundError: `${failed} LinkedIn URL${failed === 1 ? '' : 's'} could not be read. Retry them before this batch can open in the dashboard.`,
+      backgroundStatus: `Waiting for ${failed} public LinkedIn URL${failed === 1 ? '' : 's'}; the batch is not ready.`,
+    });
+    return;
+  }
   const reason = `${saved.stopReason || 'Capture finished'} · profile URLs attempted ${attempted} · failed ${failed}`;
   const finished = await finishRun(saved, reason);
-  const complete = { ...saved, total: Number(finished.total || saved.total || 0), complete: true, cardsComplete: true, completedAt: new Date().toISOString(), backgroundError: failed ? `${failed} profile URL${failed === 1 ? '' : 's'} could not be read automatically.` : '', backgroundStatus: failed ? `Dashboard ready · ${failed} URL read failed and can be retried there.` : 'Dashboard ready · profile URLs saved.' };
-  await setRun(complete);
+  const complete = { ...saved, total: Number(finished.total || saved.total || 0), complete: true, cardsComplete: true, paused: false, completedAt: new Date().toISOString(), backgroundError: '', backgroundStatus: 'Dashboard ready · all public LinkedIn URLs saved.' };
+  await setRun(complete, { resume: true });
   const opened = (await chrome.storage.local.get(['salesNavDashboardOpenedRunV1'])).salesNavDashboardOpenedRunV1;
   if (opened !== runId) {
     await chrome.storage.local.set({ salesNavDashboardOpenedRunV1: runId });

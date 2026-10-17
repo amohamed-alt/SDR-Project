@@ -55,7 +55,7 @@
           const payload = await post({ action: 'profile_read_run', runId: message.runId });
           if (startedAtEpoch !== stopEpoch) throw new Error('URL reading was cancelled from the dashboard.');
           if (!payload.leads?.length) throw new Error('No missing public URLs in this capture.');
-          await globalThis.startCapturedProfileChecks(payload.leads, payload.sourceUrl, message.runId);
+          await globalThis.startCapturedProfileChecks(payload.leads, payload.sourceUrl, message.runId, { afterCapture: payload.complete === false });
         } else if (message.action === 'stop') {
           stopEpoch += 1;
           await globalThis.stopCapturedProfileChecks();
