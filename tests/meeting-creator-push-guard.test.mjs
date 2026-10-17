@@ -55,5 +55,5 @@ test("Meeting Creator push rechecks colleague calls and allows bounded 100/day t
   assert.match(api,/WRONG_NUMBER_DISPOSITION/);
   assert.match(api,/dailyCapOverride:100/);
   assert.match(api,/elevatusTargetOverride:0/);
-  assert.match(api,/source:z\.enum\(\["inventory","wrong_number"\]\)/);
+  assert.match(api,/source:\s*z\.enum\(\["inventory","wrong_number"\]\)/);
 });
