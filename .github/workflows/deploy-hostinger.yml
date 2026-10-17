@@ -332,6 +332,62 @@ jobs:
 
           echo "Hostinger deployment verified by action success and 4/4 core containers."
 
+          # Hostinger can report a successful Compose action while retaining
+          # containers from the previous image tag. Require the exact images;
+          # if they are stale, use the documented project update operation to
+          # recreate them from the newly saved Compose configuration.
+          CONTAINERS_CODE=$(api_get "$VM/docker/$PROJECT/containers" /tmp/containers.json 3 15) || true
+          DASHBOARD_IMAGES=$(jq --arg image "sdr-dashboard:$DEPLOY_SHA" '[.[] | select((.name // "") | IN("sdr-project-sdr-dashboard-1","sdr-project-maqsam-sync-1")) | select(.image == $image)] | length' /tmp/containers.json 2>/dev/null || echo 0)
+          CACHE_IMAGES=$(jq --arg image "sdr-dashboard-cache:$DEPLOY_SHA" '[.[] | select((.name // "") == "sdr-project-dashboard-cache-api-1") | select(.image == $image)] | length' /tmp/containers.json 2>/dev/null || echo 0)
+          echo "Exact image gate: dashboard=$DASHBOARD_IMAGES/2 cache=$CACHE_IMAGES/1 containers_http=$CONTAINERS_CODE"
+
+          if [ "$CONTAINERS_CODE" != 200 ] || [ "$DASHBOARD_IMAGES" -ne 2 ] || [ "$CACHE_IMAGES" -ne 1 ]; then
+            UPDATE_CODE=$(curl -sS --connect-timeout 8 --max-time 30 \
+              -X POST -H "Authorization: $AUTH" -H 'Accept: application/json' \
+              -o /tmp/update.json -w '%{http_code}' "$VM/docker/$PROJECT/update" || true)
+            echo "Hostinger exact-image update: HTTP=${UPDATE_CODE:-000}"
+            [ -n "$UPDATE_CODE" ] && [ "$UPDATE_CODE" -ge 200 ] && [ "$UPDATE_CODE" -lt 300 ] || exit 1
+            UPDATE_ACTION_ID=$(jq -r '.id // .action.id // empty' /tmp/update.json 2>/dev/null || true)
+            test -n "$UPDATE_ACTION_ID" || { echo "::error::Hostinger update did not return an action id."; exit 1; }
+
+            UPDATE_READY=false
+            for ATTEMPT in $(seq 1 72); do
+              UPDATE_ACTION_CODE=$(api_get "$VM/actions/$UPDATE_ACTION_ID" /tmp/update-action.json 1 10) || true
+              UPDATE_STATE=$(jq -r '.state // "unknown"' /tmp/update-action.json 2>/dev/null || echo unknown)
+              CONTAINERS_CODE=$(api_get "$VM/docker/$PROJECT/containers" /tmp/containers.json 1 12) || true
+              DASHBOARD_IMAGES=$(jq --arg image "sdr-dashboard:$DEPLOY_SHA" '[.[] | select((.name // "") | IN("sdr-project-sdr-dashboard-1","sdr-project-maqsam-sync-1")) | select(.image == $image and ((.status // "") | startswith("Up ")))] | length' /tmp/containers.json 2>/dev/null || echo 0)
+              CACHE_IMAGES=$(jq --arg image "sdr-dashboard-cache:$DEPLOY_SHA" '[.[] | select((.name // "") == "sdr-project-dashboard-cache-api-1") | select(.image == $image and ((.status // "") | startswith("Up ")))] | length' /tmp/containers.json 2>/dev/null || echo 0)
+              echo "Hostinger update gate $ATTEMPT/72: action=$UPDATE_STATE dashboard=$DASHBOARD_IMAGES/2 cache=$CACHE_IMAGES/1"
+              case "$UPDATE_STATE" in failed|error|cancelled|canceled) exit 1 ;; esac
+              if [[ "$UPDATE_STATE" =~ ^(success|completed|done)$ ]] && [ "$DASHBOARD_IMAGES" -eq 2 ] && [ "$CACHE_IMAGES" -eq 1 ]; then UPDATE_READY=true; break; fi
+              sleep 5
+            done
+            [ "$UPDATE_READY" = true ] || { echo "::error::Hostinger did not recreate the exact deployment images."; exit 1; }
+          fi
+
+          # The public router is the real handoff boundary. One project restart
+          # is allowed to refresh stale Traefik registrations, then the exact
+          # commit must be visible or the deployment fails.
+          PUBLIC_EXACT=false
+          for PASS in 1 2; do
+            for ATTEMPT in $(seq 1 12); do
+              PUBLIC_CODE=$(curl -4 -sS --connect-timeout 3 --max-time 8 -H 'Cache-Control: no-cache' \
+                -o /tmp/public-health.json -w '%{http_code}' \
+                "https://sdr.dashboardtalentera.tech/api/health?deploy=$DEPLOY_SHA&pass=$PASS&attempt=$ATTEMPT" || true)
+              PUBLIC_BUILD=$(jq -r '.buildRef // ""' /tmp/public-health.json 2>/dev/null || true)
+              echo "Public exact gate pass=$PASS attempt=$ATTEMPT: HTTP=${PUBLIC_CODE:-000} build=${PUBLIC_BUILD:-none}"
+              if [ "$PUBLIC_CODE" = 200 ] && [ "$PUBLIC_BUILD" = "$DEPLOY_SHA" ]; then PUBLIC_EXACT=true; break 2; fi
+              sleep 5
+            done
+            RESTART_CODE=$(curl -sS --connect-timeout 8 --max-time 30 \
+              -X POST -H "Authorization: $AUTH" -H 'Accept: application/json' \
+              -o /tmp/restart.json -w '%{http_code}' "$VM/docker/$PROJECT/restart" || true)
+            echo "Hostinger route-refresh restart: HTTP=${RESTART_CODE:-000}"
+            [ -n "$RESTART_CODE" ] && [ "$RESTART_CODE" -ge 200 ] && [ "$RESTART_CODE" -lt 300 ] || exit 1
+            sleep 20
+          done
+          [ "$PUBLIC_EXACT" = true ] || { echo "::error::Public dashboard did not switch to exact build $DEPLOY_SHA."; exit 1; }
+
           # Report worker startup/progress after a successful deploy, without
           # dumping unrelated application logs or any environment credentials.
           LOG_CODE=$(api_get "$VM/docker/$PROJECT/logs" /tmp/maqsam-worker-logs.json 1 12) || true
