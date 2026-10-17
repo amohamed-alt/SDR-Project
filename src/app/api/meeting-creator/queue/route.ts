@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { listAcquisitionAccounts } from "@/lib/acquisition-data-api";
+import { listAcquisitionAccounts, type AcquisitionAccount } from "@/lib/acquisition-data-api";
 import { searchAll, readAssociations, batchRead } from "@/lib/hubspot";
 import { sdrAdminAuthorized } from "@/lib/sdr-admin-auth";
 import {
   buildMeetingCreatorQueue,
   type CreatorCompany, type CreatorContact, type CreatorCall,
   type CreatorTask, type CreatorMeeting, type CreatorDeal,
+  WRONG_NUMBER_DISPOSITION,
 } from "@/lib/meeting-creator-queue";
 import { normalizedCompanyDomain } from "@/lib/company-dedupe";
 import { planCreatorDay } from "@/lib/meeting-creator-daily-plan";
@@ -17,9 +18,10 @@ export const dynamic = "force-dynamic";
 // The endpoint is PREVIEW-ONLY. No provider reveal, CRM mutation, task creation,
 // LinkedIn automation or contact credit spend is reachable through this route.
 const querySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(50).default(30),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
   offset: z.coerce.number().int().min(0).max(100000).default(0),
   scan: z.coerce.number().int().min(20).max(100).default(60),
+  source: z.enum(["inventory","wrong_number"]).default("inventory"),
 });
 
 function clean(value: unknown) {
@@ -59,23 +61,77 @@ export async function GET(request: NextRequest) {
   if (!parsed.success) return NextResponse.json({error:"Invalid Meeting Creator scan options."},{status:400});
 
   try {
-    const { limit, offset, scan } = parsed.data;
-    // Stored acquisition inventory is the provider-credit-free discovery source.
-    const inventory = await listAcquisitionAccounts({
-      country:"Saudi Arabia", includeExcluded:true, limit:scan, offset,
-    });
-    const seed = inventory.accounts
-      .filter((a) => a.domain && validSaudi(a.country) && Number(a.employeeCount || 0) >= 250)
-      .filter((a) => a.exclusionStatus !== "excluded" || /already exists in hubspot/i.test(a.exclusionReason))
-      .filter((a) => !a.domain.endsWith(".invalid") && a.status !== "pushed")
-      .slice(0, scan);
+    const { limit, offset, scan, source } = parsed.data;
+    let seed: AcquisitionAccount[] = [];
+    let crmWrongNumberMatches: Awaited<ReturnType<typeof batchRead>> = [];
+    let readFromInventory = 0;
+    let sourceTotal = 0;
+    let nextOffset = offset + scan;
+    if (source === "wrong_number") {
+      // A source-independent recovery funnel: catches existing CRM companies
+      // even when the Postgres acquisition ledger labels them existing.
+      // Query only the dedicated Wrong Number disposition, never reveal phones.
+      const wrongCalls = await searchAll("calls",["hs_call_disposition","hs_timestamp"],[
+        {propertyName:"hs_call_disposition",operator:"EQ",value:WRONG_NUMBER_DISPOSITION},
+      ],["-hs_timestamp"]);
+      sourceTotal = wrongCalls.length;
+      const pageIds = wrongCalls.slice(offset,offset+scan).map((x)=>String(x.id));
+      const [directCompanies,relatedContacts] = await Promise.all([
+        readAssociations("calls","companies",pageIds),
+        readAssociations("calls","contacts",pageIds),
+      ]);
+      const personIds=flatten(relatedContacts,pageIds);
+      const indirectCompanies=await readAssociations("contacts","companies",personIds);
+      const companyIds=unique([...flatten(directCompanies,pageIds),...flatten(indirectCompanies,personIds)]);
+      crmWrongNumberMatches=await batchRead("companies",companyIds,companyProps);
+      seed=crmWrongNumberMatches
+        .filter((record)=>{
+          const p=record.properties;
+          return validSaudi(clean(p.country)||clean(p.gtm_country))
+            && (finiteNumber(p.numberofemployees)||finiteNumber(p.gtm_employee_count))>=250
+            && Boolean(normalizedCompanyDomain(p.domain));
+        })
+        .map((record)=>{
+          const p=record.properties;
+          return {
+            domain:normalizedCompanyDomain(p.domain),name:clean(p.name),
+            source:"hubspot-wrong-number",sourceId:String(record.id),
+            country:clean(p.country)||clean(p.gtm_country),
+            employeeCount:finiteNumber(p.numberofemployees)||finiteNumber(p.gtm_employee_count),
+            industry:clean(p.gtm_industry)||clean(p.industry),
+            activeJobs:0,headcountGrowth:0,hrHeadcount:0,careerPageUrl:"",
+            detectedAts:clean(p.detected_ats),gtmScore:0,gtmTier:"Watch" as const,
+            fitScore:0,intentScore:0,atsOpportunityScore:0,
+            exclusionStatus:"review" as const,exclusionReason:"Existing company · wrong number",
+            hubspotCompanyId:String(record.id),status:"existing_hubspot" as const,
+            primaryPersona:"HR Director",secondaryPersona:"Talent Acquisition Manager",
+            economicBuyer:"HR Director",technicalInfluencer:"IT",
+            strongestSignal:"Wrong number — find a different HR decision maker",
+            recommendedAngle:"Research alternate verified contact",
+            assignedOwnerId:"",assignedOwnerName:"",evidence:{},
+          };
+        });
+    } else {
+      // No Apollo or SignalHire calls: use the cached company inventory first.
+      const inventory = await listAcquisitionAccounts({
+        country:"Saudi Arabia", includeExcluded:true, limit:scan, offset,
+      });
+      readFromInventory = inventory.accounts.length;
+      sourceTotal = Number(inventory.pagination?.filteredTotal || inventory.accounts.length);
+      nextOffset=offset+inventory.accounts.length;
+      seed = inventory.accounts
+        .filter((a) => a.domain && validSaudi(a.country) && Number(a.employeeCount || 0) >= 250)
+        .filter((a) => a.exclusionStatus !== "excluded" || /already exists in hubspot/i.test(a.exclusionReason))
+        .filter((a) => !a.domain.endsWith(".invalid") && a.status !== "pushed")
+        .slice(0, scan);
+    }
 
     if (!seed.length) {
       return NextResponse.json({
         generatedAt:new Date().toISOString(),previewOnly:true,
         note:"No qualified companies on this inventory page. Use another offset or review the existing inventory.",
-        summary:{readFromInventory:inventory.accounts.length,scanned:0,callReady:0,needsResearch:0,protected:0},
-        pagination:{offset,scan,nextOffset:offset + inventory.accounts.length,sourceTotal:inventory.pagination?.filteredTotal || 0},
+        summary:{readFromInventory,scanned:0,callReady:0,needsAlternate:0,needsResearch:0,protected:0},
+        pagination:{offset,scan,nextOffset,sourceTotal},
         accounts:[],
       },{headers:{"Cache-Control":"private, no-store"}});
     }
@@ -84,10 +140,12 @@ export async function GET(request: NextRequest) {
     // Alias/parent/subsidiary matches are not automatically treated as net-new.
     const sourceDomains = unique(seed.map((a) => normalizedCompanyDomain(a.domain)).filter(Boolean));
     const storedIds = unique(seed.map((a) => clean(a.hubspotCompanyId)).filter((id) => /^\d+$/.test(id)));
-    const companyMatches = await Promise.all([
-      searchAll("companies",companyProps,[{propertyName:"domain",operator:"IN",values:sourceDomains}]),
-      batchRead("companies",storedIds,companyProps),
-    ]);
+    const companyMatches = source === "wrong_number"
+      ? [crmWrongNumberMatches]
+      : await Promise.all([
+          searchAll("companies",companyProps,[{propertyName:"domain",operator:"IN",values:sourceDomains}]),
+          batchRead("companies",storedIds,companyProps),
+        ]);
     const companiesById = new Map(companyMatches.flat().map((p) => [String(p.id),p]));
     const companiesByDomain = new Map([...companiesById.values()].map((p) => [normalizedCompanyDomain(p.properties.domain),p]));
     const confirmedCompanies = seed.map((a) => {
@@ -100,8 +158,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         generatedAt:new Date().toISOString(),previewOnly:true,
         note:"These inventory companies are not exact matched to HubSpot. Resolve company aliases before pushing.",
-        summary:{readFromInventory:inventory.accounts.length,scanned:seed.length,callReady:0,needsResearch:seed.length,protected:0},
-        pagination:{offset,scan,nextOffset:offset + inventory.accounts.length,sourceTotal:inventory.pagination?.filteredTotal || 0},
+        summary:{readFromInventory,scanned:seed.length,callReady:0,needsAlternate:0,needsResearch:seed.length,protected:0},
+        pagination:{offset,scan,nextOffset,sourceTotal},
         accounts:confirmedCompanies.slice(0,limit).map(({seed:a})=>({
           key:`identity:${a.domain}`,companyId:"",companyName:a.name,domain:a.domain,
           employeeCount:a.employeeCount,status:"needs_research",motion:"new_contact",
@@ -150,7 +208,7 @@ export async function GET(request: NextRequest) {
     const allTaskIds=unique([...companyTasksById.values()].flat());
     const allDealIds=flatten(companyDeals,matchedIds);
     const [callRows,meetingRows,taskRows,dealRows] = await Promise.all([
-      batchRead("calls",allCallIds,["hs_call_disposition","hs_call_status","hs_call_to_number"]),
+      batchRead("calls",allCallIds,["hs_call_disposition","hs_call_status","hs_call_to_number","hs_call_title"]),
       batchRead("meetings",allMeetingIds,["hs_meeting_outcome","hs_meeting_start_time"]),
       batchRead("tasks",allTaskIds,["hs_task_status","hs_task_subject"]),
       batchRead("deals",allDealIds,["dealstage","pipeline"]),
@@ -212,6 +270,7 @@ export async function GET(request: NextRequest) {
         callFacts.push({
           id:callId,companyId:id,disposition:clean(call.properties.hs_call_disposition),
           toNumber:clean(call.properties.hs_call_to_number),
+          title:clean(call.properties.hs_call_title),
           contactIds:contactIds.filter((cid)=>(contactCalls.get(cid)||[]).includes(callId)),
         });
       }
@@ -243,11 +302,12 @@ export async function GET(request: NextRequest) {
     }));
     const dailyPlans=planCreatorDay(evaluated);
     const ready=evaluated.filter((x)=>x.status==="call_ready");
+    const alternate=evaluated.filter((x)=>x.status==="needs_alternate");
     const review=evaluated.filter((x)=>x.status==="needs_research");
     const blocked=evaluated.filter((x)=>x.status==="protected");
     return NextResponse.json({
       generatedAt:new Date().toISOString(),previewOnly:true,
-      source:"Stored acquisition inventory + HubSpot read-only associations",
+      source:source === "wrong_number" ? "HubSpot wrong-number calls + CRM read-only associations" : "Stored acquisition inventory + HubSpot read-only associations",
       policy:{
         paidContactCredits:0,crmWrites:0,
         phoneNote:"Saudi mobile FORMAT detected in CRM only; deliverability/identity not verified.",
@@ -255,8 +315,9 @@ export async function GET(request: NextRequest) {
         ownerRule:"Preserve SDR ownership; protected RM/customer/connected accounts are not reassigned.",
       },
       summary:{
-        readFromInventory:inventory.accounts.length,scanned:seed.length,crmMatched:companyFacts.length,
-        callReady:ready.length,needsResearch:review.length+identityReview.length,protected:blocked.length,
+        readFromInventory,scanned:seed.length,crmMatched:companyFacts.length,
+        callReady:ready.length,needsAlternate:alternate.length,
+        needsResearch:review.length+identityReview.length,protected:blocked.length,
         maritaReady:ready.filter((x)=>x.sdrName==="Marita").length,
         danielReady:ready.filter((x)=>x.sdrName==="Daniel").length,
       },
@@ -265,8 +326,8 @@ export async function GET(request: NextRequest) {
         newAccounts:p.newAccounts,reactivationAccounts:p.reactivationAccounts,
         maxReactivation:p.maxReactivation,shortfall:p.shortfall,
       })),
-      pagination:{offset,scan,nextOffset:offset + inventory.accounts.length,sourceTotal:inventory.pagination?.filteredTotal||0},
-      accounts:[...ready,...review,...identityReview,...blocked].slice(0,limit),
+      pagination:{offset,scan,nextOffset,sourceTotal},
+      accounts:[...ready,...alternate,...review,...identityReview,...blocked].slice(0,limit),
     },{headers:{"Cache-Control":"private, no-store"}});
   }catch(error){
     console.error("Meeting Creator queue failed",error);
