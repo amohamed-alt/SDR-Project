@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { batchRead, HubSpotApiError, readAssociations, searchAll } from "@/lib/hubspot";
+import { availablePropertyNames, batchRead, HubSpotApiError, readAssociations, searchAll } from "@/lib/hubspot";
 import { normalizeCompanyDomain } from "@/lib/prospecting-company-intelligence";
 
 export const runtime = "nodejs";
@@ -25,6 +25,7 @@ const schema = z.object({
   emails: z.array(z.string().trim().max(320)).max(20).default([]),
   phone: z.string().trim().max(120).default(""),
   phones: z.array(z.string().trim().max(120)).max(20).default([]),
+  freshCompanyEngagement: z.boolean().default(false),
 });
 
 type EngagementCheck = {
@@ -206,7 +207,9 @@ async function scanCompanyEngagement(companyId: string): Promise<EngagementCheck
   }
 }
 
-async function companyEngagementCheck(companyId: string): Promise<EngagementCheck> {
+async function companyEngagementCheck(companyId: string, fresh = false): Promise<EngagementCheck> {
+  // Paid reveals and final CRM writes must see changes made since the free check.
+  if (fresh) return scanCompanyEngagement(companyId);
   const now = Date.now();
   const cached = engagementCache.get(companyId);
   if (cached?.value && cached.expiresAt > now) return cached.value;
@@ -214,7 +217,9 @@ async function companyEngagementCheck(companyId: string): Promise<EngagementChec
 
   const inflight = scanCompanyEngagement(companyId)
     .then((value) => {
-      engagementCache.set(companyId, { value, expiresAt: Date.now() + ENGAGEMENT_CACHE_TTL_MS });
+      // A failed/incomplete check must recover immediately when the user retries.
+      if (value.checked) engagementCache.set(companyId, { value, expiresAt: Date.now() + ENGAGEMENT_CACHE_TTL_MS });
+      else engagementCache.delete(companyId);
       return value;
     })
     .catch((error) => {
@@ -230,7 +235,16 @@ async function linkedInContactMatch(input: z.infer<typeof schema>, props: string
   const normalized = normalizeLinkedIn(input.linkedinUrl);
   if (!normalized) return null;
   const variants = unique([input.linkedinUrl, normalized, `${normalized}/`]);
-  const candidateProperties = ["gtm_linkedin_url", "linkedin_url", "hs_linkedin_url"];
+  let candidateProperties = ["gtm_linkedin_url", "linkedin_url", "hs_linkedin_url"];
+  try {
+    // The existing HubSpot reference cache shares this metadata across people.
+    // Avoid rate-limited searches that are guaranteed to fail for absent fields.
+    const available = await availablePropertyNames("contacts");
+    candidateProperties = candidateProperties.filter(property => available.has(property));
+  } catch {
+    // Metadata is optional: preserve the existing exact searches during an outage.
+    console.warn("HubSpot contact property metadata unavailable; checking configured LinkedIn mappings.");
+  }
 
   for (const propertyName of candidateProperties) {
     for (const value of variants) {
@@ -329,7 +343,7 @@ async function companyCheck(input: z.infer<typeof schema>) {
   const accountType = String(p.account_type || "").trim();
   const accountStatus = String(p.account_status || "").trim();
   const openDeals = Math.max(0, Number(p.hs_num_open_deals || 0) || 0);
-  const engagement = await companyEngagementCheck(String(match.id));
+  const engagement = await companyEngagementCheck(String(match.id), input.freshCompanyEngagement);
   const isRetention = retentionAccount(accountType);
   const engagementUnknown = !engagement.checked;
   const hasMeeting = engagement.meetingCount > 0;

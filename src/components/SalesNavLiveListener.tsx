@@ -34,12 +34,13 @@ export function SalesNavLiveListener() {
   const [error, setError] = useState("");
   const [checkedAt, setCheckedAt] = useState(0);
   const seen = useRef<SeenState | null>(null);
-  const reloading = useRef(false);
 
   useEffect(() => {
-    let active = true;
+    let active = true, checking = false;
 
     const poll = async () => {
+      if (checking) return;
+      checking = true;
       try {
         const response = await fetch("/api/prospecting/salesnav/companion", { cache: "no-store" });
         const payload = await response.json() as CompanionStatus & { error?: string };
@@ -63,18 +64,12 @@ export function SalesNavLiveListener() {
         if (profilesChanged) window.dispatchEvent(new CustomEvent("salesnav:profiles-synced", { detail: { runId: next.id } }));
 
         if (currentRunFinished) window.dispatchEvent(new CustomEvent("salesnav:profiles-synced", { detail: { runId: next.id } }));
-        if (newRunArrived && !reloading.current) {
-          const eventKey = `${next.id}:${next.complete ? "complete" : "started"}`;
-          const previousEvent = window.sessionStorage.getItem("salesnav-live-listener-event");
-          if (previousEvent !== eventKey) {
-            window.sessionStorage.setItem("salesnav-live-listener-event", eventKey);
-            reloading.current = true;
-            window.location.reload();
-          }
-        }
+        if (newRunArrived) window.dispatchEvent(new CustomEvent("salesnav:new-run", { detail: { runId: next.id } }));
       } catch (requestError) {
         if (!active) return;
         setError(requestError instanceof Error ? requestError.message : "Could not read Companion status.");
+      } finally {
+        checking = false;
       }
     };
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { POST as resolveCompanion } from "@/app/api/prospecting/resolve-companion/route";
 import { POST as hubspotPrecheckV2 } from "@/app/api/prospecting/salesnav/precheck-v2/route";
-import { lookupSalesNavLead, saveSalesNavReveal } from "@/lib/salesnav-lead-ledger";
+import { lookupSalesNavLead, reserveSalesNavReveal, salesNavRevealStatus, saveSalesNavReveal } from "@/lib/salesnav-lead-ledger";
 import { normalizePersonUrl } from "@/lib/ai-sdr-qualification";
 import { cachedSalesNavIdentityMismatch, salesNavNameMismatch } from "@/lib/salesnav-identity";
 
@@ -55,6 +55,7 @@ async function postRevealCheck(request: NextRequest, lead: z.infer<typeof schema
     emails: prospect.emails || [],
     phone: prospect.phone || "",
     phones: prospect.phones || [],
+    freshCompanyEngagement: true,
   }));
   const payload = await jsonFrom(response);
   if (!response.ok) throw new Error(String(payload.error || "HubSpot post-reveal check failed."));
@@ -70,61 +71,78 @@ export async function POST(request: NextRequest) {
     if (!publicProfile) return NextResponse.json({ error: "A verified public LinkedIn person URL is required before reveal. No contact credits were used.", creditUsed: false }, { status: 422 });
     lead.linkedinUrl = publicProfile;
 
-    const cached = await lookupSalesNavLead(lead);
-    if (cached?.revealAttemptedAt) {
-      const cachedMismatch = cachedSalesNavIdentityMismatch(publicProfile, cached)
-        || (cached.cachedProspect ? salesNavNameMismatch(lead, cached.cachedProspect) : "");
-      if (cachedMismatch) return NextResponse.json({ error: cachedMismatch, creditUsed: false }, { status: 409 });
+    const previous = await lookupSalesNavLead(lead);
+    if (previous?.revealAttemptedAt) {
+      const mismatch = cachedSalesNavIdentityMismatch(publicProfile, previous)
+        || (previous.cachedProspect ? salesNavNameMismatch(lead, previous.cachedProspect) : "");
+      if (mismatch) return NextResponse.json({ error: mismatch, creditUsed: false }, { status: 409 });
+    }
+    const reservation = await reserveSalesNavReveal({ identity: lead, runId });
+    const cached = reservation.record;
+    if (cached) {
+      const mismatch = cachedSalesNavIdentityMismatch(publicProfile, cached) || (cached.cachedProspect ? salesNavNameMismatch(lead, cached.cachedProspect) : "");
+      if (mismatch) return NextResponse.json({ error: mismatch, creditUsed: false }, { status: 409 });
+    }
+    if (!reservation.reserved && cached) {
+      const status = salesNavRevealStatus(cached);
       if (cached.cachedProspect) {
         const prospect = cached.cachedProspect as JsonObject;
         const check = await postRevealCheck(request, lead, prospect);
-        return NextResponse.json({
-          ok: true,
-          cached: true,
-          creditUsed: false,
-          prospect,
-          hasPhone: hasPhone(prospect),
-          postRevealCheck: check,
-          message: "Reused a previous SignalHire reveal — 0 new Contact Credits.",
-        }, { headers: { "Cache-Control": "no-store" } });
+        return NextResponse.json({ ok: true, cached: true, creditUsed: false, prospect, hasPhone: hasPhone(prospect), postRevealCheck: check,
+          message: "Reused a previous SignalHire reveal — 0 new Contact Credits." }, { headers: { "Cache-Control": "no-store" } });
       }
-      return NextResponse.json({
-        ok: true,
-        cached: true,
-        creditUsed: false,
-        prospect: null,
-        hasPhone: false,
-        message: "Previously revealed with no usable contact result; repeat credit spend is blocked.",
-      }, { headers: { "Cache-Control": "no-store" } });
+      if (status === "no-result") return NextResponse.json({ ok: true, cached: true, creditUsed: false, prospect: null, hasPhone: false,
+        message: "SignalHire completed this reveal without usable contacts. No repeat credit spend." }, { headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json({ error: cached.revealError || (status === "pending" ? "This reveal is already in progress. Reload its saved result shortly; another paid request was not sent." : "The previous provider response is uncertain. Review the attempt before another paid request; contact credits may have been used."), revealStatus: status, creditUsed: false }, { status: 409 });
     }
 
-    // Mark first-time reveal before contacting SignalHire so accidental retries cannot
-    // spend another credit if the browser times out after the provider accepted it.
-    await saveSalesNavReveal({ identity: lead, runId, attempted: true });
+    if (!reservation.reserved) throw new Error("Reveal could not be reserved safely. No provider request was sent.");
 
-    const revealResponse = await resolveCompanion(requestLike(request, "/api/prospecting/resolve-companion", {
-      linkedinUrl: lead.linkedinUrl,
-      name: lead.name,
-      company: lead.company,
-      title: lead.title,
-      location: lead.location,
-      source: "Sales Nav Full Search",
-    }));
-    const revealPayload = await jsonFrom(revealResponse);
+    try {
+      const preflight = await postRevealCheck(request, lead, {});
+      const contact = preflight.contact as JsonObject | undefined;
+      const company = preflight.company as JsonObject | undefined;
+      if (contact?.inHubSpot || company?.protected) {
+        const message = String(company?.protectedReason || "This person is no longer eligible for a paid reveal.");
+        await saveSalesNavReveal({ identity: lead, runId, status: "retryable", error: message });
+        return NextResponse.json({ error: message, postRevealCheck: preflight, creditUsed: false, revealStatus: "retryable" }, { status: 409 });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "HubSpot eligibility could not be verified.";
+      await saveSalesNavReveal({ identity: lead, runId, status: "retryable", error: message });
+      return NextResponse.json({ error: message, creditUsed: false, revealStatus: "retryable" }, { status: 503 });
+    }
+
+    let revealResponse: Response;
+    let revealPayload: JsonObject;
+    try {
+      revealResponse = await resolveCompanion(requestLike(request, "/api/prospecting/resolve-companion", {
+        linkedinUrl: lead.linkedinUrl, name: lead.name, company: lead.company, title: lead.title,
+        location: lead.location, source: "Sales Nav Full Search",
+      }));
+      revealPayload = await jsonFrom(revealResponse);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Provider response was interrupted.";
+      await saveSalesNavReveal({ identity: lead, runId, status: "uncertain", error: message });
+      return NextResponse.json({ error: `${message} Review this attempt before retrying; provider acceptance is unknown.`, revealStatus: "uncertain" }, { status: 502 });
+    }
     if (!revealResponse.ok || !revealPayload.prospect) {
-      return NextResponse.json({
-        error: String(revealPayload.error || "SignalHire could not reveal this lead."),
-        creditUsed: true,
-      }, { status: revealResponse.status || 502 });
+      const message = String(revealPayload.error || "SignalHire could not reveal this lead.");
+      const status = revealPayload.definitiveNoResult === true ? "no-result" : revealPayload.creditUsed === false ? "retryable" : "uncertain";
+      await saveSalesNavReveal({ identity: lead, runId, status, error: message });
+      return NextResponse.json({ error: message, revealStatus: status, creditUsed: revealPayload.creditUsed ?? null }, { status: revealResponse.ok ? 502 : revealResponse.status });
     }
 
     // Keep the reveal critical path focused on contact data. ATS/career/hiring research
     // used to run synchronously here and was the main source of long waits. It can be
     // enriched later during downstream company workflows; phone/email are available now.
     const prospect = revealPayload.prospect as JsonObject;
-    await saveSalesNavReveal({ identity: lead, prospect, runId, attempted: true });
-    const nameMismatch = salesNavNameMismatch(lead, prospect);
-    if (nameMismatch) return NextResponse.json({ error: nameMismatch, creditUsed: true }, { status: 409 });
+    const nameMismatch = salesNavNameMismatch(lead, prospect) || cachedSalesNavIdentityMismatch(publicProfile, { linkedinUrl: String(prospect.linkedinUrl || "") });
+    if (nameMismatch) {
+      await saveSalesNavReveal({ identity: lead, runId, status: "uncertain", error: nameMismatch });
+      return NextResponse.json({ error: nameMismatch, creditUsed: true, revealStatus: "uncertain" }, { status: 409 });
+    }
+    await saveSalesNavReveal({ identity: lead, prospect, runId, status: "completed", error: "" });
     const check = await postRevealCheck(request, lead, prospect);
 
     return NextResponse.json({

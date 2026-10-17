@@ -12,6 +12,15 @@ const NORMAL_DELAY_MS = 6500;
 const RETRY_DELAY_MS = 3000;
 const MAX_STALE_RETRIES = 8;
 let processing = false;
+let starting = false;
+let captureStopRequested = false;
+globalThis.isSalesNavCaptureBusy = () => starting || processing;
+globalThis.pauseSalesNavCapture = async () => {
+  captureStopRequested = true;
+  const saved = (await chrome.storage.local.get([FULL_RUN_KEY]))[FULL_RUN_KEY];
+  if (saved && !saved.complete) await setRun({ ...saved, paused: true, backgroundStatus: 'Paused from dashboard' });
+  await chrome.alarms.clear(CONTINUE_ALARM);
+};
 
 function leadKey(lead) {
   return lead.salesLeadUrl || lead.linkedinUrl || `${String(lead.name || '').toLowerCase()}:${String(lead.company || '').toLowerCase()}`;
@@ -86,6 +95,7 @@ async function dashboardPost(body) {
       'X-Companion-Version': CLIENT_VERSION,
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(20000),
   });
   const text = await response.text();
   let payload = {};
@@ -287,7 +297,7 @@ async function scheduleContinuation(tabId, delayMs = NORMAL_DELAY_MS) {
 
 async function setRun(run, { resume = false } = {}) {
   const current = (await chrome.storage.local.get([FULL_RUN_KEY]))[FULL_RUN_KEY];
-  const paused = resume ? false : Boolean(run.paused || (current?.runId === run.runId && current.paused));
+  const paused = Boolean(captureStopRequested || (!resume && (run.paused || (current?.runId === run.runId && current.paused))));
   await chrome.storage.local.set({ [FULL_RUN_KEY]: { ...run, paused, backgroundUpdatedAt: new Date().toISOString() } });
 }
 
@@ -307,6 +317,18 @@ async function markComplete(run, stopReason) {
   await chrome.storage.local.remove([CONTINUATION_TAB_KEY]);
   await chrome.alarms.clear(CONTINUE_ALARM);
   await setRun({ ...complete, backgroundStatus: 'Cards saved. Read missing URLs from the dashboard.' });
+  if (run.readProfilesOnComplete && !captureStopRequested && !(await chrome.storage.local.get([FULL_RUN_KEY]))[FULL_RUN_KEY]?.paused) {
+    try {
+      const saved = await dashboardPost({ action: 'profile_read_run', runId: run.runId });
+      if (captureStopRequested || (await chrome.storage.local.get([FULL_RUN_KEY]))[FULL_RUN_KEY]?.paused) return;
+      if (saved.leads?.length) {
+        await globalThis.startCapturedProfileChecks(saved.leads, saved.sourceUrl, run.runId, { afterCapture: true });
+        await setRun({ ...complete, backgroundStatus: 'Cards saved. Reading missing public URLs automatically.' });
+      } else await setRun({ ...complete, backgroundStatus: 'Scrape finished. All saved cards have public profile URLs.' });
+    } catch (error) {
+      await setRun({ ...complete, backgroundStatus: `Cards saved. URL reading could not start: ${error instanceof Error ? error.message : 'Collector unavailable'}. Retry missing URLs from the dashboard.` });
+    }
+  }
 }
 
 async function persistCurrentPage(run, current) {
@@ -332,7 +354,7 @@ async function persistCurrentPage(run, current) {
 }
 
 async function advance(run, tabId) {
-  if ((await chrome.storage.local.get([FULL_RUN_KEY]))[FULL_RUN_KEY]?.paused) return run;
+  if (captureStopRequested || (await chrome.storage.local.get([FULL_RUN_KEY]))[FULL_RUN_KEY]?.paused) return run;
   if (Number(run.pagesRead || 0) >= MAX_PAGES) return markComplete(run, `Reached ${MAX_PAGES}-page safety cap`);
   if (Number(run.total || 0) >= MAX_LEADS) return markComplete(run, `Reached ${MAX_LEADS}-lead safety cap`);
   const moved = await clickNext(tabId);
@@ -348,9 +370,18 @@ async function advance(run, tabId) {
   await scheduleContinuation(tabId, NORMAL_DELAY_MS);
 }
 
-async function startOrResume(tabId) {
+async function startOrResume(tabId, { readProfilesOnComplete = false } = {}) {
+  // Claim synchronously, before the first Chrome await, so two dashboard tabs
+  // cannot replace one another's run while the initial page is loading.
+  if (starting || processing) throw new Error('Search capture is already busy. Wait for the current page to finish.');
+  starting = true;
+  captureStopRequested = false;
+  try {
+  const queue = (await chrome.storage.local.get(['salesNavWorkQueueV160'])).salesNavWorkQueueV160;
+  if (globalThis.isCapturedProfileReaderBusy?.() || (queue?.action === 'read' && queue.pending?.length && !queue.paused)) throw new Error('URL reading is running. Stop it before starting a search capture.');
   if (!await verifySalesNavTab(tabId)) throw new Error('Open a Sales Navigator People Search tab first.');
   const current = await extractPage(tabId);
+  if (captureStopRequested) throw new Error('Search capture was stopped from the dashboard.');
   if (!current.ok) throw new Error(current.error || 'Could not read Sales Navigator.');
   const signature = pageSignature(current.leads || []);
   if (!signature) throw new Error('Sales Navigator is still loading. Wait for the people cards to appear, then press Capture FULL search again.');
@@ -371,6 +402,7 @@ async function startOrResume(tabId) {
     };
   }
 
+  run.readProfilesOnComplete = readProfilesOnComplete;
   run.paused = false;
   await setRun(run, { resume: true });
   if (!run.signatures?.includes(signature)) run = await persistCurrentPage(run, current);
@@ -389,6 +421,11 @@ async function startOrResume(tabId) {
   await chrome.storage.local.set({ [CONTINUATION_TAB_KEY]: tabId });
   await advance(run, tabId);
   return run;
+  } catch (error) {
+    const saved = (await chrome.storage.local.get([FULL_RUN_KEY]))[FULL_RUN_KEY];
+    if (saved && !saved.complete) await setRun({ ...saved, paused: true, backgroundError: error instanceof Error ? error.message : 'Search capture failed.', backgroundStatus: 'Paused with error. Progress is saved; resume from the dashboard.' });
+    throw error;
+  } finally { starting = false; }
 }
 
 async function processContinuation(tabId) {
@@ -399,14 +436,18 @@ async function processContinuation(tabId) {
     let run = stored[FULL_RUN_KEY];
     if (!run || run.complete || run.paused || !run.runId) return;
     if (!await verifySalesNavTab(tabId)) {
-      await setRun({ ...run, backgroundError: 'The saved Sales Navigator tab is no longer a People Search. Reopen the search and press Resume.', backgroundStatus: 'Paused' });
+      await setRun({ ...run, paused: true, backgroundError: 'The saved Sales Navigator tab is no longer a People Search. Reopen the search and press Resume.', backgroundStatus: 'Paused' });
       return;
     }
 
     const current = await extractPage(tabId);
+    if (searchFingerprint(current.sourceUrl) !== run.searchFingerprint) {
+      await setRun({ ...run, paused: true, backgroundError: 'The search or filters changed during capture. No cards from the changed search were saved. Reopen the original search to resume, or start the new search from the dashboard.', backgroundStatus: 'Paused because the search changed' });
+      return;
+    }
     if (!current.ok) {
       const retries = Number(run.staleRetries || 0) + 1;
-      await setRun({ ...run, staleRetries: retries, backgroundError: current.error || 'Could not read Sales Navigator.', backgroundStatus: `Waiting for Sales Nav · retry ${retries}/${MAX_STALE_RETRIES}` });
+      await setRun({ ...run, paused: retries >= MAX_STALE_RETRIES, staleRetries: retries, backgroundError: current.error || 'Could not read Sales Navigator.', backgroundStatus: `Waiting for Sales Nav · retry ${retries}/${MAX_STALE_RETRIES}` });
       if (retries < MAX_STALE_RETRIES) await scheduleContinuation(tabId, RETRY_DELAY_MS);
       return;
     }
@@ -417,7 +458,7 @@ async function processContinuation(tabId) {
       const retries = Number(run.staleRetries || 0) + 1;
       await setRun({ ...run, staleRetries: retries, backgroundError: '', backgroundStatus: `Sales Nav cards are loading · retry ${retries}/${MAX_STALE_RETRIES}` });
       if (retries < MAX_STALE_RETRIES) await scheduleContinuation(tabId, RETRY_DELAY_MS);
-      else await setRun({ ...run, staleRetries: retries, backgroundError: 'Sales Navigator kept showing a loading skeleton. Progress is saved; press Resume when the cards finish loading.', backgroundStatus: 'Paused on loading page' });
+      else await setRun({ ...run, paused: true, staleRetries: retries, backgroundError: 'Sales Navigator kept showing a loading skeleton. Progress is saved; press Resume when the cards finish loading.', backgroundStatus: 'Paused on loading page' });
       return;
     }
 
@@ -428,7 +469,7 @@ async function processContinuation(tabId) {
       const retries = Number(run.staleRetries || 0) + 1;
       await setRun({ ...run, staleRetries: retries, backgroundError: '', backgroundStatus: `URL changed but LinkedIn is still showing the previous cards · retry ${retries}/${MAX_STALE_RETRIES}` });
       if (retries < MAX_STALE_RETRIES) await scheduleContinuation(tabId, RETRY_DELAY_MS);
-      else await setRun({ ...run, staleRetries: retries, backgroundError: 'LinkedIn changed page URL but kept stale cards too long. No page was skipped. Press Resume after the new cards appear.', backgroundStatus: 'Paused safely before next capture' });
+      else await setRun({ ...run, paused: true, staleRetries: retries, backgroundError: 'LinkedIn changed page URL but kept stale cards too long. No page was skipped. Press Resume after the new cards appear.', backgroundStatus: 'Paused safely before next capture' });
       return;
     }
 
@@ -456,7 +497,7 @@ async function processContinuation(tabId) {
     const stored = await chrome.storage.local.get([FULL_RUN_KEY]);
     const run = stored[FULL_RUN_KEY];
     if (run && !run.complete) {
-      await setRun({ ...run, backgroundError: error instanceof Error ? error.message : 'Background continuation failed.', backgroundStatus: 'Paused with error' });
+      await setRun({ ...run, paused: true, backgroundError: error instanceof Error ? error.message : 'Background continuation failed.', backgroundStatus: 'Paused with error. Progress is saved; resume from the dashboard.' });
     }
   } finally {
     processing = false;

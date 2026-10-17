@@ -1,6 +1,6 @@
-import { mergeCapturedProfile, type CapturedProfile } from "./salesnav-profile-sync.ts";
+import { mergeCapturedProfile, publicPersonProfile, type CapturedProfile } from "./salesnav-profile-sync.ts";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { chmod, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 const PAIRING_STORE = process.env.SALESNAV_COMPANION_STORE_PATH || "/app/data/salesnav-companion.json";
@@ -59,7 +59,26 @@ function sha256(value: string) {
 }
 
 function leadKey(lead: CompanionLead) {
-  return lead.salesLeadUrl || lead.linkedinUrl || `${lead.name.toLowerCase()}:${lead.company.toLowerCase()}`;
+  try {
+    const url = new URL(lead.salesLeadUrl);
+    const person = url.pathname.match(/^\/sales\/lead\/([^/,?#]+)/)?.[1];
+    if (url.protocol === "https:" && /^(www\.)?linkedin\.com$/i.test(url.hostname) && person) return `sales:${person}`;
+  } catch { /* Public profile or name/company is the fallback identity. */ }
+  return lead.salesLeadUrl || publicPersonProfile(lead.linkedinUrl) || `${lead.name.toLowerCase()}:${lead.company.toLowerCase()}`;
+}
+
+function mergeCapturedLead(existing: CompanionLead, incoming: CompanionLead): CompanionLead {
+  return {
+    ...incoming,
+    ...existing,
+    title: existing.title || incoming.title,
+    company: existing.company || incoming.company,
+    location: existing.location || incoming.location,
+    connectionDegree: existing.connectionDegree || incoming.connectionDegree,
+    salesLeadUrl: existing.salesLeadUrl || incoming.salesLeadUrl,
+    linkedinUrl: publicPersonProfile(existing.linkedinUrl) || publicPersonProfile(incoming.linkedinUrl) || "",
+    rawText: existing.rawText || incoming.rawText,
+  };
 }
 
 function historyPath(id: string) {
@@ -68,11 +87,14 @@ function historyPath(id: string) {
 
 async function atomicWrite(path: string, payload: string) {
   await mkdir(/* turbopackIgnore: true */ dirname(path), { recursive: true });
-  const temp = `${path}.tmp`;
-  await writeFile(/* turbopackIgnore: true */ temp, payload, { encoding: "utf8", mode: 0o600 });
-  await chmod(temp, 0o600);
-  await rename(/* turbopackIgnore: true */ temp, /* turbopackIgnore: true */ path);
-  await chmod(path, 0o600);
+  const temp = `${path}.${randomBytes(12).toString("hex")}.tmp`;
+  try {
+    await writeFile(/* turbopackIgnore: true */ temp, payload, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    await rename(/* turbopackIgnore: true */ temp, /* turbopackIgnore: true */ path);
+    await chmod(path, 0o600);
+  } finally {
+    await unlink(/* turbopackIgnore: true */ temp).catch(() => undefined);
+  }
 }
 
 async function readPairingStore(): Promise<PairingStore | null> {
@@ -100,12 +122,10 @@ async function readFullRun(path: string): Promise<CompanionFullRun | null> {
   }
 }
 
-async function persistFullRun(run: CompanionFullRun) {
+async function persistFullRun(run: CompanionFullRun, updateLatest = true) {
   const payload = JSON.stringify(run);
-  await Promise.all([
-    atomicWrite(FULL_RUN_STORE, payload),
-    atomicWrite(historyPath(run.id), payload),
-  ]);
+  await atomicWrite(historyPath(run.id), payload);
+  if (updateLatest) await atomicWrite(FULL_RUN_STORE, payload);
 }
 
 async function archiveLegacyLatest(nextRunId = "") {
@@ -125,14 +145,23 @@ export async function companionStatus() {
   };
 }
 
-export async function generateCompanionToken() {
-  const token = `snc_${randomBytes(32).toString("base64url")}`;
-  await atomicWrite(PAIRING_STORE, JSON.stringify({
-    tokenHash: sha256(token),
-    profileActionsEnabled: true,
-    createdAt: new Date().toISOString(),
-  }));
-  return token;
+let pairingWriteQueue: Promise<unknown> = Promise.resolve();
+function withPairingWrite<T>(write: () => Promise<T>): Promise<T> {
+  const next = pairingWriteQueue.then(write);
+  pairingWriteQueue = next.catch(() => undefined);
+  return next;
+}
+
+export function generateCompanionToken() {
+  return withPairingWrite(async () => {
+    const token = `snc_${randomBytes(32).toString("base64url")}`;
+    await atomicWrite(PAIRING_STORE, JSON.stringify({
+      tokenHash: sha256(token),
+      profileActionsEnabled: true,
+      createdAt: new Date().toISOString(),
+    }));
+    return token;
+  });
 }
 
 export async function verifyCompanionToken(raw: string) {
@@ -145,10 +174,12 @@ export async function verifyCompanionToken(raw: string) {
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
-export async function touchCompanionToken() {
-  const store = await readPairingStore();
-  if (!store) return;
-  await atomicWrite(PAIRING_STORE, JSON.stringify({ ...store, lastUsedAt: new Date().toISOString() }));
+export function touchCompanionToken() {
+  return withPairingWrite(async () => {
+    const store = await readPairingStore();
+    if (!store) return;
+    await atomicWrite(PAIRING_STORE, JSON.stringify({ ...store, lastUsedAt: new Date().toISOString() }));
+  });
 }
 
 export async function saveCompanionBatch(batch: CompanionBatch) {
@@ -217,6 +248,7 @@ async function saveCompanionFullRunPageUnsafe(input: {
   const now = new Date().toISOString();
   await archiveLegacyLatest(input.id);
   const existing = await getCompanionFullRun(input.id);
+  const latest = await getLatestCompanionFullRun();
   const base: CompanionFullRun = existing || {
     id: input.id,
     startedAt: now,
@@ -235,9 +267,14 @@ async function saveCompanionFullRunPageUnsafe(input: {
   const unique = new Map<string, CompanionLead>();
   for (const lead of [...base.leads, ...input.leads]) {
     const key = leadKey(lead);
-    if (!key || unique.has(key)) continue;
+    if (!key) continue;
+    const previous = unique.get(key);
+    if (previous) {
+      unique.set(key, mergeCapturedLead(previous, lead));
+      continue;
+    }
+    if (unique.size >= FULL_RUN_MAX_LEADS) continue;
     unique.set(key, lead);
-    if (unique.size >= FULL_RUN_MAX_LEADS) break;
   }
 
   const next: CompanionFullRun = {
@@ -252,13 +289,14 @@ async function saveCompanionFullRunPageUnsafe(input: {
     parserVersion: input.parserVersion || base.parserVersion,
     leads: [...unique.values()],
   };
-  await persistFullRun(next);
+  await persistFullRun(next, !existing || !latest || latest.id === input.id);
   return next;
 }
 
 async function finishCompanionFullRunUnsafe(id: string, stopReason: string) {
   const existing = await getCompanionFullRun(id);
   if (!existing) return null;
+  const latest = await getLatestCompanionFullRun();
   const now = new Date().toISOString();
   const next: CompanionFullRun = {
     ...existing,
@@ -267,7 +305,7 @@ async function finishCompanionFullRunUnsafe(id: string, stopReason: string) {
     updatedAt: now,
     stopReason,
   };
-  await persistFullRun(next);
+  await persistFullRun(next, !latest || latest.id === id);
   return next;
 }
 
@@ -293,8 +331,7 @@ export function syncCompanionProfile(profile: CapturedProfile, expectedRunId?: s
     const result = mergeCapturedProfile(run.leads, profile);
     if (!result.synced) return false;
     const next = { ...run, leads: result.leads, updatedAt: new Date().toISOString() };
-    if (latest?.id === run.id) await persistFullRun(next);
-    else await atomicWrite(historyPath(run.id), JSON.stringify(next));
+    await persistFullRun(next, latest?.id === run.id);
     return true;
   });
 }

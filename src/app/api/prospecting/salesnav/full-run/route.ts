@@ -1,3 +1,6 @@
+import { readSalesNavPushStates } from "@/lib/salesnav-push-attempt";
+import { cachedSalesNavIdentityMismatch, salesNavNameMismatch } from "@/lib/salesnav-identity";
+import { salesNavLeadStates } from "@/lib/salesnav-lead-ledger";
 import { originMatchesRequestHosts } from "@/lib/request-origin";
 import { z } from "zod";
 import { publicPersonProfile } from "@/lib/salesnav-profile-sync";
@@ -47,12 +50,24 @@ export async function GET(request: NextRequest) {
   }
 
   const requestedId = String(request.nextUrl.searchParams.get("id") || "").trim();
+  if (requestedId && !z.string().uuid().safeParse(requestedId).success) return NextResponse.json({ error: "Invalid saved run ID." }, { status: 400 });
   const run = requestedId ? await getCompanionFullRun(requestedId) : await migrateLegacyBatchIfNeeded();
   const history = await listCompanionFullRuns(100);
+  const [reveals, pushes] = run ? await Promise.all([salesNavLeadStates(run.leads), readSalesNavPushStates(run.leads)]) : [[], []];
+  const leadStates = run?.leads.map((lead, index) => {
+    const saved = reveals[index], push = pushes[index];
+    if (!push) return saved;
+    const mismatch = cachedSalesNavIdentityMismatch(lead.linkedinUrl, { cachedProspect: push.prospect }) || salesNavNameMismatch(lead, push.prospect);
+    if (mismatch) return { ...saved, resumeContactId: "", pushRetryable: false, revealStatus: "uncertain", revealError: mismatch };
+    return { ...saved, prospect: saved?.prospect || push.prospect,
+      revealStatus: saved?.revealStatus || "completed", resumeContactId: push.resumeContactId, pushRetryable: push.pushRetryable,
+      taskId: push.taskId || saved?.taskId, contactId: push.contactId || saved?.contactId,
+      companyId: push.companyId || saved?.companyId, pushCompleted: Boolean(push.result && push.taskId) };
+  });
 
   return NextResponse.json({
     ok: true,
-    run: run ? { ...run, total: run.leads.length } : null,
+    run: run ? { ...run, total: run.leads.length, leadStates } : null,
     history,
   }, { headers: { "Cache-Control": "no-store" } });
 }
@@ -64,8 +79,8 @@ export async function POST(request: NextRequest) {
   if (!unlocked(request)) return NextResponse.json({ error: "Unlock SDR tools first." }, { status: 401 });
   const parsed = z.object({ runId: z.string().uuid(), salesLeadUrl: z.string().url().max(1500), linkedinUrl: z.string().url().max(1500) }).safeParse(await request.json().catch(() => null));
   if (!parsed.success || !publicPersonProfile(parsed.data.linkedinUrl)) return NextResponse.json({ error: "Enter an HTTPS LinkedIn person URL containing /in/." }, { status: 400 });
-  const run = await getLatestCompanionFullRun();
-  if (run?.id !== parsed.data.runId) return NextResponse.json({ error: "Open the latest run before repairing its profile links." }, { status: 409 });
+  const run = await getCompanionFullRun(parsed.data.runId);
+  if (!run) return NextResponse.json({ error: "Saved run was not found." }, { status: 404 });
   const lead = run.leads.find(person => person.salesLeadUrl === parsed.data.salesLeadUrl);
   if (!lead) return NextResponse.json({ error: "Person was not found in this saved run." }, { status: 404 });
   try {
