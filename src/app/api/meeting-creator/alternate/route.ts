@@ -91,7 +91,7 @@ export async function POST(request:NextRequest) {
     const records:AcquisitionPerson[]=scored.filter((p)=>!previousIds.has(p.uid)).map((person,index)=>({
       uid:person.uid,accountDomain:row.domain,
       fullName:person.fullName,title:person.title,currentCompany:person.currentCompany,
-      location:person.location,linkedinUrl:person.linkedinUrl,
+      location:person.location,linkedinUrl:person.linkedinUrl || "",
       rankScore:person.score,fitReason:person.reason,emails:[],phones:[],
       enrichmentStatus:"search_only",selected:index===0,
       meta:{provider:"SignalHire search-only",verifiedCurrentCompany:true,
@@ -112,7 +112,7 @@ export async function POST(request:NextRequest) {
       note:"Search-only profiles: no contact phones or emails revealed; do not create a call task until a different working number is obtained and verified.",
       people:scored.map((p)=>({
         uid:p.uid,name:p.fullName,title:p.title,currentCompany:p.currentCompany,
-        linkedinUrl:p.linkedinUrl,score:p.score,phoneStatus:"not_revealed",
+        linkedinUrl:p.linkedinUrl || "",score:p.score,phoneStatus:"not_revealed",
       })),
     },{headers:{"Cache-Control":"private, no-store"}});
   }catch(error) {
