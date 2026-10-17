@@ -32,6 +32,7 @@ export type CreatorContact = {
   ownerId: string;
   linkedinUrl: string;
   salesEmailLastReplied: string;
+  phoneNumberStatus?: string;
 };
 
 export type CreatorCall = {
@@ -97,6 +98,7 @@ export type CreatorQueueRow = {
   connectedCalls: number;
   openTasks: number;
   wrongNumberCalls?: number;
+  wrongNumberContacts?: number;
   nextAction?: string;
 };
 
@@ -208,6 +210,8 @@ export function buildMeetingCreatorQueue(input: CreatorQueueInput): CreatorQueue
     const singleWrongNumberWithUnknownPerson = wrongNumberCalls > 0 && sourcePeople.length === 1 && unknownCalledPerson;
     const meaningfulMeeting = allMeetings.some((m) => m.outcome.toUpperCase() !== "CANCELED" && m.outcome.toUpperCase() !== "NO_SHOW" && m.outcome.toUpperCase() !== "RESCHEDULED");
     const positiveReplies = sourcePeople.filter((p) => clean(p.salesEmailLastReplied)).length;
+    const invalidPhoneContacts=sourcePeople.filter((p)=>/^(wrong number|exhausted)$/i.test(clean(p.phoneNumberStatus)));
+    const wrongNumberContacts=sourcePeople.filter((p)=>/^wrong number$/i.test(clean(p.phoneNumberStatus))).length;
     const protectedOwner = Boolean(company.ownerId && ![MEETING_CREATOR_MARITA_OWNER,MEETING_CREATOR_DANIEL_OWNER,MEETING_CREATOR_OPS_OWNER].includes(company.ownerId));
     const protectedAccount = !eligibleCountry(company.country)
       || company.employeeCount < 250
@@ -243,6 +247,7 @@ export function buildMeetingCreatorQueue(input: CreatorQueueInput): CreatorQueue
         const phone = normalizeSaudiMobile(p.mobilePhone) || normalizeSaudiMobile(p.phone);
         const persona = titleFit(p.title);
         const different = !calledIds.has(p.id) && !wrongContactIds.has(p.id)
+          && !/^(wrong number|exhausted|no answer)$/i.test(clean(p.phoneNumberStatus))
           && (!phone || (!calledNumbers.has(phone) && !wrongNumbers.has(phone)))
           && !(singleWrongNumberWithUnknownPerson && sourcePeople.length === 1);
         return { p, phone, persona, different, weight: (persona ? 100 : 0) + (phone ? 50 : 0) + (different ? 30 : 0) };
@@ -288,6 +293,11 @@ export function buildMeetingCreatorQueue(input: CreatorQueueInput): CreatorQueue
       } else {
         reason = reactivation.reason;
       }
+    } else if (invalidPhoneContacts.length > 0 && !best) {
+      status = "needs_alternate";
+      reason = wrongNumberContacts
+        ? "HubSpot Contact Phone Number Status = Wrong Number; find a new HR decision maker and a different phone."
+        : "Old contact phone is exhausted; research another HR decision maker.";
     } else if (wrongNumberCalls > 0 && allCalls.length > 0) {
       status = "needs_alternate";
       reason = wrongNumberCalls === 1
@@ -311,7 +321,7 @@ export function buildMeetingCreatorQueue(input: CreatorQueueInput): CreatorQueue
       contactPhone: status === "call_ready" ? best?.phone || "" : "",
       phoneEvidence: status === "call_ready" && best?.phone ? "saudi_mobile_format_unverified" : "missing",
       contactLinkedIn: selected?.p.linkedinUrl || "",
-      attemptedCalls, connectedCalls, openTasks, wrongNumberCalls,
+      attemptedCalls, connectedCalls, openTasks, wrongNumberCalls, wrongNumberContacts,
       nextAction: status === "needs_alternate" ? "Search-only: find a different HR decision maker; verify employer and new Saudi phone before creating a task." : "",
     });
   }
