@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
     const parsed = requestSchema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: "Invalid companion prospect." }, { status: 400 });
     const apiKey = String(process.env.SIGNALHIRE_API_KEY || "").trim();
-    if (!apiKey) return NextResponse.json({ error: "SIGNALHIRE_API_KEY is not configured." }, { status: 503 });
+    if (!apiKey) return NextResponse.json({ error: "SIGNALHIRE_API_KEY is not configured.", creditUsed: false }, { status: 503 });
 
     let identifier = normalizeLinkedIn(parsed.data.linkedinUrl);
     let matchedBy = identifier ? "linkedin_url" : "signalhire_search";
@@ -146,7 +146,7 @@ export async function POST(request: NextRequest) {
     const payload = await response.json().catch(() => null) as SignalHireResult[] | { error?: string } | null;
     if (!response.ok) {
       const message = payload && !Array.isArray(payload) && payload.error ? payload.error : `SignalHire returned HTTP ${response.status}.`;
-      return NextResponse.json({ error: message, creditsLeft }, { status: response.status });
+      return NextResponse.json({ error: message, creditsLeft, ...([401, 402, 403, 429].includes(response.status) ? { creditUsed: false } : {}) }, { status: response.status });
     }
     const item = Array.isArray(payload) ? payload[0] : null;
     if (!item || item.status !== "success" || !item.candidate) return NextResponse.json({ error: "SignalHire could not resolve this person." }, { status: 404 });

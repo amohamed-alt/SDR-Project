@@ -11,6 +11,7 @@ import { manualTaskOwners } from "@/lib/acquisition-routing";
 import { batchRead, HubSpotApiError, readAssociations, searchAll } from "@/lib/hubspot";
 import { normalizeCompanyDomain } from "@/lib/prospecting-company-intelligence";
 import { compatibleCompanyIdentity, normalizedCompanyName } from "@/lib/company-dedupe";
+import { checkpointSalesNavPush, currentSalesNavPushAttempt, withSalesNavPushCompany } from "@/lib/salesnav-push-attempt";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,6 +71,15 @@ type Prospect = z.infer<typeof prospectSchema>;
 
 type Assignment = { id: string; name: string; mode: "marita" | "acquisition" };
 
+class HubSpotWriteError extends Error {
+  status: number;
+  constructor(message: string, status: number) { super(message); this.status = status; }
+}
+
+function definitelyRejected(error: unknown) {
+  return error instanceof HubSpotWriteError && error.status >= 400 && error.status < 500 && error.status !== 408;
+}
+
 function token() {
   const value = String(process.env.HUBSPOT_PRIVATE_APP_TOKEN || "").trim();
   if (!value) throw new Error("HUBSPOT_PRIVATE_APP_TOKEN is not configured.");
@@ -103,7 +113,7 @@ async function hubspotRequest<T>(path: string, init: RequestInit) {
     cache: "no-store",
     signal: AbortSignal.timeout(30_000),
   });
-  if (!response.ok) throw new Error(`HubSpot ${path} failed (${response.status}): ${(await response.text()).slice(0, 500)}`);
+  if (!response.ok) throw new HubSpotWriteError(`HubSpot ${path} failed (${response.status}): ${(await response.text()).slice(0, 500)}`, response.status);
   if (response.status === 204) return undefined as T;
   return await response.json() as T;
 }
@@ -169,14 +179,19 @@ async function createContact(prospect: Prospect, ownerId: string) {
   if (prospect.company) properties.company = prospect.company;
   if (prospect.companyWebsite) properties.website = prospect.companyWebsite;
   if (prospect.linkedinUrl && await contactHasLinkedInProperty()) properties.gtm_linkedin_url = prospect.linkedinUrl;
-  const created = await hubspotRequest<{ id: string }>("/crm/v3/objects/contacts", { method: "POST", body: JSON.stringify({ properties }) });
+  await checkpointSalesNavPush({ contactWriteStarted: true });
+  let created: { id: string };
+  try { created = await hubspotRequest<{ id: string }>("/crm/v3/objects/contacts", { method: "POST", body: JSON.stringify({ properties }) }); }
+  catch (error) { if (definitelyRejected(error)) await checkpointSalesNavPush({ contactWriteStarted: false }); throw error; }
+  if (!created.id) throw new Error("HubSpot did not return a contact ID. Reconcile the uncertain create before retrying.");
+  await checkpointSalesNavPush({ contactId: String(created.id) });
   await verifyContactPhones(String(created.id), properties);
   return String(created.id);
 }
 
 async function syncMissingContactDetails(contactId: string, prospect: Prospect, ownerId: string) {
   const current = (await batchRead("contacts", [contactId], ["email", "phone", "mobilephone", "gtm_linkedin_url", "company", "jobtitle", "hubspot_owner_id"]))[0];
-  if (!current) return [] as string[];
+  if (!current) throw new Error("The saved HubSpot contact could not be read. Retry after verifying the contact; no new contact was created.");
   const properties: Record<string, string> = {};
   if (prospect.email && !String(current.properties.email || "").trim()) properties.email = prospect.email.toLowerCase();
   Object.assign(properties, missingProspectPhoneProperties(prospect, current.properties));
@@ -253,17 +268,24 @@ function companyPropertiesFromProspect(prospect: Prospect, includeIdentity = tru
   return properties;
 }
 
-async function createCompany(prospect: Prospect, ownerId: string) {
+async function createCompany(prospect: Prospect, ownerId: string, remember?: (id: string, writeStarted?: boolean) => Promise<void>) {
   const properties = companyPropertiesFromProspect(prospect, true, ownerId);
   if (!properties.name || !properties.domain) return "";
-  const created = await hubspotRequest<{ id: string }>("/crm/v3/objects/companies", { method: "POST", body: JSON.stringify({ properties }) });
+  await checkpointSalesNavPush({ companyWriteStarted: true });
+  await remember?.("");
+  let created: { id: string };
+  try { created = await hubspotRequest<{ id: string }>("/crm/v3/objects/companies", { method: "POST", body: JSON.stringify({ properties }) }); }
+  catch (error) { if (definitelyRejected(error)) { await checkpointSalesNavPush({ companyWriteStarted: false }); await remember?.("", false); } throw error; }
+  if (!created.id) throw new Error("HubSpot did not return a company ID. Reconcile the uncertain create before retrying.");
+  await remember?.(String(created.id));
+  await checkpointSalesNavPush({ companyId: String(created.id) });
   return String(created.id);
 }
 
 async function syncCompany(companyId: string, prospect: Prospect) {
   const fields = ["name", "domain", "company_website", "career_page_url", "detected_ats", "ats_status", "ats_confidence", "ats_evidence_url", "ats_evidence_reason", "hubspot_owner_id"];
   const current = (await batchRead("companies", [companyId], fields))[0];
-  if (!current) return { fieldsUpdated: [] as string[], existingOwnerId: "" };
+  if (!current) throw new Error("The saved HubSpot company could not be read. Verify its saved ID before another CRM write.");
   const desired = companyPropertiesFromProspect(prospect, false);
   if (prospect.companyWebsite && !String(current.properties.company_website || "").trim()) desired.company_website = prospect.companyWebsite;
   const properties: Record<string, string> = {};
@@ -277,14 +299,17 @@ async function syncCompany(companyId: string, prospect: Prospect) {
 
 async function ensureCompany(prospect: Prospect, requestedOwnerId: string) {
   const domain = companyDomain(prospect);
-  let companyId = await findCompanyId(prospect);
-  if (!companyId) {
-    if (!domain) return { companyId: "", created: false, fieldsUpdated: [] as string[], existingOwnerId: "" };
-    companyId = await createCompany(prospect, requestedOwnerId);
-    return { companyId, created: Boolean(companyId), fieldsUpdated: [] as string[], existingOwnerId: "" };
-  }
-  const synced = await syncCompany(companyId, prospect);
-  return { companyId, created: false, fieldsUpdated: synced.fieldsUpdated, existingOwnerId: synced.existingOwnerId };
+  return await withSalesNavPushCompany(domain, async (knownId, remember) => {
+    let companyId = currentSalesNavPushAttempt()?.companyId || knownId || await findCompanyId(prospect);
+    if (!companyId) {
+      if (!domain) return { companyId: "", created: false, fieldsUpdated: [] as string[], existingOwnerId: "" };
+      companyId = await createCompany(prospect, requestedOwnerId, remember);
+      return { companyId, created: Boolean(companyId), fieldsUpdated: [] as string[], existingOwnerId: "" };
+    }
+    const synced = await syncCompany(companyId, prospect);
+    if (domain) await remember(companyId);
+    return { companyId, created: false, fieldsUpdated: synced.fieldsUpdated, existingOwnerId: synced.existingOwnerId };
+  });
 }
 
 function finalAssignment(requested: Assignment, companyExistingOwnerId: string): Assignment {
@@ -299,14 +324,12 @@ async function associateContactCompany(contactId: string, companyId: string) {
 }
 
 async function existingOpenProspectingTask(contactId: string, fullName: string) {
-  try {
-    const associations = await readAssociations("contacts", "tasks", [contactId]);
-    const ids = (associations.get(contactId) || []).slice(0, 100);
-    if (!ids.length) return null;
-    const tasks = await batchRead("tasks", ids, ["hs_task_subject", "hs_task_status", "hubspot_owner_id", "hs_timestamp"]);
-    const marker = `SALES SIGNAL — ${fullName}`.toLowerCase();
-    return tasks.find((task) => String(task.properties.hs_task_status || "") !== "COMPLETED" && String(task.properties.hs_task_subject || "").toLowerCase().includes(marker)) || null;
-  } catch { return null; }
+  const associations = await readAssociations("contacts", "tasks", [contactId]);
+  const ids = (associations.get(contactId) || []).slice(0, 100);
+  if (!ids.length) return null;
+  const tasks = await batchRead("tasks", ids, ["hs_task_subject", "hs_task_status", "hubspot_owner_id", "hs_timestamp"]);
+  const marker = `SALES SIGNAL — ${fullName}`.toLowerCase();
+  return tasks.find((task) => String(task.properties.hs_task_status || "") !== "COMPLETED" && String(task.properties.hs_task_subject || "").toLowerCase().includes(marker)) || null;
 }
 
 function taskBody(prospect: Prospect, clickedAt: string, ownerName: string) {
@@ -427,9 +450,14 @@ export async function POST(request: Request) {
     }
 
     const company = await ensureCompany(prospect, requestedOwner.id);
-    const owner = finalAssignment(requestedOwner, company.existingOwnerId);
+    const attempt = currentSalesNavPushAttempt();
+    // A dashboard push has already validated the explicitly selected SDR.
+    // Existing company ownership stays intact; contact/task start with that SDR.
+    const owner = attempt ? requestedOwner : finalAssignment(requestedOwner, company.existingOwnerId);
+    await checkpointSalesNavPush({ companyId: company.companyId });
 
-    let contactId = await findContact(allEmails(prospect), prospect.linkedinUrl);
+    let contactId = attempt?.contactId || await findContact(allEmails(prospect), prospect.linkedinUrl);
+    if (attempt && !attempt.contactId && contactId) throw new Error("This person appeared in HubSpot after the safety check. Recheck before pushing; the existing contact was not changed.");
     let contactCreated = false;
     let contactFieldsUpdated: string[] = [];
     if (!contactId) {
@@ -438,10 +466,13 @@ export async function POST(request: Request) {
     } else {
       contactFieldsUpdated = await syncMissingContactDetails(contactId, prospect, owner.id);
     }
+    await checkpointSalesNavPush({ contactId });
 
     if (company.companyId) await associateContactCompany(contactId, company.companyId);
 
-    const duplicateTask = await existingOpenProspectingTask(contactId, prospect.fullName);
+    const savedTask = attempt?.taskId ? (await batchRead("tasks", [attempt.taskId], ["hs_task_subject", "hs_task_status", "hubspot_owner_id", "hs_timestamp"]))[0] : null;
+    if (attempt?.taskId && !savedTask) throw new Error("The previously created task could not be read. No replacement was created; retry after verifying its saved ID.");
+    const duplicateTask = savedTask || await existingOpenProspectingTask(contactId, prospect.fullName);
     if (duplicateTask) {
       const taskId = String(duplicateTask.id);
       await logAcquisitionPush(prospect, { companyId: company.companyId, contactId, taskId, owner, status: "pushed" });
@@ -456,10 +487,11 @@ export async function POST(request: Request) {
         companyCreated: company.created,
         companyFieldsUpdated: company.fieldsUpdated,
         taskId,
-        ownerId: owner.id,
-        ownerName: owner.name,
+        ownerId: String(duplicateTask.properties.hubspot_owner_id || owner.id),
+        ownerName: manualTaskOwners().find(item => item.id === duplicateTask.properties.hubspot_owner_id)?.name || owner.name,
         ownerPreservedFromCompany: Boolean(company.existingOwnerId && owner.id === company.existingOwnerId),
         clickedAt,
+        scheduledAt: String(duplicateTask.properties.hs_timestamp || attempt?.dueAt || clickedAt),
         message: "An open Sales Signal task already exists for this contact. Company/contact intelligence was still synced.",
       });
     }
@@ -470,7 +502,11 @@ export async function POST(request: Request) {
     if (company.companyId) associations.push({ to: { id: company.companyId }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 192 }] });
 
     const elevatus = /\belevatus\b/i.test(prospect.source);
-    const createTask = (dueAt: string) => hubspotRequest<{ id: string }>("/crm/objects/2026-03/tasks", {
+    if (attempt?.taskWriteStarted) throw new Error("The previous task create is uncertain and no matching task is visible yet. Refresh/retry to reconcile it; another task was not created.");
+    const createTask = async (dueAt: string) => {
+      await checkpointSalesNavPush({ taskWriteStarted: true });
+      let task: { id: string };
+      try { task = await hubspotRequest<{ id: string }>("/crm/objects/2026-03/tasks", {
       method: "POST",
       body: JSON.stringify({
         properties: {
@@ -484,9 +520,16 @@ export async function POST(request: Request) {
         },
         associations,
       }),
-    });
+      }); }
+      catch (error) { if (definitelyRejected(error)) await checkpointSalesNavPush({ taskWriteStarted: false }); throw error; }
+      if (!task.id) throw new Error("HubSpot did not return a task ID. Reconcile the uncertain create before retrying.");
+      await checkpointSalesNavPush({ taskId: String(task.id) });
+      return task;
+    };
 
-    const scheduled = owner.id === MARITA_OWNER_ID || (Boolean(prospect.inventoryBusinessLine) && owner.id === "37624223")
+    const scheduled = attempt
+      ? { task: await createTask(attempt.dueAt), dueAt: attempt.dueAt }
+      : owner.id === MARITA_OWNER_ID || (Boolean(prospect.inventoryBusinessLine) && owner.id === "37624223")
       ? await createScheduledMaritaTask({
         contactId,
         companyId: company.companyId,

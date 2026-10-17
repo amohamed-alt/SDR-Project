@@ -1,9 +1,10 @@
 // Persistent URL-only reader. No HubSpot requests, paid reveals or CRM writes.
 importScripts('profile-dom.js');
 (() => {
-  const KEY = 'salesNavWorkQueueV160', ALARM = 'salesnav-work-queue-v160';
+  const KEY = 'salesNavWorkQueueV160', PROGRESS = 'salesNavReaderProgressV1', ALARM = 'salesnav-work-queue-v160';
   const API = 'https://sdr.dashboardtalentera.tech/api/prospecting/salesnav/companion';
-  let busy = false;
+  let busy = false, starting = false, stopRequested = false;
+  globalThis.isCapturedProfileReaderBusy = () => busy || starting;
   const persist = queue => chrome.storage.local.set({ [KEY]: { ...queue, updatedAt: new Date().toISOString() } });
   const nameKey = value => String(value || '').normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
   const identity = lead => new URL(lead.salesLeadUrl).pathname.split(',')[0];
@@ -14,7 +15,7 @@ importScripts('profile-dom.js');
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.ok || !payload.profileSynced) throw new Error(payload.error || 'URL was read but could not be saved to its capture.');
   }
-  async function profile(lead) {
+  async function profile(lead, phase) {
     const allowed = await chrome.permissions.contains({ origins: ['https://www.linkedin.com/sales/*'] });
     if (!allowed) throw new Error('Enable Sales Nav reading in extension settings, then retry from the dashboard.');
     const url = new URL(lead.salesLeadUrl);
@@ -27,6 +28,7 @@ importScripts('profile-dom.js');
         if (current.status === 'complete') break;
         await new Promise(resolve => setTimeout(resolve, 500));
       }
+      await phase('reading profile menu');
       let result;
       for (let attempt = 0; attempt < 8; attempt++) {
         const values = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: readVisibleLinkedInProfile, args: [lead] });
@@ -44,28 +46,47 @@ importScripts('profile-dom.js');
     if (busy) return;
     busy = true;
     try {
-      const queue = (await chrome.storage.local.get([KEY]))[KEY];
+      let queue = (await chrome.storage.local.get([KEY]))[KEY];
       if (!queue?.pending?.length || queue.paused || queue.action !== 'read') return;
+      // Drain continuously. Timers/alarms are recovery paths, rather than a
+      // lifecycle boundary between every person in a suspended MV3 worker.
+      while (queue.pending.length && !queue.paused) {
       const key = queue.pending[0], row = queue.rows.find(item => item.key === key);
-      if (!row) { queue.pending.shift(); await persist(queue); return; }
+      if (!row) { queue.pending.shift(); await persist(queue); continue; }
+      const startedAt = new Date().toISOString();
+      const phase = value => chrome.storage.local.set({ [PROGRESS]: { runId: queue.captureRunId, name: row.lead.name, phase: value, startedAt, phaseStartedAt: new Date().toISOString() } });
       row.status = 'reading'; row.error = ''; await persist(queue);
-      try { row.lead = await profile(row.lead); await sync(row.lead, queue.captureRunId); row.status = 'synced'; }
+      await phase('loading profile');
+      try { row.lead = await profile(row.lead, phase); await phase('saving URL'); await sync(row.lead, queue.captureRunId); row.status = 'synced'; }
       catch (error) { row.status = 'error'; row.error = error instanceof Error ? error.message : 'Profile read failed.'; if (/sign-in|verification|unusual traffic|pairing token|enable Sales Nav/i.test(row.error)) queue.paused = true; }
       queue.pending.shift(); queue.done = (queue.done || 0) + 1;
-      if ((await chrome.storage.local.get([KEY]))[KEY]?.paused) queue.paused = true;
+      if (stopRequested || (await chrome.storage.local.get([KEY]))[KEY]?.paused) queue.paused = true;
       await persist(queue);
-      if (queue.pending.length && !queue.paused) { chrome.alarms.create(ALARM, { when: Date.now() + 1000 }); setTimeout(() => void step(), 1000); }
-    } finally { busy = false; }
+      await phase(queue.paused ? 'paused' : queue.pending.length ? 'next profile' : 'finished');
+      if (queue.pending.length && !queue.paused) await new Promise(resolve => setTimeout(resolve, 300));
+      }
+    } finally {
+      busy = false;
+      const queue = (await chrome.storage.local.get([KEY]))[KEY];
+      if (queue?.action === 'read' && queue.pending?.length && !queue.paused) chrome.alarms.create(ALARM, { when: Date.now() + 1000 });
+    }
   }
-  globalThis.startCapturedProfileChecks = async (leads, sourceUrl, captureRunId) => {
+  globalThis.startCapturedProfileChecks = async (leads, sourceUrl, captureRunId, { afterCapture = false } = {}) => {
+    if (starting || busy) throw new Error('URL reading is already running. Stop or wait before starting another run.');
+    starting = true; stopRequested = false;
+    try {
+    const capture = (await chrome.storage.local.get(['salesNavFullRunV1'])).salesNavFullRunV1;
+    const finishingSameCapture = afterCapture && capture?.complete && capture.runId === captureRunId;
+    if ((!finishingSameCapture && globalThis.isSalesNavCaptureBusy?.()) || (capture && !capture.complete && !capture.paused)) throw new Error('Search capture is running. Stop it before reading profile URLs.');
     const previous = (await chrome.storage.local.get([KEY]))[KEY];
-    if (busy || (previous?.pending?.length && !previous.paused && previous.action === 'read')) throw new Error('URL reading is already running. Stop or wait before starting another run.');
+    if (previous?.pending?.length && !previous.paused && previous.action === 'read') throw new Error('URL reading is already running. Stop or wait before starting another run.');
     const rows = [...new Map(leads.filter(lead => lead.connectionDegree !== '1st').map(lead => [identity(lead), lead])).entries()].slice(0,2500).map(([key, lead]) => ({ key, lead, status: 'pending' }));
-    const queue = { sourceUrl, captureRunId, rows, action: 'read', pending: rows.map(row => row.key), done: 0, total: rows.length, paused: false };
+    const queue = { sourceUrl, captureRunId, rows, action: 'read', pending: rows.map(row => row.key), done: 0, total: rows.length, paused: stopRequested };
     await persist(queue); chrome.alarms.create(ALARM, { when: Date.now() + 1000 }); setTimeout(() => void step(), 100);
     return queue;
+    } finally { starting = false; }
   };
-  globalThis.stopCapturedProfileChecks = async () => { const queue = (await chrome.storage.local.get([KEY]))[KEY]; if (queue) await persist({ ...queue, paused: true }); await chrome.alarms.clear(ALARM); };
+  globalThis.stopCapturedProfileChecks = async () => { stopRequested = true; const queue = (await chrome.storage.local.get([KEY]))[KEY]; if (queue) await persist({ ...queue, paused: true }); await chrome.alarms.clear(ALARM); };
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!String(message?.type || '').startsWith('work_queue_')) return false;
     respond({ ok: false, error: 'All work has moved to the dashboard. Update the collector and open the prospecting dashboard.' });

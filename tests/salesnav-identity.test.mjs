@@ -24,7 +24,7 @@ function route(file, adapters) {
 function revealFixture({ cached = null, revealed = prospect } = {}) {
   const calls = [];
   const run = route('src/app/api/prospecting/salesnav/reveal-fast/route.ts', {
-    '@/lib/salesnav-lead-ledger': { lookupSalesNavLead: async () => { calls.push('lookup'); return cached; }, saveSalesNavReveal: async input => { calls.push(input.prospect ? 'save-result' : 'save-attempt'); } },
+    '@/lib/salesnav-lead-ledger': { lookupSalesNavLead: async () => { calls.push('lookup'); return cached; }, reserveSalesNavReveal: async () => { if(cached) return {reserved:false,record:cached}; calls.push('save-attempt'); return {reserved:true,record:{linkedinUrl:lead.linkedinUrl}}; }, salesNavRevealStatus: record => record.cachedProspect ? 'completed' : 'uncertain', saveSalesNavReveal: async input => { calls.push(input.prospect ? 'save-result' : 'save-state'); } },
     '@/app/api/prospecting/resolve-companion/route': { POST: async () => { calls.push('provider'); return NextResponse.json({ prospect: revealed }); } },
     '@/app/api/prospecting/salesnav/precheck-v2/route': { POST: async () => { calls.push('crm-check'); return NextResponse.json({ contact: { inHubSpot: false }, company: { protected: false } }); } },
   });
@@ -65,29 +65,29 @@ test('matching cached result remains free; conflicting cached name never reaches
     assert.deepEqual(f.calls, mismatch ? ['lookup'] : ['lookup', 'crm-check']);
   }
 });
-test('fresh mismatching reveal is retained against repeat spend but fails before CRM checks', async () => {
+test('fresh mismatching reveal is retained as uncertain after a free eligibility check', async () => {
   const f = revealFixture({ revealed: { ...prospect, fullName: 'Colleague Name' } }); const r = await f.run({ lead });
   assert.equal(r.status, 409); assert.equal(r.data.creditUsed, true);
-  assert.deepEqual(f.calls, ['lookup', 'save-attempt', 'provider', 'save-result']);
+  assert.deepEqual(f.calls, ['lookup', 'save-attempt', 'crm-check', 'provider', 'save-state']);
 });
 test('fresh missing provider name cannot pass using the requested display-name fallback', async () => {
   for (const providerFullName of ['', 'Colleague Name']) {
     const f = revealFixture({ revealed: { ...prospect, providerFullName } }); const r = await f.run({ lead });
     assert.equal(r.status, 409); assert.equal(r.data.creditUsed, true);
-    assert.deepEqual(f.calls, ['lookup', 'save-attempt', 'provider', 'save-result']);
+    assert.deepEqual(f.calls, ['lookup', 'save-attempt', 'crm-check', 'provider', 'save-state']);
   }
   assert.equal(identity.salesNavNameMismatch(lead, { ...prospect, fullName: 'Display label', providerFullName: lead.name }), '');
 });
 test('fresh matching reveal continues through the existing CRM safety check', async () => {
   const f = revealFixture(); const r = await f.run({ lead }); assert.equal(r.status, 200);
-  assert.deepEqual(f.calls, ['lookup', 'save-attempt', 'provider', 'save-result', 'crm-check']);
+  assert.deepEqual(f.calls, ['lookup', 'save-attempt', 'crm-check', 'provider', 'save-result', 'crm-check']);
 });
 test('both push routes reject a same-company colleague before any CRM access or write', async () => {
   const calls = [];
   const unexpected = async () => { calls.push('unexpected'); throw new Error('CRM must not be reached'); };
   const shared = { '@/app/api/prospecting/salesnav/precheck-v2/route': { POST: unexpected } };
   const ready = route('src/app/api/prospecting/salesnav/push-ready-v2/route.ts', { ...shared,
-    '@/app/api/prospecting/push/route': { POST: unexpected }, '@/lib/acquisition-routing': { manualTaskOwners: unexpected }, '@/lib/salesnav-lead-ledger': { saveSalesNavPush: unexpected },
+    '@/app/api/prospecting/push/route': { POST: unexpected }, '@/lib/acquisition-routing': { manualTaskOwners: unexpected }, '@/lib/salesnav-lead-ledger': { saveSalesNavPush: unexpected }, '@/lib/salesnav-push-attempt': { checkpointSalesNavPush: unexpected, SalesNavPushAttemptError: class extends Error {}, withSalesNavPushAttempt: unexpected }, '@/lib/sdr-admin-auth': {sdrAdminAuthorized: () => true}, 'node:crypto': require('node:crypto'),
   });
   const ai = route('src/app/api/ai/lead-agent/push/route.ts', { ...shared,
     '@/app/api/prospecting/salesnav/push-ready-v2/route': { POST: unexpected }, '@/lib/hubspot': { batchRead: unexpected, readAssociations: unexpected }, '@/lib/sdr-admin-auth': { sdrAdminAuthorized: () => true }, '@/lib/request-origin': { originMatchesRequestHosts: () => true },

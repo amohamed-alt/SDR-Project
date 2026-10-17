@@ -30,3 +30,14 @@ test('legacy popup queue commands cannot reveal contacts or create SDR tasks',as
 test('full-search capture saves cards independently and never waits on CRM/profile queue',()=>{
  const source=fs.readFileSync('chrome-companion/background-v154.js','utf8');assert.doesNotMatch(source,/appendCapturedProfileChecks|ensureCapturedProfileQueueIdle|action: 'profile_options'/);assert.match(source,/await savePage/);assert.match(source,/run\.paused/);
 });
+test('reader drains multiple profiles continuously without requiring an alarm per person',async()=>{
+ const f=fixture();await f.start([sample,{...sample,name:'Person B',salesLeadUrl:'https://www.linkedin.com/sales/lead/DEF'}],'search','run');
+ for(let i=0;i<100&&f.storage.salesNavWorkQueueV160?.done!==2;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(f.storage.salesNavWorkQueueV160.done,2);assert.equal(f.opened.length,2);assert.equal(f.storage.salesNavReaderProgressV1.phase,'finished');
+});
+test('concurrent reader starts cannot replace one another and capture owns the browser until paused or finished',async()=>{
+ const f=fixture();const results=await Promise.allSettled([f.start([sample],'search','first'),f.start([sample],'search','second')]);
+ assert.equal(results.filter(result=>result.status==='fulfilled').length,1);assert.equal(results.filter(result=>result.status==='rejected').length,1);await f.drain();
+ const blocked=fixture();blocked.storage.salesNavFullRunV1={runId:'capture',complete:false,paused:false};
+ await assert.rejects(blocked.start([sample],'search','run'),/capture is running/);assert.equal(blocked.opened.length,0);
+});

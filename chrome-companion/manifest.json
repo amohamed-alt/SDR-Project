@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Talentera Prospecting Companion",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Dashboard-controlled Sales Navigator collector. Reads rendered profile URLs; all HubSpot checks, reveals and CRM tasks stay in the dashboard.",
   "permissions": [
     "activeTab",

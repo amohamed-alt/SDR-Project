@@ -99,12 +99,12 @@ export function SalesNavCompanionSetup() {
 
       {message && <div className={styles.message}>{message}</div>}
       <div className={styles.actions}>
-        <a href="/downloads/talentera-companion-v1.7.0.zip" download>Download Companion v1.7.0</a>
+        <a href="/downloads/talentera-companion-v1.7.1.zip" download>Download Companion v1.7.1</a>
         <a href="/downloads/companion-preview/index.html">Preview the design</a>
         <Link href="/signalhire-queue">Open Persistent Prospecting Queue</Link>
         <a href="https://github.com/amohamed-alt/SDR-Project/tree/main/chrome-companion" target="_blank" rel="noreferrer">Chrome Companion files</a>
       </div>
-      <p className={styles.note}>v1.7.0: All work happens in the prospecting dashboard. The extension only pairs Chrome and reads rendered pages. Update the same unpacked folder, Reload, refresh the dashboard and enable Sales Nav access once. Existing pairing tokens are retained.</p>
+      <p className={styles.note}>v1.7.1: Scrape → Check → Reveal → Push, all from the dashboard. Scrape reads profile URLs automatically after saving the search cards. Update the same unpacked folder, Reload, refresh the dashboard and enable Sales Nav access once. Existing pairing tokens are retained.</p>
     </section>
   </main>;
 }

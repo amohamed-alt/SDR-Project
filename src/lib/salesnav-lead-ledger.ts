@@ -1,3 +1,4 @@
+import { cachedSalesNavIdentityMismatch, salesNavNameMismatch } from "./salesnav-identity.ts";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
@@ -12,6 +13,8 @@ export type SalesNavLeadIdentity = {
   salesLeadUrl?: string;
 };
 
+export type RevealStatus = "pending" | "completed" | "no-result" | "retryable" | "uncertain";
+
 export type SalesNavLeadLedgerRecord = {
   key: string;
   aliases: string[];
@@ -22,6 +25,8 @@ export type SalesNavLeadLedgerRecord = {
   linkedinUrl: string;
   salesLeadUrl: string;
   revealAttemptedAt: string;
+  revealStatus?: RevealStatus;
+  revealError?: string;
   revealedAt: string;
   cachedProspect?: UnknownRecord;
   lastPushAt: string;
@@ -91,8 +96,12 @@ function emptyLedger(): Ledger {
 async function readLedger(): Promise<Ledger> {
   try {
     const parsed = JSON.parse(await readFile(/* turbopackIgnore: true */ LEDGER_PATH, "utf8")) as Partial<Ledger>;
-    return { version: 1, records: parsed.records && typeof parsed.records === "object" ? parsed.records : {} };
-  } catch { return emptyLedger(); }
+    if (parsed.version !== 1 || !parsed.records || typeof parsed.records !== "object" || Array.isArray(parsed.records)) throw new Error("Invalid saved Sales Navigator ledger. Review durable state before paid operations.");
+    return { version: 1, records: parsed.records };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyLedger();
+    throw error; // Missing/corrupt durable state must never enable another paid reveal.
+  }
 }
 
 async function writeLedger(ledger: Ledger) {
@@ -118,8 +127,8 @@ function canonicalKey(aliases: string[]) {
 async function mutate(action: (ledger: Ledger) => void | Promise<void>) {
   let resultError: unknown;
   writeQueue = writeQueue.then(async () => {
-    const ledger = await readLedger();
     try {
+      const ledger = await readLedger();
       await action(ledger);
       await writeLedger(ledger);
     } catch (error) {
@@ -142,6 +151,8 @@ export async function saveSalesNavReveal(input: {
   prospect?: UnknownRecord;
   runId?: string;
   attempted?: boolean;
+  status?: RevealStatus;
+  error?: string;
 }) {
   const now = new Date().toISOString();
   let saved: SalesNavLeadLedgerRecord | null = null;
@@ -161,6 +172,8 @@ export async function saveSalesNavReveal(input: {
       linkedinUrl: clean(input.prospect?.linkedinUrl || input.identity.linkedinUrl || existing?.linkedinUrl),
       salesLeadUrl: clean(input.identity.salesLeadUrl || existing?.salesLeadUrl),
       revealAttemptedAt: input.attempted ? now : existing?.revealAttemptedAt || "",
+      revealStatus: input.status || (input.prospect ? "completed" : existing?.revealStatus),
+      revealError: input.error ?? existing?.revealError ?? "",
       revealedAt: input.prospect ? now : existing?.revealedAt || "",
       cachedProspect: input.prospect || existing?.cachedProspect,
       lastPushAt: existing?.lastPushAt || "",
@@ -200,6 +213,8 @@ export async function saveSalesNavPush(input: {
       linkedinUrl: clean(input.prospect?.linkedinUrl || input.identity.linkedinUrl || existing?.linkedinUrl),
       salesLeadUrl: clean(input.identity.salesLeadUrl || existing?.salesLeadUrl),
       revealAttemptedAt: existing?.revealAttemptedAt || "",
+      revealStatus: existing?.revealStatus || (input.prospect ? "completed" : undefined),
+      revealError: existing?.revealError || "",
       revealedAt: existing?.revealedAt || (input.prospect ? now : ""),
       cachedProspect: input.prospect || existing?.cachedProspect,
       lastPushAt: now,
@@ -212,4 +227,48 @@ export async function saveSalesNavPush(input: {
     saved = record;
   });
   return saved;
+}
+
+/** Legacy attempts without a saved result are uncertain, never a confirmed no-result. */
+export function salesNavRevealStatus(record: SalesNavLeadLedgerRecord): RevealStatus | "" {
+  return record.revealStatus || (record.cachedProspect ? "completed" : record.revealAttemptedAt ? "uncertain" : "");
+}
+
+/** Reserve inside the same write queue as the lookup, before a provider request. */
+export async function reserveSalesNavReveal(input: { identity: SalesNavLeadIdentity; runId?: string }) {
+  let reserved = false;
+  let saved: SalesNavLeadLedgerRecord | null = null;
+  await mutate((ledger) => {
+    const aliases = aliasesFor(input.identity);
+    const existing = findRecord(ledger, aliases);
+    if (existing && salesNavRevealStatus(existing) !== "retryable" && salesNavRevealStatus(existing) !== "") { saved = existing; return; }
+    const now = new Date().toISOString();
+    const key = existing?.key || canonicalKey(aliases);
+    const record: SalesNavLeadLedgerRecord = {
+      key, aliases: [...new Set([...(existing?.aliases || []), ...aliases])],
+      firstSeenAt: existing?.firstSeenAt || now, lastSeenAt: now,
+      name: clean(input.identity.name), company: clean(input.identity.company),
+      linkedinUrl: clean(input.identity.linkedinUrl), salesLeadUrl: clean(input.identity.salesLeadUrl),
+      revealAttemptedAt: now, revealStatus: "pending", revealError: "", revealedAt: existing?.revealedAt || "",
+      cachedProspect: existing?.cachedProspect, lastPushAt: existing?.lastPushAt || "",
+      taskId: existing?.taskId || "", contactId: existing?.contactId || "", companyId: existing?.companyId || "",
+      runIds: [...new Set([...(existing?.runIds || []), ...(input.runId ? [input.runId] : [])])].slice(-100),
+    };
+    ledger.records[key] = record; saved = record; reserved = true;
+  });
+  return { reserved, record: saved as SalesNavLeadLedgerRecord | null };
+}
+
+/** One read per saved run; no provider calls and no raw aliases exposed to the page. */
+export async function salesNavLeadStates(identities: SalesNavLeadIdentity[]) {
+  const ledger = await readLedger();
+  const byAlias = new Map<string, SalesNavLeadLedgerRecord>();
+  for (const record of Object.values(ledger.records)) for (const alias of record.aliases) if (!byAlias.has(alias)) byAlias.set(alias, record);
+  return identities.map(identity => {
+    const record = aliasesFor(identity).map(alias => byAlias.get(alias)).find(Boolean);
+    if (!record) return null;
+    const mismatch = record.cachedProspect ? cachedSalesNavIdentityMismatch(String(identity.linkedinUrl || ""), record) || salesNavNameMismatch(identity, record.cachedProspect) : "";
+    if (mismatch) return { revealStatus: "uncertain" as const, revealError: mismatch, lastPushAt: "", taskId: "" };
+    return { prospect: record.cachedProspect, revealStatus: salesNavRevealStatus(record), revealError: record.revealError || "", revealedAt: record.revealedAt, lastPushAt: record.lastPushAt, taskId: record.taskId, contactId: record.contactId, companyId: record.companyId };
+  });
 }
