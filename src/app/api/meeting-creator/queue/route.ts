@@ -50,7 +50,7 @@ const companyProps = [
 ] as const;
 const contactProps = [
   "firstname","lastname","jobtitle","phone","mobilephone","hubspot_owner_id",
-  "gtm_linkedin_url","hs_sales_email_last_replied",
+  "gtm_linkedin_url","hs_sales_email_last_replied","phone_number_status",
 ] as const;
 
 export async function GET(request: NextRequest) {
@@ -262,6 +262,7 @@ export async function GET(request: NextRequest) {
           title:clean(cp.jobtitle),phone:clean(cp.phone),mobilePhone:clean(cp.mobilephone),
           ownerId:clean(cp.hubspot_owner_id),linkedinUrl:clean(cp.gtm_linkedin_url),
           salesEmailLastReplied:clean(cp.hs_sales_email_last_replied),
+          phoneNumberStatus:clean(cp.phone_number_status),
         });
       }
       for(const callId of allCompanyCalls){
