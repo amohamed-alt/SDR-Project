@@ -92,3 +92,25 @@ test("Daniel inventory scheduling uses his own 50/day capacity and preserves bac
   const due = planMaritaTask(tasks, [], false, new Date("2026-10-01T10:00:00Z"), { ownerId: "37624223", dailyCap: 50, elevatusTarget: 0 });
   assert.equal(cairoDate(due), "2026-10-05");
 });
+
+test("Meeting Creator can opt into a 100/day cap without changing default Marita 70 or Daniel 50",async()=>{
+  const directory=await mkdtemp(path.join(os.tmpdir(),"creator-cap-test-"));
+  const due="2026-10-01";
+  const existing=tasks(98,false,due);
+  const ownerId="31644369";
+  try{
+    const input={stateDirectory:directory,now,contactId:"newcontact",companyId:"newcompany",
+      elevatus:false,ownerId,dailyCapOverride:100,elevatusTargetOverride:0,
+      readTasks:async()=>existing,
+      createTask:async()=>({id:"created-task"})};
+    const first=await createScheduledMaritaTask(input);
+    assert.equal(cairoDate(first.dueAt),due);
+    const second=await createScheduledMaritaTask({...input,contactId:"newcontact2",
+      companyId:"newcompany2",createTask:async()=>({id:"created-task-2"})});
+    assert.equal(cairoDate(second.dueAt),due);
+    const third=await createScheduledMaritaTask({...input,contactId:"newcontact3",
+      companyId:"newcompany3",createTask:async()=>({id:"created-task-3"})});
+    assert.equal(cairoDate(third.dueAt),"2026-10-04");
+    assert.equal(cairoDate(planMaritaTask(tasks(60),[],false,now)),"2026-10-04");
+  }finally{await rm(directory,{recursive:true,force:true});}
+});
