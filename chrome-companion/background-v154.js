@@ -1,4 +1,4 @@
-importScripts('queue-v160.js');
+importScripts('queue-v160.js', 'dashboard-controller.js');
 const FULL_RUN_KEY = 'salesNavFullRunV1';
 const CONTINUATION_TAB_KEY = 'salesNavFullRunContinuationTabV1';
 const CONTINUE_ALARM = 'salesnav-full-run-v154-continue';
@@ -285,8 +285,10 @@ async function scheduleContinuation(tabId, delayMs = NORMAL_DELAY_MS) {
   chrome.alarms.create(CONTINUE_ALARM, { when: Date.now() + delayMs });
 }
 
-async function setRun(run) {
-  await chrome.storage.local.set({ [FULL_RUN_KEY]: { ...run, backgroundUpdatedAt: new Date().toISOString() } });
+async function setRun(run, { resume = false } = {}) {
+  const current = (await chrome.storage.local.get([FULL_RUN_KEY]))[FULL_RUN_KEY];
+  const paused = resume ? false : Boolean(run.paused || (current?.runId === run.runId && current.paused));
+  await chrome.storage.local.set({ [FULL_RUN_KEY]: { ...run, paused, backgroundUpdatedAt: new Date().toISOString() } });
 }
 
 async function markComplete(run, stopReason) {
@@ -304,7 +306,7 @@ async function markComplete(run, stopReason) {
   await setRun(complete);
   await chrome.storage.local.remove([CONTINUATION_TAB_KEY]);
   await chrome.alarms.clear(CONTINUE_ALARM);
-  await setRun({ ...complete, backgroundStatus: 'Search cards saved · profile reading continues in the saved work queue' });
+  await setRun({ ...complete, backgroundStatus: 'Cards saved. Read missing URLs from the dashboard.' });
 }
 
 async function persistCurrentPage(run, current) {
@@ -326,11 +328,11 @@ async function persistCurrentPage(run, current) {
     backgroundStatus: `Saved page ${nextPageNumber} · ${Number(payload.total || run.total || 0)} unique leads`,
   };
   await setRun(updated);
-  await globalThis.appendCapturedProfileChecks(clean, updated.sourceUrl, updated.runId);
   return updated;
 }
 
 async function advance(run, tabId) {
+  if ((await chrome.storage.local.get([FULL_RUN_KEY]))[FULL_RUN_KEY]?.paused) return run;
   if (Number(run.pagesRead || 0) >= MAX_PAGES) return markComplete(run, `Reached ${MAX_PAGES}-page safety cap`);
   if (Number(run.total || 0) >= MAX_LEADS) return markComplete(run, `Reached ${MAX_LEADS}-lead safety cap`);
   const moved = await clickNext(tabId);
@@ -347,7 +349,6 @@ async function advance(run, tabId) {
 }
 
 async function startOrResume(tabId) {
-  await dashboardPost({ action: 'profile_options' });
   if (!await verifySalesNavTab(tabId)) throw new Error('Open a Sales Navigator People Search tab first.');
   const current = await extractPage(tabId);
   if (!current.ok) throw new Error(current.error || 'Could not read Sales Navigator.');
@@ -370,9 +371,8 @@ async function startOrResume(tabId) {
     };
   }
 
-  await globalThis.ensureCapturedProfileQueueIdle(run.runId);
-  // Also recover cards already saved by v1.6.3 before resuming pagination.
-  if (run.profileLeads?.length) await globalThis.appendCapturedProfileChecks(run.profileLeads, run.sourceUrl, run.runId);
+  run.paused = false;
+  await setRun(run, { resume: true });
   if (!run.signatures?.includes(signature)) run = await persistCurrentPage(run, current);
   else {
     run = {
@@ -397,7 +397,7 @@ async function processContinuation(tabId) {
   try {
     const stored = await chrome.storage.local.get([FULL_RUN_KEY]);
     let run = stored[FULL_RUN_KEY];
-    if (!run || run.complete || !run.runId) return;
+    if (!run || run.complete || run.paused || !run.runId) return;
     if (!await verifySalesNavTab(tabId)) {
       await setRun({ ...run, backgroundError: 'The saved Sales Navigator tab is no longer a People Search. Reopen the search and press Resume.', backgroundStatus: 'Paused' });
       return;
@@ -508,7 +508,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       const stored = await chrome.storage.local.get([FULL_RUN_KEY, CONTINUATION_TAB_KEY]);
       const run = stored[FULL_RUN_KEY];
       const tabId = Number(stored[CONTINUATION_TAB_KEY]);
-      if (!run || run.complete || !Number.isFinite(tabId)) return;
+      if (!run || run.complete || run.paused || !Number.isFinite(tabId)) return;
       const age = Date.now() - Date.parse(run.backgroundUpdatedAt || run.startedAt || 0);
       if (age > 45000) await processContinuation(tabId);
     })();

@@ -1,7 +1,7 @@
 // Runs only in a rendered profile tab after the user requests a profile check.
 // Called across extension isolated contexts after serializing through chrome.scripting.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function readVisibleLinkedInProfile() {
+async function readVisibleLinkedInProfile(captured = {}) {
   const text = (node) => String(node?.innerText || node?.textContent || '').replace(/\s+/g, ' ').trim();
   const normalizePublic = (raw) => {
     try { const url = new URL(raw, location.origin); if (url.protocol !== 'https:' || !/^(www\.)?linkedin\.com$/i.test(url.hostname) || !/^\/in\/[^/?#]+\/?$/.test(url.pathname)) return ''; return `https://www.linkedin.com${url.pathname.replace(/\/$/, '')}`; }
@@ -48,6 +48,10 @@ async function readVisibleLinkedInProfile() {
   }
   const locationText = text(root.querySelector('[data-anonymize="location"]'));
   if (!linkedinUrl) return { ok: false, error: 'Public LinkedIn URL was not found in the profile actions menu. Open this Sales Nav profile and check View LinkedIn profile, then retry.' };
-  if (!name || !company || !title) return { ok: false, error: 'Could not read the name and current role. Keep this profile open, wait for it to load, and retry.' };
+  // Public identity is independent of optional role markup. Keep the validated
+  // search-card role when the profile role is still loading, never invent it.
+  company = company || String(captured.company || '').trim();
+  title = title || String(captured.title || '').trim();
+  if (!name) return { ok: false, error: 'Profile name is still loading. Retry from the dashboard.' };
   return { ok: true, lead: { name, title, company, location: locationText, linkedinUrl, salesLeadUrl: sales ? location.href : '' } };
 }

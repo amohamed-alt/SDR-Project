@@ -1,163 +1,81 @@
-// Persistent, user-triggered queue actions. Never starts reveal or push on capture.
+// Persistent URL-only reader. No HubSpot requests, paid reveals or CRM writes.
 importScripts('profile-dom.js');
 (() => {
   const KEY = 'salesNavWorkQueueV160', ALARM = 'salesnav-work-queue-v160';
   const API = 'https://sdr.dashboardtalentera.tech/api/prospecting/salesnav/companion';
   let busy = false;
-  // Page appends and a worker result must not overwrite each other's saved snapshot.
-  let queueWrites = Promise.resolve();
-  function withQueueWrite(work) {
-    const next = queueWrites.then(work);
-    queueWrites = next.catch(() => undefined);
-    return next;
-  }
-  const identity = (lead) => {
-    try { const url = new URL(lead.salesLeadUrl || lead.linkedinUrl); return url.pathname.split(',')[0]; }
-    catch { return `${lead.name}:${lead.company}`; }
-  };
-  const persist = (queue) => chrome.storage.local.set({ [KEY]: { ...queue, updatedAt: new Date().toISOString() } });
-  async function api(body) {
+  const persist = queue => chrome.storage.local.set({ [KEY]: { ...queue, updatedAt: new Date().toISOString() } });
+  const nameKey = value => String(value || '').normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
+  const identity = lead => new URL(lead.salesLeadUrl).pathname.split(',')[0];
+  async function sync(lead, runId) {
     const { pairingToken } = await chrome.storage.local.get(['pairingToken']);
     if (!pairingToken) throw new Error('Save a pairing token first.');
-    const response = await fetch(API, { method: 'POST', headers: { Authorization: `Bearer ${pairingToken}`, 'Content-Type': 'application/json', 'X-Companion-Version': chrome.runtime.getManifest().version }, body: JSON.stringify(body), signal: AbortSignal.timeout(120000) });
+    const response = await fetch(API, { method: 'POST', headers: { Authorization: `Bearer ${pairingToken}`, 'Content-Type': 'application/json', 'X-Companion-Version': chrome.runtime.getManifest().version }, body: JSON.stringify({ action: 'profile_sync', runId, lead }), signal: AbortSignal.timeout(20000) });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.ok) throw new Error(payload.error || `Server returned ${response.status}`);
-    return payload;
+    if (!response.ok || !payload.ok || !payload.profileSynced) throw new Error(payload.error || 'URL was read but could not be saved to its capture.');
   }
   async function profile(lead) {
-    if (lead.linkedinUrl && lead.title && !/in role|in company/.test(lead.title)) return lead;
     const allowed = await chrome.permissions.contains({ origins: ['https://www.linkedin.com/sales/*'] });
-    if (!allowed) throw new Error('Allow LinkedIn profile reading from the extension first.');
+    if (!allowed) throw new Error('Enable Sales Nav reading in extension settings, then retry from the dashboard.');
     const url = new URL(lead.salesLeadUrl);
-    if (url.protocol !== 'https:' || url.hostname !== 'www.linkedin.com' || !/^\/sales\/lead\//.test(url.pathname)) throw new Error('Invalid Sales Navigator profile link.');
-    // Ordinary temporary tab, no hidden fetches or session/cookie reads.
+    if (url.protocol !== 'https:' || url.hostname !== 'www.linkedin.com' || url.port || url.username || url.password || !/^\/sales\/lead\//.test(url.pathname)) throw new Error('Invalid Sales Navigator profile link.');
     const tab = await chrome.tabs.create({ url: url.href, active: false });
     try {
       for (let attempt = 0; attempt < 45; attempt++) {
         const current = await chrome.tabs.get(tab.id);
+        if (/\/(login|checkpoint|authwall)(?:\/|\?|$)/.test(current.url || '')) throw new Error('LinkedIn sign-in or verification is required.');
         if (current.status === 'complete') break;
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['profile-dom.js'] });
       let result;
-      for (let attempt = 0; attempt < 5; attempt++) {
-        const values = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: readVisibleLinkedInProfile });
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const values = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: readVisibleLinkedInProfile, args: [lead] });
         result = values?.[0]?.result;
-        if (result?.ok) break;
-        await new Promise((resolve) => setTimeout(resolve, 700));
+        if (result?.ok || /sign-in|verification|unusual traffic/i.test(result?.error || '')) break;
+        await new Promise(resolve => setTimeout(resolve, 700));
       }
-      if (!result?.ok) throw new Error(result?.error || 'Could not read this profile.');
-      const nameKey = value => value.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
-      if (nameKey(result.lead.name) !== nameKey(lead.name)) throw new Error('Opened profile identity differs from the search card.');
-      return { ...lead, ...result.lead, location: result.lead.location || lead.location };
+      if (!result?.ok) throw new Error(result?.error || 'Profile did not finish loading. Retry from the dashboard.');
+      if (nameKey(result.lead.name) !== nameKey(lead.name)) throw new Error('Profile name differs from the captured person. Review before retrying.');
+      // Preserve capture identity; do not replace it with navigation tracking parameters.
+      return { ...lead, ...result.lead, salesLeadUrl: lead.salesLeadUrl, location: result.lead.location || lead.location };
     } finally { await chrome.tabs.remove(tab.id).catch(() => {}); }
   }
-  globalThis.startCapturedProfileChecks = async (leads, sourceUrl, captureRunId) => {
-    const stored = (await chrome.storage.local.get([KEY]))[KEY];
-    if (busy || stored?.pending?.length) throw new Error('Wait for the current profile checks to finish before starting another capture.');
-    const rows = dedupe(leads.filter(lead => lead.connectionDegree !== '1st'), 2500).map(lead => ({ key: identity(lead), lead, status: 'pending' }));
-    const queue = { sourceUrl, captureRunId, rows, action: 'check', pending: rows.map(row => row.key), done: 0, total: rows.length, paused: false };
-    await persist(queue);
-    chrome.alarms.create(ALARM, { when: Date.now() + 1000 }); setTimeout(() => void step(), 100);
-    return queue;
-  };
-  globalThis.appendCapturedProfileChecks = (leads, sourceUrl, captureRunId) => withQueueWrite(async () => {
-    const stored = (await chrome.storage.local.get([KEY]))[KEY];
-    const sameRun = stored?.captureRunId === captureRunId;
-    if (stored?.pending?.length && (!sameRun || stored.action !== 'check')) throw new Error('Another queue operation is running. Finish it before continuing this capture.');
-    const queue = sameRun ? stored : { sourceUrl, captureRunId, rows: [], action: 'check', pending: [], done: 0, total: 0, paused: false };
-    const keys = new Set(queue.rows.map(row => row.key));
-    for (const lead of dedupe(leads.filter(lead => lead.connectionDegree !== '1st'), 2500)) {
-      const key = identity(lead);
-      if (keys.has(key)) continue;
-      keys.add(key); queue.rows.push({ key, lead, status: 'pending' }); queue.pending.push(key);
-    }
-    queue.total = queue.rows.length;
-    await persist(queue);
-    if (queue.pending.length && !queue.paused) { chrome.alarms.create(ALARM, { when: Date.now() + 1000 }); setTimeout(() => void step(), 100); }
-    return queue;
-  });
-  globalThis.ensureCapturedProfileQueueIdle = async (captureRunId) => {
-    const stored = (await chrome.storage.local.get([KEY]))[KEY];
-    if (captureRunId && stored?.captureRunId === captureRunId && stored.action === 'check') return;
-    if (busy || stored?.pending?.length) throw new Error('Profile checks are still running. Wait or stop them before capturing another search.');
-  };
-  function step() { return withQueueWrite(stepUnsafe); }
-  async function stepUnsafe() {
+  async function step() {
     if (busy) return;
     busy = true;
     try {
-      let { [KEY]: queue } = await chrome.storage.local.get([KEY]);
-      if (!queue?.pending?.length || queue.paused) return;
-      const key = queue.pending[0], row = queue.rows.find((item) => item.key === key);
+      const queue = (await chrome.storage.local.get([KEY]))[KEY];
+      if (!queue?.pending?.length || queue.paused || queue.action !== 'read') return;
+      const key = queue.pending[0], row = queue.rows.find(item => item.key === key);
       if (!row) { queue.pending.shift(); await persist(queue); return; }
-      row.status = 'working'; row.error = ''; await persist(queue);
-      try {
-        if (queue.action === 'check') {
-          row.lead = await profile(row.lead);
-          const payload = await api({ action: 'profile_check', lead: row.lead, runId: queue.captureRunId });
-          if (queue.captureRunId && payload.profileSynced === false) throw new Error('Public URL was read but not saved to this capture. Retry the profile check.');
-          Object.assign(row, { check: payload.check, prospect: payload.prospect, cached: payload.cached, revealAttempted: payload.revealAttempted, hasPhone: payload.hasPhone, previousPush: payload.previousPush });
-          row.status = payload.previousPush ? 'pushed' : !payload.check?.eligible ? 'blocked' : payload.hasPhone ? 'ready' : payload.revealAttempted ? 'no-phone' : 'needs-reveal';
-        } else if (queue.action === 'reveal') {
-          if (!row.check?.eligible || row.statusBefore !== 'needs-reveal') throw new Error('Check this new person before reveal.');
-          const payload = await api({ action: 'profile_reveal', lead: row.lead, revealConfirmed: true });
-          Object.assign(row, { check: payload.check, prospect: payload.prospect, hasPhone: payload.hasPhone, cached: payload.cached, revealAttempted: true });
-          row.status = !payload.check?.eligible ? 'blocked' : payload.hasPhone ? 'ready' : 'no-phone';
-        } else if (queue.action === 'push') {
-          if (!row.check?.eligible || !row.hasPhone || row.statusBefore !== 'ready') throw new Error('Only checked new people with a phone can be pushed.');
-          const payload = await api({ action: 'profile_push', lead: row.lead, taskOwnerId: queue.ownerId, taskDueAt: queue.dueAt, pushConfirmed: true });
-          row.status = 'pushed'; row.previousPush = payload; row.message = `Task ${payload.taskId} → ${payload.ownerName}`;
-        }
-      } catch (error) { row.status = 'error'; row.error = error instanceof Error ? error.message : 'Queue operation failed.'; if (/verification|sign-in|unusual traffic|pairing token/i.test(row.error)) queue.paused = true; }
+      row.status = 'reading'; row.error = ''; await persist(queue);
+      try { row.lead = await profile(row.lead); await sync(row.lead, queue.captureRunId); row.status = 'synced'; }
+      catch (error) { row.status = 'error'; row.error = error instanceof Error ? error.message : 'Profile read failed.'; if (/sign-in|verification|unusual traffic|pairing token|enable Sales Nav/i.test(row.error)) queue.paused = true; }
       queue.pending.shift(); queue.done = (queue.done || 0) + 1;
-      const stopped = (await chrome.storage.local.get([KEY]))[KEY]?.paused;
-      if (stopped) { queue.paused = true; queue.pending = []; }
+      if ((await chrome.storage.local.get([KEY]))[KEY]?.paused) queue.paused = true;
       await persist(queue);
-      const fresh = (await chrome.storage.local.get([KEY]))[KEY];
-      if (fresh?.paused) { queue.paused = true; queue.pending = []; await persist(queue); }
-      if (queue.pending.length && !queue.paused) { chrome.alarms.create(ALARM, { when: Date.now() + 1500 }); setTimeout(() => void step(), 1500); }
+      if (queue.pending.length && !queue.paused) { chrome.alarms.create(ALARM, { when: Date.now() + 1000 }); setTimeout(() => void step(), 1000); }
     } finally { busy = false; }
   }
+  globalThis.startCapturedProfileChecks = async (leads, sourceUrl, captureRunId) => {
+    const previous = (await chrome.storage.local.get([KEY]))[KEY];
+    if (busy || (previous?.pending?.length && !previous.paused && previous.action === 'read')) throw new Error('URL reading is already running. Stop or wait before starting another run.');
+    const rows = [...new Map(leads.filter(lead => lead.connectionDegree !== '1st').map(lead => [identity(lead), lead])).entries()].slice(0,2500).map(([key, lead]) => ({ key, lead, status: 'pending' }));
+    const queue = { sourceUrl, captureRunId, rows, action: 'read', pending: rows.map(row => row.key), done: 0, total: rows.length, paused: false };
+    await persist(queue); chrome.alarms.create(ALARM, { when: Date.now() + 1000 }); setTimeout(() => void step(), 100);
+    return queue;
+  };
+  globalThis.stopCapturedProfileChecks = async () => { const queue = (await chrome.storage.local.get([KEY]))[KEY]; if (queue) await persist({ ...queue, paused: true }); await chrome.alarms.clear(ALARM); };
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!String(message?.type || '').startsWith('work_queue_')) return false;
-    void (async () => {
-      try {
-        let { [KEY]: queue } = await chrome.storage.local.get([KEY]);
-        if (['work_queue_capture', 'work_queue_import_capture', 'work_queue_prepare_capture'].includes(message.type)) {
-          const readProfiles = message.readProfiles === true || message.type !== 'work_queue_capture';
-          if (!(await chrome.storage.local.get(['pairingToken'])).pairingToken) throw new Error('Save pairing before working this page.');
-          if ((await chrome.storage.local.get(['salesNavFullRunV1'])).salesNavFullRunV1?.complete === false) throw new Error('Full-search capture is running. Wait for it to finish before loading Current 25.');
-          if (busy || queue?.pending?.length) throw new Error('Finish or pause the current operation before loading another page.');
-          if (readProfiles) await api({ action: 'profile_options' });
-          if (message.type === 'work_queue_prepare_capture') { respond({ ok: true }); return; }
-          const captured = message.type === 'work_queue_import_capture' ? { ok: true, sourceUrl: message.sourceUrl, leads: (message.leads || []).slice(0, 50) } : (await chrome.scripting.executeScript({ target: { tabId: message.tabId }, func: extractCurrentSalesNavPageV154 }))?.[0]?.result;
-          if (!captured?.ok || !captured.leads?.length) throw new Error(captured?.error || 'No lead cards found.');
-          const previous = new Map((queue?.rows || []).map((row) => [row.key, row]));
-          queue = { sourceUrl: captured.sourceUrl, rows: dedupe(captured.leads.filter((lead) => lead.connectionDegree !== '1st'), message.type === 'work_queue_import_capture' ? 50 : 25).map((lead) => ({ ...previous.get(identity(lead)), key: identity(lead), lead: { ...lead, ...(previous.get(identity(lead))?.lead?.linkedinUrl ? previous.get(identity(lead)).lead : {}) }, status: previous.get(identity(lead))?.status || 'pending' })), pending: [], done: 0, paused: false };
-          await persist(queue);
-          if (readProfiles) {
-            const imported = await api({ action: 'import', sourceUrl: captured.sourceUrl, pagesRead: message.pagesRead === 2 ? 2 : 1, clientVersion: chrome.runtime.getManifest().version, parserVersion: 'card-v7-streaming-profiles', leads: queue.rows.map(row => row.lead) });
-            queue = await globalThis.startCapturedProfileChecks(queue.rows.map(row => row.lead), captured.sourceUrl, imported.runId);
-          }
-        } else if (message.type === 'work_queue_start') {
-          if (busy || !queue?.rows?.length || (queue.pending?.length && !queue.paused)) throw new Error('Load a page first or wait for the current operation.');
-          if (!['check','reveal','push'].includes(message.action)) throw new Error('Invalid queue action.');
-          if (['reveal','push'].includes(message.action) && message.confirmed !== true) throw new Error('Confirm this action first.');
-          const selected = queue.rows.filter((row) => message.keys?.includes(row.key));
-          const allowed = selected.filter((row) => message.action === 'check' ? row.status !== 'pushed' : message.action === 'reveal' ? row.status === 'needs-reveal' && row.check?.eligible : row.status === 'ready' && row.check?.eligible && row.hasPhone);
-          if (!allowed.length) throw new Error('No selected rows are eligible for this action.');
-          allowed.forEach((row) => { row.statusBefore = row.status; });
-          queue = { ...queue, action: message.action, pending: allowed.map((row) => row.key), done: 0, total: allowed.length, paused: false, ownerId: message.ownerId, dueAt: message.dueAt };
-          await persist(queue); chrome.alarms.create(ALARM, { when: Date.now() + 1000 }); setTimeout(() => void step(), 100);
-        } else if (message.type === 'work_queue_options') { const payload = await api({ action: 'profile_options' }); respond(payload); return; }
-        else if (message.type === 'work_queue_stop') { if (queue) { queue.paused = true; queue.pending = []; await persist(queue); } await chrome.alarms.clear(ALARM); }
-        else if (message.type === 'work_queue_kick') { if (!queue?.rows?.some((row) => row.status === 'working') || Date.now() - Date.parse(queue.updatedAt || 0) > 180000) void step(); }
-        respond({ ok: true, queue });
-      } catch (error) { respond({ ok: false, error: error instanceof Error ? error.message : 'Queue failed.' }); }
-    })();
-    return true;
+    respond({ ok: false, error: 'All work has moved to the dashboard. Update the collector and open the prospecting dashboard.' });
+    return false;
   });
-  chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === ALARM) void step(); if (alarm.name === `${ALARM}-watchdog`) void (async () => { const value = (await chrome.storage.local.get([KEY]))[KEY]; if (value?.pending?.length && !value.paused && Date.now() - Date.parse(value.updatedAt || 0) > 180000) await step(); })(); });
+  chrome.alarms.onAlarm.addListener(alarm => {
+    if (alarm.name === ALARM) void step();
+    if (alarm.name === `${ALARM}-watchdog`) void (async () => { const value = (await chrome.storage.local.get([KEY]))[KEY]; if (value?.action === 'read' && value.pending?.length && !value.paused && Date.now() - Date.parse(value.updatedAt || 0) > 45000) await step(); })();
+  });
+  // An old queue mixed CRM checks with reading; do not silently restart it after update.
+  void (async () => { const old = (await chrome.storage.local.get([KEY]))[KEY]; if (old && old.action !== 'read') await persist({ ...old, paused: true }); })();
   void chrome.alarms.create(`${ALARM}-watchdog`, { periodInMinutes: 1 });
 })();

@@ -97,7 +97,7 @@ test("HubSpot checks all 100 captured people without skipping missing URLs or hi
   expect(calls).toBe(100);
   await expect(page.getByRole("button", { name: "HubSpot Check", exact: true })).toBeDisabled();
   releaseLast();
-  await expect(page.getByText("HubSpot: 99/100 checked · 1 failed · 91 eligible people still need a public profile URL before reveal. LinkedIn profile reading is separate and runs in Companion.", { exact: true })).toBeVisible();
+  await expect(page.getByText("HubSpot: 99/100 checked · 1 failed · 91 eligible people still need a public profile URL before reveal. URL reading is controlled above and runs independently of CRM checks.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /^All 100$/ })).toHaveAttribute("data-active", "true");
   await expect(page.getByRole("table").getByText("Awaiting profile read", { exact: true })).toHaveCount(91);
   await expect(page.getByRole("button", { name: /^Review 92$/ })).toBeVisible();

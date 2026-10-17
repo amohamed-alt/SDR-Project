@@ -11,6 +11,7 @@ import {
   generateCompanionToken,
   getLatestCompanionBatch,
   getLatestCompanionFullRun,
+  getCompanionFullRun,
   saveCompanionBatch,
   saveCompanionFullRunPage,
   touchCompanionToken,
@@ -186,6 +187,31 @@ export async function POST(request: NextRequest) {
   const token = bearer(request);
   if (!await verifyCompanionToken(token)) {
     return NextResponse.json({ error: "Invalid or expired companion pairing token." }, { status: 401, headers: corsHeaders() });
+  }
+
+  // The collector only reads saved identities and syncs URLs. All CRM work is
+  // owned by the authenticated dashboard, never by the extension worker.
+  if (["profile_reveal", "profile_push"].includes(String(body.action || ""))) {
+    return NextResponse.json({ error: "Reveal and CRM tasks are only available in the dashboard." }, { status: 409, headers: corsHeaders() });
+  }
+  if (body.action === "profile_read_run") {
+    const parsed = z.object({ runId: z.string().uuid() }).safeParse(body);
+    if (!parsed.success) return NextResponse.json({ error: "Choose a valid saved run." }, { status: 400, headers: corsHeaders() });
+    const run = await getCompanionFullRun(parsed.data.runId);
+    if (!run) return NextResponse.json({ error: "Saved capture was not found." }, { status: 404, headers: corsHeaders() });
+    return NextResponse.json({ ok: true, sourceUrl: run.sourceUrl, leads: run.leads.filter(lead => !publicPersonProfile(lead.linkedinUrl) && lead.salesLeadUrl).slice(0,2500) }, { headers: corsHeaders() });
+  }
+  if (body.action === "profile_sync") {
+    const parsed = z.object({ runId: z.string().uuid(), lead: leadSchema }).safeParse(body);
+    if (!parsed.success || !publicPersonProfile(parsed.data.lead.linkedinUrl)) return NextResponse.json({ error: "A rendered public LinkedIn person URL is required." }, { status: 400, headers: corsHeaders() });
+    try {
+      const profileSynced = await syncCompanionProfile(parsed.data.lead, parsed.data.runId);
+      if (!profileSynced) return NextResponse.json({ error: "The profile could not be matched to this saved person." }, { status: 409, headers: corsHeaders() });
+      await touchCompanionToken();
+      return NextResponse.json({ ok: true, profileSynced: true }, { headers: corsHeaders() });
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : "Could not save the public URL." }, { status: 409, headers: corsHeaders() });
+    }
   }
 
   if (["profile_options", "profile_check", "profile_reveal", "profile_push"].includes(String(body.action || "")) && !(await companionStatus()).profileActionsEnabled) {
