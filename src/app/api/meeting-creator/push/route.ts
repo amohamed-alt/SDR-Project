@@ -7,7 +7,7 @@ import { createScheduledMaritaTask, MaritaScheduleError } from "@/lib/marita-tas
 import {
   CONNECTED_DISPOSITIONS, ATTEMPT_DISPOSITIONS, normalizeSaudiMobile,
   MEETING_CREATOR_MARITA_OWNER, MEETING_CREATOR_DANIEL_OWNER,
-  MEETING_CREATOR_OPS_OWNER, type CreatorQueueRow,
+  MEETING_CREATOR_OPS_OWNER, WRONG_NUMBER_DISPOSITION, type CreatorQueueRow,
 } from "@/lib/meeting-creator-queue";
 import { normalizedCompanyDomain } from "@/lib/company-dedupe";
 
@@ -17,13 +17,15 @@ export const dynamic = "force-dynamic";
 const schema = z.object({
   action: z.literal("push_selected"),
   offset: z.number().int().min(0).max(100000),
+  source: z.enum(["inventory","wrong_number"]).default("inventory"),
+  scan: z.number().int().min(20).max(100).default(60),
+  limit: z.number().int().min(1).max(100).default(50),
   choices: z.array(z.object({
     companyId: z.string().regex(/^\d{1,22}$/),
     contactId: z.string().regex(/^\d{1,22}$/),
   })).min(1).max(10),
 });
 const OPEN_STATUSES = new Set(["NOT_STARTED","IN_PROGRESS","WAITING","DEFERRED"]);
-const PREVIEW_BATCH_SIZE = 60;
 
 function sameOrigin(request: NextRequest) {
   const site = request.headers.get("sec-fetch-site");
@@ -92,7 +94,8 @@ async function preflight(row:CreatorQueueRow){
     throw new Error("Possible duplicate company/domain: resolve the CRM identity before pushing.");
   }
 
-  const [companyCalls,personCalls,companyTasks,personTasks,companyMeetings,personMeetings,companyDeals]=await Promise.all([
+  const [allCompanyContacts,companyCalls,personCalls,companyTasks,personTasks,companyMeetings,personMeetings,companyDeals]=await Promise.all([
+    linkedIds("companies","contacts",row.companyId),
     linkedIds("companies","calls",row.companyId),
     linkedIds("contacts","calls",row.contactId),
     linkedIds("companies","tasks",row.companyId),
@@ -101,13 +104,23 @@ async function preflight(row:CreatorQueueRow){
     linkedIds("contacts","meetings",row.contactId),
     linkedIds("companies","deals",row.companyId),
   ]);
+  // Include calls/tasks/meetings linked to OTHER contacts at the same company,
+  // not just the selected person. A connected call on any colleague is protected.
+  if (allCompanyContacts.length > 30) throw new Error("More than 30 CRM contacts: manual activity review required.");
+  const [associatedCalls,associatedTasks,associatedMeetings]=await Promise.all([
+    readAssociations("contacts","calls",allCompanyContacts),
+    readAssociations("contacts","tasks",allCompanyContacts),
+    readAssociations("contacts","meetings",allCompanyContacts),
+  ]);
   const [calls,tasks,meetings,deals]=await Promise.all([
-    batchRead("calls",uniq([...companyCalls,...personCalls]),["hs_call_disposition","hs_call_status"]),
-    batchRead("tasks",uniq([...companyTasks,...personTasks]),["hs_task_status"]),
-    batchRead("meetings",uniq([...companyMeetings,...personMeetings]),["hs_meeting_outcome"]),
+    batchRead("calls",uniq([...companyCalls,...personCalls,...allCompanyContacts.flatMap((id)=>ids(associatedCalls,id))]),["hs_call_disposition","hs_call_status","hs_call_to_number"]),
+    batchRead("tasks",uniq([...companyTasks,...personTasks,...allCompanyContacts.flatMap((id)=>ids(associatedTasks,id))]),["hs_task_status"]),
+    batchRead("meetings",uniq([...companyMeetings,...personMeetings,...allCompanyContacts.flatMap((id)=>ids(associatedMeetings,id))]),["hs_meeting_outcome"]),
     batchRead("deals",uniq(companyDeals),["pipeline","dealstage"]),
   ]);
   if(calls.some((c)=>CONNECTED_DISPOSITIONS.has(clean(c.properties.hs_call_disposition))))throw new Error("Connected call logged; protect the existing conversation.");
+  if(calls.some((c)=>clean(c.properties.hs_call_disposition)===WRONG_NUMBER_DISPOSITION
+    && normalizeSaudiMobile(c.properties.hs_call_to_number)===personPhone))throw new Error("Selected Saudi mobile has a prior wrong-number outcome.");
   if(calls.some((c)=>!ATTEMPT_DISPOSITIONS.has(clean(c.properties.hs_call_disposition))))throw new Error("Unclassified call outcome requires review.");
   if(tasks.some((t)=>OPEN_STATUSES.has(clean(t.properties.hs_task_status))))throw new Error("An open follow-up task already exists.");
   if(meetings.some((m)=>!["CANCELED","NO_SHOW","RESCHEDULED"].includes(clean(m.properties.hs_meeting_outcome))))throw new Error("Meeting history blocks a new acquisition task.");
@@ -134,6 +147,8 @@ async function createTask(row:CreatorQueueRow,person:{phone:string;companyName:s
   return createScheduledMaritaTask({
     contactId:row.contactId,companyId:row.companyId,
     ownerId:row.sdrId as "31644369"|"37624223",
+    dailyCapOverride:100,
+    elevatusTargetOverride:0,
     elevatus:false,
     readTasks:()=>searchAll("tasks",["hs_task_status","hs_timestamp","hubspot_owner_id","hs_task_subject"],[
       {propertyName:"hubspot_owner_id",operator:"EQ",value:row.sdrId},
@@ -169,15 +184,16 @@ export async function POST(request:NextRequest) {
   if(!sdrAdminAuthorized(request))return NextResponse.json({error:"Admin authorization is required to push SDR tasks."},{status:401});
   const parsed=schema.safeParse(await request.json().catch(()=>null));
   if(!parsed.success)return NextResponse.json({error:"Invalid push selection."},{status:400});
-  const {offset,choices}=parsed.data;
+  const {offset,choices,source,scan,limit}=parsed.data;
   const uniqueChoice=new Map(choices.map((item)=>[item.companyId,item]));
   if(uniqueChoice.size!==choices.length)return NextResponse.json({error:"Select no more than one person per company per push."},{status:409});
 
   try{
     const url=new URL("/api/meeting-creator/queue",request.url);
     url.searchParams.set("offset",String(offset));
-    url.searchParams.set("scan",String(PREVIEW_BATCH_SIZE));
-    url.searchParams.set("limit","50");
+    url.searchParams.set("source",source);
+    url.searchParams.set("scan",String(scan));
+    url.searchParams.set("limit",String(limit));
     const previewRequest=new NextRequest(url,{headers:request.headers});
     const response=await queuePreview(previewRequest);
     const payload=await response.json() as {accounts?:CreatorQueueRow[];error?:string};
