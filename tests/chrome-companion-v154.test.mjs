@@ -9,13 +9,14 @@ const popupController = fs.readFileSync('chrome-companion/popup-v154.js', 'utf8'
 const background = fs.readFileSync('chrome-companion/background-v154.js', 'utf8');
 const popupLiveProfile = fs.readFileSync('chrome-companion/popup-live-profile.js', 'utf8');
 
-test('Chrome Companion v1.6.5 uses one background full-search engine', () => {
-  assert.equal(manifest.version, '1.6.5');
+test('Chrome Companion v1.7.0 uses one background full-search engine', () => {
+  assert.equal(manifest.version, '1.7.0');
   assert.equal(manifest.background?.service_worker, 'background-v154.js');
-  assert.match(popupHtml, /popup-v154\.js/);
+  assert.match(popupHtml, /popup-dashboard\.js/);
+  assert.doesNotMatch(popupHtml, /popup-work-queue|popup-live-profile|Push \+ CALL|Reveal selected/);
   assert.doesNotMatch(background, /importScripts\(['"]background\.js/);
-  assert.match(popupController, /replaceWith\(button\)/);
-  assert.match(popupController, /salesnav_v154_start/);
+  assert.match(background, /dashboard-controller/);
+  assert.ok(manifest.content_scripts.some(item => item.js.includes('dashboard-bridge.js')));
 });
 
 test('v1.5.4 refuses to skip ahead while LinkedIn still shows stale cards', () => {

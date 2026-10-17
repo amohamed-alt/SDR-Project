@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Talentera Prospecting Companion",
-  "version": "1.6.5",
-  "description": "User-triggered Sales Navigator and SignalHire sync for the Talentera SDR dashboard, with one persistent queue and a single resilient background full-search capture engine. No cookie access or hidden profile fetches.",
+  "version": "1.7.0",
+  "description": "Dashboard-controlled Sales Navigator collector. Reads rendered profile URLs; all HubSpot checks, reveals and CRM tasks stay in the dashboard.",
   "permissions": [
     "activeTab",
     "scripting",
@@ -21,5 +21,18 @@
   },
   "optional_host_permissions": [
     "https://www.linkedin.com/sales/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://sdr.dashboardtalentera.tech/signalhire-queue*",
+        "https://sdr.dashboardtalentera.tech/salesnav-full-run*",
+        "https://sdr.dashboardtalentera.tech/salesnav-prospecting*"
+      ],
+      "js": [
+        "dashboard-bridge.js"
+      ],
+      "run_at": "document_idle"
+    }
   ]
 }

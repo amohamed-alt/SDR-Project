@@ -62,7 +62,8 @@ export function SalesNavLiveListener() {
         seen.current = next;
         if (profilesChanged) window.dispatchEvent(new CustomEvent("salesnav:profiles-synced", { detail: { runId: next.id } }));
 
-        if ((newRunArrived || currentRunFinished) && !reloading.current) {
+        if (currentRunFinished) window.dispatchEvent(new CustomEvent("salesnav:profiles-synced", { detail: { runId: next.id } }));
+        if (newRunArrived && !reloading.current) {
           const eventKey = `${next.id}:${next.complete ? "complete" : "started"}`;
           const previousEvent = window.sessionStorage.getItem("salesnav-live-listener-event");
           if (previousEvent !== eventKey) {
@@ -89,7 +90,7 @@ export function SalesNavLiveListener() {
   const connected = Boolean(status?.paired);
   const captureStale = Boolean(latest && !latest.complete && checkedAt - Date.parse(status?.lastUsedAt || latest.updatedAt || "") > 180000);
   const serverText = latest
-    ? `${latest.pagesRead || 0} page${latest.pagesRead === 1 ? "" : "s"} · ${latest.total || 0} leads · ${latest.complete ? `${latest.profilesAvailable || 0}/${latest.total || 0} public profile URLs` : `${captureStale ? "no recent capture update · Resume in Companion" : "capturing"} · ${latest.profilesAvailable || 0} public profile URLs`}`
+    ? `${latest.pagesRead || 0} page${latest.pagesRead === 1 ? "" : "s"} · ${latest.total || 0} leads · ${latest.complete ? `${latest.profilesAvailable || 0}/${latest.total || 0} public profile URLs` : `${captureStale ? "no recent capture update · resume capture from dashboard" : "capturing"} · ${latest.profilesAvailable || 0} public profile URLs`}`
     : "waiting for first full-search page";
 
   return <aside style={{
@@ -108,7 +109,7 @@ export function SalesNavLiveListener() {
     lineHeight: 1.45,
   }}>
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-      <strong style={{ fontSize: 12.5 }}>{error ? "Companion status error" : connected ? "● Companion paired" : "● Companion not paired"}</strong>
+      <strong style={{ fontSize: 12.5 }}>{error ? "Companion status error" : connected ? "● Server pairing configured" : "● Companion not paired"}</strong>
       <Link href="/salesnav-prospecting" style={{ color: "#08795c", fontWeight: 800, textDecoration: "none" }}>Setup / token</Link>
     </div>
     <div style={{ marginTop: 4, color: error ? "#a23c34" : "#54736c" }}>{error || `Server: ${serverText}`}</div>
