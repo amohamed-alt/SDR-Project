@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import styles from "./MeetingCreatorQueue.module.css";
 
-type Status = "call_ready" | "needs_research" | "protected";
+type Status = "call_ready" | "needs_research" | "needs_alternate" | "protected";
 type Motion = "new_contact" | "reactivation" | "blocked";
 type Lead = {
   key: string;
@@ -35,6 +35,8 @@ type Lead = {
   attemptedCalls: number;
   connectedCalls: number;
   openTasks: number;
+  wrongNumberCalls?: number;
+  nextAction?: string;
 };
 type QueueData = {
   generatedAt: string;
@@ -47,6 +49,7 @@ type QueueData = {
     crmMatched?: number;
     callReady: number;
     needsResearch: number;
+    needsAlternate?: number;
     protected: number;
     maritaReady?: number;
     danielReady?: number;
@@ -74,6 +77,7 @@ function csvEscape(v: unknown) {
 function humanStatus(status: Status) {
   if(status==="call_ready")return "Call-ready · review";
   if(status==="needs_research")return "Needs research";
+  if(status==="needs_alternate")return "Find another person";
   return "Protected";
 }
 
@@ -88,13 +92,19 @@ export function MeetingCreatorQueue() {
   const [status,setStatus] = useState<Status|"all">("all");
   const [owner,setOwner] = useState("all");
   const [mode,setMode] = useState<"all"|"new_contact"|"reactivation">("all");
+  const [source,setSource] = useState<"inventory"|"wrong_number">("inventory");
+  const [searchingAlternate,setSearchingAlternate] = useState("");
+  const [alternateResults,setAlternateResults] = useState<Record<string,{
+    note:string;matchedAlternates:number;
+    people:Array<{uid:string;name:string;title:string;currentCompany:string;linkedinUrl:string;score:number;phoneStatus:string}>;
+  }>>({});
   const [selectedKeys,setSelectedKeys] = useState<string[]>([]);
   const [pushing,setPushing] = useState(false);
 
   const load = useCallback(async (signal: AbortSignal)=>{
     setLoading(true);setError("");
     try {
-      const response = await fetch(`/api/meeting-creator/queue?offset=${offset}&scan=60&limit=50`,{cache:"no-store",signal});
+      const response = await fetch(`/api/meeting-creator/queue?source=${source}&offset=${offset}&scan=60&limit=50`,{cache:"no-store",signal});
       const payload=await response.json() as QueueData;
       if(!response.ok) throw new Error(payload.error || "Unable to load Meeting Creator preview.");
       if(!signal.aborted)setData(payload);
@@ -104,7 +114,7 @@ export function MeetingCreatorQueue() {
         setError(cause instanceof Error?cause.message:"Read-only queue request failed.");
       }
     }finally {if(!signal.aborted)setLoading(false);}
-  },[offset]);
+  },[offset,source]);
   useEffect(()=>{
     const controller=new AbortController();
     const scheduled=window.setTimeout(()=>{void load(controller.signal);},0);
@@ -146,7 +156,7 @@ export function MeetingCreatorQueue() {
     try {
       const response=await fetch("/api/meeting-creator/push",{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({action:"push_selected",offset,choices:candidates.map((x)=>({companyId:x.companyId,contactId:x.contactId}))}),
+        body:JSON.stringify({action:"push_selected",source,scan:60,limit:50,offset,choices:candidates.map((x)=>({companyId:x.companyId,contactId:x.contactId}))}),
       });
       const result=await response.json() as {error?:string;created?:number;skipped?:number;results?:Array<{companyId:string;status:string;reason?:string}>};
       if(!response.ok)throw new Error(result.error||"HubSpot push was rejected.");
@@ -157,6 +167,26 @@ export function MeetingCreatorQueue() {
     }catch(cause) {
       setError(cause instanceof Error?cause.message:"Push failed. Reconcile before retrying.");
     }finally {setPushing(false);}
+  }
+  async function findAlternate(lead:Lead) {
+    setSearchingAlternate(lead.companyId);
+    setError("");
+    try {
+      const response=await fetch("/api/meeting-creator/alternate",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"find_alternate",companyId:lead.companyId,source,offset,scan:60}),
+      });
+      const result=await response.json() as {error?:string;note?:string;matchedAlternates?:number;people?:Array<{
+        uid:string;name:string;title:string;currentCompany:string;linkedinUrl:string;score:number;phoneStatus:string;
+      }>};
+      if(!response.ok)throw new Error(result.error||"Search-only research did not complete.");
+      setAlternateResults((old)=>({...old,[lead.companyId]:{
+        note:result.note||"Search only · no phones revealed",
+        matchedAlternates:result.matchedAlternates||0,people:result.people||[],
+      }}));
+      setNotice(`${lead.companyName}: ${result.matchedAlternates||0} alternate HR profiles from search-only. No phone credits spent.`);
+    }catch(cause){setError(cause instanceof Error?cause.message:"Unable to search alternative decision makers.");}
+    finally{setSearchingAlternate("");}
   }
   async function copy(number:string) {
     try{await navigator.clipboard.writeText(number);setNotice("Phone copied.");}
@@ -181,11 +211,11 @@ export function MeetingCreatorQueue() {
       <section className={styles.hero}>
         <div className={styles.heroCopy}>
           <span><Sparkles size={13}/> LEADS WITH CONTEXT, NOT JUST NAMES</span>
-          <h2>Find the next reachable decision maker.</h2>
-          <p>Existing company does not mean excluded. Unanswered old calls can become a new opportunity—only when there is a different valid HR contact, no connected conversation, no open task or deal, and no customer ownership conflict.</p>
+          <h2>200 new opportunities every Saudi workday.</h2>
+          <p>100 Marita + 100 Daniel is the daily target, not a guarantee. Wrong Number with only one person becomes Find Another Person; never call the invalid number twice. Only verified available people enter SDR tasks. Protect connected calls, open tasks, meetings and deals.</p>
         </div>
         <div className={styles.heroRight}>
-          <div><span>Target throughput</span><strong>1,000 / mo</strong><small>Planning capacity, not a validated output</small></div>
+          <div><span>Daily target</span><strong>200 / day</strong><small>100 per SDR · Saudi workdays</small></div>
           <div><span>Credit cost for this page</span><strong>$0</strong><small>Existing Postgres + HubSpot only</small></div>
         </div>
       </section>
@@ -194,8 +224,9 @@ export function MeetingCreatorQueue() {
       {notice?<div className={styles.notice} role="status"><CheckCircle2 size={16}/><span>{notice}</span><button onClick={()=>setNotice("")} aria-label="Dismiss notice"><XCircle size={15}/></button></div>:null}
 
       <section className={styles.kpis}>
-        <article><span><Phone size={15}/> CALL-READY TO REVIEW</span><strong>{loading?"—":fmt(data?.summary.callReady||0)}</strong><small>Available in current scanned batch</small></article>
+        <article><span><Phone size={15}/> CALL-READY TO REVIEW</span><strong>{loading?"—":fmt(data?.summary.callReady||0)}</strong><small>Existing numbers · current scan only</small></article>
         <article><span><UsersRound size={15}/> MARITA / DANIEL</span><strong>{loading?"—":`${data?.summary.maritaReady||0} / ${data?.summary.danielReady||0}`}</strong><small>Preserve existing SDR ownership</small></article>
+        <article><span><Search size={15}/> FIND ANOTHER PERSON</span><strong>{loading?"—":fmt(data?.summary.needsAlternate||0)}</strong><small>Wrong number; search-only first</small></article>
         <article><span><Search size={15}/> NEEDS RESEARCH</span><strong>{loading?"—":fmt(data?.summary.needsResearch||0)}</strong><small>Identity, phone, or activity uncertain</small></article>
         <article><span><ShieldCheck size={15}/> PROTECTED</span><strong>{loading?"—":fmt(data?.summary.protected||0)}</strong><small>Connected, customer, owner, deal, or task</small></article>
       </section>
@@ -210,7 +241,10 @@ export function MeetingCreatorQueue() {
         </div>
         <div className={styles.filters}>
           <label className={styles.search}><Search size={15}/><input aria-label="Search companies or contacts" placeholder="Company, domain, title, product…" value={query} onChange={e=>setQuery(e.target.value)}/></label>
-          <label><span>Status</span><select value={status} onChange={e=>setStatus(e.target.value as Status|"all")}><option value="all">All</option><option value="call_ready">Call-ready</option><option value="needs_research">Needs research</option><option value="protected">Protected</option></select></label>
+          <label><span>Source</span><select aria-label="Lead source" value={source} onChange={e=>{
+            setSelectedKeys([]);setAlternateResults({});setOffset(0);setSource(e.target.value as "inventory"|"wrong_number");
+          }}><option value="inventory">Cached inventory</option><option value="wrong_number">Wrong number recovery</option></select></label>
+          <label><span>Status</span><select value={status} onChange={e=>setStatus(e.target.value as Status|"all")}><option value="all">All</option><option value="call_ready">Call-ready</option><option value="needs_alternate">Find another person</option><option value="needs_research">Needs research</option><option value="protected">Protected</option></select></label>
           <label><span>SDR</span><select value={owner} onChange={e=>setOwner(e.target.value)}><option value="all">Both SDRs</option><option value="Marita">Marita</option><option value="Daniel">Daniel</option></select></label>
           <label><span>Motion</span><select value={mode} onChange={e=>setMode(e.target.value as typeof mode)}><option value="all">All</option><option value="new_contact">Untouched</option><option value="reactivation">Reactivation</option></select></label>
         </div>
@@ -219,21 +253,41 @@ export function MeetingCreatorQueue() {
           <table className={styles.table}>
             <thead><tr><th>SELECT</th><th>ACCOUNT / ROUTE</th><th>DECISION MAKER</th><th>PHONE</th><th>QUALIFICATION</th><th>STATUS</th></tr></thead>
             <tbody>
-              {shown.map((lead)=><tr key={lead.key}>
+              {shown.map((lead)=><tbody key={lead.key}>
+              <tr>
                 <td><input type="checkbox" className={styles.selectLead} aria-label={`Select ${lead.contactName} at ${lead.companyName} for HubSpot task`} checked={selectedKeys.includes(lead.key)} disabled={lead.status!=="call_ready"||pushing||(!selectedKeys.includes(lead.key)&&selectedKeys.length>=10)} onChange={(event)=>toggleLead(lead.key,event.target.checked)}/></td>
                 <td><strong>{lead.companyName}</strong><small>{lead.domain} · {fmt(lead.employeeCount)} employees</small><span className={styles.tinyPill}>{lead.recommendedProduct}</span><small>Talentera {lead.talenteraScore} · Evalufy {lead.evalufyScore} · Priority {lead.priority}</small></td>
                 <td><strong>{lead.contactName||"Find HR decision maker"}</strong><small>{lead.contactTitle||"Profile pending"}</small><small>{lead.sdrName||"Owner under review"}</small></td>
                 <td>{lead.contactPhone?<div className={styles.number}><span>{lead.contactPhone}</span><button type="button" onClick={()=>void copy(lead.contactPhone)} title="Copy phone"><ClipboardCopy size={14}/></button></div>:<span className={styles.muted}>Not verified for review</span>}<small>{lead.contactPhone?"Saudi mobile format · not dial-verified":""}</small></td>
-                <td><small>{lead.reason}</small><span className={styles.context}>{lead.attemptedCalls} unanswered attempts · {lead.connectedCalls} connected · {lead.openTasks} open tasks</span></td>
-                <td><span className={styles.status} data-kind={lead.status}>{humanStatus(lead.status)}</span>{lead.companyId?<a className={styles.crm} href={`https://app.hubspot.com/contacts/145742477/company/${lead.companyId}?utm_source=meeting_creator&utm_medium=dashboard`} target="_blank" rel="noopener noreferrer">HubSpot <Eye size={12}/></a>:null}</td>
-              </tr>)}
+                <td><small>{lead.reason}</small><span className={styles.context}>{lead.attemptedCalls} failed attempts · {lead.wrongNumberCalls||0} wrong number · {lead.connectedCalls} connected · {lead.openTasks} open tasks</span></td>
+                <td><span className={styles.status} data-kind={lead.status}>{humanStatus(lead.status)}</span>
+                  {lead.status==="needs_alternate"&&lead.companyId?
+                    <button type="button" className={styles.researchAlternate} disabled={Boolean(searchingAlternate)}
+                      onClick={()=>void findAlternate(lead)}>
+                      <Search size={12}/>{searchingAlternate===lead.companyId?"Searching…":"Find alternate (free)"}
+                    </button>:null}
+                  {lead.companyId?<a className={styles.crm} href={`https://app.hubspot.com/contacts/145742477/company/${lead.companyId}?utm_source=meeting_creator&utm_medium=dashboard`} target="_blank" rel="noopener noreferrer">HubSpot <Eye size={12}/></a>:null}
+                </td>
+              </tr>
+              {alternateResults[lead.companyId]?
+                <tr><td colSpan={6} className={styles.alternates}>
+                  <strong>Search-only alternatives · {lead.companyName}</strong>
+                  {alternateResults[lead.companyId].people.length?
+                    alternateResults[lead.companyId].people.map((p)=><div key={p.uid}>
+                      <b>{p.name}</b> · {p.title} · {p.currentCompany} · Fit {p.score}
+                      {p.linkedinUrl?<a target="_blank" rel="noopener noreferrer" href={p.linkedinUrl}>LinkedIn ↗</a>:null}
+                      <small>No phone revealed · verify contact before SDR task</small>
+                    </div>):
+                    <p>No alternative with a confirmed current employer was found in the free search. Keep this company in the research backlog; never reuse the wrong number.</p>}
+                </td></tr>:null}
+            </tbody>)}
               {!loading&&!shown.length?<tr><td colSpan={6} className={styles.empty}>No matching records on this inventory page. Adjust filters or scan the next batch.</td></tr>:null}
               {loading?<tr><td colSpan={6} className={styles.empty}>Checking existing company associations and SDR history…</td></tr>:null}
             </tbody>
           </table>
         </div>
         <footer className={styles.footer}>
-          <small>Inventory page {Math.floor(offset/60)+1} · scanned {data?.summary.scanned||0} · total stored {fmt(data?.pagination.sourceTotal||0)} · page phone data is protected by the admin session</small>
+          <small>{source==="wrong_number"?"Wrong-number call page":"Inventory page"} {Math.floor(offset/60)+1} · scanned {data?.summary.scanned||0} · total source records {fmt(data?.pagination.sourceTotal||0)} · admin-only phone data</small>
           <div>
             <button type="button" onClick={()=>{setSelectedKeys([]);setOffset(Math.max(0,offset-60));}} disabled={loading||offset===0}><ArrowLeft size={14}/> Previous</button>
             <button type="button" onClick={()=>{setSelectedKeys([]);setOffset(data?.pagination.nextOffset||offset+60);}} disabled={loading||!data?.pagination||data.pagination.nextOffset>=data.pagination.sourceTotal}>Next batch <ArrowRight size={14}/></button>
