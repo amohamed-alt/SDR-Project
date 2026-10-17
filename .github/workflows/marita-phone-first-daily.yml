@@ -6,6 +6,10 @@ on:
   schedule:
     # 09:15 Saudi time, Sunday through Thursday; GitHub may run a little late.
     - cron: '15 6 * * 0-4'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/marita-phone-first-daily.yml'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -138,7 +142,7 @@ jobs:
                 }
                 const next=Number(payload.pagination?.nextOffset||0);
                 const total=Number(payload.pagination?.sourceTotal||0);
-                if(next<=offset || next>=total || !list.length && !Number(payload.summary?.scanned))break;
+                if(next<=offset || next>=total)break;
                 offset=next;
               }
             }
