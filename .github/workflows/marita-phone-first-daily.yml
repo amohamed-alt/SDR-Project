@@ -48,7 +48,7 @@ jobs:
       DASHBOARD_PASSWORD: ${{ secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD }}
       DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || inputs.dry_run || 'true' }}
       TARGET_PER_SDR: ${{ inputs.target_per_sdr || '100' }}
-      MAX_INVENTORY_PAGES: ${{ inputs.max_inventory_pages || '12' }}
+      MAX_INVENTORY_PAGES: ${{ github.event_name == 'push' && '3' || inputs.max_inventory_pages || '12' }}
       MAX_ALTERNATE_SEARCHES: ${{ inputs.max_free_alternate_searches || '20' }}
     steps:
       - name: Validate credentials and bounded zero-credit policy
@@ -146,10 +146,10 @@ jobs:
                 offset=next;
               }
             }
-            await scanSource('inventory',maxInventoryPages);
-            // Also scan the full wrong-number recovery source rather than assuming
-            // a company with one bad Contact is excluded forever.
+            // Search the recovery source FIRST, so a company with Wrong Number
+            // does not get hidden by a weaker generic inventory classification.
             await scanSource('wrong_number',5);
+            await scanSource('inventory',maxInventoryPages);
             candidates.sort((a,b)=>Number(b.priority||0)-Number(a.priority||0));
             alternatives.sort((a,b)=>Number(b.priority||0)-Number(a.priority||0));
 
