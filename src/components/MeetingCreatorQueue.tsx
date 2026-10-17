@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft, ArrowRight, CheckCircle2, ClipboardCopy, Download,
   Eye, Filter, LockKeyhole, Phone, Radar, RefreshCw, Search,
@@ -253,7 +253,7 @@ export function MeetingCreatorQueue() {
           <table className={styles.table}>
             <thead><tr><th>SELECT</th><th>ACCOUNT / ROUTE</th><th>DECISION MAKER</th><th>PHONE</th><th>QUALIFICATION</th><th>STATUS</th></tr></thead>
             <tbody>
-              {shown.map((lead)=><tbody key={lead.key}>
+              {shown.map((lead)=><Fragment key={lead.key}>
               <tr>
                 <td><input type="checkbox" className={styles.selectLead} aria-label={`Select ${lead.contactName} at ${lead.companyName} for HubSpot task`} checked={selectedKeys.includes(lead.key)} disabled={lead.status!=="call_ready"||pushing||(!selectedKeys.includes(lead.key)&&selectedKeys.length>=10)} onChange={(event)=>toggleLead(lead.key,event.target.checked)}/></td>
                 <td><strong>{lead.companyName}</strong><small>{lead.domain} · {fmt(lead.employeeCount)} employees</small><span className={styles.tinyPill}>{lead.recommendedProduct}</span><small>Talentera {lead.talenteraScore} · Evalufy {lead.evalufyScore} · Priority {lead.priority}</small></td>
@@ -280,7 +280,7 @@ export function MeetingCreatorQueue() {
                     </div>):
                     <p>No alternative with a confirmed current employer was found in the free search. Keep this company in the research backlog; never reuse the wrong number.</p>}
                 </td></tr>:null}
-            </tbody>)}
+            </Fragment>)}
               {!loading&&!shown.length?<tr><td colSpan={6} className={styles.empty}>No matching records on this inventory page. Adjust filters or scan the next batch.</td></tr>:null}
               {loading?<tr><td colSpan={6} className={styles.empty}>Checking existing company associations and SDR history…</td></tr>:null}
             </tbody>
