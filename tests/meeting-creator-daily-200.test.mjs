@@ -42,8 +42,14 @@ test("alternate research is authorized, search-only and reject wrong-company mat
 test("wrong number reads CRM calls even when the cached inventory excludes a company",()=>{
   assert.match(queue,/source: z\.enum\(\["inventory","wrong_number"\]\)/);
   assert.match(queue,/WRONG_NUMBER_DISPOSITION/);
-  assert.match(queue,/readAssociations\("calls","contacts",pageIds\)/);
-  assert.match(queue,/readAssociations\("calls","companies",pageIds\)/);
+  assert.match(queue,/readAssociations\("calls","contacts",callIds\)/);
+  assert.match(queue,/readAssociations\("calls","companies",callIds\)/);
   assert.match(queue,/batchRead\("calls",allCallIds,\["hs_call_disposition","hs_call_status","hs_call_to_number","hs_call_title"\]\)/);
   assert.match(queue,/needsAlternate:alternate\.length/);
+});
+
+test("recovery source also includes Contact phone_number_status Wrong Number",()=>{
+  assert.match(queue,/searchAll\("contacts",\["phone_number_status"\]/);
+  assert.match(queue,/value:"Wrong Number"/);
+  assert.match(queue,/readAssociations\("contacts","companies",flaggedContactIds\)/);
 });
