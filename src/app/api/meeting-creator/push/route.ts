@@ -67,7 +67,7 @@ function nameToken(raw:string){
 async function preflight(row:CreatorQueueRow){
   const [company,contact]=await Promise.all([
     batchRead("companies",[row.companyId],["name","domain","country","numberofemployees","hs_num_open_deals","account_type","account_status","hubspot_owner_id","hs_last_booked_meeting_date"]),
-    batchRead("contacts",[row.contactId],["firstname","lastname","jobtitle","phone","mobilephone","hubspot_owner_id","hs_sales_email_last_replied"]),
+    batchRead("contacts",[row.contactId],["firstname","lastname","jobtitle","phone","mobilephone","hubspot_owner_id","hs_sales_email_last_replied","phone_number_status"]),
   ]);
   if(!company[0]||!contact[0])throw new Error("Company or contact no longer exists.");
   const companyInfo=company[0].properties;
@@ -75,6 +75,9 @@ async function preflight(row:CreatorQueueRow){
   validCompany(companyInfo,row);
   const personPhone=normalizeSaudiMobile(person.mobilephone)||normalizeSaudiMobile(person.phone);
   if(!personPhone || personPhone!==row.contactPhone)throw new Error("Contact phone changed or is not Saudi mobile format.");
+  if(/^(wrong number|exhausted|no answer)$/i.test(clean(person.phone_number_status))) {
+    throw new Error("Selected contact has invalid or exhausted phone status; find another decision maker.");
+  }
   if(clean(person.hs_sales_email_last_replied))throw new Error("Buyer has already replied by email.");
   if(person.hubspot_owner_id && ![row.sdrId,MEETING_CREATOR_OPS_OWNER].includes(clean(person.hubspot_owner_id)))throw new Error("Contact is assigned to another owner.");
 
