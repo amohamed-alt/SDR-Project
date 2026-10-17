@@ -229,7 +229,7 @@ export function buildMeetingCreatorQueue(input: CreatorQueueInput): CreatorQueue
     });
     const defaultOwner = ownerFor(company, product.recommendedProduct, product.talenteraScore, product.evalufyScore);
     const historicalSdrOwners = [...new Set(sourcePeople
-      .filter((p)=>calledIds.has(p.id))
+      .filter((p)=>calledIds.has(p.id) || /^(wrong number|exhausted)$/i.test(clean(p.phoneNumberStatus)))
       .map((p)=>p.ownerId)
       .filter((id)=>id===MEETING_CREATOR_MARITA_OWNER||id===MEETING_CREATOR_DANIEL_OWNER))];
     const ownerConflict = historicalSdrOwners.length > 1 ||
@@ -254,7 +254,7 @@ export function buildMeetingCreatorQueue(input: CreatorQueueInput): CreatorQueue
       })
       .sort((a, b) => b.weight - a.weight || a.p.id.localeCompare(b.p.id));
     const best = rankedPeople.find((x) => x.persona && x.phone && x.different);
-    const motion = allCalls.length ? "reactivation" : "new_contact";
+    const motion = allCalls.length || invalidPhoneContacts.length ? "reactivation" : "new_contact";
     let status: CreatorQueueRow["status"] = "needs_research";
     let reason = "Find a different current HR decision maker with a Saudi mobile number.";
     if (protectedAccount) {
