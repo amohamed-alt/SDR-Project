@@ -16,7 +16,11 @@ jobs:
     env:
       BASE_URL: https://sdr.dashboardtalentera.tech
       EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+      OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN || secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD }}
     steps:
+      - name: Validate production smoke credential
+        run: test -n "$OWNER_TOKEN" || { echo "::error::Production smoke admin token is missing"; exit 1; }
+
       - name: Verify exact production build
         run: |
           set -euo pipefail
@@ -32,6 +36,7 @@ jobs:
           set -euo pipefail
           curl -4 -sS --connect-timeout 5 --max-time 30 \
             -H 'Cache-Control: no-cache' \
+            -H "x-acquisition-owner-token: $OWNER_TOKEN" \
             "$BASE_URL/api/acquisition/coverage-status?page=1&limit=20" -o /tmp/coverage.json
           jq '{version,ledger,countries,probe:{completedPageCount:.probe.completedPageCount,spentPageCount:.probe.spentPageCount,partialSpentPages:.probe.partialSpentPages,totalPages:.probe.totalPages,additionalCredits:.probe.estimatedAdditionalSearchCreditsToFinish},pagination}' /tmp/coverage.json
 
@@ -56,6 +61,7 @@ jobs:
           start=$(date +%s)
           curl -4 -sS --connect-timeout 5 --max-time 30 \
             -H 'Cache-Control: no-cache' \
+            -H "x-acquisition-owner-token: $OWNER_TOKEN" \
             "$BASE_URL/api/acquisition/zero-credit-ready" -o /tmp/ready.json
           elapsed=$(( $(date +%s) - start ))
           jq '{zeroCreditMode,summary,policy}' /tmp/ready.json
