@@ -57,3 +57,8 @@ test("Meeting Creator push rechecks colleague calls and allows bounded 100/day t
   assert.match(api,/elevatusTargetOverride:0/);
   assert.match(api,/source:\s*z\.enum\(\["inventory","wrong_number"\]\)/);
 });
+
+test("push reads contact's actual phone_number_status, not merely numeric formatting",()=>{
+  assert.match(api,/phone_number_status/);
+  assert.match(api,/Selected contact has invalid or exhausted phone status/);
+});
