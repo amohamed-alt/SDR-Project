@@ -89,7 +89,7 @@ test("Hostinger workflow rejects stale CI candidates, retries reads, and queues 
   assert.match(workflow, /Hostinger Compose action remained active after 5 minutes/);
 });
 
-test("deployment requires Hostinger action success and keeps GitHub public HTTPS advisory", async () => {
+test("deployment requires the exact Hostinger images and exact public build", async () => {
   const workflow = await read(".github/workflows/deploy-hostinger.yml");
   const health = await read("src/app/api/health/route.ts");
 
@@ -99,6 +99,12 @@ test("deployment requires Hostinger action success and keeps GitHub public HTTPS
   assert.match(workflow, /success\|completed\|done/);
   assert.match(workflow, /\[ "\$ACTION_SUCCEEDED" = true \] && \[ "\$CORE_TOTAL" -ge 4 \] && \[ "\$CORE_UP" -eq "\$CORE_TOTAL" \]/);
   assert.match(workflow, /Hostinger deployment verified by action success and 4\/4 core containers/);
+  assert.match(workflow, /sdr-dashboard:\$DEPLOY_SHA/);
+  assert.match(workflow, /sdr-dashboard-cache:\$DEPLOY_SHA/);
+  assert.match(workflow, /docker\/\$PROJECT\/update/);
+  assert.match(workflow, /docker\/\$PROJECT\/restart/);
+  assert.match(workflow, /\[ "\$PUBLIC_BUILD" = "\$DEPLOY_SHA" \]/);
+  assert.match(workflow, /Public dashboard did not switch to exact build \$DEPLOY_SHA/);
   assert.match(workflow, /docker\/\$PROJECT\/start/);
   assert.match(workflow, /Hostinger deploy succeeded but core containers are not all Up/);
   assert.match(workflow, /public-advisory:/);
