@@ -40,6 +40,7 @@ export type CreatorCall = {
   contactIds: string[];
   toNumber: string;
   disposition: string;
+  title?: string;
 };
 
 export type CreatorTask = {
@@ -77,7 +78,7 @@ export type CreatorQueueRow = {
   companyName: string;
   domain: string;
   employeeCount: number;
-  status: "call_ready" | "needs_research" | "protected";
+  status: "call_ready" | "needs_research" | "needs_alternate" | "protected";
   motion: "new_contact" | "reactivation" | "blocked";
   reason: string;
   recommendedProduct: string;
@@ -95,6 +96,8 @@ export type CreatorQueueRow = {
   attemptedCalls: number;
   connectedCalls: number;
   openTasks: number;
+  wrongNumberCalls?: number;
+  nextAction?: string;
 };
 
 export const CONNECTED_DISPOSITIONS = new Set([
@@ -103,11 +106,13 @@ export const CONNECTED_DISPOSITIONS = new Set([
   "a4c4c377-d246-4b32-a13b-75a56a4cd0ff", // Left live message: human engaged
 ]);
 
+export const WRONG_NUMBER_DISPOSITION = "17b47fee-58de-441e-a44c-c6300d46f273";
+
 export const ATTEMPT_DISPOSITIONS = new Set([
   "73a0d17f-1163-4015-bdd5-ec830791da20", // No answer
   "9d9162e7-6cf3-4944-bf63-4dff82258764", // Busy
   "b2cf5968-551e-4856-9783-52b3da59a7d0", // Left voicemail
-  "17b47fee-58de-441e-a44c-c6300d46f273", // Wrong number
+  WRONG_NUMBER_DISPOSITION, // Wrong number
 ]);
 
 const OPEN_TASK_STATUSES = new Set(["NOT_STARTED", "IN_PROGRESS", "WAITING", "DEFERRED"]);
@@ -127,6 +132,10 @@ export function normalizeSaudiMobile(raw: unknown) {
   if (/^05\d{8}$/.test(digits)) digits = "966" + digits.slice(1);
   if (/^5\d{8}$/.test(digits)) digits = "966" + digits;
   return /^9665\d{8}$/.test(digits) ? "+" + digits : "";
+}
+function comparableName(value: string) {
+  return clean(value).toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g,"")
+    .replace(/[^a-z0-9\u0600-\u06ff]+/g," ").replace(/\s+/g," ").trim();
 }
 function safeNumber(value: unknown) {
   return Math.max(0, Number(value) || 0);
@@ -175,8 +184,28 @@ export function buildMeetingCreatorQueue(input: CreatorQueueInput): CreatorQueue
     const openTasks = allTasks.filter((t) => OPEN_TASK_STATUSES.has(t.status.toUpperCase())).length;
     const connectedCalls = allCalls.filter((c) => CONNECTED_DISPOSITIONS.has(clean(c.disposition))).length;
     const attemptedCalls = allCalls.filter((c) => ATTEMPT_DISPOSITIONS.has(clean(c.disposition))).length;
+    const wrongNumberCalls = allCalls.filter((c) => clean(c.disposition) === WRONG_NUMBER_DISPOSITION).length;
     const unresolvedDisposition = allCalls.some((c) => !CONNECTED_DISPOSITIONS.has(clean(c.disposition)) && !ATTEMPT_DISPOSITIONS.has(clean(c.disposition)));
-    const unknownCalledPerson = allCalls.some((c) => !c.contactIds.length && !normalizeSaudiMobile(c.toNumber));
+    const calledIds = new Set<string>();
+    const calledNumbers = new Set<string>();
+    const unlinkedCalls = new Set<string>();
+    for (const call of allCalls) {
+      const normalizedNumber = normalizeSaudiMobile(call.toNumber);
+      if (normalizedNumber) calledNumbers.add(normalizedNumber);
+      const explicitIds = call.contactIds.filter((id) => sourcePeople.some((person) => person.id === id));
+      for (const id of explicitIds) calledIds.add(id);
+      if (explicitIds.length) continue;
+      const matchesByPhone = normalizedNumber ? sourcePeople.filter((person) =>
+        [normalizeSaudiMobile(person.phone),normalizeSaudiMobile(person.mobilePhone)].includes(normalizedNumber)) : [];
+      const titleName = comparableName(call.title || "").replace(/^call with /,"");
+      const matchesByTitle = titleName ? sourcePeople.filter((person) =>
+        comparableName(person.firstName+" "+person.lastName) === titleName) : [];
+      const matches = [...new Set([...matchesByPhone,...matchesByTitle].map((person) => person.id))];
+      if (matches.length === 1) calledIds.add(matches[0]);
+      else unlinkedCalls.add(call.id);
+    }
+    const unknownCalledPerson = unlinkedCalls.size > 0;
+    const singleWrongNumberWithUnknownPerson = wrongNumberCalls > 0 && sourcePeople.length === 1 && unknownCalledPerson;
     const meaningfulMeeting = allMeetings.some((m) => m.outcome.toUpperCase() !== "CANCELED" && m.outcome.toUpperCase() !== "NO_SHOW" && m.outcome.toUpperCase() !== "RESCHEDULED");
     const positiveReplies = sourcePeople.filter((p) => clean(p.salesEmailLastReplied)).length;
     const protectedOwner = Boolean(company.ownerId && ![MEETING_CREATOR_MARITA_OWNER,MEETING_CREATOR_DANIEL_OWNER,MEETING_CREATOR_OPS_OWNER].includes(company.ownerId));
@@ -195,14 +224,17 @@ export function buildMeetingCreatorQueue(input: CreatorQueueInput): CreatorQueue
       ats: company.detectedAts, activeJobs: safeNumber(company.activeJobs),
     });
     const owner = ownerFor(company, product.recommendedProduct, product.talenteraScore, product.evalufyScore);
-    const calledIds = new Set(allCalls.flatMap((call) => call.contactIds));
-    const calledNumbers = new Set(allCalls.map((call) => normalizeSaudiMobile(call.toNumber)).filter(Boolean));
+    const wrongContactIds = new Set(allCalls.filter((call)=>call.disposition===WRONG_NUMBER_DISPOSITION).flatMap((call)=>call.contactIds));
+    const wrongNumbers = new Set(allCalls.filter((call)=>call.disposition===WRONG_NUMBER_DISPOSITION)
+      .map((call)=>normalizeSaudiMobile(call.toNumber)).filter(Boolean));
     const rankedPeople = [...sourcePeople]
       .filter((p) => !p.ownerId || p.ownerId === owner.id || p.ownerId === MEETING_CREATOR_OPS_OWNER)
       .map((p) => {
         const phone = normalizeSaudiMobile(p.mobilePhone) || normalizeSaudiMobile(p.phone);
         const persona = titleFit(p.title);
-        const different = !calledIds.has(p.id) && (!phone || !calledNumbers.has(phone));
+        const different = !calledIds.has(p.id) && !wrongContactIds.has(p.id)
+          && (!phone || (!calledNumbers.has(phone) && !wrongNumbers.has(phone)))
+          && !(singleWrongNumberWithUnknownPerson && sourcePeople.length === 1);
         return { p, phone, persona, different, weight: (persona ? 100 : 0) + (phone ? 50 : 0) + (different ? 30 : 0) };
       })
       .sort((a, b) => b.weight - a.weight || a.p.id.localeCompare(b.p.id));
@@ -219,10 +251,13 @@ export function buildMeetingCreatorQueue(input: CreatorQueueInput): CreatorQueue
               : openTasks ? "Open SDR follow-up / task already exists."
                 : positiveReplies ? "Positive email reply exists."
                   : "Account outside approved acquisition scope.";
-    } else if (!company.completeHistory || unresolvedDisposition || unknownCalledPerson) {
+    } else if (!company.completeHistory || unresolvedDisposition || (unknownCalledPerson && !singleWrongNumberWithUnknownPerson)) {
       reason = "Activity history is incomplete or a call has an unknown outcome/person. Manual review required.";
     } else if (allCalls.length && attemptedCalls !== allCalls.length) {
       reason = "Some call outcomes cannot be classified as failed attempts.";
+    } else if (singleWrongNumberWithUnknownPerson) {
+      status = "needs_alternate";
+      reason = "Wrong number on the only contact; previous call identity requires confirmation before new outreach.";
     } else if (best) {
       const reactivation = allCalls.length ? evaluateReactivation({
         attemptedCalls, connectedCalls, bookedMeetings: allMeetings.length,
@@ -241,6 +276,11 @@ export function buildMeetingCreatorQueue(input: CreatorQueueInput): CreatorQueue
       } else {
         reason = reactivation.reason;
       }
+    } else if (wrongNumberCalls > 0 && allCalls.length > 0) {
+      status = "needs_alternate";
+      reason = wrongNumberCalls === 1
+        ? "Wrong number on the previous contact; find a different verified HR decision maker and a different phone."
+        : `${wrongNumberCalls} wrong-number calls; find a different HR decision maker and verify the new phone.`;
     }
     const selected = best || rankedPeople[0];
     const priority = clamp(product.meetingScore + (best?.phone ? 5 : 0) + (allCalls.length && status === "call_ready" ? 3 : 0));
@@ -256,10 +296,11 @@ export function buildMeetingCreatorQueue(input: CreatorQueueInput): CreatorQueue
       contactPhone: status === "call_ready" ? best?.phone || "" : "",
       phoneEvidence: status === "call_ready" && best?.phone ? "saudi_mobile_format_unverified" : "missing",
       contactLinkedIn: selected?.p.linkedinUrl || "",
-      attemptedCalls, connectedCalls, openTasks,
+      attemptedCalls, connectedCalls, openTasks, wrongNumberCalls,
+      nextAction: status === "needs_alternate" ? "Search-only: find a different HR decision maker; verify employer and new Saudi phone before creating a task." : "",
     });
   }
   return result.sort((a,b) =>
-    ({call_ready:0,needs_research:1,protected:2})[a.status] - ({call_ready:0,needs_research:1,protected:2})[b.status]
+    ({call_ready:0,needs_alternate:1,needs_research:2,protected:3})[a.status] - ({call_ready:0,needs_alternate:1,needs_research:2,protected:3})[b.status]
       || b.priority - a.priority || a.companyName.localeCompare(b.companyName));
 }
