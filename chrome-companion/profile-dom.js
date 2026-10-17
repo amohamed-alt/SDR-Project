@@ -8,8 +8,8 @@ async function readVisibleLinkedInProfile() {
     catch { return ''; }
   };
   const sales = /^\/sales\/lead\//.test(location.pathname);
-  if (!sales && !/^\/in\/[^/]+\/?$/.test(location.pathname)) return { ok: false, error: 'Open a LinkedIn or Sales Navigator profile first.' };
   if (/checkpoint|login|authwall/.test(location.pathname) || /verify you are human|security verification|unusual traffic/i.test(document.title || '')) return { ok: false, error: 'LinkedIn sign-in or verification is required. Open the profile manually before continuing.' };
+  if (!sales && !/^\/in\/[^/]+\/?$/.test(location.pathname)) return { ok: false, error: 'Open a LinkedIn or Sales Navigator profile first.' };
   let root = document.querySelector('main');
   if (!root) return { ok: false, error: 'Profile is still loading.' };
   let linkedinUrl = normalizePublic(location.href);
@@ -29,7 +29,7 @@ async function readVisibleLinkedInProfile() {
   const name = structuredName || text(heading);
   let company = '', title = '', currentRoleText = '';
   if (sales) {
-    const roleHeading = Array.from(root.querySelectorAll('h2')).find((node) => text(node) === 'Current role');
+    const roleHeading = Array.from(root.querySelectorAll('h2')).find((node) => /^Current roles?$/i.test(text(node)));
     const section = root.querySelector('[data-sn-view-name="lead-current-role"]') || roleHeading?.parentElement;
     title = text(section?.querySelector('[data-anonymize="job-title"]'));
     company = text(section?.querySelector('[data-anonymize="company-name"]'));

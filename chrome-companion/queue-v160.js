@@ -47,15 +47,16 @@ importScripts('profile-dom.js');
         await new Promise((resolve) => setTimeout(resolve, 700));
       }
       if (!result?.ok) throw new Error(result?.error || 'Could not read this profile.');
-      if (result.lead.name.normalize('NFKC').trim().toLowerCase() !== lead.name.normalize('NFKC').trim().toLowerCase()) throw new Error('Opened profile identity differs from the search card.');
+      const nameKey = value => value.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
+      if (nameKey(result.lead.name) !== nameKey(lead.name)) throw new Error('Opened profile identity differs from the search card.');
       return { ...lead, ...result.lead, location: result.lead.location || lead.location };
     } finally { await chrome.tabs.remove(tab.id).catch(() => {}); }
   }
-  globalThis.startCapturedProfileChecks = async (leads, sourceUrl) => {
+  globalThis.startCapturedProfileChecks = async (leads, sourceUrl, captureRunId) => {
     const stored = (await chrome.storage.local.get([KEY]))[KEY];
     if (busy || stored?.pending?.length) throw new Error('Wait for the current profile checks to finish before starting another capture.');
     const rows = dedupe(leads.filter(lead => lead.connectionDegree !== '1st'), 2500).map(lead => ({ key: identity(lead), lead, status: 'pending' }));
-    const queue = { sourceUrl, rows, action: 'check', pending: rows.map(row => row.key), done: 0, total: rows.length, paused: false };
+    const queue = { sourceUrl, captureRunId, rows, action: 'check', pending: rows.map(row => row.key), done: 0, total: rows.length, paused: false };
     await persist(queue);
     chrome.alarms.create(ALARM, { when: Date.now() + 1000 }); setTimeout(() => void step(), 100);
     return queue;
@@ -94,7 +95,8 @@ importScripts('profile-dom.js');
       try {
         if (queue.action === 'check') {
           row.lead = await profile(row.lead);
-          const payload = await api({ action: 'profile_check', lead: row.lead });
+          const payload = await api({ action: 'profile_check', lead: row.lead, runId: queue.captureRunId });
+          if (queue.captureRunId && payload.profileSynced === false) throw new Error('Public URL was read but not saved to this capture. Retry the profile check.');
           Object.assign(row, { check: payload.check, prospect: payload.prospect, cached: payload.cached, revealAttempted: payload.revealAttempted, hasPhone: payload.hasPhone, previousPush: payload.previousPush });
           row.status = payload.previousPush ? 'pushed' : !payload.check?.eligible ? 'blocked' : payload.hasPhone ? 'ready' : payload.revealAttempted ? 'no-phone' : 'needs-reveal';
         } else if (queue.action === 'reveal') {
@@ -135,8 +137,8 @@ importScripts('profile-dom.js');
           queue = { sourceUrl: captured.sourceUrl, rows: dedupe(captured.leads.filter((lead) => lead.connectionDegree !== '1st'), message.type === 'work_queue_import_capture' ? 50 : 25).map((lead) => ({ ...previous.get(identity(lead)), key: identity(lead), lead: { ...lead, ...(previous.get(identity(lead))?.lead?.linkedinUrl ? previous.get(identity(lead)).lead : {}) }, status: previous.get(identity(lead))?.status || 'pending' })), pending: [], done: 0, paused: false };
           await persist(queue);
           if (readProfiles) {
-            await api({ action: 'import', sourceUrl: captured.sourceUrl, pagesRead: message.pagesRead === 2 ? 2 : 1, clientVersion: chrome.runtime.getManifest().version, parserVersion: 'card-v7-streaming-profiles', leads: queue.rows.map(row => row.lead) });
-            queue = await globalThis.startCapturedProfileChecks(queue.rows.map(row => row.lead), captured.sourceUrl);
+            const imported = await api({ action: 'import', sourceUrl: captured.sourceUrl, pagesRead: message.pagesRead === 2 ? 2 : 1, clientVersion: chrome.runtime.getManifest().version, parserVersion: 'card-v7-streaming-profiles', leads: queue.rows.map(row => row.lead) });
+            queue = await globalThis.startCapturedProfileChecks(queue.rows.map(row => row.lead), captured.sourceUrl, imported.runId);
           }
         } else if (message.type === 'work_queue_start') {
           if (busy || !queue?.rows?.length || (queue.pending?.length && !queue.paused)) throw new Error('Load a page first or wait for the current operation.');

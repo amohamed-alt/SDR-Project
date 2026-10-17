@@ -8,7 +8,7 @@ This is the Talentera SDR Chrome companion for user-triggered prospecting workfl
 2. Open `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Click **Load unpacked** and select the `chrome-companion` folder.
-5. Confirm the extension shows version **1.6.4**.
+5. Confirm the extension shows version **1.6.5**.
 6. In the SDR Dashboard, open **Sales Nav → Companion setup**.
 7. Unlock admin settings and click **Enable profile actions / rotate token**.
 8. Paste that token into the extension and click **Test connection**.
@@ -98,3 +98,10 @@ Full Search enqueues each saved page immediately; it no longer waits for the ent
 To resume v1.6.3 progress, update the same unpacked folder, Reload the extension, then press Resume FULL search. Previously saved cards are queued for profile reading before pagination resumes. Keep the original search tab and Chrome open. No paid reveal or CRM push runs automatically.
 
 The smaller capture buttons inside Full-search capture (25 and 50) now use the same automatic profile queue too. They no longer create card-only imports. For an urgent saved-person repair, open their Sales Nav link, copy View LinkedIn profile, and use Add profile URL in the latest dashboard run. This saves only the public URL and runs a free eligibility check; it never reveals paid contact data or pushes to CRM.
+
+
+## v1.6.5: reliable URL-to-check handoff
+
+Opening the dashboard after profiles were captured now automatically checks saved public URLs too. Newly received links update their rows immediately; stable completed checks are not repeated on status events. Quick captures and full-search profile checks carry their originating run ID. Delayed results update that saved run even if a newer search is active, without replacing the latest search. An unmatched URL is an explicit retry error, not a completed check. Sign-in/verification redirects pause profile work. No paid reveal or CRM push starts automatically.
+
+Update the same unpacked folder, Reload the extension, and refresh the dashboard. Existing pairing and capture progress stay in place. The new run binding applies to new captures; older unbound quick captures should be recaptured when another search has since become latest.

@@ -3,10 +3,10 @@ import fs from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
 const sample={name:'Person A',title:'HR Director',company:'Example Company',location:'Amman, Jordan',connectionDegree:'3rd',salesLeadUrl:'https://www.linkedin.com/sales/lead/123,NAME_SEARCH,456',linkedinUrl:''};
-function fixture({allowed=true,blocked=false,checkGate=null}={}){
+function fixture({allowed=true,blocked=false,checkGate=null,profileSynced=true}={}){
  const storage={pairingToken:'test-token'},messages=[],alarms=[],opened=[],closed=[],calls=[];
  const chrome={storage:{local:{get:async keys=>Object.fromEntries(keys.map(k=>[k,storage[k]])),set:async v=>Object.assign(storage,JSON.parse(JSON.stringify(v)))}},runtime:{getManifest:()=>({version:'1.6.0'}),onMessage:{addListener:fn=>messages.push(fn)}},permissions:{contains:async()=>allowed},tabs:{create:async args=>(opened.push(args),{id:100}),get:async()=>({status:'complete'}),remove:async id=>closed.push(id)},scripting:{executeScript:async args=>args.files?[]:[{result:args.target.tabId===9?{ok:true,sourceUrl:'https://www.linkedin.com/sales/search/people',leads:[sample]}:{ok:true,lead:{...sample,linkedinUrl:'https://www.linkedin.com/in/person-a'}}}]},alarms:{create:()=>{},clear:async()=>{},onAlarm:{addListener:fn=>alarms.push(fn)}}};
- const fetch=async(url,args)=>{const body=JSON.parse(args.body);calls.push(body);if(body.action==='profile_check' && checkGate)await checkGate;return {ok:true,json:async()=>body.action==='profile_options'?{ok:true,owners:[]}:body.action==='profile_check'?{ok:true,check:{eligible:!blocked,company:{protected:blocked}},hasPhone:false}:body.action==='profile_reveal'?{ok:true,check:{eligible:true},prospect:{phone:'+962791234567'},hasPhone:true}: {ok:true,verified:true,taskId:'t1',ownerName:'Daniel'}};};
+ const fetch=async(url,args)=>{const body=JSON.parse(args.body);calls.push(body);if(body.action==='profile_check' && checkGate)await checkGate;return {ok:true,json:async()=>body.action==='profile_options'?{ok:true,owners:[]}:body.action==='profile_check'?{ok:true,profileSynced,check:{eligible:!blocked,company:{protected:blocked}},hasPhone:false}:body.action==='profile_reveal'?{ok:true,check:{eligible:true},prospect:{phone:'+962791234567'},hasPhone:true}: body.action==='import'?{ok:true,runId:'00000000-0000-4000-8000-000000000021'}:{ok:true,verified:true,taskId:'t1',ownerName:'Daniel'}};};
  const context={chrome,fetch,URL,Map,Date,Promise,AbortSignal,importScripts:()=>{},extractCurrentSalesNavPageV154:()=>{},readVisibleLinkedInProfile:()=>{},dedupe:arr=>arr,setTimeout:f=>f()};
  vm.runInNewContext(fs.readFileSync('chrome-companion/queue-v160.js','utf8'),context);
  const message=body=>new Promise(resolve=>messages[0](body,{},resolve));
@@ -69,3 +69,11 @@ test('legacy 25/50 capture buttons also import and start automatic free profile 
  assert.equal(f.calls.find(call=>call.action==='import').pagesRead,2);
  assert.ok(f.calls.some(call=>call.action==='profile_check'));assert.ok(f.calls.every(call=>!['profile_reveal','profile_push'].includes(call.action)));
 });
+
+ test('quick capture binds checks to the imported run; unsaved URLs cannot report success',async()=>{
+ const f=fixture();await f.message({type:'work_queue_capture',tabId:9,readProfiles:true});await f.drain();
+ assert.equal(f.calls.find(call=>call.action==='profile_check').runId,'00000000-0000-4000-8000-000000000021');
+ const failed=fixture({profileSynced:false});await failed.append([sample],'https://www.linkedin.com/sales/search/people','00000000-0000-4000-8000-000000000022');
+ const queue=await failed.drain();assert.equal(queue.rows[0].status,'error');assert.match(queue.rows[0].error,/not saved/);assert.equal(queue.rows[0].lead.linkedinUrl,'https://www.linkedin.com/in/person-a');
+ assert.ok(failed.calls.every(call=>call.action==='profile_check'));
+ });

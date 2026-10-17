@@ -9,6 +9,16 @@ export function publicPersonProfile(raw: string): string {
   } catch { return ""; }
 }
 
+/** Saved URLs also need a free check when the dashboard is opened after capture. */
+export function shouldCheckCapturedProfile(
+  lead: CapturedProfile,
+  previous?: { lead: CapturedProfile; stage: string },
+): boolean {
+  if (!publicPersonProfile(lead.linkedinUrl) || previous?.stage === "pushed") return false;
+  return !previous || ["pending", "awaiting-profile", "needs-profile"].includes(previous.stage)
+    || JSON.stringify(previous.lead) !== JSON.stringify(lead);
+}
+
 function salesPersonKey(raw: string): string {
   try {
     const url = new URL(raw);

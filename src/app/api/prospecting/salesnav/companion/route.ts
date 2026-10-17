@@ -193,7 +193,15 @@ export async function POST(request: NextRequest) {
   }
   // Save the verified profile independently of optional CRM availability.
   const checkedProfile = body.action === "profile_check" ? leadSchema.safeParse(body.lead) : null;
-  const profileSynced = checkedProfile?.success ? await syncCompanionProfile(checkedProfile.data) : false;
+  const targetRun = z.string().uuid().optional().safeParse(body.runId);
+  if (checkedProfile && !targetRun.success) return NextResponse.json({ error: "Invalid capture run identity." }, { status: 400, headers: corsHeaders() });
+  let profileSynced = false;
+  try {
+    profileSynced = checkedProfile?.success ? await syncCompanionProfile(checkedProfile.data, targetRun.success ? targetRun.data : undefined) : false;
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Could not save profile URL." }, { status: 409, headers: corsHeaders() });
+  }
+  if (checkedProfile?.success && body.runId && !profileSynced) return NextResponse.json({ error: "Profile URL could not be matched to its saved capture. Retry this capture before continuing." }, { status: 409, headers: corsHeaders() });
   const profileAction = await handleCompanionProfileAction(request, body);
   if (profileAction) {
     const payload = await profileAction.json();

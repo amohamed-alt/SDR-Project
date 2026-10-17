@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { publicPersonProfile } from "@/lib/salesnav-profile-sync";
+import { publicPersonProfile, shouldCheckCapturedProfile } from "@/lib/salesnav-profile-sync";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft, CalendarClock, CheckCircle2, CircleAlert, Download, ExternalLink, History,
@@ -54,7 +54,7 @@ async function readJson<T>(response: Response): Promise<T> {
   const text = await response.text(); if (!text.trim()) return {} as T;
   try { return JSON.parse(text) as T; } catch { throw new Error(`Server returned non-JSON: ${text.slice(0, 160)}`); }
 }
-async function precheckLead(lead: Lead) {
+async function fetchPrecheckLead(lead: Lead) {
   const response = await fetch("/api/prospecting/salesnav/precheck-v2", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: lead.name, company: lead.company, linkedinUrl: lead.linkedinUrl, email: "", emails: [], phone: "", phones: [] }),
@@ -63,6 +63,18 @@ async function precheckLead(lead: Lead) {
   const payload = await readJson<Precheck & { error?: string }>(response);
   if (!response.ok) throw new Error(payload.error || "HubSpot precheck failed.");
   return payload;
+}
+
+// Manual and streaming checks can overlap. Share only the active request;
+// completed or failed checks are never cached here, so Retry always revalidates.
+const inFlightPrechecks = new Map<string, Promise<Precheck>>();
+function precheckLead(lead: Lead) {
+  const key = JSON.stringify([lead.name, lead.company, lead.linkedinUrl]);
+  const existing = inFlightPrechecks.get(key);
+  if (existing) return existing;
+  const request = fetchPrecheckLead(lead).finally(() => inFlightPrechecks.delete(key));
+  inFlightPrechecks.set(key, request);
+  return request;
 }
 
 export function SalesNavPipelineV2() {
@@ -129,13 +141,16 @@ export function SalesNavPipelineV2() {
         const previousRows = new Map(rowsRef.current.map(row => [row.key, row]));
         const changed = payload.run.leads.filter(lead => {
           const previous = previousRows.get(keyFor(lead));
-          return publicPersonProfile(lead.linkedinUrl) && (!previous || JSON.stringify(previous.lead) !== JSON.stringify(lead)) && previous?.stage !== "pushed";
+          return shouldCheckCapturedProfile(lead, previous);
         });
         setRun(payload.run);
         const latestRun = payload.run;
         setRows(current => {
           const existing = new Map(current.map(row => [row.key, row]));
-          return latestRun.leads.map(lead => existing.get(keyFor(lead)) || { key: keyFor(lead), lead, stage: !latestRun.complete && !publicPersonProfile(lead.linkedinUrl) ? "awaiting-profile" : "pending" });
+          return latestRun.leads.map(lead => {
+            const previous = existing.get(keyFor(lead));
+            return previous ? { ...previous, lead } : { key: keyFor(lead), lead, stage: !latestRun.complete && !publicPersonProfile(lead.linkedinUrl) ? "awaiting-profile" : "pending" };
+          });
         });
         const pending = [...changed];
         await Promise.all(Array.from({ length: Math.min(4, pending.length) }, async () => {

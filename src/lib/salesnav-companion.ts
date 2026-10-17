@@ -286,12 +286,15 @@ export function finishCompanionFullRun(id: string, stopReason: string) {
 }
 export function syncCompanionProfile(profile: CapturedProfile, expectedRunId?: string) {
   return withRunWrite(async () => {
-    const run = await getLatestCompanionFullRun();
-    // The shared write queue preserves page captures and profile updates while running.
-    if (!run || (expectedRunId && run.id !== expectedRunId)) return false;
+    const latest = await getLatestCompanionFullRun();
+    const run = expectedRunId ? await getCompanionFullRun(expectedRunId) : latest;
+    // Repair the originating saved run without replacing a newer search as latest.
+    if (!run) return false;
     const result = mergeCapturedProfile(run.leads, profile);
     if (!result.synced) return false;
-    await persistFullRun({ ...run, leads: result.leads, updatedAt: new Date().toISOString() });
+    const next = { ...run, leads: result.leads, updatedAt: new Date().toISOString() };
+    if (latest?.id === run.id) await persistFullRun(next);
+    else await atomicWrite(historyPath(run.id), JSON.stringify(next));
     return true;
   });
 }

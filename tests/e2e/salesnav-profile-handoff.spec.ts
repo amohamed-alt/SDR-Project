@@ -105,3 +105,24 @@ test("HubSpot checks all 100 captured people without skipping missing URLs or hi
   await expect(page.getByRole("row").filter({ hasText: "Check Person 99" })).toContainText("HubSpot unavailable");
   expect(paidActions).toBe(0);
 });
+
+test("opening an already captured public URL automatically checks it without a manual click", async ({ page }) => {
+  await page.addInitScript(() => { localStorage.setItem("sdr_v2_visitor_id", "saved_url_qa"); localStorage.setItem("sdr_v2_visitor_name", "Saved URL QA"); });
+  await page.request.post("/api/sdr-admin", { data: { password: "playwright-tools-only-password" } });
+  let checks = 0, paid = 0;
+  const lead = { name: "Saved Profile Person", title: "HR Director", company: "Example", location: "Riyadh", connectionDegree: "2nd", salesLeadUrl: "https://www.linkedin.com/sales/lead/SAVED,SEARCH,x", linkedinUrl: "https://www.linkedin.com/in/saved-profile-person" };
+  const run = { id: "00000000-0000-4000-8000-000000000007", startedAt: "2026-10-17T08:00:00Z", updatedAt: "2026-10-17T08:00:00Z", completedAt: "2026-10-17T08:01:00Z", complete: true, stopReason: "Done", sourceUrl: "https://www.linkedin.com/sales/search/people", searchFingerprint: "saved-url", pagesRead: 1, total: 1, leads: [lead] };
+  await page.route("**/api/prospecting/salesnav/full-run*", route => route.fulfill({ json: { run, history: [run] } }));
+  await page.route("**/api/prospecting/salesnav/companion", route => route.fulfill({ json: { ok: true, paired: true, unlocked: true, latestFullRun: run } }));
+  await page.route("**/api/prospecting/salesnav/task-options", route => route.fulfill({ json: { owners: [] } }));
+  await page.route("**/api/prospecting/salesnav/precheck-v2", route => { checks += 1; return route.fulfill({ json: { contact: { inHubSpot: false }, company: { protected: false, inHubSpot: false } } }); });
+  await page.route("**/api/prospecting/salesnav/reveal-fast", route => { paid += 1; return route.fulfill({ status: 500, json: { error: "No credits in this test" } }); });
+  await page.goto("/signalhire-queue");
+  await expect(page.getByRole("row").filter({ hasText: lead.name })).toContainText("Needs reveal");
+  expect(checks).toBe(1);
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("salesnav:profiles-synced")));
+  await expect(page.getByRole("link", { name: "LinkedIn", exact: true })).toHaveAttribute("href", lead.linkedinUrl);
+  await page.getByRole("button", { name: "Select visible", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Reveal selected (1)", exact: true })).toBeEnabled();
+  expect(checks).toBe(1);expect(paid).toBe(0);
+});
