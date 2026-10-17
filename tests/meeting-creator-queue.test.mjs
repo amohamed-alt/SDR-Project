@@ -159,6 +159,7 @@ test("HubSpot phone_number_status Wrong Number with only one contact starts alte
   const [row]=queue({calls:[],contacts:[{...oldPerson,phoneNumberStatus:"Wrong Number"}]});
   assert.equal(row.status,"needs_alternate");
   assert.equal(row.wrongNumberContacts,1);
+  assert.equal(row.motion,"reactivation");
   assert.equal(row.contactPhone,"");
   assert.match(row.reason,/Phone Number Status = Wrong Number/);
 });
