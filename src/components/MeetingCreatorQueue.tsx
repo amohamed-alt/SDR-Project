@@ -36,6 +36,7 @@ type Lead = {
   connectedCalls: number;
   openTasks: number;
   wrongNumberCalls?: number;
+  wrongNumberContacts?: number;
   nextAction?: string;
 };
 type QueueData = {
@@ -259,7 +260,7 @@ export function MeetingCreatorQueue() {
                 <td><strong>{lead.companyName}</strong><small>{lead.domain} · {fmt(lead.employeeCount)} employees</small><span className={styles.tinyPill}>{lead.recommendedProduct}</span><small>Talentera {lead.talenteraScore} · Evalufy {lead.evalufyScore} · Priority {lead.priority}</small></td>
                 <td><strong>{lead.contactName||"Find HR decision maker"}</strong><small>{lead.contactTitle||"Profile pending"}</small><small>{lead.sdrName||"Owner under review"}</small></td>
                 <td>{lead.contactPhone?<div className={styles.number}><span>{lead.contactPhone}</span><button type="button" onClick={()=>void copy(lead.contactPhone)} title="Copy phone"><ClipboardCopy size={14}/></button></div>:<span className={styles.muted}>Not verified for review</span>}<small>{lead.contactPhone?"Saudi mobile format · not dial-verified":""}</small></td>
-                <td><small>{lead.reason}</small><span className={styles.context}>{lead.attemptedCalls} failed attempts · {lead.wrongNumberCalls||0} wrong number · {lead.connectedCalls} connected · {lead.openTasks} open tasks</span></td>
+                <td><small>{lead.reason}</small><span className={styles.context}>{lead.attemptedCalls} failed attempts · {lead.wrongNumberCalls||0} wrong-number calls · {lead.wrongNumberContacts||0} flagged contacts · {lead.connectedCalls} connected · {lead.openTasks} open tasks</span></td>
                 <td><span className={styles.status} data-kind={lead.status}>{humanStatus(lead.status)}</span>
                   {lead.status==="needs_alternate"&&lead.companyId?
                     <button type="button" className={styles.researchAlternate} disabled={Boolean(searchingAlternate)}
