@@ -245,7 +245,7 @@ export function SalesNavPipelineV2() {
     const operationRunId = activeRunId.current;
     setProcessing(true); setError(""); setMessage(""); setSelected(new Set()); setView("all");
     setProgress({ done: 0, total, label: "HubSpot check" });
-    let checkedCount = 0, failedCount = 0, missingProfiles = 0;
+    let checkedCount = 0, failedCount = 0;
     const workers = Array.from({ length: Math.min(4, pending.length) }, async () => {
       while (pending.length) {
         const source = pending.shift(); if (!source) return;
@@ -255,10 +255,7 @@ export function SalesNavPipelineV2() {
         try {
           const checked = await precheckLead(source.lead);
           if (activeRunId.current !== operationRunId) return;
-          const blocked = blockedCompany({ ...source, precheck: checked }) || isExistingPerson({ ...source, precheck: checked });
-          const hasProfile = Boolean(publicPersonProfile(source.lead.linkedinUrl));
           const stage = checkedStage(source, checked, Boolean(run?.complete));
-          if (!blocked && !hasProfile) missingProfiles += 1;
           checkedCount += 1;
           setRows((current) => current.map((row) => row.key === source.key ? { ...row, precheck: checked, stage, error: stage === "error" ? source.error || "Review the uncertain reveal before another paid request." : undefined } : row));
         } catch (requestError) {
@@ -269,7 +266,7 @@ export function SalesNavPipelineV2() {
       }
     });
     await Promise.all(workers); setSelected(new Set()); setProcessing(false);
-    setMessage(`HubSpot: ${checkedCount}/${total} checked · ${failedCount} failed · ${missingProfiles} eligible people still need a public profile URL before reveal. URL reading is controlled above and runs independently of CRM checks.`);
+    setMessage(`HubSpot: ${checkedCount}/${total} checked · ${failedCount} failed. Missing public URLs are listed below and update as Scrape progresses.`);
   }
 
   async function revealSelected() {
@@ -334,7 +331,7 @@ export function SalesNavPipelineV2() {
           if (!response.ok) { retryable = payload.retryable === true; resumeContactId = String(payload.contactId || ""); throw new Error(payload.error || "Push + Task failed."); }
           if (activeRunId.current !== operationRunId) return;
           pushedCount += 1;
-          setRows((current) => current.map((row) => row.key === source.key ? { ...row, stage: "pushed", message: payload.duplicate ? `Existing task kept · ${payload.taskId || "found"}` : `Task ${payload.taskId || "created"} → ${payload.ownerName || ownerName}` } : row));
+          setRows((current) => current.map((row) => row.key === source.key ? { ...row, stage: "pushed", error: undefined, pushRetryable: false, resumeContactId: "", message: payload.duplicate ? `Existing task kept · ${payload.taskId || "found"}` : `Task ${payload.taskId || "created"} → ${payload.ownerName || ownerName}` } : row));
         } catch (requestError) {
           if (activeRunId.current !== operationRunId) return;
           failedCount += 1;
