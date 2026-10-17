@@ -89,7 +89,7 @@ test("wrong-number accounts can search for alternate people without exposing a f
   await page.goto("/meeting-creator");
   await page.getByRole("combobox",{name:"Lead source"}).selectOption("wrong_number");
   await expect(page.getByText("AJA Pharma")).toBeVisible();
-  await expect(page.getByText("Find another person")).toBeVisible();
+  await expect(page.getByRole("table").getByText("Find another person",{exact:true})).toBeVisible();
   await expect(page.getByRole("checkbox",{name:/Select Salem Al-Twalah/})).toBeDisabled();
   await page.getByRole("button",{name:"Find alternate (free)"}).click();
   await expect(page.getByText("Example New HR")).toBeVisible();
