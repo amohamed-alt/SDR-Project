@@ -22,7 +22,7 @@ export function SalesNavCollectorControls({ runId, missing, captureLocked, readL
   function request(action: string) {
     return new Promise<CollectorState>(resolve => {
       const id = crypto.randomUUID();
-      const timer = setTimeout(() => { pending.current.delete(id); resolve({ ok: false, error: "Collector 1.7.1 is not connected to this tab. Update/reload the extension, then refresh this dashboard." }); }, action === "status" ? 2500 : 60000);
+      const timer = setTimeout(() => { pending.current.delete(id); resolve({ ok: false, error: "Collector 1.8.0 is not connected to this tab. Update/reload the extension, then refresh this dashboard." }); }, action === "status" ? 2500 : 60000);
       pending.current.set(id, { resolve, timer });
       window.postMessage({ channel: "talentera-collector-request", id, action, runId, tabId: Number(tabId) }, window.location.origin);
     });
@@ -77,13 +77,13 @@ export function SalesNavCollectorControls({ runId, missing, captureLocked, readL
     finally { setBusy(false); }
   }
   return <section className={styles.collector} aria-label="Dashboard collector">
-    <div><strong>1. Scrape → 2. Check → 3. Reveal → 4. Push</strong><p>Scrape saves search cards and reads their public profile links. Continue with HubSpot Check, Reveal and Push here.</p></div>
+    <div><strong>Extension: 25 / 50 / Full → Dashboard: Check → Reveal → Push</strong><p>Start the capture from the extension. It reads and saves profile URLs first, then opens the ready batch here automatically.</p></div>
     <div role="status">{state?.ok ? `Collector ${state.version} connected${state.permission ? "" : " · Sales Nav permission required"}` : state?.error || "Connecting to Chrome collector…"}</div>
-    {!state?.ok && <Link href="/salesnav-prospecting">Download / set up Collector 1.7.1</Link>}
-    {state?.ok && state.version === "1.7.0" && <p><Link href="/salesnav-prospecting">Update Collector to 1.7.1</Link> for automatic profile reading after scrape. Your current collector can still read missing URLs with the retry button.</p>}
+    {!state?.ok && <Link href="/salesnav-prospecting">Download / set up Collector 1.8.0</Link>}
+    {state?.ok && state.version !== "1.8.0" && <p><Link href="/salesnav-prospecting">Update Collector to 1.8.0</Link> to restore the 25 / 50 / Full extension workflow and automatic URL handoff.</p>}
     {state?.ok && !state.permission && <p>Open the extension once and click Enable Sales Nav reading, then return here.</p>}
     <div className={styles.collectorActions}><label>Sales Nav search<select aria-label="Sales Nav search tab" value={selectedTab} onChange={event => setTabId(event.target.value)} disabled={busy || capturing}>{searches.length ? searches.map((tab,index) => <option key={tab.id} value={tab.id}>{tab.title}{index === 0 ? " · most recently used" : ` · search ${index + 1}`}</option>) : <option value="">Open a Sales Navigator People Search tab</option>}</select></label>
-      <button onClick={() => void act("capture")} disabled={busy || captureLocked || !state?.ok || !state.permission || !selectedTab || capturing || reading}>{state?.capture?.error || state?.capture?.paused ? "Resume scrape" : "Scrape search"}</button>
+      {(state?.capture?.error || state?.capture?.paused) && <button onClick={() => void act("capture")} disabled={busy || captureLocked || !state?.ok || !state.permission || !selectedTab || capturing || reading}>Resume interrupted scrape</button>}
       <button onClick={() => void act("read")} disabled={busy || readLocked || !state?.ok || !state.permission || !runId || !missing || reading || capturing}>Read / retry {missing} missing URLs</button>
       <button onClick={() => void act("stop")} disabled={busy || !state?.ok || (!reading && !capturing)}>Stop collector</button>
     </div>

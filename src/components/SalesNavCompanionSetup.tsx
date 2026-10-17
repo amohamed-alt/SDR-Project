@@ -75,8 +75,8 @@ export function SalesNavCompanionSetup() {
   return <main className={styles.page}>
     <section className={styles.card}>
       <div className={styles.eyebrow}>TALENTERA SDR · CHROME COMPANION</div>
-      <h1>Companion setup only</h1>
-      <p>This page is only for pairing. Prospecting results no longer process here; every Sales Navigator capture goes to the Persistent Prospecting Queue.</p>
+      <h1>Extension capture setup</h1>
+      <p>Pair the extension once, then use its 25, 50 or Full buttons on a Sales Navigator People Search. Completed captures open in the Persistent Prospecting Queue.</p>
       <div className={styles.statusRow}>
         <span data-ok={status?.paired || false}>{status?.paired ? "Pairing active" : "Not paired"}</span>
         <span data-ok={Boolean(status?.lastUsedAt)}>{status?.lastUsedAt ? `Last contact ${new Date(status.lastUsedAt).toLocaleTimeString()}` : "No Companion contact yet"}</span>
@@ -99,12 +99,12 @@ export function SalesNavCompanionSetup() {
 
       {message && <div className={styles.message}>{message}</div>}
       <div className={styles.actions}>
-        <a href="/downloads/talentera-companion-v1.7.1.zip" download>Download Companion v1.7.1</a>
+        <a href="/downloads/talentera-companion-v1.8.0.zip" download>Download Companion v1.8.0</a>
         <a href="/downloads/companion-preview/index.html">Preview the design</a>
         <Link href="/signalhire-queue">Open Persistent Prospecting Queue</Link>
         <a href="https://github.com/amohamed-alt/SDR-Project/tree/main/chrome-companion" target="_blank" rel="noreferrer">Chrome Companion files</a>
       </div>
-      <p className={styles.note}>v1.7.1: Scrape → Check → Reveal → Push, all from the dashboard. Scrape reads profile URLs automatically after saving the search cards. Update the same unpacked folder, Reload, refresh the dashboard and enable Sales Nav access once. Existing pairing tokens are retained.</p>
+      <p className={styles.note}>v1.8.0 restores the extension workflow: choose 25, 50 or Full in the extension. It captures the cards, reads profile URLs, then opens the ready batch in the dashboard for HubSpot Check → Reveal → Push. Update the same unpacked folder and press Reload once. Existing pairing tokens are retained.</p>
     </section>
   </main>;
 }
