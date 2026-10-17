@@ -91,7 +91,7 @@ test("HubSpot checks all 100 captured people without skipping missing URLs or hi
   await expect(page.getByText(/4 pages · 100 unique leads · capture can resume · Companion 1.6.4/)).toBeVisible();
   await expect.poll(() => calls).toBe(4);
   await expect(page.getByText("HubSpot check 0/100", { exact: true })).toBeVisible();
-  await expect(page.getByRole("combobox").first()).toBeDisabled();
+  await expect(page.getByRole("combobox", { name: "Search history", exact: true })).toBeDisabled();
   releaseFirst();
   await expect(page.getByText("HubSpot check 99/100", { exact: true })).toBeVisible();
   expect(calls).toBe(100);

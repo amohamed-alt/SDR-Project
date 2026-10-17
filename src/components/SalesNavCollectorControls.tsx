@@ -15,6 +15,9 @@ export function SalesNavCollectorControls({ runId, missing, captureLocked, readL
   const [tabId, setTabId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const currentRun = useRef(runId);
+  currentRun.current = runId;
+  const lastProgress = useRef("");
   const pending = useRef(new Map<string, { resolve: (value: CollectorState) => void; timer: ReturnType<typeof setTimeout> }>());
   function request(action: string) {
     return new Promise<CollectorState>(resolve => {
@@ -36,7 +39,17 @@ export function SalesNavCollectorControls({ runId, missing, captureLocked, readL
     const refresh = async () => {
       if (checking) return;
       checking = true;
-      try { const next = await request("status"); if (active) setState(next); } finally { checking = false; }
+      try {
+        const next = await request("status");
+        if (active) {
+          setState(next);
+          const progress = next.queue ? `${next.queue.runId}:${next.queue.done}:${next.queue.updatedAt || ""}` : "";
+          if (progress && progress !== lastProgress.current && next.queue?.runId === currentRun.current) {
+            window.dispatchEvent(new CustomEvent("salesnav:profiles-synced", { detail: { runId: next.queue.runId } }));
+          }
+          lastProgress.current = progress;
+        }
+      } finally { checking = false; }
     };
     void refresh(); const interval = setInterval(() => void refresh(), 3000);
     return () => { active = false; clearInterval(interval); window.removeEventListener("message", listener); for (const value of callbacks.values()) { clearTimeout(value.timer); value.resolve({ ok: false }); } callbacks.clear(); };
