@@ -199,7 +199,7 @@ export async function POST(request: NextRequest) {
     if (!parsed.success) return NextResponse.json({ error: "Choose a valid saved run." }, { status: 400, headers: corsHeaders() });
     const run = await getCompanionFullRun(parsed.data.runId);
     if (!run) return NextResponse.json({ error: "Saved capture was not found." }, { status: 404, headers: corsHeaders() });
-    return NextResponse.json({ ok: true, sourceUrl: run.sourceUrl, leads: run.leads.filter(lead => !publicPersonProfile(lead.linkedinUrl) && lead.salesLeadUrl).slice(0,2500) }, { headers: corsHeaders() });
+    return NextResponse.json({ ok: true, complete: run.complete, sourceUrl: run.sourceUrl, leads: run.leads.filter(lead => !publicPersonProfile(lead.linkedinUrl) && lead.salesLeadUrl).slice(0,2500) }, { headers: corsHeaders() });
   }
   if (body.action === "profile_sync") {
     const parsed = z.object({ runId: z.string().uuid(), lead: leadSchema }).safeParse(body);

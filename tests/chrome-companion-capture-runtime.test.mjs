@@ -61,6 +61,15 @@ test('extension capture reads saved missing URLs before completing and handing t
   assert.deepEqual(f.calls.map(call => call.action), ['full_run_page', 'profile_read_run', 'full_run_finish']);
   assert.equal(f.storage.salesNavFullRunV1.complete, true);
 });
+test('a failed LinkedIn URL read keeps the batch incomplete and does not open the dashboard', async () => {
+  const f = fixture(); await f.context.startOrResume(4, { readProfilesOnComplete: true });
+  const runId = f.storage.salesNavFullRunV1.runId;
+  await f.context.finalizeSalesNavCapture(runId, { attempted: 1, failed: 1 });
+  assert.deepEqual(f.calls.map(call => call.action), ['full_run_page', 'profile_read_run']);
+  assert.equal(f.storage.salesNavFullRunV1.complete, false);
+  assert.equal(f.storage.salesNavFullRunV1.paused, true);
+  assert.match(f.storage.salesNavFullRunV1.backgroundError, /LinkedIn URL/);
+});
 test('legacy capture does not silently opt into URL reading', async () => {
   const f = fixture(); await f.context.startOrResume(4);
   assert.equal(f.readers.length, 0); assert.deepEqual(f.calls.map(call => call.action), ['full_run_page', 'full_run_finish']);

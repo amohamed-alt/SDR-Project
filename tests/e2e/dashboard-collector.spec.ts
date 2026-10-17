@@ -9,7 +9,7 @@ test("dashboard controls missing URL reads, surfaces profile errors and checks a
   const run={id:runId,startedAt:"2026-10-17T08:00:00Z",updatedAt:"2026-10-17T08:00:00Z",completedAt:"2026-10-17T08:01:00Z",complete:true,stopReason:"Done",sourceUrl:"https://www.linkedin.com/sales/search/people",searchFingerprint:"collector-qa",pagesRead:1,total:2};
   await page.exposeFunction("collectorCommand",async(action:string)=>{
     if(action==="read"){reads++;started=true;setTimeout(()=>{synced=true;},150);}
-    return {ok:true,version:"1.8.0",permission:true,tabs:[{id:4,title:"HR Saudi"}],queue:synced?{runId,running:false,paused:false,done:2,total:2,failed:[{name:"Reader Failed",error:"Profile name differs from the captured person."}]}:started?{runId,running:true,paused:false,done:0,total:2,failed:[]}:null};
+    return {ok:true,version:"1.8.1",permission:true,tabs:[{id:4,title:"HR Saudi"}],queue:synced?{runId,running:false,paused:false,done:2,total:2,failed:[{name:"Reader Failed",error:"Profile name differs from the captured person."}]}:started?{runId,running:true,paused:false,done:0,total:2,failed:[]}:null};
   });
   await page.addInitScript(()=>window.addEventListener("message",async event=>{
     if(event.source!==window||event.data?.channel!=="talentera-collector-request")return;
@@ -22,7 +22,7 @@ test("dashboard controls missing URL reads, surfaces profile errors and checks a
   await page.route("**/api/prospecting/salesnav/precheck-v2",route=>{checks++;return route.fulfill({json:{contact:{inHubSpot:false},company:{protected:false,inHubSpot:false}}});});
   await page.route(/\/api\/prospecting\/salesnav\/(reveal-fast|push-ready-v2)/,route=>{paid++;return route.fulfill({status:500,json:{error:"No paid actions in this test"}});});
   await page.goto("/signalhire-queue");
-  await expect(page.getByText("Collector 1.8.0 connected",{exact:true})).toBeVisible();
+  await expect(page.getByText("Collector 1.8.1 connected",{exact:true})).toBeVisible();
   await page.getByRole("button",{name:"Read / retry 2 missing URLs",exact:true}).click();
   await expect(page.getByRole("row").filter({hasText:"Reader Success"})).toContainText("Needs reveal");
   await expect(page.getByRole("link",{name:"LinkedIn",exact:true})).toHaveAttribute("href","https://www.linkedin.com/in/reader-success");
@@ -39,7 +39,7 @@ test("server pairing alone never claims Chrome collector is connected",async({pa
   await page.route("**/api/prospecting/salesnav/companion",route=>route.fulfill({json:{ok:true,paired:true,unlocked:true}}));
   await page.route("**/api/prospecting/salesnav/task-options",route=>route.fulfill({json:{owners:[]}}));
   await page.goto("/signalhire-queue");
-  await expect(page.getByText(/Collector 1.8.0 is not connected to this tab/)).toBeVisible();
-  await expect(page.getByText("Extension: 25 / 50 / Full → Dashboard: Check → Reveal → Push",{exact:true})).toBeVisible();
+  await expect(page.getByText(/Collector 1.8.1 is not connected to this tab/)).toBeVisible();
+  await expect(page.getByText("Extension: 25 / 50 / Full LinkedIn URLs → Dashboard: Check → Reveal → Push",{exact:true})).toBeVisible();
   await expect(page.getByRole("button",{name:"Scrape search",exact:true})).toHaveCount(0);
 });

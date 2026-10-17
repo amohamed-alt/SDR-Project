@@ -99,12 +99,12 @@ export function SalesNavCompanionSetup() {
 
       {message && <div className={styles.message}>{message}</div>}
       <div className={styles.actions}>
-        <a href="/downloads/talentera-companion-v1.8.0.zip" download>Download Companion v1.8.0</a>
+        <a href="/downloads/talentera-companion-v1.8.1.zip" download>Download Companion v1.8.1</a>
         <a href="/downloads/companion-preview/index.html">Preview the design</a>
         <Link href="/signalhire-queue">Open Persistent Prospecting Queue</Link>
         <a href="https://github.com/amohamed-alt/SDR-Project/tree/main/chrome-companion" target="_blank" rel="noreferrer">Chrome Companion files</a>
       </div>
-      <p className={styles.note}>v1.8.0 restores the extension workflow: choose 25, 50 or Full in the extension. It captures the cards, reads profile URLs, then opens the ready batch in the dashboard for HubSpot Check → Reveal → Push. Update the same unpacked folder and press Reload once. Existing pairing tokens are retained.</p>
+      <p className={styles.note}>v1.8.1 restores the extension workflow: choose 25, 50 or Full in the extension. It captures the cards, reads profile URLs, then opens the ready batch in the dashboard for HubSpot Check → Reveal → Push. Update the same unpacked folder and press Reload once. Existing pairing tokens are retained.</p>
     </section>
   </main>;
 }
