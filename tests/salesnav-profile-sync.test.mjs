@@ -37,3 +37,28 @@ test('free checks repair a finished saved run without duplicates, losing pages, 
   assert.equal(await store.syncCompanionProfile(profile),false);assert.equal((await store.getLatestCompanionFullRun()).id,'00000000-0000-4000-8000-000000000002');
  } finally {for(const k of keys){if(saved[k]===undefined)delete process.env[k];else process.env[k]=saved[k];}await rm(dir,{recursive:true,force:true});}
 });
+
+test('opening a saved dashboard checks existing URLs once and leaves paid/finished rows alone',async()=>{
+ const {shouldCheckCapturedProfile}=await import('../src/lib/salesnav-profile-sync.ts');
+ assert.equal(shouldCheckCapturedProfile(profile,{lead:profile,stage:'pending'}),true);
+ assert.equal(shouldCheckCapturedProfile(profile,{lead,stage:'awaiting-profile'}),true);
+ assert.equal(shouldCheckCapturedProfile(lead,{lead,stage:'pending'}),false);
+ for(const stage of ['needs-reveal','blocked','ready','no-phone','pushed','error']) assert.equal(shouldCheckCapturedProfile(profile,{lead:profile,stage}),false,stage);
+});
+
+test('delayed profile results repair their originating archived run without replacing latest',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'salesnav-bound-run-'));
+ const keys=['SALESNAV_COMPANION_FULL_RUN_PATH','SALESNAV_COMPANION_HISTORY_DIR'];const saved=Object.fromEntries(keys.map(k=>[k,process.env[k]]));
+ try {
+  process.env.SALESNAV_COMPANION_FULL_RUN_PATH=join(dir,'latest.json');process.env.SALESNAV_COMPANION_HISTORY_DIR=join(dir,'history');
+  const store=await import('../src/lib/salesnav-companion.ts?bound-run-test');
+  const first='00000000-0000-4000-8000-000000000011',latest='00000000-0000-4000-8000-000000000012';
+  const input={sourceUrl:'https://www.linkedin.com/sales/search/people',searchFingerprint:'bound',pageNumber:1,leads:[lead]};
+  await store.saveCompanionFullRunPage({...input,id:first});await store.finishCompanionFullRun(first,'Done');
+  await store.saveCompanionFullRunPage({...input,id:latest});
+  assert.equal(await store.syncCompanionProfile(profile,first),true);
+  assert.equal((await store.getCompanionFullRun(first)).leads[0].linkedinUrl,'https://www.linkedin.com/in/test-person');
+  const current=await store.getLatestCompanionFullRun();assert.equal(current.id,latest);assert.equal(current.leads[0].linkedinUrl,'');
+  assert.equal(await store.syncCompanionProfile({...profile,name:'Wrong Person'},latest),false);
+ } finally {for(const k of keys){if(saved[k]===undefined)delete process.env[k];else process.env[k]=saved[k];}await rm(dir,{recursive:true,force:true});}
+});

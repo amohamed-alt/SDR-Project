@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { publicPersonProfile } from "@/lib/salesnav-profile-sync";
+import { publicPersonProfile, shouldCheckCapturedProfile } from "@/lib/salesnav-profile-sync";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft, CalendarClock, CheckCircle2, CircleAlert, Download, ExternalLink, History,
@@ -129,13 +129,16 @@ export function SalesNavPipelineV2() {
         const previousRows = new Map(rowsRef.current.map(row => [row.key, row]));
         const changed = payload.run.leads.filter(lead => {
           const previous = previousRows.get(keyFor(lead));
-          return publicPersonProfile(lead.linkedinUrl) && (!previous || JSON.stringify(previous.lead) !== JSON.stringify(lead)) && previous?.stage !== "pushed";
+          return shouldCheckCapturedProfile(lead, previous);
         });
         setRun(payload.run);
         const latestRun = payload.run;
         setRows(current => {
           const existing = new Map(current.map(row => [row.key, row]));
-          return latestRun.leads.map(lead => existing.get(keyFor(lead)) || { key: keyFor(lead), lead, stage: !latestRun.complete && !publicPersonProfile(lead.linkedinUrl) ? "awaiting-profile" : "pending" });
+          return latestRun.leads.map(lead => {
+            const previous = existing.get(keyFor(lead));
+            return previous ? { ...previous, lead } : { key: keyFor(lead), lead, stage: !latestRun.complete && !publicPersonProfile(lead.linkedinUrl) ? "awaiting-profile" : "pending" };
+          });
         });
         const pending = [...changed];
         await Promise.all(Array.from({ length: Math.min(4, pending.length) }, async () => {

@@ -37,3 +37,9 @@ test('profile reader uses the current role instead of a prior employer',async()=
  vm.runInContext(fs.readFileSync('chrome-companion/profile-dom.js','utf8')+'\nresult=readVisibleLinkedInProfile();',context);const result=await context.result;
  assert.equal(result.lead.company,'The American University of Kurdistan');assert.equal(result.lead.title,'Human Resources Director');assert.equal(result.lead.linkedinUrl,'https://www.linkedin.com/in/beyan-berwari');
 });
+
+test('sign-in redirect is reported as a pause condition before trying to parse a profile',async()=>{
+ const context={document:{title:'LinkedIn Login'},location:new URL('https://www.linkedin.com/login'),URL};vm.createContext(context);
+ vm.runInContext(fs.readFileSync('chrome-companion/profile-dom.js','utf8')+'\nresult=readVisibleLinkedInProfile();',context);
+ const result=await context.result;assert.equal(result.ok,false);assert.match(result.error,/sign-in or verification/);
+});
