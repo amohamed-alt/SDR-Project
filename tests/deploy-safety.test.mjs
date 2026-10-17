@@ -136,6 +136,13 @@ test("acquisition bootstrap retries transient people-scan gateway failures", asy
   assert.match(workflow, /ATTEMPT \* 5/);
 });
 
+test("production coverage smoke authenticates protected acquisition reads", async () => {
+  const workflow = await read(".github/workflows/coverage-production-smoke.yml");
+  assert.match(workflow, /OWNER_TOKEN: \$\{\{ secrets\.ACQUISITION_OWNER_TOKEN \|\| secrets\.SDR_ADMIN_PASSWORD \|\| secrets\.DASHBOARD_PASSWORD \}\}/);
+  assert.match(workflow, /Validate production smoke credential/);
+  assert.equal((workflow.match(/x-acquisition-owner-token: \$OWNER_TOKEN/g) || []).length, 2);
+});
+
 test("today task queue and full task drawer expose WhatsApp for associated contacts", async () => {
   const workspace = await read("src/components/MaritaWorkspace.tsx");
   const drawer = await read("src/components/DashboardRecordColumns.tsx");
