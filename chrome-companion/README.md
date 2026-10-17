@@ -1,41 +1,29 @@
-# Talentera Dashboard Collector 1.7.1
+# Talentera Sales Nav Collector 1.8.0
 
-The dashboard is the only prospecting work surface. The extension only connects Chrome and reads rendered Sales Navigator pages. No LinkedIn cookies, passwords, hidden APIs, stealth, or contact credits are used by the collector.
+The extension again owns capture. HubSpot checks, contact reveals and CRM tasks stay in the dashboard.
 
 ## Update / setup
 
-1. Replace the files in the same unpacked extension folder, then Reload the extension in Chrome.
-2. Open the extension once and click **Enable Sales Nav reading**. Existing pairing tokens stay valid; only paste a new token if connection testing rejects the existing one.
-3. Refresh the dashboard at https://sdr.dashboardtalentera.tech/signalhire-queue .
-4. The dashboard must say **Collector 1.7.1 connected**. **Server pairing configured** alone only means a token exists; it is not proof Chrome is connected.
+1. Replace the files in the same unpacked extension folder, then press Reload in Chrome.
+2. Open the extension once and click **Enable Sales Nav reading**. Existing pairing tokens remain valid.
+3. Open the Sales Navigator People Search you want to use.
+4. Open the extension and choose **Capture 25**, **Capture 50**, or **Capture FULL search**.
 
-## Work from the dashboard
+## Workflow
 
-1. Open the desired Sales Navigator People Search, then return to the dashboard and select that open search.
-2. Click **Scrape search**. The collector saves each rendered page before normal Next pagination. Capture stops at no Next page, 100 pages or 2,500 unique leads. First-degree connections are excluded.
-3. When card capture finishes, profile URL reading starts automatically. Chrome opens ordinary temporary profile tabs, reads their actual public LinkedIn URL, saves it to the originating capture and closes each tab. **Read / retry missing URLs** is available to resume missing profiles.
-4. Read progress, failed names, failure reasons and **Stop collector** are visible in the dashboard. Sign-in/verification pauses reading. Retry only requests people who still lack public URLs in the saved server run.
-5. The workflow stays **Scrape → Check → Reveal → Push**. **HubSpot Check** runs in the dashboard independently from URL reading. Slow or unavailable CRM checks cannot stop the URL reader.
-6. Reveal contacts and create guarded SDR tasks only through the dashboard. Existing identity, phone, CRM conflict and task verification checks remain in place.
+1. The background collector saves rendered search cards and follows normal Sales Navigator pagination up to the chosen limit.
+2. After card capture, it opens ordinary temporary Sales Navigator profile tabs one at a time, reads the actual public LinkedIn URL, saves it to the same server run, and closes the tab.
+3. The run remains in preparation until URL reading finishes. The collector then marks it complete and opens the prospecting dashboard automatically.
+4. Run **HubSpot Check → Reveal → Push** in the dashboard. Capture and URL reading use no contact credits and perform no CRM writes.
+5. **Read / retry missing URLs** remains in the dashboard only as recovery for sign-in, verification, identity mismatch, or a transient profile failure.
 
-The popup contains only connection settings, the one-time Sales Nav permission and a dashboard link. It has no reveal or task controls. The companion endpoint also rejects extension reveal/push actions.
-
-## Recovery / limitations
-
-- Keep Chrome open for capture and profile reading. The popup can stay closed.
-- Changing the search filters during capture pauses the scrape before another search can be mixed into it. Resume the original search or start a fresh scrape.
-- Failed profiles remain missing until retried; a finished search capture does not mean all profile URLs were read.
-- A sign-in, checkpoint or identity mismatch is shown as a failure, never converted into a successful read.
-- The background worker stores URL-reading progress across popup closures. An old queue mixing HubSpot checks with reading is paused after update; start missing URL reads from the dashboard instead.
-- Chrome's unpacked-extension update and one-time access grant must be performed in Chrome. The dashboard cannot replace or reload installed extension files.
+Keep Chrome open while the collector runs. The popup may close; progress is stored by the background worker. Changing search filters during capture pauses safely before another search can be mixed into the run. Stop pauses after the current person and keeps saved progress.
 
 ## Boundaries
 
-- No cookies permission or LinkedIn session upload.
-- Optional access is limited to https://www.linkedin.com/sales/* .
-- The page bridge accepts only status/capture/read/stop from the exact dashboard origin.
-- Profile targets come from the authenticated server's saved run, not arbitrary page-provided URLs.
-- Pairing tokens never appear in bridge status responses.
-- Capture and profile URL reading perform zero paid contact reveals and zero CRM writes.
-- Revealed contacts, completed no-result lookups, and successful pushes are restored from the saved server ledger after reload. Paid request outcomes that cannot be confirmed require review instead of another automatic charge.
-- Build the versioned download from repository source with `python3 scripts/package-companion.py`.
+- No cookies permission, password access, hidden LinkedIn API, stealth, paid reveal or CRM write from the collector.
+- Optional access is limited to `https://www.linkedin.com/sales/*`.
+- Public URLs are accepted only when the rendered profile name matches the captured person.
+- Pairing tokens never appear in dashboard bridge responses.
+- Reveal and Push remain guarded dashboard actions.
+- Build the versioned download with `python3 scripts/package-companion.py`.

@@ -4,12 +4,12 @@ import test from 'node:test';
 import vm from 'node:vm';
 const sample={name:'Person A',title:'HR Director',company:'Example',location:'Riyadh',connectionDegree:'3rd',salesLeadUrl:'https://www.linkedin.com/sales/lead/ABC,SEARCH,x',linkedinUrl:''};
 function fixture({allowed=true,syncOk=true,profileError=''}={}){
- const storage={pairingToken:'test-token'},messages=[],alarms=[],calls=[],opened=[],closed=[];
+ const storage={pairingToken:'test-token'},messages=[],alarms=[],calls=[],opened=[],closed=[],finalized=[];
  const chrome={storage:{local:{get:async keys=>Object.fromEntries(keys.map(k=>[k,storage[k]])),set:async v=>Object.assign(storage,JSON.parse(JSON.stringify(v)))}},runtime:{getManifest:()=>({version:'1.7.0'}),onMessage:{addListener:fn=>messages.push(fn)}},permissions:{contains:async()=>allowed},tabs:{create:async args=>(opened.push(args),{id:opened.length}),get:async()=>({status:'complete'}),remove:async id=>closed.push(id)},scripting:{executeScript:async args=>[{result:profileError?{ok:false,error:profileError}:{ok:true,lead:{...args.args[0],linkedinUrl:'https://www.linkedin.com/in/'+args.args[0].name.replaceAll(' ','-')}}}]},alarms:{create:()=>{},clear:async()=>{},onAlarm:{addListener:fn=>alarms.push(fn)}}};
  const fetch=async(url,args)=>{calls.push(JSON.parse(args.body));return {ok:true,json:async()=>({ok:true,profileSynced:syncOk})};};
- const context={chrome,fetch,URL,Map,Date,Promise,AbortSignal,importScripts:()=>{},readVisibleLinkedInProfile:()=>{},setTimeout:f=>f()};vm.runInNewContext(fs.readFileSync('chrome-companion/queue-v160.js','utf8'),context);
+ const context={chrome,fetch,URL,Map,Date,Promise,AbortSignal,importScripts:()=>{},readVisibleLinkedInProfile:()=>{},setTimeout:f=>f(),finalizeSalesNavCapture:async(...args)=>finalized.push(args)};vm.runInNewContext(fs.readFileSync('chrome-companion/queue-v160.js','utf8'),context);
  async function drain(){for(let i=0;i<100;i++){alarms.forEach(fn=>fn({name:'salesnav-work-queue-v160'}));await new Promise(r=>setImmediate(r));const q=storage.salesNavWorkQueueV160;if(q&&(!q.pending.length||q.paused))return q;}throw Error('Queue stalled');}
- return {storage,calls,opened,closed,drain,start:context.startCapturedProfileChecks,stop:context.stopCapturedProfileChecks,message:body=>new Promise(resolve=>messages[0](body,{},resolve))};
+ return {storage,calls,opened,closed,finalized,drain,start:context.startCapturedProfileChecks,stop:context.stopCapturedProfileChecks,message:body=>new Promise(resolve=>messages[0](body,{},resolve))};
 }
 test('URL reading syncs every saved identity without any HubSpot, reveal or push request',async()=>{
  const f=fixture();await f.start([sample,{...sample,name:'Person B',salesLeadUrl:'https://www.linkedin.com/sales/lead/DEF'}],'search','00000000-0000-4000-8000-000000000001');
@@ -34,6 +34,10 @@ test('reader drains multiple profiles continuously without requiring an alarm pe
  const f=fixture();await f.start([sample,{...sample,name:'Person B',salesLeadUrl:'https://www.linkedin.com/sales/lead/DEF'}],'search','run');
  for(let i=0;i<100&&f.storage.salesNavWorkQueueV160?.done!==2;i++)await new Promise(resolve=>setImmediate(resolve));
  assert.equal(f.storage.salesNavWorkQueueV160.done,2);assert.equal(f.opened.length,2);assert.equal(f.storage.salesNavReaderProgressV1.phase,'finished');
+});
+test('extension capture is finalized only after every queued profile URL attempt completes',async()=>{
+ const f=fixture();await f.start([sample,{...sample,name:'Person B',salesLeadUrl:'https://www.linkedin.com/sales/lead/DEF'}],'search','run',{afterCapture:true});
+ assert.equal(f.finalized.length,0);await f.drain();assert.equal(f.finalized.length,1);assert.equal(f.finalized[0][0],'run');assert.equal(f.finalized[0][1].attempted,2);assert.equal(f.finalized[0][1].failed,0);
 });
 test('concurrent reader starts cannot replace one another and capture owns the browser until paused or finished',async()=>{
  const f=fixture();const results=await Promise.allSettled([f.start([sample],'search','first'),f.start([sample],'search','second')]);

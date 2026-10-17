@@ -22,20 +22,21 @@ importScripts('profile-dom.js');
     if (url.protocol !== 'https:' || url.hostname !== 'www.linkedin.com' || url.port || url.username || url.password || !/^\/sales\/lead\//.test(url.pathname)) throw new Error('Invalid Sales Navigator profile link.');
     const tab = await chrome.tabs.create({ url: url.href, active: false });
     try {
-      for (let attempt = 0; attempt < 45; attempt++) {
+      let result;
+      // Start reading as soon as the rendered profile is usable. Waiting for
+      // every background resource to report "complete" made each lead much
+      // slower than the old collector.
+      for (let attempt = 0; attempt < 30; attempt++) {
         const current = await chrome.tabs.get(tab.id);
         if (/\/(login|checkpoint|authwall)(?:\/|\?|$)/.test(current.url || '')) throw new Error('LinkedIn sign-in or verification is required.');
-        if (current.status === 'complete') break;
+        if (current.status === 'complete' || attempt >= 3) {
+          const values = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: readVisibleLinkedInProfile, args: [lead] });
+          result = values?.[0]?.result;
+          if (result?.ok || /sign-in|verification|unusual traffic/i.test(result?.error || '')) break;
+        }
         await new Promise(resolve => setTimeout(resolve, 500));
       }
       await phase('reading profile menu');
-      let result;
-      for (let attempt = 0; attempt < 8; attempt++) {
-        const values = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: readVisibleLinkedInProfile, args: [lead] });
-        result = values?.[0]?.result;
-        if (result?.ok || /sign-in|verification|unusual traffic/i.test(result?.error || '')) break;
-        await new Promise(resolve => setTimeout(resolve, 700));
-      }
       if (!result?.ok) throw new Error(result?.error || 'Profile did not finish loading. Retry from the dashboard.');
       if (nameKey(result.lead.name) !== nameKey(lead.name)) throw new Error('Profile name differs from the captured person. Review before retrying.');
       // Preserve capture identity; do not replace it with navigation tracking parameters.
@@ -65,6 +66,12 @@ importScripts('profile-dom.js');
       await phase(queue.paused ? 'paused' : queue.pending.length ? 'next profile' : 'finished');
       if (queue.pending.length && !queue.paused) await new Promise(resolve => setTimeout(resolve, 300));
       }
+      if (!queue.pending.length && !queue.paused && queue.finalizeCapture && typeof globalThis.finalizeSalesNavCapture === 'function') {
+        const failed = queue.rows.filter(row => row.status === 'error').length;
+        await globalThis.finalizeSalesNavCapture(queue.captureRunId, { attempted: queue.done || 0, failed });
+        queue.finalizeCapture = false;
+        await persist(queue);
+      }
     } finally {
       busy = false;
       const queue = (await chrome.storage.local.get([KEY]))[KEY];
@@ -81,8 +88,9 @@ importScripts('profile-dom.js');
     const previous = (await chrome.storage.local.get([KEY]))[KEY];
     if (previous?.pending?.length && !previous.paused && previous.action === 'read') throw new Error('URL reading is already running. Stop or wait before starting another run.');
     const rows = [...new Map(leads.filter(lead => lead.connectionDegree !== '1st').map(lead => [identity(lead), lead])).entries()].slice(0,2500).map(([key, lead]) => ({ key, lead, status: 'pending' }));
-    const queue = { sourceUrl, captureRunId, rows, action: 'read', pending: rows.map(row => row.key), done: 0, total: rows.length, paused: stopRequested };
+    const queue = { sourceUrl, captureRunId, rows, action: 'read', pending: rows.map(row => row.key), done: 0, total: rows.length, paused: stopRequested, finalizeCapture: afterCapture };
     await persist(queue); chrome.alarms.create(ALARM, { when: Date.now() + 1000 }); setTimeout(() => void step(), 100);
+    if (!queue.pending.length && afterCapture && typeof globalThis.finalizeSalesNavCapture === 'function') await globalThis.finalizeSalesNavCapture(captureRunId, { attempted: 0, failed: 0 });
     return queue;
     } finally { starting = false; }
   };

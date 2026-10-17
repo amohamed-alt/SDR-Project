@@ -19,6 +19,7 @@ function fixture({ failSave = false, pageGate } = {}) {
       if (func.name === 'clickNextSalesNavPageV154') return [{ result: false }];
       throw new Error(`Unexpected script ${func.name}`);
     } },
+    tabs: { create: async args => ({ id: 9, ...args }) },
     alarms: { create() {}, clear: async () => {}, get: async () => ({}), onAlarm: { addListener() {} } },
   };
   const context = { chrome, URL, Error, crypto: { randomUUID: () => '00000000-0000-4000-8000-000000000001' }, importScripts() {}, AbortSignal: { timeout: value => { timeoutValues.push(value); return { timeout: value }; } },
@@ -51,11 +52,14 @@ test('capture API requests have a deadline and failures pause without losing sav
   f.recover(); await f.context.startOrResume(4);
   assert.equal(f.storage.salesNavFullRunV1.complete, true); assert.equal(f.storage.salesNavFullRunV1.paused, false);
 });
-test('dashboard scrape automatically reads only saved missing URLs for its completed exact run, without CRM operations', async () => {
+test('extension capture reads saved missing URLs before completing and handing the exact run to the dashboard', async () => {
   const f = fixture(); await f.context.startOrResume(4, { readProfilesOnComplete: true });
-  assert.deepEqual(f.calls.map(call => call.action), ['full_run_page', 'full_run_finish', 'profile_read_run']);
+  assert.deepEqual(f.calls.map(call => call.action), ['full_run_page', 'profile_read_run']);
   assert.equal(f.readers.length, 1); assert.equal(f.readers[0][2], f.storage.salesNavFullRunV1.runId);
-  assert.equal(f.readers[0][3].afterCapture, true); assert.equal(f.storage.salesNavFullRunV1.complete, true);
+  assert.equal(f.readers[0][3].afterCapture, true); assert.equal(f.storage.salesNavFullRunV1.complete, false); assert.equal(f.storage.salesNavFullRunV1.cardsComplete, true);
+  await f.context.finalizeSalesNavCapture(f.storage.salesNavFullRunV1.runId, { attempted: 1, failed: 0 });
+  assert.deepEqual(f.calls.map(call => call.action), ['full_run_page', 'profile_read_run', 'full_run_finish']);
+  assert.equal(f.storage.salesNavFullRunV1.complete, true);
 });
 test('legacy capture does not silently opt into URL reading', async () => {
   const f = fixture(); await f.context.startOrResume(4);

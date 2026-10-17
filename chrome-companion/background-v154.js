@@ -302,34 +302,49 @@ async function setRun(run, { resume = false } = {}) {
 }
 
 async function markComplete(run, stopReason) {
-  const finished = await finishRun(run, stopReason);
-  const complete = {
+  const cardsComplete = {
     ...run,
-    total: Number(finished.total || run.total || 0),
-    complete: true,
-    completedAt: new Date().toISOString(),
+    cardsComplete: true,
+    complete: false,
     stopReason,
     navigationPending: false,
     backgroundError: '',
-    backgroundStatus: `Finished: ${stopReason}`,
+    backgroundStatus: 'Cards saved. Reading public profile URLs before dashboard handoff.',
   };
-  await setRun(complete);
+  await setRun(cardsComplete);
   await chrome.storage.local.remove([CONTINUATION_TAB_KEY]);
   await chrome.alarms.clear(CONTINUE_ALARM);
-  await setRun({ ...complete, backgroundStatus: 'Cards saved. Read missing URLs from the dashboard.' });
   if (run.readProfilesOnComplete && !captureStopRequested && !(await chrome.storage.local.get([FULL_RUN_KEY]))[FULL_RUN_KEY]?.paused) {
     try {
       const saved = await dashboardPost({ action: 'profile_read_run', runId: run.runId });
       if (captureStopRequested || (await chrome.storage.local.get([FULL_RUN_KEY]))[FULL_RUN_KEY]?.paused) return;
       if (saved.leads?.length) {
         await globalThis.startCapturedProfileChecks(saved.leads, saved.sourceUrl, run.runId, { afterCapture: true });
-        await setRun({ ...complete, backgroundStatus: 'Cards saved. Reading missing public URLs automatically.' });
-      } else await setRun({ ...complete, backgroundStatus: 'Scrape finished. All saved cards have public profile URLs.' });
+        await setRun({ ...cardsComplete, backgroundStatus: 'Cards saved. Reading missing public URLs automatically.' });
+      } else await globalThis.finalizeSalesNavCapture(run.runId, { attempted: 0, failed: 0 });
     } catch (error) {
-      await setRun({ ...complete, backgroundStatus: `Cards saved. URL reading could not start: ${error instanceof Error ? error.message : 'Collector unavailable'}. Retry missing URLs from the dashboard.` });
+      const finished = await finishRun(run, `${stopReason} · URL reader could not start`);
+      await setRun({ ...cardsComplete, total: Number(finished.total || run.total || 0), complete: true, completedAt: new Date().toISOString(), backgroundError: error instanceof Error ? error.message : 'Collector unavailable', backgroundStatus: 'Cards saved, but automatic URL reading needs retry.' });
     }
+  } else {
+    const finished = await finishRun(run, stopReason);
+    await setRun({ ...cardsComplete, total: Number(finished.total || run.total || 0), complete: true, completedAt: new Date().toISOString(), backgroundStatus: `Finished: ${stopReason}` });
   }
 }
+
+globalThis.finalizeSalesNavCapture = async (runId, { attempted = 0, failed = 0 } = {}) => {
+  const saved = (await chrome.storage.local.get([FULL_RUN_KEY]))[FULL_RUN_KEY];
+  if (!saved || saved.runId !== runId || saved.complete) return;
+  const reason = `${saved.stopReason || 'Capture finished'} · profile URLs attempted ${attempted} · failed ${failed}`;
+  const finished = await finishRun(saved, reason);
+  const complete = { ...saved, total: Number(finished.total || saved.total || 0), complete: true, cardsComplete: true, completedAt: new Date().toISOString(), backgroundError: failed ? `${failed} profile URL${failed === 1 ? '' : 's'} could not be read automatically.` : '', backgroundStatus: failed ? `Dashboard ready · ${failed} URL read failed and can be retried there.` : 'Dashboard ready · profile URLs saved.' };
+  await setRun(complete);
+  const opened = (await chrome.storage.local.get(['salesNavDashboardOpenedRunV1'])).salesNavDashboardOpenedRunV1;
+  if (opened !== runId) {
+    await chrome.storage.local.set({ salesNavDashboardOpenedRunV1: runId });
+    await chrome.tabs.create({ url: `${DASHBOARD_DEFAULT}/signalhire-queue`, active: true });
+  }
+};
 
 async function persistCurrentPage(run, current) {
   const signature = pageSignature(current.leads || []);
@@ -355,8 +370,10 @@ async function persistCurrentPage(run, current) {
 
 async function advance(run, tabId) {
   if (captureStopRequested || (await chrome.storage.local.get([FULL_RUN_KEY]))[FULL_RUN_KEY]?.paused) return run;
-  if (Number(run.pagesRead || 0) >= MAX_PAGES) return markComplete(run, `Reached ${MAX_PAGES}-page safety cap`);
-  if (Number(run.total || 0) >= MAX_LEADS) return markComplete(run, `Reached ${MAX_LEADS}-lead safety cap`);
+  const maxPages = Math.max(1, Math.min(MAX_PAGES, Number(run.maxPages || MAX_PAGES)));
+  const maxLeads = Math.max(1, Math.min(MAX_LEADS, Number(run.maxLeads || MAX_LEADS)));
+  if (Number(run.pagesRead || 0) >= maxPages) return markComplete(run, `Reached ${maxPages}-page capture limit`);
+  if (Number(run.total || 0) >= maxLeads) return markComplete(run, `Reached ${maxLeads}-lead capture limit`);
   const moved = await clickNext(tabId);
   if (!moved) return markComplete(run, 'No next page');
   const waiting = {
@@ -370,7 +387,7 @@ async function advance(run, tabId) {
   await scheduleContinuation(tabId, NORMAL_DELAY_MS);
 }
 
-async function startOrResume(tabId, { readProfilesOnComplete = false } = {}) {
+async function startOrResume(tabId, { readProfilesOnComplete = false, maxPages = MAX_PAGES, maxLeads = MAX_LEADS } = {}) {
   // Claim synchronously, before the first Chrome await, so two dashboard tabs
   // cannot replace one another's run while the initial page is loading.
   if (starting || processing) throw new Error('Search capture is already busy. Wait for the current page to finish.');
@@ -397,12 +414,16 @@ async function startOrResume(tabId, { readProfilesOnComplete = false } = {}) {
       total: 0,
       signatures: [],
       complete: false,
+      maxPages: Math.max(1, Math.min(MAX_PAGES, Number(maxPages || MAX_PAGES))),
+      maxLeads: Math.max(1, Math.min(MAX_LEADS, Number(maxLeads || MAX_LEADS))),
       startedAt: new Date().toISOString(),
       backgroundStatus: 'Starting full Sales Navigator capture',
     };
   }
 
   run.readProfilesOnComplete = readProfilesOnComplete;
+  run.maxPages = Math.max(1, Math.min(MAX_PAGES, Number(maxPages || run.maxPages || MAX_PAGES)));
+  run.maxLeads = Math.max(1, Math.min(MAX_LEADS, Number(maxLeads || run.maxLeads || MAX_LEADS)));
   run.paused = false;
   await setRun(run, { resume: true });
   if (!run.signatures?.includes(signature)) run = await persistCurrentPage(run, current);
@@ -434,7 +455,7 @@ async function processContinuation(tabId) {
   try {
     const stored = await chrome.storage.local.get([FULL_RUN_KEY]);
     let run = stored[FULL_RUN_KEY];
-    if (!run || run.complete || run.paused || !run.runId) return;
+    if (!run || run.complete || run.cardsComplete || run.paused || !run.runId) return;
     if (!await verifySalesNavTab(tabId)) {
       await setRun({ ...run, paused: true, backgroundError: 'The saved Sales Navigator tab is no longer a People Search. Reopen the search and press Resume.', backgroundStatus: 'Paused' });
       return;
@@ -510,12 +531,20 @@ async function ensureWatchdog() {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'salesnav_collector_stop') {
+    void (async () => {
+      await globalThis.stopCapturedProfileChecks?.();
+      await globalThis.pauseSalesNavCapture();
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
   if (message?.type === 'salesnav_v154_start') {
     void (async () => {
       try {
         const tabId = Number(message.tabId);
         if (!Number.isFinite(tabId)) throw new Error('Sales Navigator tab was not found.');
-        const run = await startOrResume(tabId);
+        const run = await startOrResume(tabId, { readProfilesOnComplete: message.readProfilesOnComplete === true, maxPages: message.maxPages, maxLeads: message.maxLeads });
         sendResponse({ ok: true, run });
       } catch (error) {
         sendResponse({ ok: false, error: error instanceof Error ? error.message : 'Could not start full capture.' });
