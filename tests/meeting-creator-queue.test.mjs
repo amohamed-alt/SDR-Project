@@ -55,9 +55,9 @@ test("reactivation uses a different decision maker, not the old attempted contac
   assert.equal(rows[0].sdrId, MEETING_CREATOR_MARITA_OWNER);
 });
 
-test("an old contact cannot be presented as alternate", () => {
+test("a company with only an already-called person enters alternate discovery", () => {
   const [row] = queue({ contacts: [oldPerson] });
-  assert.equal(row.status, "needs_research");
+  assert.equal(row.status, "needs_alternate");
   assert.equal(row.contactPhone, "");
 });
 
@@ -134,4 +134,23 @@ test("connected call or open future task blocks wrong-number reactivation", () =
   const wrong={...noAnswer,disposition:"17b47fee-58de-441e-a44c-c6300d46f273"};
   assert.equal(queue({calls:[wrong,{...wrong,id:"c2",disposition:"f240bbac-87c9-4f6e-bf70-924b57d47db7"}],contacts:[oldPerson]})[0].status,"protected");
   assert.equal(queue({calls:[wrong],contacts:[oldPerson],tasks:[{id:"t2",companyId:"c1",status:"NOT_STARTED",subject:"Future task"}]})[0].status,"protected");
+});
+
+test("the original SDR remains the owner for a wrong-number account in Ops queue", () => {
+  const wrong={...noAnswer,title:"Call with Old Contact",
+    disposition:"17b47fee-58de-441e-a44c-c6300d46f273"};
+  const prior={...oldPerson,ownerId:"37624223"};
+  const [row]=queue({companies:[{...company,ownerId:"31594536"}],contacts:[prior],calls:[wrong]});
+  assert.equal(row.status,"needs_alternate");
+  assert.equal(row.sdrId,"37624223");
+  assert.equal(row.sdrName,"Daniel");
+});
+
+test("conflicting SDR historical owners require review instead of task redistribution", () => {
+  const calledOther={...newPerson,ownerId:"37624223"};
+  const otherCall={...noAnswer,id:"call2",contactIds:["p2"],toNumber:calledOther.phone};
+  const [row]=queue({companies:[{...company,ownerId:"31594536"}],
+    contacts:[oldPerson,calledOther],calls:[noAnswer,otherCall]});
+  assert.equal(row.status,"needs_research");
+  assert.match(row.reason,/Different SDRs/);
 });
