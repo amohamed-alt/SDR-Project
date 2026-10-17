@@ -223,7 +223,17 @@ export function buildMeetingCreatorQueue(input: CreatorQueueInput): CreatorQueue
       employeeCount: company.employeeCount, industry: company.industry,
       ats: company.detectedAts, activeJobs: safeNumber(company.activeJobs),
     });
-    const owner = ownerFor(company, product.recommendedProduct, product.talenteraScore, product.evalufyScore);
+    const defaultOwner = ownerFor(company, product.recommendedProduct, product.talenteraScore, product.evalufyScore);
+    const historicalSdrOwners = [...new Set(sourcePeople
+      .filter((p)=>calledIds.has(p.id))
+      .map((p)=>p.ownerId)
+      .filter((id)=>id===MEETING_CREATOR_MARITA_OWNER||id===MEETING_CREATOR_DANIEL_OWNER))];
+    const ownerConflict = historicalSdrOwners.length > 1 ||
+      (historicalSdrOwners.length===1 && [MEETING_CREATOR_MARITA_OWNER,MEETING_CREATOR_DANIEL_OWNER].includes(company.ownerId)
+        && company.ownerId!==historicalSdrOwners[0]);
+    const owner = historicalSdrOwners.length===1 && !ownerConflict
+      ? { id:historicalSdrOwners[0],name:historicalSdrOwners[0]===MEETING_CREATOR_MARITA_OWNER?"Marita":"Daniel" }
+      : defaultOwner;
     const wrongContactIds = new Set(allCalls.filter((call)=>call.disposition===WRONG_NUMBER_DISPOSITION).flatMap((call)=>call.contactIds));
     const wrongNumbers = new Set(allCalls.filter((call)=>call.disposition===WRONG_NUMBER_DISPOSITION)
       .map((call)=>normalizeSaudiMobile(call.toNumber)).filter(Boolean));
@@ -251,6 +261,8 @@ export function buildMeetingCreatorQueue(input: CreatorQueueInput): CreatorQueue
               : openTasks ? "Open SDR follow-up / task already exists."
                 : positiveReplies ? "Positive email reply exists."
                   : "Account outside approved acquisition scope.";
+    } else if (ownerConflict) {
+      reason = "Different SDRs have contacted this account; confirm original assignment before any new task.";
     } else if (!company.completeHistory || unresolvedDisposition || (unknownCalledPerson && !singleWrongNumberWithUnknownPerson)) {
       reason = "Activity history is incomplete or a call has an unknown outcome/person. Manual review required.";
     } else if (allCalls.length && attemptedCalls !== allCalls.length) {
@@ -281,6 +293,9 @@ export function buildMeetingCreatorQueue(input: CreatorQueueInput): CreatorQueue
       reason = wrongNumberCalls === 1
         ? "Wrong number on the previous contact; find a different verified HR decision maker and a different phone."
         : `${wrongNumberCalls} wrong-number calls; find a different HR decision maker and verify the new phone.`;
+    } else if (attemptedCalls > 0 && !best) {
+      status = "needs_alternate";
+      reason = `${attemptedCalls} unsuccessful call attempt(s) but no different phone-ready HR contact. Find a new decision maker.`;
     }
     const selected = best || rankedPeople[0];
     const priority = clamp(product.meetingScore + (best?.phone ? 5 : 0) + (allCalls.length && status === "call_ready" ? 3 : 0));
