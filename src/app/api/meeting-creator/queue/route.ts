@@ -71,18 +71,36 @@ export async function GET(request: NextRequest) {
       // A source-independent recovery funnel: catches existing CRM companies
       // even when the Postgres acquisition ledger labels them existing.
       // Query only the dedicated Wrong Number disposition, never reveal phones.
-      const wrongCalls = await searchAll("calls",["hs_call_disposition","hs_timestamp"],[
-        {propertyName:"hs_call_disposition",operator:"EQ",value:WRONG_NUMBER_DISPOSITION},
-      ],["-hs_timestamp"]);
-      sourceTotal = wrongCalls.length;
-      const pageIds = wrongCalls.slice(offset,offset+scan).map((x)=>String(x.id));
-      const [directCompanies,relatedContacts] = await Promise.all([
-        readAssociations("calls","companies",pageIds),
-        readAssociations("calls","contacts",pageIds),
+      const [wrongCalls,wrongContacts]=await Promise.all([
+        searchAll("calls",["hs_call_disposition","hs_timestamp"],[
+          {propertyName:"hs_call_disposition",operator:"EQ",value:WRONG_NUMBER_DISPOSITION},
+        ],["-hs_timestamp"]),
+        searchAll("contacts",["phone_number_status"],[
+          {propertyName:"phone_number_status",operator:"EQ",value:"Wrong Number"},
+        ]),
       ]);
-      const personIds=flatten(relatedContacts,pageIds);
+      // Wrong-number events can live either on Call disposition or directly
+      // on Contact phone_number_status; both are part of one recovery source.
+      const events=[
+        ...wrongCalls.map((row)=>({kind:"call" as const,id:String(row.id)})),
+        ...wrongContacts.map((row)=>({kind:"contact" as const,id:String(row.id)})),
+      ];
+      sourceTotal=events.length;
+      const page=events.slice(offset,offset+scan);
+      const callIds=page.filter((e)=>e.kind==="call").map((e)=>e.id);
+      const flaggedContactIds=page.filter((e)=>e.kind==="contact").map((e)=>e.id);
+      const [directCompanies,relatedContacts,flaggedCompanies]=await Promise.all([
+        readAssociations("calls","companies",callIds),
+        readAssociations("calls","contacts",callIds),
+        readAssociations("contacts","companies",flaggedContactIds),
+      ]);
+      const personIds=flatten(relatedContacts,callIds);
       const indirectCompanies=await readAssociations("contacts","companies",personIds);
-      const companyIds=unique([...flatten(directCompanies,pageIds),...flatten(indirectCompanies,personIds)]);
+      const companyIds=unique([
+        ...flatten(directCompanies,callIds),
+        ...flatten(indirectCompanies,personIds),
+        ...flatten(flaggedCompanies,flaggedContactIds),
+      ]);
       crmWrongNumberMatches=await batchRead("companies",companyIds,companyProps);
       seed=crmWrongNumberMatches
         .filter((record)=>{
