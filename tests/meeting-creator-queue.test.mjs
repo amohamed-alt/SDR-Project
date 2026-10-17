@@ -154,3 +154,17 @@ test("conflicting SDR historical owners require review instead of task redistrib
   assert.equal(row.status,"needs_research");
   assert.match(row.reason,/Different SDRs/);
 });
+
+test("HubSpot phone_number_status Wrong Number with only one contact starts alternate research",()=>{
+  const [row]=queue({calls:[],contacts:[{...oldPerson,phoneNumberStatus:"Wrong Number"}]});
+  assert.equal(row.status,"needs_alternate");
+  assert.equal(row.wrongNumberContacts,1);
+  assert.equal(row.contactPhone,"");
+  assert.match(row.reason,/Phone Number Status = Wrong Number/);
+});
+test("a new HR person can replace an old CRM contact flagged wrong number",()=>{
+  const [row]=queue({calls:[],contacts:[{...oldPerson,phoneNumberStatus:"Wrong Number"},newPerson]});
+  assert.equal(row.status,"call_ready");
+  assert.equal(row.contactId,"p2");
+  assert.equal(row.contactPhone,"+966552223344");
+});
