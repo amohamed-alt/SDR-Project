@@ -103,7 +103,8 @@ test("HubSpot checks all 100 captured people without skipping missing URLs or hi
   releaseLast();
   await expect(page.getByText("HubSpot: 99/100 checked · 1 failed. Eligible people can be revealed by public URL or name + company.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /^All 100$/ })).toHaveAttribute("data-active", "true");
-  await expect(page.getByRole("table").getByText("Needs reveal", { exact: true })).toHaveCount(99);
+  await expect(page.getByRole("table").getByText("Needs reveal", { exact: true })).toHaveCount(95);
+  await expect(page.getByRole("button", { name: /^Blocked 4$/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /^Review 1$/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Reveal selected (0)", exact: true })).toBeDisabled();
   await expect(page.getByRole("row").filter({ hasText: "Check Person 99" })).toContainText("HubSpot unavailable");
