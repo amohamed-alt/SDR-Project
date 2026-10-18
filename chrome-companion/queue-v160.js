@@ -115,7 +115,7 @@ importScripts('profile-dom.js');
     if (alarm.name === `${ALARM}-watchdog`) void (async () => { const value = (await chrome.storage.local.get([KEY]))[KEY]; if (value?.action === 'read' && value.pending?.length && !value.paused && Date.now() - Date.parse(value.updatedAt || 0) > 45000) await step(); })();
   });
   // An old queue mixed CRM checks with reading; do not silently restart it after update.
-  void (async () => { const old = (await chrome.storage.local.get([KEY]))[KEY]; if (old && old.action !== 'read') await persist({ ...old, paused: true }); })();
+  void (async () => { const old = (await chrome.storage.local.get([KEY]))[KEY]; if (old) await persist({ ...old, paused: true }); })();
   void chrome.alarms.create(`${ALARM}-watchdog`, { periodInMinutes: 1 });
 })();
 

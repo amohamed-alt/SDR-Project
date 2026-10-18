@@ -267,8 +267,9 @@ export async function salesNavLeadStates(identities: SalesNavLeadIdentity[]) {
   return identities.map(identity => {
     const record = aliasesFor(identity).map(alias => byAlias.get(alias)).find(Boolean);
     if (!record) return null;
-    const mismatch = record.cachedProspect ? cachedSalesNavIdentityMismatch(String(identity.linkedinUrl || ""), record) || salesNavNameMismatch(identity, record.cachedProspect) : "";
+    const mismatch = record.cachedProspect ? (identity.linkedinUrl ? cachedSalesNavIdentityMismatch(identity.linkedinUrl, record) : "") || salesNavNameMismatch(identity, record.cachedProspect) : "";
     if (mismatch) return { revealStatus: "uncertain" as const, revealError: mismatch, lastPushAt: "", taskId: "" };
     return { prospect: record.cachedProspect, revealStatus: salesNavRevealStatus(record), revealError: record.revealError || "", revealedAt: record.revealedAt, lastPushAt: record.lastPushAt, taskId: record.taskId, contactId: record.contactId, companyId: record.companyId };
   });
 }
+

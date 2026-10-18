@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-test("captured people without public URLs stay out of paid reveal until a checked profile is synced", async ({ page }) => {
+test("classic capture checks people immediately without requiring profile reads", async ({ page }) => {
   await page.addInitScript(() => { localStorage.setItem("sdr_v2_visitor_id", "profile_handoff_qa"); localStorage.setItem("sdr_v2_visitor_name", "Profile QA"); });
   await page.request.post("/api/sdr-admin", { data: { password: "playwright-tools-only-password" } });
   let synced = false, reveals = 0;
@@ -13,9 +13,9 @@ test("captured people without public URLs stay out of paid reveal until a checke
   await page.route("**/api/prospecting/salesnav/reveal-fast", route => { reveals += 1; return route.fulfill({ status: 500, json: { error: "Paid requests must not run in this fixture." } }); });
   await page.goto("/signalhire-queue");
   await page.getByRole("button", { name: "HubSpot Check", exact: true }).click();
-  await expect(page.getByText("Needs profile URL", { exact: true })).toBeVisible();
+  await expect(page.getByRole("table").getByText("Needs reveal", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Reveal selected (0)", exact: true })).toBeDisabled();
-  await expect(page.getByText("Missing public profile URLs: 1", { exact: true })).toBeVisible();
+  await expect(page.getByText("Missing public profile URLs: 1", { exact: true })).toHaveCount(0);
   expect(reveals).toBe(0);
   // Free Companion handoff updates the visible queue without a manual reload.
   synced = true;
@@ -49,7 +49,7 @@ test("an active capture receives new pages and usable public URLs before the sea
   await page.route("**/api/prospecting/salesnav/precheck-v2", route => { checks += 1; return route.fulfill({ json: { contact: { inHubSpot: false }, company: { protected: false, inHubSpot: false } } }); });
   await page.route("**/api/prospecting/salesnav/reveal-fast", route => { reveals += 1; return route.fulfill({ status: 500, json: { error: "No paid actions in this fixture." } }); });
   await page.goto("/signalhire-queue");
-  await expect(page.getByRole("table").getByText("Awaiting profile read", { exact: true })).toBeVisible();
+  await expect(page.getByRole("table").getByText("pending", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "HubSpot Check", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "HubSpot Check", exact: true }).click();
   await expect.poll(() => checks).toBe(1);
@@ -101,10 +101,10 @@ test("HubSpot checks all 100 captured people without skipping missing URLs or hi
   expect(calls).toBe(100);
   await expect(page.getByRole("button", { name: "HubSpot Check", exact: true })).toBeDisabled();
   releaseLast();
-  await expect(page.getByText("HubSpot: 99/100 checked · 1 failed. Missing public URLs are listed below and update as Scrape progresses.", { exact: true })).toBeVisible();
+  await expect(page.getByText("HubSpot: 99/100 checked · 1 failed. Eligible people can be revealed by public URL or name + company.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /^All 100$/ })).toHaveAttribute("data-active", "true");
-  await expect(page.getByRole("table").getByText("Needs profile URL", { exact: true })).toHaveCount(91);
-  await expect(page.getByRole("button", { name: /^Review 92$/ })).toBeVisible();
+  await expect(page.getByRole("table").getByText("Needs reveal", { exact: true })).toHaveCount(99);
+  await expect(page.getByRole("button", { name: /^Review 1$/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Reveal selected (0)", exact: true })).toBeDisabled();
   await expect(page.getByRole("row").filter({ hasText: "Check Person 99" })).toContainText("HubSpot unavailable");
   expect(paidActions).toBe(0);

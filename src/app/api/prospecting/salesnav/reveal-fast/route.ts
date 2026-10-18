@@ -68,19 +68,20 @@ export async function POST(request: NextRequest) {
     if (!parsed.success) return NextResponse.json({ error: "Invalid Sales Nav reveal payload." }, { status: 400 });
     const { lead, runId } = parsed.data;
     const publicProfile = normalizePersonUrl(lead.linkedinUrl);
-    if (!publicProfile) return NextResponse.json({ error: "A verified public LinkedIn person URL is required before reveal. No contact credits were used.", creditUsed: false }, { status: 422 });
+    if (lead.linkedinUrl && !publicProfile) return NextResponse.json({ error: "Invalid public LinkedIn profile URL. Clear it to use name + company search.", creditUsed: false }, { status: 422 });
+    if (!publicProfile && !lead.company) return NextResponse.json({ error: "Company is required for name + company search. No contact credits were used.", creditUsed: false }, { status: 422 });
     lead.linkedinUrl = publicProfile;
 
     const previous = await lookupSalesNavLead(lead);
     if (previous?.revealAttemptedAt) {
-      const mismatch = cachedSalesNavIdentityMismatch(publicProfile, previous)
+      const mismatch = (publicProfile ? cachedSalesNavIdentityMismatch(publicProfile, previous) : "")
         || (previous.cachedProspect ? salesNavNameMismatch(lead, previous.cachedProspect) : "");
       if (mismatch) return NextResponse.json({ error: mismatch, creditUsed: false }, { status: 409 });
     }
     const reservation = await reserveSalesNavReveal({ identity: lead, runId });
     const cached = reservation.record;
     if (cached) {
-      const mismatch = cachedSalesNavIdentityMismatch(publicProfile, cached) || (cached.cachedProspect ? salesNavNameMismatch(lead, cached.cachedProspect) : "");
+      const mismatch = (publicProfile ? cachedSalesNavIdentityMismatch(publicProfile, cached) : "") || (cached.cachedProspect ? salesNavNameMismatch(lead, cached.cachedProspect) : "");
       if (mismatch) return NextResponse.json({ error: mismatch, creditUsed: false }, { status: 409 });
     }
     if (!reservation.reserved && cached) {
@@ -137,7 +138,7 @@ export async function POST(request: NextRequest) {
     // used to run synchronously here and was the main source of long waits. It can be
     // enriched later during downstream company workflows; phone/email are available now.
     const prospect = revealPayload.prospect as JsonObject;
-    const nameMismatch = salesNavNameMismatch(lead, prospect) || cachedSalesNavIdentityMismatch(publicProfile, { linkedinUrl: String(prospect.linkedinUrl || "") });
+    const nameMismatch = salesNavNameMismatch(lead, prospect) || (publicProfile ? cachedSalesNavIdentityMismatch(publicProfile, { linkedinUrl: String(prospect.linkedinUrl || "") }) : "");
     if (nameMismatch) {
       await saveSalesNavReveal({ identity: lead, runId, status: "uncertain", error: nameMismatch });
       return NextResponse.json({ error: nameMismatch, creditUsed: true, revealStatus: "uncertain" }, { status: 409 });
@@ -160,3 +161,4 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Sales Nav reveal failed." }, { status: 500 });
   }
 }
+

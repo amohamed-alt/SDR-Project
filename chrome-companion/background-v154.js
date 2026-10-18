@@ -329,6 +329,7 @@ async function markComplete(run, stopReason) {
   } else {
     const finished = await finishRun(run, stopReason);
     await setRun({ ...cardsComplete, total: Number(finished.total || run.total || 0), complete: true, completedAt: new Date().toISOString(), backgroundStatus: `Finished: ${stopReason}` });
+    await chrome.tabs.create({ url: `${DASHBOARD_DEFAULT}/signalhire-queue`, active: true });
   }
 }
 
@@ -599,3 +600,4 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.runtime.onInstalled.addListener(() => { void ensureWatchdog(); });
 chrome.runtime.onStartup.addListener(() => { void ensureWatchdog(); });
 void ensureWatchdog();
+
