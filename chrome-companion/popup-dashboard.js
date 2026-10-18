@@ -25,8 +25,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       setStatus(`Capturing ${run.pagesRead || 0} page${run.pagesRead === 1 ? '' : 's'} · ${run.total || 0} people.`, 'working');
       el('profileStatus').textContent = run.backgroundStatus || '';
     } else if (run?.complete) {
-      const failed = (queue?.rows || []).filter(row => row.status === 'error').length;
-      setStatus(failed ? `${failed} LinkedIn URL${failed === 1 ? '' : 's'} need retry before the batch is ready.` : `Dashboard ready · ${run.total || 0} people with LinkedIn URLs.`, failed ? 'bad' : 'ok');
+      setStatus(`Dashboard ready · ${run.total || 0} people captured.`, 'ok');
       el('profileStatus').textContent = run.backgroundStatus || '';
     } else if (run?.paused) {
       setStatus(run.backgroundError || 'Capture paused. Start the same size to resume.', 'bad');
@@ -42,7 +41,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const tab = await activeSalesNavTab();
       buttons.forEach(button => { button.disabled = true; });
       setStatus('Starting capture…', 'working');
-      const result = await chrome.runtime.sendMessage({ type: 'salesnav_v154_start', tabId: tab.id, readProfilesOnComplete: true, maxPages, maxLeads });
+      const result = await chrome.runtime.sendMessage({ type: 'salesnav_v154_start', tabId: tab.id, readProfilesOnComplete: false, maxPages, maxLeads });
       if (!result?.ok) throw new Error(result?.error || 'Capture could not start.');
       await render();
     } catch (error) { setStatus(error instanceof Error ? error.message : 'Capture failed.', 'bad'); buttons.forEach(button => { button.disabled = false; }); }
@@ -59,3 +58,4 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   await render(); window.setInterval(() => void render(), 1000);
 });
+

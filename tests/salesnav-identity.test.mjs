@@ -47,8 +47,8 @@ test('cache identity requires a verified matching public URL even when other ali
     { aliases: [`li:${lead.linkedinUrl}`], cachedProspect: { linkedinUrl: 'https://www.linkedin.com/in/colleague' } },
   ]) assert.match(identity.cachedSalesNavIdentityMismatch(lead.linkedinUrl, cached), /Manual identity review/);
 });
-test('missing or Sales Nav-only public URL is rejected before lookup or paid reveal', async () => {
-  for (const linkedinUrl of ['', lead.salesLeadUrl, 'https://example.com/in/test-person']) {
+test('invalid nonempty public URL is rejected before lookup or paid reveal', async () => {
+  for (const linkedinUrl of [lead.salesLeadUrl, 'https://example.com/in/test-person']) {
     const f = revealFixture(); const r = await f.run({ lead: { ...lead, linkedinUrl } });
     assert.equal(r.status, 422); assert.equal(r.data.creditUsed, false); assert.deepEqual(f.calls, []);
   }
@@ -95,4 +95,20 @@ test('both push routes reject a same-company colleague before any CRM access or 
   const input = { lead: { ...lead, location: '', companyCountry: 'Saudi Arabia', companyDomain: 'example.com', employeeCount: 100, detectedAts: '', atsStatus: 'unknown', atsEvidence: '', sector: '' }, prospect: { ...prospect, fullName: 'Colleague Name' }, taskDueAt: '2026-10-14T06:00:00Z', taskOwnerId: '31644369' };
   for (const run of [ready, ai]) { const r = await run(input); assert.equal(r.status, 409); assert.match(r.data.error, /manually/); }
   assert.deepEqual(calls, []);
+});
+
+
+
+test('classic name + company reveal works without per-profile URL capture and reuses cached results', async () => {
+  const requestLead = { ...lead, linkedinUrl: '' };
+  const fresh = revealFixture();
+  assert.equal((await fresh.run({ lead: requestLead })).status, 200);
+  assert.deepEqual(fresh.calls, ['lookup', 'save-attempt', 'crm-check', 'provider', 'save-result', 'crm-check']);
+  const cached = revealFixture({ cached: { revealAttemptedAt: 'now', cachedProspect: prospect } });
+  const result = await cached.run({ lead: requestLead });
+  assert.equal(result.status, 200); assert.equal(result.data.creditUsed, false);
+  assert.deepEqual(cached.calls, ['lookup', 'crm-check']);
+  const missingCompany = revealFixture();
+  assert.equal((await missingCompany.run({ lead: { ...requestLead, company: '' } })).status, 422);
+  assert.deepEqual(missingCompany.calls, []);
 });

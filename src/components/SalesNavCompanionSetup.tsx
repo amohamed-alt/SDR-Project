@@ -99,13 +99,14 @@ export function SalesNavCompanionSetup() {
 
       {message && <div className={styles.message}>{message}</div>}
       <div className={styles.actions}>
-        <a href="/downloads/talentera-companion-v1.8.2.zip" download>Download Companion v1.8.2</a>
+        <a href="/downloads/talentera-companion-v1.8.3.zip" download>Download Companion v1.8.3</a>
         <a href="/downloads/companion-preview/index.html">Preview the design</a>
         <Link href="/signalhire-queue">Open Persistent Prospecting Queue</Link>
         <a href="https://github.com/amohamed-alt/SDR-Project/tree/main/chrome-companion" target="_blank" rel="noreferrer">Chrome Companion files</a>
       </div>
-      <p className={styles.note}>v1.8.2 restores the extension workflow: choose 25, 50 or Full in the extension. HubSpot Check can run in the dashboard while profile URLs are loading. Missing URLs use bounded retries and remain blocked from paid reveal until verified. Update the same unpacked folder and press Reload once. Existing pairing tokens are retained.</p>
+      <p className={styles.note}>v1.8.3 Classic restores Scrape → HubSpot Check → Reveal → Push. Capture opens the dashboard immediately without reading every profile. Reveal uses a public URL when available, otherwise name + company search. Existing pairing and saved results are retained.</p>
     </section>
   </main>;
 }
+
 

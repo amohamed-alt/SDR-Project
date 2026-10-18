@@ -22,6 +22,7 @@ test("dashboard controls missing URL reads, surfaces profile errors and checks a
   await page.route("**/api/prospecting/salesnav/precheck-v2",route=>{checks++;return route.fulfill({json:{contact:{inHubSpot:false},company:{protected:false,inHubSpot:false}}});});
   await page.route(/\/api\/prospecting\/salesnav\/(reveal-fast|push-ready-v2)/,route=>{paid++;return route.fulfill({status:500,json:{error:"No paid actions in this test"}});});
   await page.goto("/signalhire-queue");
+  await page.getByText("Optional profile tools", { exact: true }).click();
   await expect(page.getByText("Collector 1.8.1 connected",{exact:true})).toBeVisible();
   await page.getByRole("button",{name:"Read / retry 2 missing URLs",exact:true}).click();
   await expect(page.getByRole("row").filter({hasText:"Reader Success"})).toContainText("Needs reveal");
@@ -39,7 +40,9 @@ test("server pairing alone never claims Chrome collector is connected",async({pa
   await page.route("**/api/prospecting/salesnav/companion",route=>route.fulfill({json:{ok:true,paired:true,unlocked:true}}));
   await page.route("**/api/prospecting/salesnav/task-options",route=>route.fulfill({json:{owners:[]}}));
   await page.goto("/signalhire-queue");
+  await page.getByText("Optional profile tools", { exact: true }).click();
   await expect(page.getByText(/Collector [\d.]+ is not connected to this tab/)).toBeVisible();
   await expect(page.getByText("Extension: 25 / 50 / Full LinkedIn URLs → Dashboard: Check → Reveal → Push",{exact:true})).toBeVisible();
   await expect(page.getByRole("button",{name:"Scrape search",exact:true})).toHaveCount(0);
 });
+

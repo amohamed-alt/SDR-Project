@@ -57,19 +57,11 @@ function normalizeLinkedIn(raw: string) {
 function bestSearchMatch(profiles: SearchProfile[], name: string, company: string) {
   const targetName = normalize(name);
   const targetCompany = normalize(company);
-  return [...profiles].sort((a, b) => {
-    const score = (profile: SearchProfile) => {
-      let total = 0;
-      const profileName = normalize(profile.fullName || "");
-      if (profileName === targetName) total += 100;
-      else if (profileName.includes(targetName) || targetName.includes(profileName)) total += 55;
-      const currentCompany = normalize(profile.experience?.[0]?.company || "");
-      if (targetCompany && currentCompany === targetCompany) total += 70;
-      else if (targetCompany && (currentCompany.includes(targetCompany) || targetCompany.includes(currentCompany))) total += 35;
-      return total;
-    };
-    return score(b) - score(a);
-  })[0];
+  if (!targetName || !targetCompany) return undefined;
+  const matches = profiles.filter(profile => normalize(profile.fullName || "") === targetName
+    && normalize(profile.experience?.[0]?.company || "") === targetCompany && profile.uid);
+  const unique = new Map(matches.map(profile => [profile.uid, profile]));
+  return unique.size === 1 ? [...unique.values()][0] : undefined;
 }
 
 function contacts(candidate: SignalHireCandidate, type: string, preferredSubtype?: string) {
@@ -128,10 +120,10 @@ export async function POST(request: NextRequest) {
       });
       const searchPayload = await searchResponse.json().catch(() => null) as { profiles?: SearchProfile[]; error?: string } | null;
       if (!searchResponse.ok) {
-        return NextResponse.json({ error: searchResponse.status === 402 ? "SignalHire daily search quota is exhausted. Contact credits may still be available. Sync a public LinkedIn profile URL to resolve this person without name/company search." : searchPayload?.error || `SignalHire Search API returned HTTP ${searchResponse.status}.` }, { status: searchResponse.status });
+        return NextResponse.json({ error: searchResponse.status === 402 ? "SignalHire daily search quota is exhausted. Contact credits may still be available. Add a public profile URL in Optional profile tools to resolve this person without name/company search." : searchPayload?.error || `SignalHire Search API returned HTTP ${searchResponse.status}.`, creditUsed: false }, { status: searchResponse.status });
       }
       const match = bestSearchMatch(searchPayload?.profiles || [], parsed.data.name, parsed.data.company);
-      if (!match?.uid) return NextResponse.json({ error: "SignalHire could not match this Sales Nav person by name + company." }, { status: 404 });
+      if (!match?.uid) return NextResponse.json({ error: "No unique exact name + company match was found. Add a public profile URL in Optional profile tools to resolve this person.", creditUsed: false }, { status: 404 });
       identifier = match.uid;
     }
 
@@ -230,3 +222,4 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Companion prospect resolution failed." }, { status: 500 });
   }
 }
+
