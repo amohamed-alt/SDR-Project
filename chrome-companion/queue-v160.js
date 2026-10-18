@@ -26,18 +26,19 @@ importScripts('profile-dom.js');
       // Start reading as soon as the rendered profile is usable. Waiting for
       // every background resource to report "complete" made each lead much
       // slower than the old collector.
-      for (let attempt = 0; attempt < 30; attempt++) {
+      const deadline = Date.now() + 15000;
+      for (let attempt = 0; attempt < 30 && Date.now() < deadline; attempt++) {
         const current = await chrome.tabs.get(tab.id);
         if (/\/(login|checkpoint|authwall)(?:\/|\?|$)/.test(current.url || '')) throw new Error('LinkedIn sign-in or verification is required.');
         if (current.status === 'complete' || attempt >= 3) {
-          const values = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: readVisibleLinkedInProfile, args: [lead] });
+          const values = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: readVisibleLinkedInProfile, args: [lead, { waitForMenu: false }] });
           result = values?.[0]?.result;
           if (result?.ok || /sign-in|verification|unusual traffic/i.test(result?.error || '')) break;
         }
         await new Promise(resolve => setTimeout(resolve, 500));
       }
       await phase('reading profile menu');
-      if (!result?.ok) throw new Error(result?.error || 'Profile did not finish loading. Retry from the dashboard.');
+      if (!result?.ok) throw new Error(result?.error || 'Profile did not finish loading within 15 seconds. Retry from the dashboard.');
       if (nameKey(result.lead.name) !== nameKey(lead.name)) throw new Error('Profile name differs from the captured person. Review before retrying.');
       // Preserve capture identity; do not replace it with navigation tracking parameters.
       return { ...lead, ...result.lead, salesLeadUrl: lead.salesLeadUrl, location: result.lead.location || lead.location };
@@ -117,3 +118,4 @@ importScripts('profile-dom.js');
   void (async () => { const old = (await chrome.storage.local.get([KEY]))[KEY]; if (old && old.action !== 'read') await persist({ ...old, paused: true }); })();
   void chrome.alarms.create(`${ALARM}-watchdog`, { periodInMinutes: 1 });
 })();
+

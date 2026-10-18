@@ -50,10 +50,13 @@ test("an active capture receives new pages and usable public URLs before the sea
   await page.route("**/api/prospecting/salesnav/reveal-fast", route => { reveals += 1; return route.fulfill({ status: 500, json: { error: "No paid actions in this fixture." } }); });
   await page.goto("/signalhire-queue");
   await expect(page.getByRole("table").getByText("Awaiting profile read", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "HubSpot Check", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "HubSpot Check", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "HubSpot Check", exact: true }).click();
+  await expect.poll(() => checks).toBe(1);
+  await expect(page.getByRole("button", { name: "Reveal selected (0)", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Export CSV (1)", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: /^All 1$/ })).toHaveAttribute("data-active", "true");
-  expect(checks).toBe(0);
+  expect(checks).toBe(1);
   await page.getByRole("row").filter({ hasText: "Stream First Person" }).getByRole("button", { name: "Add profile URL", exact: true }).click();
   await page.getByRole("textbox", { name: "Public LinkedIn URL for Stream First Person", exact: true }).fill("https://www.linkedin.com/in/stream-first");
   await page.getByRole("button", { name: "Save profile URL", exact: true }).click();
@@ -61,7 +64,7 @@ test("an active capture receives new pages and usable public URLs before the sea
   await expect(page.getByRole("table").getByText("Stream Second Person", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "LinkedIn", exact: true })).toHaveAttribute("href", "https://www.linkedin.com/in/stream-first");
   await expect(page.getByRole("table").getByText("Needs reveal", { exact: true })).toBeVisible();
-  expect(checks).toBe(1); expect(reveals).toBe(0); expect(repairs).toBe(1);
+  expect(checks).toBe(2); expect(reveals).toBe(0); expect(repairs).toBe(1);
 });
 
 test("HubSpot checks all 100 captured people without skipping missing URLs or hiding incomplete work", async ({ page }) => {
@@ -127,3 +130,4 @@ test("opening an already captured public URL automatically checks it without a m
   await expect(page.getByRole("button", { name: "Reveal selected (1)", exact: true })).toBeEnabled();
   expect(checks).toBe(1);expect(paid).toBe(0);
 });
+
