@@ -39,7 +39,7 @@ test("server pairing alone never claims Chrome collector is connected",async({pa
   await page.route("**/api/prospecting/salesnav/companion",route=>route.fulfill({json:{ok:true,paired:true,unlocked:true}}));
   await page.route("**/api/prospecting/salesnav/task-options",route=>route.fulfill({json:{owners:[]}}));
   await page.goto("/signalhire-queue");
-  await expect(page.getByText(/Collector 1.8.1 is not connected to this tab/)).toBeVisible();
+  await expect(page.getByText(/Collector [\d.]+ is not connected to this tab/)).toBeVisible();
   await expect(page.getByText("Extension: 25 / 50 / Full LinkedIn URLs → Dashboard: Check → Reveal → Push",{exact:true})).toBeVisible();
   await expect(page.getByRole("button",{name:"Scrape search",exact:true})).toHaveCount(0);
 });

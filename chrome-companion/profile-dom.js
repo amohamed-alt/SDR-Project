@@ -1,7 +1,7 @@
 // Runs only in a rendered profile tab after the user requests a profile check.
 // Called across extension isolated contexts after serializing through chrome.scripting.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function readVisibleLinkedInProfile(captured = {}) {
+async function readVisibleLinkedInProfile(captured = {}, { waitForMenu = true } = {}) {
   const text = (node) => String(node?.innerText || node?.textContent || '').replace(/\s+/g, ' ').trim();
   const normalizePublic = (raw) => {
     try { const url = new URL(raw, location.origin); if (url.protocol !== 'https:' || !/^(www\.)?linkedin\.com$/i.test(url.hostname) || !/^\/in\/[^/?#]+\/?$/.test(url.pathname)) return ''; return `https://www.linkedin.com${url.pathname.replace(/\/$/, '')}`; }
@@ -16,10 +16,10 @@ async function readVisibleLinkedInProfile(captured = {}) {
   if (sales) {
     const menu = document.querySelector('button[aria-label="Open actions overflow menu"], button[aria-label="More actions"], button[aria-label="المزيد من الإجراءات"]');
     if (menu && menu.getAttribute('aria-expanded') !== 'true') menu.click();
-    for (let attempt = 0; attempt < 15 && !linkedinUrl; attempt++) {
+    for (let attempt = 0; attempt < (waitForMenu ? 15 : 1) && !linkedinUrl; attempt++) {
       const link = Array.from(document.querySelectorAll('a[href*="/in/"]')).find((node) => /view.*linkedin.*profile|linkedin.*profile|عرض.*ملف.*لينكد|عرض.*linkedin/i.test([text(node), node.getAttribute('aria-label'), node.getAttribute('title')].filter(Boolean).join(' ')));
       linkedinUrl = normalizePublic(link?.getAttribute('href') || '');
-      if (!linkedinUrl) await new Promise((resolve) => setTimeout(resolve, 200));
+      if (!linkedinUrl && waitForMenu) await new Promise((resolve) => setTimeout(resolve, 200));
     }
   }
   const structuredName = text(root.querySelector('[data-anonymize="person-name"]'));
@@ -55,3 +55,4 @@ async function readVisibleLinkedInProfile(captured = {}) {
   if (!name) return { ok: false, error: 'Profile name is still loading. Retry from the dashboard.' };
   return { ok: true, lead: { name, title, company, location: locationText, linkedinUrl, salesLeadUrl: sales ? location.href : '' } };
 }
+
