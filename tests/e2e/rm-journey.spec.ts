@@ -89,6 +89,7 @@ test('task creation API rejects cross-origin writes and demo-mode writes', async
  await setup(page);
  await page.route('**/api/rm-journey/trackers?**',r=>r.fulfill({json:{sources:[{owner:'Marita',ownerId:'31644369',status:'ready',syncedAt:'2026-10-23T10:00:00Z',url:'https://docs.google.com/spreadsheets/d/example/edit',warnings:[],rows:[{id:'sheet-1',date:'2026-10-20',company:'Tracker-only Company',salesRep:'Fadi',product:'Talentera',status:'Completed',motion:'Inbound',sheetUrl:'https://docs.google.com/spreadsheets/d/example/edit#range=A2',hubspotUrl:'',rmId:'76369998',meetingId:'',sdrId:'31644369',sdr:'Marita'}]}]}}));
  await page.goto('/rm/fadi');
+ await page.getByText('View tracker meetings · 1 entries',{exact:true}).click();
  await expect(page.getByText('Tracker-only Company',{exact:true})).toBeVisible();
  await expect(page.getByText('Follow-up and SLA unverified for this entry')).toBeVisible();
  await expect(page.getByRole('img',{name:'Talentera',exact:true})).toBeVisible();
@@ -120,4 +121,21 @@ test('contact update endpoint rejects cross-origin and demo writes',async({page}
  await setup(page);const auth={'x-acquisition-owner-token':'playwright-tools-only-password'};
  expect((await page.request.post('/api/rm-journey/contact',{headers:{...auth,origin:'https://untrusted.invalid'},data:{}})).status()).toBe(403);
  expect((await page.request.post('/api/rm-journey/contact',{headers:auth,data:{}})).status()).toBe(403);
+});
+
+test('RM reporting starts July 13 and ends on the current Riyadh day',async({page})=>{
+ await setup(page);
+ const requests:string[]=[];
+ page.on('request',r=>{if(r.url().includes('/api/rm-journey?')||r.url().includes('/api/rm-journey/trackers?'))requests.push(r.url());});
+ await page.goto('/rm/zein');
+ await expect(page.getByRole('heading',{name:'Zein’s workspace'})).toBeVisible();
+ await expect(page.getByText('Fixed start · updates through today · Riyadh')).toBeVisible();
+ await expect(page.getByRole('button',{name:'Last 30 days'})).toHaveCount(0);
+ await expect.poll(()=>requests.length).toBeGreaterThanOrEqual(2);
+ const today=new Date(Date.now()+3*3600000).toISOString().slice(0,10);
+ for(const request of requests){const u=new URL(request);expect(u.searchParams.get('from')).toBe('2026-07-13');expect(u.searchParams.get('to')).toBe(today);}
+ await page.getByRole('button',{name:'Open journey',exact:true}).click();
+ await page.getByRole('tab',{name:'Update HubSpot'}).click();
+ await expect(page.getByRole('region',{name:'Where changes are saved'})).toContainText('Saved directly to HubSpot');
+ await expect(page.getByRole('region',{name:'Where changes are saved'}).getByRole('link',{name:'Contact: Example Director'})).toHaveAttribute('href','https://example.invalid');
 });
