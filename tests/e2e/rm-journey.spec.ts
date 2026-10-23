@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 const profiles=[{slug:'zein',id:'31558980',name:'Zein Fares',short:'Zein',initials:'ZF'},{slug:'bassam',id:'75863674',name:'Bassam Hamed',short:'Bassam',initials:'BH'}];
-const fixture={rows:[{id:'1',title:'Example discovery',start:'2026-10-20T08:00:00Z',end:'2026-10-20T09:00:00Z',outcome:'COMPLETED',version:'v1',people:{creatorId:'31558980',assignedId:'31558980',attendees:['31644369'],sdrs:[{id:'31644369',name:'Marita',roles:['Attendee'],booked:false}],rms:[{...profiles[0],roles:['Creator','Assigned owner']}]},creatorName:'Zein Fares',assignedName:'Zein Fares',company:{id:'company',name:'Example Logistics',domain:'example.invalid',url:'https://example.invalid'},contacts:[{id:'contact',name:'Example Director',email:'director@example.invalid',title:'HR Director',createdAt:'2026-10-01T08:00:00Z',source:'OFFLINE',url:'https://example.invalid'}],deals:[],tasks:[],notes:'Discovery recorded.',summary:'Assessment discussion.',description:'',hasTranscript:true,recordUrl:'https://example.invalid',prospectKey:'company:company',followups:[]}],profiles,fields:[],outcomes:[],updatedAt:'2026-10-23T10:00:00Z',from:'2026-09-23',to:'2026-10-23',counts:{scannedMeetings:1,matchedMeetings:1},coverage:'Explicit CRM evidence',warnings:[]};
+const fixture={rows:[{responsibleRmIds:['31558980'],responsibleRmNames:['Zein Fares'],responsibilitySource:'Contact owner',id:'1',title:'Example discovery',start:'2026-10-20T08:00:00Z',end:'2026-10-20T09:00:00Z',outcome:'COMPLETED',version:'v1',people:{creatorId:'31558980',assignedId:'31558980',attendees:['31644369'],sdrs:[{id:'31644369',name:'Marita',roles:['Attendee'],booked:false}],rms:[{...profiles[0],roles:['Creator','Assigned owner']}]},creatorName:'Zein Fares',assignedName:'Zein Fares',company:{id:'company',name:'Example Logistics',domain:'example.invalid',url:'https://example.invalid'},contacts:[{id:'contact',name:'Example Director',email:'director@example.invalid',title:'HR Director',createdAt:'2026-10-01T08:00:00Z',source:'OFFLINE',url:'https://example.invalid'}],deals:[],tasks:[],notes:'Discovery recorded.',summary:'Assessment discussion.',description:'',hasTranscript:true,recordUrl:'https://example.invalid',prospectKey:'company:company',followups:[]}],profiles,fields:[],outcomes:[],updatedAt:'2026-10-23T10:00:00Z',from:'2026-09-23',to:'2026-10-23',counts:{scannedMeetings:1,matchedMeetings:1},coverage:'Explicit CRM evidence',warnings:[]};
 async function setup(page:import('@playwright/test').Page){
  await page.addInitScript(()=>{localStorage.setItem('sdr_v2_visitor_id','visitor_rm_journey_ci');localStorage.setItem('sdr_v2_visitor_name','RM Journey CI');sessionStorage.setItem('sdr_v2_session_id','session_rm_journey_ci');});
  await page.request.post('/api/sdr-admin',{data:{password:'playwright-tools-only-password'}});
@@ -16,4 +16,16 @@ test('separate RM URLs preserve reverse participant evidence and open the comple
 });
 test('team navigation remains usable on mobile and search filters prospects',async({page})=>{
  await setup(page);await page.setViewportSize({width:390,height:844});await page.goto('/rm');await expect(page.getByRole('navigation',{name:'Relationship managers'})).toBeVisible();await expect(page.getByRole('heading',{name:'Every handoff. One clear next step.'})).toBeVisible();await page.getByRole('textbox',{name:'Search prospects'}).fill('No matching company');await expect(page.getByRole('heading',{name:'No matching prospect meetings'})).toBeVisible();
+});
+test('an RM invited as an attendee is visible without being blamed for another RM follow-up',async({page})=>{
+ await setup(page);
+ const shared=structuredClone(fixture);
+ shared.rows[0].people.rms.push({...profiles[1],roles:['Attendee']});
+ await page.route('**/api/rm-journey?**',r=>r.fulfill({json:shared}));
+ await page.goto('/rm/bassam');
+ await expect(page.getByText('Example Logistics',{exact:true})).toBeVisible();
+ await expect(page.getByText('Participant · no follow-up SLA assigned',{exact:true})).toBeVisible();
+ await expect(page.getByRole('article').filter({hasText:'Assigned SLA exceptions'})).toContainText('0');
+ await page.getByRole('button',{name:'Open journey'}).click();
+ await expect(page.getByRole('dialog').getByText('attendance alone does not assign follow-up SLA.',{exact:false})).toBeVisible();
 });

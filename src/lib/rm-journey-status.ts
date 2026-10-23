@@ -11,8 +11,9 @@ export function journeyStatus(row:JourneyRow,rmId:string,now:string){
  const future=open.filter(t=>Date.parse(t.due)>=Date.parse(now));
  const overdue=open.filter(t=>Date.parse(t.due)<Date.parse(now));
  const followups=row.followups.filter(f=>(f.ownerId===rmId||f.participantIds?.includes(rmId))&&afterMeeting(f.at,row.end,now)).sort((a,b)=>a.at.localeCompare(b.at));
+ const responsible=Boolean(row.responsibleRmIds?.includes(rmId)||deal||open.length);
  const issues:string[]=[];const age=businessMinutes(row.end,now);
- if(!closed){
+ if(!closed&&responsible){
  if(age>=120&&!['COMPLETED','NO_SHOW','CANCELED','RESCHEDULED'].includes(row.outcome))issues.push('Outcome needs updating');
  if(row.outcome==='COMPLETED'&&age>=180){
  if(!row.notes&&!deal?.properties.deal_update_rm_notes)issues.push('Meeting notes missing');
@@ -21,5 +22,5 @@ export function journeyStatus(row:JourneyRow,rmId:string,now:string){
  }
  if(overdue.length)issues.push(`${overdue.length} overdue RM task${overdue.length>1?'s':''}`);
  }
- return {deal,tasks,future,overdue,followups,issues,closed:Boolean(closed),stage:deal?.stage||'No unique RM opportunity',linkReview:matching.length>1?'Multiple RM opportunities':!deal?'Opportunity linkage needs review':''};
+ return {responsible,deal,tasks,future,overdue,followups,issues,closed:Boolean(closed),stage:deal?.stage||'No unique RM opportunity',linkReview:matching.length>1?'Multiple RM opportunities':!deal?'Opportunity linkage needs review':''};
 }
