@@ -5,10 +5,10 @@ export function journeyStatus(row:JourneyRow,rmId:string,now:string){
  const matching=row.deals.filter(d=>d.ownerId===rmId);
  const direct=matching.filter(d=>d.direct);
  const deal=direct.length===1?direct[0]:matching.length===1?matching[0]:undefined;
- const closed=deal&&['closedwon','closedlost'].includes(String(deal.properties.dealstage));
+ const closed=deal&&(deal.properties.hs_is_closed==='true'||['closedwon','closedlost'].includes(String(deal.properties.dealstage)));
  const tasks=row.tasks.filter(t=>t.ownerId===rmId&&(!deal||!t.dealIds.length||t.dealIds.includes(deal.id)));
  const open=tasks.filter(t=>t.status!=='COMPLETED');
- const future=open.filter(t=>Date.parse(t.due)>=Date.parse(now));
+ const future=open.filter(t=>Date.parse(t.due)>=Date.parse(now)).sort((a,b)=>Date.parse(a.due)-Date.parse(b.due));
  const overdue=open.filter(t=>Date.parse(t.due)<Date.parse(now));
  const followups=row.followups.filter(f=>(f.ownerId===rmId||f.participantIds?.includes(rmId))&&afterMeeting(f.at,row.end,now)).sort((a,b)=>a.at.localeCompare(b.at));
  const responsible=Boolean(row.responsibleRmIds?.includes(rmId)||deal||open.length);
@@ -22,5 +22,8 @@ export function journeyStatus(row:JourneyRow,rmId:string,now:string){
  }
  if(overdue.length)issues.push(`${overdue.length} overdue RM task${overdue.length>1?'s':''}`);
  }
- return {responsible,deal,tasks,future,overdue,followups,issues,closed:Boolean(closed),stage:deal?.stage||'No unique RM opportunity',linkReview:matching.length>1?'Multiple RM opportunities':!deal?'Opportunity linkage needs review':''};
+ const lastFollowupAt=followups.at(-1)?.at||'';
+ const elapsed=Date.parse(now)-Date.parse(lastFollowupAt||row.end);
+ const idleDays=Number.isFinite(elapsed)&&elapsed>=0?Math.floor(elapsed/86400000):null;
+ return {lastFollowupAt,idleDays,workingMinutes:age,responsible,deal,tasks,future,overdue,followups,issues,closed:Boolean(closed),stage:deal?.stage||'No unique RM opportunity',linkReview:matching.length>1?'Multiple RM opportunities':!deal?'Opportunity linkage needs review':''};
 }
