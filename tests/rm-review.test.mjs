@@ -16,10 +16,11 @@ test('bad timing, absent interest checkbox and missing fields do not invent disq
  assert.equal(contactDisposition({rm_meeting_outcome:'Unqualified'}).stopped,true);
  assert.equal(contactDisposition({rm_validation_reason:'No need'}).stopped,true);
 });
-test('one excluded contact does not exempt another active contact or another RM',()=>{
+test('one excluded contact does not exempt another active associated contact',()=>{
  const contacts=[{ownerId:'76369998',properties:{hs_lead_status:'UNQUALIFIED'}},{ownerId:'76369998',properties:{hs_lead_status:'IN_PROGRESS'}}];
  assert.equal(journeyStatus({...row,contacts},'76369998','2026-10-23T12:00:00Z').followupRequired,true);
- assert.equal(journeyStatus({...row,contacts:[{ownerId:'other',properties:{hs_lead_status:'UNQUALIFIED'}}]},'76369998','2026-10-23T12:00:00Z').followupRequired,true);
+ assert.equal(journeyStatus({...row,contacts:[{ownerId:'other',properties:{hs_lead_status:'UNQUALIFIED'}}]},'76369998','2026-10-23T12:00:00Z').followupRequired,false);
+ assert.equal(journeyStatus({...row,contacts:[...contacts,{ownerId:'other',properties:{}}]},'76369998','2026-10-23T12:00:00Z').followupRequired,true);
 });
 test('no deal does not create a missing deal next-step SLA and closed deal validation excludes future steps',()=>{
  assert.equal(journeyStatus(row,'76369998','2026-10-23T12:00:00Z').issues.includes('Next step / date missing'),false);

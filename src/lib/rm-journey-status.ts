@@ -13,8 +13,7 @@ export function journeyStatus(row:JourneyRow,rmId:string,now:string){
  const overdue=open.filter(t=>Date.parse(t.due)<Date.parse(now));
  const followups=row.followups.filter(f=>(f.ownerId===rmId||f.participantIds?.includes(rmId))&&afterMeeting(f.at,row.end,now)).sort((a,b)=>a.at.localeCompare(b.at));
  const responsible=Boolean(row.responsibleRmIds?.includes(rmId)||deal||open.length);
- const ownedContacts=(row.contacts||[]).filter(c=>c.ownerId===rmId);
- const dispositions=ownedContacts.map(c=>contactDisposition(c.properties));
+ const dispositions=(row.contacts||[]).map(c=>contactDisposition(c.properties));
  const disqualified=dispositions.length>0&&dispositions.every(c=>c.stopped);
  const stopReason=closed?'Closed opportunity':disqualified?dispositions.map(c=>c.reason).filter((v,i,a)=>a.indexOf(v)===i).join(' · '):'';
  const followupRequired=!closed&&!disqualified;
