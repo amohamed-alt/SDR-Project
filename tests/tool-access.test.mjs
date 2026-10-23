@@ -4,7 +4,7 @@ import { toolAccessResponse, isProtectedToolPage } from "../src/lib/tool-access.
 import { sdrAdminCookieToken, validateSdrAdminPassword } from "../src/lib/sdr-admin-auth.ts";
 const request = (path, method = "GET", headers = {}, cookie = "") => ({ nextUrl: new URL(path, "https://sdr.dashboardtalentera.tech"), method, headers: new Headers(headers), cookies: { get: () => ({ value: cookie }) } });
 test("tool reads and mutations fail closed while public dashboard and tracking remain available", () => {
-  for (const path of ["/api/usage", "/api/%75sage", "/api/acquisition", "/api/lead-inventory/engine", "/api/prospecting/signalhire/companion", "/api/company-enrichment", "/api/dashboard/sales-handoff"]) {
+  for (const path of ["/api/meeting-followup", "/api/usage", "/api/%75sage", "/api/acquisition", "/api/lead-inventory/engine", "/api/prospecting/signalhire/companion", "/api/company-enrichment", "/api/dashboard/sales-handoff"]) {
     assert.equal(toolAccessResponse(request(path))?.status, 401, path);
     assert.equal(toolAccessResponse(request(path, "GET", { "authorization": "Bearer fake", "x-acquisition-owner-token": "fake", "x-acquisition-worker-key": "fake" }))?.status, 401, path);
   }
@@ -20,7 +20,7 @@ test("direct tool URLs redirect before rendering and retain filters without trus
   assert.equal(redirect.origin, "https://sdr.dashboardtalentera.tech");
   assert.equal(redirect.pathname, "/tools-unlock");
   assert.equal(redirect.searchParams.get("returnTo"), path);
-  for (const path of ["/lead-inventory", "/system-health", "/salesnav-prospecting", "/company-enrichment"]) assert.equal(toolAccessResponse(request(path))?.status, 307);
+  for (const path of ["/meeting-followup", "/lead-inventory", "/system-health", "/salesnav-prospecting", "/company-enrichment"]) assert.equal(toolAccessResponse(request(path))?.status, 307);
   assert.equal(isProtectedToolPage("/", new URLSearchParams("acq=intelligence&studio=tools")), true);
   assert.equal(isProtectedToolPage("/", new URLSearchParams("acq=marita")), false);
 });

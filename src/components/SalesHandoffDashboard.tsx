@@ -327,6 +327,7 @@ export function SalesHandoffDashboard({ onBack, initialSearch = "", initialSales
           <div>
             <span className={styles.eyebrow}>{sourceName(applied.sdr).toUpperCase()} → SALES · POST-MEETING INTELLIGENCE</span>
             <h1>Sales Handoff</h1>
+            <a href="/meeting-followup">SLA exceptions & verified HubSpot updates →</a>
             <p>Track what happens after {sourceName(applied.sdr)} books a meeting: Sales follow-up speed, deal creation, stage movement, pipeline and accounts that need action.</p>
           </div>
         </div>

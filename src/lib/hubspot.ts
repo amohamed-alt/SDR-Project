@@ -431,3 +431,14 @@ export async function createMeeting(input: CreateMeetingInput): Promise<HubSpotR
 export async function archiveMeeting(meetingId: string): Promise<void> {
   await hubspotRequest<void>(`/crm/v3/objects/meetings/${encodeURIComponent(meetingId)}`, { method: "DELETE" });
 }
+
+// Return success only after a fresh CRM read confirms every submitted value.
+export async function updateRecordVerified(objectType: 'deals' | 'meetings', id: string, properties: Record<string, string>): Promise<HubSpotRecord> {
+  await hubspotRequest<HubSpotRecord>(`/crm/v3/objects/${objectType}/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ properties }) });
+  const [record] = await batchRead(objectType, [id], [...Object.keys(properties), 'hs_lastmodifieddate']);
+  if (!record || Object.entries(properties).some(([key, value]) => {
+    const actual = String(record.properties[key] ?? '');
+    return key === 'next_step_due_date' && value ? actual.slice(0, 10) !== value : actual !== value;
+  })) throw new Error('HubSpot write could not be verified');
+  return record;
+}
