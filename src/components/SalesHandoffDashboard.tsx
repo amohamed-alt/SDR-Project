@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -327,7 +328,7 @@ export function SalesHandoffDashboard({ onBack, initialSearch = "", initialSales
           <div>
             <span className={styles.eyebrow}>{sourceName(applied.sdr).toUpperCase()} → SALES · POST-MEETING INTELLIGENCE</span>
             <h1>Sales Handoff</h1>
-            <a href="/meeting-followup">SLA exceptions & verified HubSpot updates →</a>
+            <Link href="/rm">RM workspaces · prospect journeys & verified updates →</Link>
             <p>Track what happens after {sourceName(applied.sdr)} books a meeting: Sales follow-up speed, deal creation, stage movement, pipeline and accounts that need action.</p>
           </div>
         </div>

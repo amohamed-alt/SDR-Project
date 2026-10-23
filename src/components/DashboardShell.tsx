@@ -202,6 +202,7 @@ export function Dashboard({
               <span className={`${styles.toolIcon} ${styles.gtmIcon}`}><BriefcaseBusiness size={17}/></span>
               <span className={styles.toolCopy}><strong>Sales Handoff</strong><small>Booking SDR → RM · follow-up · opportunities</small></span>
             </button>
+            <Link className={styles.toolItem} href="/rm"><span className={`${styles.toolIcon} ${styles.gtmIcon}`}><BriefcaseBusiness size={17}/></span><span className={styles.toolCopy}><strong>RM Workspaces</strong><small>Zein · Jehad · Fadi · Faizan · Ursula · Bassam</small></span></Link>
             <button className={`${styles.toolItem} ${view === "inventory" ? styles.activeTool : ""}`} type="button" aria-current={view === "inventory" ? "page" : undefined} onClick={() => changeView("inventory")}>
               <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Building2 size={17}/></span>
               <span className={styles.toolCopy}><strong>Lead Inventory</strong><small>Company stock · sources · qualification · Marita & Daniel</small></span>
