@@ -29,3 +29,55 @@ test('an RM invited as an attendee is visible without being blamed for another R
  await page.getByRole('button',{name:'Open journey'}).click();
  await expect(page.getByRole('dialog').getByText('attendance alone does not assign follow-up SLA.',{exact:false})).toBeVisible();
 });
+
+test('follow-up task confirms owner, time and contact and displays success only after server verification', async ({page}) => {
+ await setup(page);
+ let creates = 0;
+ await page.route('**/api/rm-journey/task', async route => {
+   creates++;
+   const body = route.request().postDataJSON();
+   expect(body).toMatchObject({meetingId:'1',rmId:'31558980',contactId:'contact',dealId:'',type:'TODO',title:'Follow up with HR'});
+   expect(body.dueAt).toBe('2027-10-25T06:30:00.000Z');
+   await route.fulfill({json:{confirmed:true,taskId:'9001',reused:false,task:{id:'9001',properties:{hs_task_subject:body.title,hs_timestamp:body.dueAt,hubspot_owner_id:body.rmId,hs_task_type:body.type,hs_task_status:'NOT_STARTED'}}}});
+ });
+ await page.goto('/rm/zein');
+ await page.getByRole('button',{name:'Open journey'}).click();
+ await page.getByRole('tab',{name:'Update HubSpot'}).click();
+ await page.getByLabel('Task title',{exact:true}).fill('Follow up with HR');
+ await page.getByLabel('Task due time (Riyadh)',{exact:true}).fill('2027-10-25T09:30');
+ page.on('dialog', async dialog => { expect(dialog.message()).toContain('Zein Fares'); expect(dialog.message()).toContain('Example Director'); await dialog.accept(); });
+ await page.getByRole('button',{name:'Create & verify task'}).click();
+ await expect(page.getByRole('status')).toContainText('Task 9001 created and verified in HubSpot.');
+ await expect(page.getByRole('button',{name:'Create & verify task'})).toHaveCount(0);
+ expect(creates).toBe(1);
+});
+
+test('failed task create preserves the draft on mobile and never claims success', async ({page}) => {
+ await setup(page);
+ await page.route('**/api/rm-journey/task', route => route.fulfill({status:502,json:{error:'Task creation could not be confirmed. Review HubSpot before retrying.'}}));
+ await page.setViewportSize({width:390,height:844});
+ await page.goto('/rm/zein');
+ await page.getByRole('button',{name:'Open journey'}).click();
+ await page.getByRole('tab',{name:'Update HubSpot'}).click();
+ await page.getByLabel('Task title',{exact:true}).fill('Retain this task draft');
+ await page.getByLabel('Task due time (Riyadh)',{exact:true}).fill('2027-10-25T09:30');
+ page.on('dialog', dialog => dialog.accept());
+ await page.getByRole('button',{name:'Create & verify task'}).click();
+ await expect(page.getByRole('status')).toContainText('Review HubSpot before retrying');
+ await expect(page.getByLabel('Task title',{exact:true})).toHaveValue('Retain this task draft');
+ await expect(page.getByText('created and verified in HubSpot.',{exact:false})).toHaveCount(0);
+});
+
+test('task creation API rejects cross-origin writes and demo-mode writes', async ({page,baseURL}) => {
+ await setup(page);
+ const locked = await page.request.post('/api/rm-journey/task',{data:{}});
+ expect(locked.status()).toBe(401);
+ // next start uses a Secure cookie. Exercise the route's authenticated guards
+ // with the existing test-only automation credential over the isolated HTTP server.
+ const auth = {'x-acquisition-owner-token':'playwright-tools-only-password'};
+ const cross = await page.request.post('/api/rm-journey/task',{headers:{...auth,origin:'https://untrusted.invalid'},data:{}});
+ expect(cross.status()).toBe(403);
+ const demo = await page.request.post('/api/rm-journey/task',{headers:{...auth,origin:baseURL!},data:{}});
+ expect(demo.status()).toBe(403);
+ expect((await demo.json()).error).toContain('demo mode');
+});

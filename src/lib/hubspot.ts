@@ -172,10 +172,10 @@ function logHubSpotFailure(path: string, response: Response) {
   });
 }
 
-async function hubspotRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function hubspotRequest<T>(path: string, init: RequestInit = {}, retries = MAX_RETRIES): Promise<T> {
   let lastError: unknown;
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
     try {
       const response = await fetch(`${API_BASE}${path}`, {
         ...init,
@@ -197,7 +197,7 @@ async function hubspotRequest<T>(path: string, init: RequestInit = {}): Promise<
         try {
           return JSON.parse(body) as T;
         } catch {
-          if (attempt < MAX_RETRIES) {
+          if (attempt < retries) {
             await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
             continue;
           }
@@ -210,7 +210,7 @@ async function hubspotRequest<T>(path: string, init: RequestInit = {}): Promise<
       }
 
       const body = await response.text();
-      if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
+      if ((response.status === 429 || response.status >= 500) && attempt < retries) {
         const retryAfter = Number(response.headers.get("retry-after") ?? "0");
         const delay = retryAfter > 0 ? retryAfter * 1000 : 500 * 2 ** attempt;
         await new Promise((resolve) => setTimeout(resolve, delay));
@@ -221,7 +221,7 @@ async function hubspotRequest<T>(path: string, init: RequestInit = {}): Promise<
       throw new HubSpotApiError(`HubSpot request failed: ${path}`, response.status, body.slice(0, 1_000));
     } catch (error) {
       lastError = error;
-      if (error instanceof HubSpotApiError || attempt === MAX_RETRIES) throw error;
+      if (error instanceof HubSpotApiError || attempt === retries) throw error;
       await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
     }
   }
@@ -430,6 +430,29 @@ export async function createMeeting(input: CreateMeetingInput): Promise<HubSpotR
 
 export async function archiveMeeting(meetingId: string): Promise<void> {
   await hubspotRequest<void>(`/crm/v3/objects/meetings/${encodeURIComponent(meetingId)}`, { method: "DELETE" });
+}
+
+export type FollowupTaskInput = {
+  contactId: string; dealId: string; ownerId: string;
+  title: string; dueAt: string; type: 'CALL' | 'EMAIL' | 'TODO';
+};
+
+export async function createFollowupTaskOnce(input: FollowupTaskInput): Promise<HubSpotRecord> {
+  const targets = [{ object: 'contacts', id: input.contactId }, ...(input.dealId ? [{ object: 'deals', id: input.dealId }] : [])];
+  const associations = await Promise.all(targets.map(async target => {
+    const labels = await hubspotRequest<{ results: { category: string; typeId: number; label: string | null }[] }>(`/crm/v4/associations/tasks/${target.object}/labels`);
+    const association = labels.results.find(a => a.category === 'HUBSPOT_DEFINED' && a.label === null);
+    if (!association) throw new Error('Task association definition unavailable');
+    return { to: { id: target.id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: association.typeId }] };
+  }));
+  // No automatic retry: a timeout or 5xx can occur after HubSpot committed.
+  return hubspotRequest<HubSpotRecord>('/crm/v3/objects/tasks', {
+    method: 'POST', body: JSON.stringify({ properties: {
+      hs_task_subject: input.title, hs_timestamp: input.dueAt,
+      hubspot_owner_id: input.ownerId, hs_task_type: input.type,
+      hs_task_status: 'NOT_STARTED',
+    }, associations }),
+  }, 0);
 }
 
 // Return success only after a fresh CRM read confirms every submitted value.
