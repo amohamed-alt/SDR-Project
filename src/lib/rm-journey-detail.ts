@@ -1,5 +1,5 @@
 import { batchRead, listOwners, readAssociations } from './hubspot';
-import { participation, plainText, afterMeeting } from './rm-journey-core';
+import { participation, plainText, afterMeeting, attendeeIds } from './rm-journey-core';
 import { JOURNEY_MEETING_FIELDS } from './rm-journey';
 import { hubspotRecordUrl } from './config';
 export async function loadJourneyDetail(meetingId:string,rmId:string){
@@ -29,11 +29,11 @@ export async function loadJourneyDetail(meetingId:string,rmId:string){
    const records=await batchRead(d.type,ids.slice(0,1000),d.fields);
    return records.map(r=>{
     const p=r.properties, owner=String(p.hubspot_owner_id||'');
-    const at=String(p.hs_timestamp||p.hs_meeting_start_time||'');
+    const at=String((d.type==='meetings'?p.hs_meeting_start_time:p.hs_timestamp)||p.hs_timestamp||'');
     const body=plainText(p[d.body]);
     const outgoing=d.type!=='emails'||['OUTGOING','EMAIL'].some(v=>String(p.hs_email_direction||'').includes(v));
     const realMeeting=d.type!=='meetings'||p.hs_meeting_outcome==='COMPLETED';
-    return {id:r.id,type:d.kind,title:plainText(p[d.title])||d.kind,body:body.slice(0,12000),bodyTruncated:body.length>12000,at,ownerId:owner,owner:owners.find(o=>o.id===owner)?.name||'Not recorded',status:String(p.hs_task_status||p.hs_meeting_outcome||p.hs_call_status||''),completedAt:String(p.hs_task_completion_date||''),hasTranscript:p.hs_has_meeting_transcript==='true',summary:plainText(p.hs_meeting_summary),followup:owner===rmId&&outgoing&&realMeeting&&['calls','emails','communications','meetings'].includes(d.type)&&afterMeeting(at,String(meeting.properties.hs_meeting_end_time||meeting.properties.hs_meeting_start_time),new Date().toISOString()),scope:dids.some(id=>(dl.get(id)||[]).includes(r.id))?'Deal-linked':'Contact-linked'};
+    return {id:r.id,type:d.kind,title:plainText(p[d.title])||d.kind,body:body.slice(0,12000),bodyTruncated:body.length>12000,at,ownerId:owner,owner:owners.find(o=>o.id===owner)?.name||'Not recorded',status:String(p.hs_task_status||p.hs_meeting_outcome||p.hs_call_status||''),completedAt:String(p.hs_task_completion_date||''),hasTranscript:p.hs_has_meeting_transcript==='true',summary:plainText(p.hs_meeting_summary),followup:(owner===rmId||(d.type==='meetings'&&attendeeIds(p.hs_attendee_owner_ids).includes(rmId)))&&outgoing&&realMeeting&&['calls','emails','communications','meetings'].includes(d.type)&&afterMeeting(at,String(meeting.properties.hs_meeting_end_time||meeting.properties.hs_meeting_start_time),new Date().toISOString()),scope:dids.some(id=>(dl.get(id)||[]).includes(r.id))?'Deal-linked':'Contact-linked'};
    });
   }catch{warnings.push(`${d.kind} could not be loaded; follow-up coverage is incomplete.`);return [];}
  }));

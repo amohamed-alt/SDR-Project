@@ -10,7 +10,7 @@ export function journeyStatus(row:JourneyRow,rmId:string,now:string){
  const open=tasks.filter(t=>t.status!=='COMPLETED');
  const future=open.filter(t=>Date.parse(t.due)>=Date.parse(now));
  const overdue=open.filter(t=>Date.parse(t.due)<Date.parse(now));
- const followups=row.followups.filter(f=>f.ownerId===rmId&&afterMeeting(f.at,row.end,now)).sort((a,b)=>a.at.localeCompare(b.at));
+ const followups=row.followups.filter(f=>(f.ownerId===rmId||f.participantIds?.includes(rmId))&&afterMeeting(f.at,row.end,now)).sort((a,b)=>a.at.localeCompare(b.at));
  const issues:string[]=[];const age=businessMinutes(row.end,now);
  if(!closed){
  if(age>=120&&!['COMPLETED','NO_SHOW','CANCELED','RESCHEDULED'].includes(row.outcome))issues.push('Outcome needs updating');

@@ -30,3 +30,8 @@ test('another RM task or outreach never clears this RM follow-up gap',()=>{
 test('ambiguous contact-linked opportunities are not automatically selected',()=>{
  const deals=['one','two'].map(id=>({id,ownerId:'31558980',direct:false,properties:{}}));assert.equal(journeyStatus({...base,deals},'31558980','2026-10-25T11:00:00Z').deal,undefined);
 });
+
+test('a completed follow-up meeting with this RM as listed attendee is counted',()=>{
+ const row={...base,followups:[{ownerId:'31644369',participantIds:['31558980'],at:'2026-10-25T08:00:00Z'}]};
+ assert.equal(journeyStatus(row,'31558980','2026-10-25T11:00:00Z').followups.length,1);
+});
