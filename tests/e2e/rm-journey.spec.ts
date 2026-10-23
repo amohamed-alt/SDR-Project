@@ -70,9 +70,14 @@ test('failed task create preserves the draft on mobile and never claims success'
 
 test('task creation API rejects cross-origin writes and demo-mode writes', async ({page,baseURL}) => {
  await setup(page);
- const cross = await page.request.post('/api/rm-journey/task',{headers:{origin:'https://untrusted.invalid'},data:{}});
+ const locked = await page.request.post('/api/rm-journey/task',{data:{}});
+ expect(locked.status()).toBe(401);
+ // next start uses a Secure cookie. Exercise the route's authenticated guards
+ // with the existing test-only automation credential over the isolated HTTP server.
+ const auth = {'x-acquisition-owner-token':'playwright-tools-only-password'};
+ const cross = await page.request.post('/api/rm-journey/task',{headers:{...auth,origin:'https://untrusted.invalid'},data:{}});
  expect(cross.status()).toBe(403);
- const demo = await page.request.post('/api/rm-journey/task',{headers:{origin:baseURL!},data:{}});
+ const demo = await page.request.post('/api/rm-journey/task',{headers:{...auth,origin:baseURL!},data:{}});
  expect(demo.status()).toBe(403);
  expect((await demo.json()).error).toContain('demo mode');
 });
