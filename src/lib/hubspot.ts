@@ -434,7 +434,7 @@ export async function archiveMeeting(meetingId: string): Promise<void> {
 
 export type FollowupTaskInput = {
   contactId: string; dealId: string; ownerId: string;
-  title: string; dueAt: string; type: 'CALL' | 'EMAIL' | 'TODO';
+  title: string; dueAt: string; type: 'CALL' | 'EMAIL' | 'TODO'; reminderAt?:string;
 };
 
 export async function createFollowupTaskOnce(input: FollowupTaskInput): Promise<HubSpotRecord> {
@@ -451,17 +451,25 @@ export async function createFollowupTaskOnce(input: FollowupTaskInput): Promise<
       hs_task_subject: input.title, hs_timestamp: input.dueAt,
       hubspot_owner_id: input.ownerId, hs_task_type: input.type,
       hs_task_status: 'NOT_STARTED',
+      ...(input.reminderAt?{hs_task_reminders:String(Date.parse(input.reminderAt))}:{}),
     }, associations }),
   }, 0);
 }
 
 // Return success only after a fresh CRM read confirms every submitted value.
-export async function updateRecordVerified(objectType: 'deals' | 'meetings', id: string, properties: Record<string, string>): Promise<HubSpotRecord> {
+export async function updateRecordVerified(objectType: 'deals' | 'meetings' | 'contacts', id: string, properties: Record<string, string>): Promise<HubSpotRecord> {
   await hubspotRequest<HubSpotRecord>(`/crm/v3/objects/${objectType}/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ properties }) });
-  const [record] = await batchRead(objectType, [id], [...Object.keys(properties), 'hs_lastmodifieddate']);
+  const [record] = await batchRead(objectType, [id], [...Object.keys(properties), objectType==='contacts'?'lastmodifieddate':'hs_lastmodifieddate']);
   if (!record || Object.entries(properties).some(([key, value]) => {
     const actual = String(record.properties[key] ?? '');
-    return key === 'next_step_due_date' && value ? actual.slice(0, 10) !== value : actual !== value;
+    return ['next_step_due_date','rm_next_followup_date'].includes(key) && value ? actual.slice(0, 10) !== value : actual !== value;
   })) throw new Error('HubSpot write could not be verified');
   return record;
+}
+
+// Bounded, user-triggered company lookup; candidates never establish meeting identity.
+export async function searchCompanyCandidates(query:string) {
+ return scheduleSearch(()=>hubspotRequest<SearchResponse>('/crm/v3/objects/companies/search',{
+  method:'POST',body:JSON.stringify({query,properties:['name','domain'],limit:20}),
+ }));
 }

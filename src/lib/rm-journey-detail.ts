@@ -1,13 +1,17 @@
 import { batchRead, listOwners, readAssociations } from './hubspot';
 import { participation, plainText, afterMeeting, attendeeIds } from './rm-journey-core';
-import { JOURNEY_MEETING_FIELDS } from './rm-journey';
+import { JOURNEY_MEETING_FIELDS,loadRmJourney } from './rm-journey';
 import { hubspotRecordUrl } from './config';
 export async function loadJourneyDetail(meetingId:string,rmId:string){
  const [meetings,owners]=await Promise.all([batchRead('meetings',[meetingId],JOURNEY_MEETING_FIELDS),listOwners()]);
  const meeting=meetings[0];
  if(!meeting)throw new Error('Meeting not found');
  const people=participation(meeting,owners);
- if(!people.rms.some(r=>r.id===rmId)||!people.sdrs.length)throw new Error('Meeting is not in this RM workspace');
+ if(!people.rms.some(r=>r.id===rmId)||!people.sdrs.length){
+  const day=new Date(Date.parse(String(meeting.properties.hs_meeting_start_time))+3*3600000).toISOString().slice(0,10);
+  const journey=await loadRmJourney(day,day);
+  if(!journey.rows.some(r=>r.id===meetingId&&r.people.rms.some(p=>p.id===rmId)))throw new Error('Meeting is not in this RM workspace');
+ }
  const [contacts,deals]=await Promise.all([readAssociations('meetings','contacts',[meetingId]),readAssociations('meetings','deals',[meetingId])]);
  const cids=contacts.get(meetingId)||[];
  const cd=await readAssociations('contacts','deals',cids);

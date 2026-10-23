@@ -1,3 +1,4 @@
+import { contactDisposition } from './rm-review-core.ts';
 import { afterMeeting } from './rm-journey-core.ts';
 import { businessMinutes } from './meeting-followup-core.ts';
 import type { JourneyRow } from './rm-journey.ts';
@@ -12,18 +13,22 @@ export function journeyStatus(row:JourneyRow,rmId:string,now:string){
  const overdue=open.filter(t=>Date.parse(t.due)<Date.parse(now));
  const followups=row.followups.filter(f=>(f.ownerId===rmId||f.participantIds?.includes(rmId))&&afterMeeting(f.at,row.end,now)).sort((a,b)=>a.at.localeCompare(b.at));
  const responsible=Boolean(row.responsibleRmIds?.includes(rmId)||deal||open.length);
+ const dispositions=(row.contacts||[]).map(c=>contactDisposition(c.properties));
+ const disqualified=dispositions.length>0&&dispositions.every(c=>c.stopped);
+ const stopReason=closed?'Closed opportunity':disqualified?dispositions.map(c=>c.reason).filter((v,i,a)=>a.indexOf(v)===i).join(' · '):'';
+ const followupRequired=!closed&&!disqualified;
  const issues:string[]=[];const age=businessMinutes(row.end,now);
- if(!closed&&responsible){
+ if(followupRequired&&responsible){
  if(age>=120&&!['COMPLETED','NO_SHOW','CANCELED','RESCHEDULED'].includes(row.outcome))issues.push('Outcome needs updating');
  if(row.outcome==='COMPLETED'&&age>=180){
  if(!row.notes&&!deal?.properties.deal_update_rm_notes)issues.push('Meeting notes missing');
  if(!future.length)issues.push('No upcoming RM task recorded');
- if(!deal?.properties.deal_next_step||!deal.properties.next_step_due_date)issues.push('Next step / date missing');
+ if(deal&&(!(deal.properties.deal_next_step||deal.properties.next_steps_planned_by_rm)||!deal.properties.next_step_due_date))issues.push('Next step / date missing');
  }
  if(overdue.length)issues.push(`${overdue.length} overdue RM task${overdue.length>1?'s':''}`);
  }
  const lastFollowupAt=followups.at(-1)?.at||'';
  const elapsed=Date.parse(now)-Date.parse(lastFollowupAt||row.end);
  const idleDays=Number.isFinite(elapsed)&&elapsed>=0?Math.floor(elapsed/86400000):null;
- return {lastFollowupAt,idleDays,workingMinutes:age,responsible,deal,tasks,future,overdue,followups,issues,closed:Boolean(closed),stage:deal?.stage||'No unique RM opportunity',linkReview:matching.length>1?'Multiple RM opportunities':!deal?'Opportunity linkage needs review':''};
+ return {followupRequired,stopReason,disqualified,lastFollowupAt,idleDays,workingMinutes:age,responsible,deal,tasks,future,overdue,followups,issues,closed:Boolean(closed),stage:deal?.stage||'No unique RM opportunity',linkReview:matching.length>1?'Multiple RM opportunities':!deal?'Opportunity linkage needs review':''};
 }

@@ -8,7 +8,7 @@ import { SDRS } from '@/lib/meeting-followup-core';
 import { bookedBySdr } from '@/lib/handoff-attribution';
 import { meetingCreatorId } from '@/lib/owner-attribution';
 import { participation } from '@/lib/rm-journey-core';
-import { invalidateRmJourney } from '@/lib/rm-journey';
+import { invalidateRmJourney,loadRmJourney } from '@/lib/rm-journey';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 const headers = { 'Cache-Control':'private, no-store' };
@@ -49,9 +49,12 @@ export async function POST(req:NextRequest) {
     const [record]=await batchRead('deals',[id],DEAL_FIELDS);
     let journeyEligible=false;
     if(parsed.data.meetingId&&parsed.data.rmId&&record?.properties.hubspot_owner_id===parsed.data.rmId){
-      const [meetings,owners]=await Promise.all([batchRead('meetings',[parsed.data.meetingId],['hs_created_by_user_id','hs_attendee_owner_ids','hubspot_owner_id','hs_internal_meeting_notes']),listOwners()]);
+      const [meetings,owners]=await Promise.all([batchRead('meetings',[parsed.data.meetingId],['hs_created_by_user_id','hs_attendee_owner_ids','hubspot_owner_id','hs_internal_meeting_notes','hs_meeting_start_time']),listOwners()]);
       if(meetings[0]){const evidence=participation(meetings[0],owners);
-        if(evidence.sdrs.length&&evidence.rms.some(r=>r.id===parsed.data.rmId)){
+        const start=Date.parse(String(meetings[0].properties.hs_meeting_start_time||''));
+        const day=Number.isFinite(start)?new Date(start+3*3600000).toISOString().slice(0,10):'';
+        const owned=day?(await loadRmJourney(day,day,true)).rows.some(r=>r.id===parsed.data.meetingId&&r.responsibleRmIds.includes(parsed.data.rmId!)):false;
+        if(evidence.sdrs.length&&(owned||evidence.rms.some(r=>r.id===parsed.data.rmId))){
           const [direct,contacts]=await Promise.all([readAssociations('meetings','deals',[parsed.data.meetingId]),readAssociations('meetings','contacts',[parsed.data.meetingId])]);
           const indirect=await readAssociations('contacts','deals',contacts.get(parsed.data.meetingId)||[]);
           journeyEligible=[...(direct.get(parsed.data.meetingId)||[]),...[...indirect.values()].flat()].includes(id);

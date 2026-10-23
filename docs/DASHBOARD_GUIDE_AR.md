@@ -514,3 +514,12 @@ docker compose up -d --build
 <https://sdr.dashboardtalentera.tech>
 
 ولا يجب رفع أو مشاركة ملف `.env` أو HubSpot Private App Token على GitHub.
+
+
+## RM workspace: CRM review and follow-up
+
+- RM workspace includes SDR-involved meetings where the RM is an explicit participant **or** the verified contact/direct opportunity follow-up owner. Ownership-only entries say `attendance unverified`; they do not establish attendance or booking credit.
+- Private tracker rows offer exact meeting links or company + same Riyadh date candidates. Multiple CRM records remain separate. Candidates do not establish tracker identity. Unmatched rows expose a protected, bounded company search (first 20 results, explicit total).
+- Contact and deal validation cards show filled/missing review fields. Contact review edits are limited to the associated contact owned by the selected RM: Lead Status, Unqualified sub-reason, RM Meeting Outcome, RM Validation Reason, RM Feedback, RM Next Follow-up Date. Values use live CRM definitions; stale versions are rejected and saves are read back.
+- Explicit Unqualified or No need on all associated meeting contacts removes follow-up SLA and inactivity queue inclusion. One excluded contact does not exempt other active contacts. Closed opportunities are also exempt. Validation omissions remain visible. Bad timing, an unset interest checkbox, or free-text notes do not automatically disqualify anyone. Existing tasks are not deleted/completed.
+- Task creation offers no reminder, at due time, 1 hour before, or 1 day before. Reminder times must be future and no later than due. HubSpot owns delivery; the dashboard verifies the stored timestamp, not email receipt. Existing duplicate prevention and uncertain-create journal remain active.

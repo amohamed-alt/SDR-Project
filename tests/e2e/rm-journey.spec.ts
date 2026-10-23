@@ -39,12 +39,14 @@ test('follow-up task confirms owner, time and contact and displays success only 
    const body = route.request().postDataJSON();
    expect(body).toMatchObject({meetingId:'1',rmId:'31558980',contactId:'contact',dealId:'',type:'TODO',title:'Follow up with HR'});
    expect(body.dueAt).toBe('2027-10-25T06:30:00.000Z');
+   expect(body.reminderAt).toBe('2027-10-25T05:30:00.000Z');
    await route.fulfill({json:{confirmed:true,taskId:'9001',reused:false,task:{id:'9001',properties:{hs_task_subject:body.title,hs_timestamp:body.dueAt,hubspot_owner_id:body.rmId,hs_task_type:body.type,hs_task_status:'NOT_STARTED'}}}});
  });
  await page.goto('/rm/zein');
  await page.getByRole('button',{name:'Open journey'}).click();
  await page.getByRole('tab',{name:'Update HubSpot'}).click();
  await page.getByLabel('Task title',{exact:true}).fill('Follow up with HR');
+ await page.getByLabel('HubSpot reminder',{exact:true}).selectOption('60');
  await page.getByLabel('Task due time (Riyadh)',{exact:true}).fill('2027-10-25T09:30');
  page.on('dialog', async dialog => { expect(dialog.message()).toContain('Zein Fares'); expect(dialog.message()).toContain('Example Director'); await dialog.accept(); });
  await page.getByRole('button',{name:'Create & verify task'}).click();
@@ -97,3 +99,25 @@ test('task creation API rejects cross-origin writes and demo-mode writes', async
  await page.setViewportSize({width:1440,height:1000});
  await page.screenshot({path:'/tmp/rm-desktop-review.png',fullPage:true});
  });
+
+
+test('contact validation saves only changed fields and immediately exempts an unqualified contact',async({page})=>{
+ await setup(page);
+ const data={...structuredClone(fixture),contactFields:[{name:'rm_meeting_outcome',label:'RM Meeting Outcome',type:'enumeration',options:[{value:'Unqualified',label:'Unqualified'}]},{name:'rm_validation_reason',label:'RM Validation Reason',type:'enumeration',options:[{value:'No need',label:'No need'}]},{name:'rm_feedback',label:'RM Feedback',type:'string'}]};
+ Object.assign(data.rows[0].contacts[0],{ownerId:'31558980',version:'contact-v1',properties:{}});
+ await page.route('**/api/rm-journey?**',r=>r.fulfill({json:data}));
+ let writes=0;
+ await page.route('**/api/rm-journey/contact',async r=>{writes++;const b=r.request().postDataJSON();expect(b).toMatchObject({id:'contact',rmId:'31558980',version:'contact-v1',properties:{rm_meeting_outcome:'Unqualified',rm_validation_reason:'No need',rm_feedback:'No recruitment need'}});await r.fulfill({json:{confirmed:true,record:{id:'contact',properties:{...b.properties,lastmodifieddate:'contact-v2'}}}});});
+ await page.goto('/rm/zein');await page.getByRole('button',{name:'Open journey',exact:true}).click();
+ const dialog=page.getByRole('dialog');await expect(dialog.getByLabel('CRM validation')).toContainText('0 / 3 filled');
+ await dialog.getByRole('button',{name:'Review contact fields'}).click();
+ await dialog.getByLabel('RM Meeting Outcome',{exact:true}).selectOption('Unqualified');await dialog.getByLabel('RM Validation Reason',{exact:true}).selectOption('No need');await dialog.getByLabel('RM Feedback',{exact:true}).fill('No recruitment need');
+ page.on('dialog',d=>d.accept());await dialog.getByRole('button',{name:'Save & verify contact'}).click();await expect(dialog.getByRole('status')).toContainText('Contact saved and verified');
+ await dialog.getByRole('tab',{name:'Overview',exact:true}).click();await expect(dialog.getByLabel('CRM validation')).toContainText('3 / 3 filled');await expect(dialog.getByText('No follow-up required · Unqualified · No need',{exact:true})).toHaveCount(2);expect(writes).toBe(1);
+});
+
+test('contact update endpoint rejects cross-origin and demo writes',async({page})=>{
+ await setup(page);const auth={'x-acquisition-owner-token':'playwright-tools-only-password'};
+ expect((await page.request.post('/api/rm-journey/contact',{headers:{...auth,origin:'https://untrusted.invalid'},data:{}})).status()).toBe(403);
+ expect((await page.request.post('/api/rm-journey/contact',{headers:auth,data:{}})).status()).toBe(403);
+});

@@ -28,3 +28,10 @@ export function plainText(value: unknown): string {
 export function afterMeeting(at:string, end:string, now:string) {
  const t=Date.parse(at);return Number.isFinite(t)&&t>Date.parse(end)+60000&&t<=Date.parse(now);
 }
+
+// CRM ownership establishes responsibility, never attendance or booking credit.
+export function withResponsibleOwners(rms: Array<(typeof RM_PROFILES)[number] & {roles:string[]}>, ids:string[], source:string) {
+ const result=rms.map(r=>({...r,roles:[...r.roles]}));
+ for(const profile of RM_PROFILES) if(ids.includes(profile.id)&&!result.some(r=>r.id===profile.id)) result.push({...profile,roles:[source+' · attendance unverified']});
+ return result;
+}
