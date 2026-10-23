@@ -4,6 +4,7 @@ const fixture={rows:[{responsibleRmIds:['31558980'],responsibleRmNames:['Zein Fa
 async function setup(page:import('@playwright/test').Page){
  await page.addInitScript(()=>{localStorage.setItem('sdr_v2_visitor_id','visitor_rm_journey_ci');localStorage.setItem('sdr_v2_visitor_name','RM Journey CI');sessionStorage.setItem('sdr_v2_session_id','session_rm_journey_ci');});
  await page.request.post('/api/sdr-admin',{data:{password:'playwright-tools-only-password'}});
+ await page.route('**/api/rm-journey/trackers?**',r=>r.fulfill({json:{sources:[]}}));
  await page.route('**/api/rm-journey?**',r=>r.fulfill({json:fixture}));
  await page.route('**/api/rm-journey/detail?**',r=>r.fulfill({json:{events:[{id:'call1',type:'Call',title:'Follow-up attempt',body:'Customer asked for pricing',at:'2026-10-21T08:00:00Z',ownerId:'31558980',owner:'Zein',status:'COMPLETED',followup:true,scope:'Contact-linked'}],warnings:[],coverage:'Contact-linked events may relate to another opportunity.',generatedAt:'2026-10-23T10:00:00Z'}}));
 }
@@ -81,3 +82,18 @@ test('task creation API rejects cross-origin writes and demo-mode writes', async
  expect(demo.status()).toBe(403);
  expect((await demo.json()).error).toContain('demo mode');
 });
+
+ test('Fadi tracker meetings remain visible without CRM participation and never invent SLA',async({page})=>{
+ await setup(page);
+ await page.route('**/api/rm-journey/trackers?**',r=>r.fulfill({json:{sources:[{owner:'Marita',ownerId:'31644369',status:'ready',syncedAt:'2026-10-23T10:00:00Z',url:'https://docs.google.com/spreadsheets/d/example/edit',warnings:[],rows:[{id:'sheet-1',date:'2026-10-20',company:'Tracker-only Company',salesRep:'Fadi',product:'Talentera',status:'Completed',motion:'Inbound',sheetUrl:'https://docs.google.com/spreadsheets/d/example/edit#range=A2',hubspotUrl:'',rmId:'76369998',meetingId:'',sdrId:'31644369',sdr:'Marita'}]}]}}));
+ await page.goto('/rm/fadi');
+ await expect(page.getByText('Tracker-only Company',{exact:true})).toBeVisible();
+ await expect(page.getByText('Follow-up and SLA unverified for this entry')).toBeVisible();
+ await expect(page.getByRole('img',{name:'Talentera',exact:true})).toBeVisible();
+ await page.setViewportSize({width:390,height:844});
+ await expect(page.getByText('Tracker-only Company',{exact:true})).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+ await page.screenshot({path:'/tmp/rm-mobile-review.png',fullPage:true});
+ await page.setViewportSize({width:1440,height:1000});
+ await page.screenshot({path:'/tmp/rm-desktop-review.png',fullPage:true});
+ });

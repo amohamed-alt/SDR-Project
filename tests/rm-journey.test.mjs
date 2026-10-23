@@ -50,3 +50,14 @@ test('a historic completed task does not assign an attendee an ongoing follow-up
  const row={...base,responsibleRmIds:[],tasks:[{id:'old',ownerId:'75863674',due:'2026-09-01T08:00:00Z',status:'COMPLETED',dealIds:[]}]};
  assert.equal(journeyStatus(row,'75863674','2026-10-25T11:00:00Z').responsible,false);
 });
+
+test('latest RM outreach determines inactivity and tasks sort by nearest due date',()=>{
+ const row={...base,followups:[{ownerId:'31558980',at:'2026-10-25T08:00:00Z'},{ownerId:'31558980',at:'2026-10-26T08:00:00Z'}],tasks:[{id:'late',ownerId:'31558980',due:'2026-11-05T10:00:00Z',status:'NOT_STARTED',dealIds:[]},{id:'next',ownerId:'31558980',due:'2026-10-30T10:00:00Z',status:'NOT_STARTED',dealIds:[]}]};
+ const status=journeyStatus(row,'31558980','2026-10-29T10:00:00Z');
+ assert.equal(status.idleDays,3);assert.equal(status.lastFollowupAt,'2026-10-26T08:00:00Z');assert.equal(status.future[0].id,'next');
+});
+test('future meetings have no inactivity age and custom closed stages suppress SLA',()=>{
+ assert.equal(journeyStatus(base,'31558980','2026-10-24T11:00:00Z').idleDays,null);
+ const status=journeyStatus({...base,deals:[{id:'closed',direct:true,ownerId:'31558980',properties:{hs_is_closed:'true',dealstage:'custom-closed'}}]},'31558980','2026-10-29T11:00:00Z');
+ assert.equal(status.closed,true);assert.deepEqual(status.issues,[]);
+});
