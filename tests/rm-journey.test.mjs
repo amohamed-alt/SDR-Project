@@ -25,7 +25,7 @@ test('future scheduled activities cannot count as completed follow-up',()=>{
 });
 const base={responsibleRmIds:['31558980'],end:'2026-10-25T07:00:00Z',outcome:'COMPLETED',notes:'Discovery notes',followups:[{ownerId:'other',at:'2026-10-25T08:00:00Z'}],tasks:[{id:'task',ownerId:'other',due:'2026-10-26T10:00:00Z',status:'NOT_STARTED',dealIds:[]}],deals:[]};
 test('another RM task or outreach never clears this RM follow-up gap',()=>{
- const s=journeyStatus(base,'31558980','2026-10-25T11:00:00Z');assert.equal(s.followups.length,0);assert.equal(s.future.length,0);assert.ok(s.issues.includes('No upcoming RM task recorded'));
+ const s=journeyStatus(base,'31558980','2026-10-25T11:00:00Z');assert.equal(s.followups.length,0);assert.equal(s.future.length,0);assert.equal(s.slaBreached,false);assert.deepEqual(s.issues,[]);
 });
 test('ambiguous contact-linked opportunities are not automatically selected',()=>{
  const deals=['one','two'].map(id=>({id,ownerId:'31558980',direct:false,properties:{}}));assert.equal(journeyStatus({...base,deals},'31558980','2026-10-25T11:00:00Z').deal,undefined);
@@ -60,4 +60,26 @@ test('future meetings have no inactivity age and custom closed stages suppress S
  assert.equal(journeyStatus(base,'31558980','2026-10-24T11:00:00Z').idleDays,null);
  const status=journeyStatus({...base,deals:[{id:'closed',direct:true,ownerId:'31558980',properties:{hs_is_closed:'true',dealstage:'custom-closed'}}]},'31558980','2026-10-29T11:00:00Z');
  assert.equal(status.closed,true);assert.deepEqual(status.issues,[]);
+});
+
+test('21 calendar day SLA crosses at the exact due instant',()=>{
+ const before=journeyStatus(base,'31558980','2026-11-15T06:59:59Z');
+ const due=journeyStatus(base,'31558980','2026-11-15T07:00:00Z');
+ assert.equal(before.slaBreached,false);assert.equal(before.daysRemaining,1);
+ assert.equal(due.slaBreached,true);assert.equal(due.slaDueAt,'2026-11-15T07:00:00.000Z');
+});
+test('recent RM outreach resets SLA but an overdue task stays overdue',()=>{
+ const row={...base,followups:[{ownerId:'31558980',at:'2026-11-14T08:00:00Z'}],tasks:[{id:'late',ownerId:'31558980',due:'2026-11-13T08:00:00Z',status:'NOT_STARTED',dealIds:[]},{id:'done',ownerId:'31558980',due:'2026-11-12T08:00:00Z',status:'COMPLETED',dealIds:[]}]};
+ const status=journeyStatus(row,'31558980','2026-11-15T08:00:00Z');
+ assert.equal(status.slaBreached,false);assert.equal(status.daysRemaining,20);
+ assert.deepEqual(status.overdue.map(t=>t.id),['late']);assert.deepEqual(status.issues,['1 overdue RM task']);
+});
+test('missing notes are validation issues rather than an early SLA breach',()=>{
+ const status=journeyStatus({...base,notes:''},'31558980','2026-10-26T07:00:00Z');
+ assert.deepEqual(status.issues,[]);assert.ok(status.validationIssues.includes('Meeting notes missing'));
+});
+test('closed opportunities stay SLA exempt after 21 days without deleting overdue tasks',()=>{
+ const row={...base,deals:[{id:'closed',direct:true,ownerId:'31558980',properties:{hs_is_closed:'true'}}],tasks:[{id:'late',ownerId:'31558980',due:'2026-10-26T07:00:00Z',status:'NOT_STARTED',dealIds:[]}]};
+ const status=journeyStatus(row,'31558980','2026-12-01T07:00:00Z');
+ assert.equal(status.slaBreached,false);assert.equal(status.followupRequired,false);assert.equal(status.overdue.length,1);assert.deepEqual(status.issues,[]);
 });

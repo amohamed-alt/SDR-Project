@@ -28,3 +28,10 @@ Give each account an explicit Update HubSpot action that opens the existing veri
 - Filtering on the last page returns the first matching page.
 - Direct edit opens the verified HubSpot editor; it never writes automatically.
 - Existing keyboard, save confirmation, disqualification and ownership tests remain green.
+
+
+## Daily review: 21-day follow-up SLA
+
+The workspace now separates account follow-up from task deadlines and data completeness. Follow-up is due 21 elapsed calendar days after the latest recorded RM outreach, falling back to meeting end. Only responsible RMs on active accounts are assessed; closed and disqualified accounts stay exempt. Existing overdue tasks remain visible even when follow-up is exempt; no CRM records are auto-closed.
+
+The account table exposes SLA due date, overdue task deadline, opportunity and contact/deal completeness independently. A light navigation rail, flat metrics, neutral surfaces and restrained status colors replace the stacked decorative panels. The reporting start remains 13 July 2026. Saves continue to target and verify the original HubSpot records.
