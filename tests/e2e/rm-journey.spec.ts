@@ -26,7 +26,7 @@ test('an RM invited as an attendee is visible without being blamed for another R
  await page.goto('/rm/bassam');
  await expect(page.getByText('Example Logistics',{exact:true})).toBeVisible();
  await expect(page.getByText('Participant · no follow-up SLA assigned',{exact:true})).toBeVisible();
- await expect(page.getByRole('article').filter({hasText:'Assigned SLA exceptions'})).toContainText('0');
+ await expect(page.getByRole('article').filter({hasText:'21-day SLA overdue'})).toContainText('0');
  await page.getByRole('button',{name:'Open journey'}).click();
  await expect(page.getByRole('dialog').getByText('attendance alone does not assign follow-up SLA.',{exact:false})).toBeVisible();
 });
@@ -161,4 +161,22 @@ test('long RM queues paginate without changing totals and reset pages after filt
  await row.getByRole('button',{name:'Update HubSpot',exact:true}).click();
  await expect(page.getByRole('tab',{name:'Update HubSpot',exact:true})).toHaveAttribute('aria-selected','true');
  await expect(page.getByRole('region',{name:'Where changes are saved'})).toBeVisible();
+});
+
+test('overdue tasks and 21-day account SLA have independent queues',async({page})=>{
+ await setup(page);
+ const recent={...fixture.rows[0],tasks:[{id:'late',title:'Call HR',ownerId:'31558980',due:'2026-10-22T09:00:00Z',status:'NOT_STARTED',dealIds:[]}]};
+ const stale={...fixture.rows[0],id:'stale',prospectKey:'company:stale',company:{...fixture.rows[0].company,name:'Stale Account'},start:'2026-09-01T08:00:00Z',end:'2026-09-01T09:00:00Z'};
+ await page.route('**/api/rm-journey?**',r=>r.fulfill({json:{...fixture,rows:[recent,stale]}}));
+ await page.goto('/rm/zein');
+ await expect(page.getByRole('article').filter({hasText:'21-day SLA overdue'})).toContainText('1');
+ await expect(page.getByRole('article').filter({hasText:'Overdue RM tasks'})).toContainText('1');
+ await page.getByRole('button',{name:'Overdue tasks',exact:true}).click();
+ await expect(page.getByText('Example Logistics',{exact:true})).toBeVisible();
+ await expect(page.getByText('Stale Account',{exact:true})).toHaveCount(0);
+ await expect(page.getByText('1 overdue task',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'21-day SLA overdue',exact:true}).click();
+ await expect(page.getByText('Stale Account',{exact:true})).toBeVisible();
+ await expect(page.getByText('Example Logistics',{exact:true})).toHaveCount(0);
+ await expect(page.getByText('SLA overdue',{exact:true}).last()).toBeVisible();
 });
