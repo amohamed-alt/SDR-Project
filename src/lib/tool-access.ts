@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { sdrAdminAuthorized } from "./sdr-admin-auth.ts";
 
-const API_PREFIXES = ["/api/meeting-followup", "/api/usage", "/api/acquisition", "/api/prospecting", "/api/lead-inventory", "/api/account-intelligence", "/api/best-accounts", "/api/target-account-pool", "/api/company-enrichment", "/api/maqsam", "/api/marita-priority", "/api/daniel-evalufy", "/api/daniel-transfer-plan", "/api/system-health", "/api/hubspot", "/api/ai", "/api/dashboard/sales-handoff"];
+const API_PREFIXES = ["/api/rm-journey", "/api/meeting-followup", "/api/usage", "/api/acquisition", "/api/prospecting", "/api/lead-inventory", "/api/account-intelligence", "/api/best-accounts", "/api/target-account-pool", "/api/company-enrichment", "/api/maqsam", "/api/marita-priority", "/api/daniel-evalufy", "/api/daniel-transfer-plan", "/api/system-health", "/api/hubspot", "/api/ai", "/api/dashboard/sales-handoff"];
 const PAGES = new Set(["/meeting-followup", "/best-accounts", "/ai-sdr-agent", "/salesnav-prospecting", "/salesnav-full-run", "/signalhire-companion", "/signalhire-queue", "/lead-import", "/prospecting", "/system-health", "/marita-calls", "/account-intelligence", "/net-new-accounts", "/lead-inventory", "/company-enrichment"]);
 export function normalizedToolPath(path: string) {
   try { return decodeURIComponent(path).replace(/\/$/, "") || "/"; } catch { return path; }
@@ -17,7 +17,7 @@ export function isProtectedToolApi(path: string, method: string) {
 export function isProtectedToolPage(path: string, params: URLSearchParams) {
   path = normalizedToolPath(path);
   if (path === "/marita-calls" || (path === "/" && params.get("view") === "maqsam" && params.get("studio") !== "tools")) return false;
-  return PAGES.has(path) || (path === "/" && (Boolean(params.get("view") && params.get("view") !== "core") || params.get("studio") === "tools"));
+  return path === "/rm" || path.startsWith("/rm/") || PAGES.has(path) || (path === "/" && (Boolean(params.get("view") && params.get("view") !== "core") || params.get("studio") === "tools"));
 }
 function equalSecret(value: string | null, expected: string | undefined) {
   if (!value || !expected?.trim()) return false;
