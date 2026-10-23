@@ -6,15 +6,17 @@ import { participation, RM_PROFILES, plainText, afterMeeting } from './rm-journe
 export const JOURNEY_MEETING_FIELDS=['hs_meeting_title','hs_meeting_start_time','hs_meeting_end_time','hs_meeting_outcome','hs_created_by_user_id','hs_attendee_owner_ids','hubspot_owner_id','hs_internal_meeting_notes','hs_meeting_body','hs_meeting_summary','hs_has_meeting_transcript','hs_lastmodifieddate'];
 export const JOURNEY_TASK_FIELDS=['hs_task_subject','hs_task_status','hs_timestamp','hs_task_completion_date','hubspot_owner_id'];
 const snapshotCache=new Map<string,{expires:number;value:Awaited<ReturnType<typeof buildRmJourney>>}>();
+let snapshotGeneration=0;
 const inflight=new Map<string,Promise<Awaited<ReturnType<typeof buildRmJourney>>>>();
 export async function loadRmJourney(from:string,to:string,refresh=false){
  const key=from+':'+to; const cached=snapshotCache.get(key);
  if(!refresh&&cached&&cached.expires>Date.now())return cached.value;
  const running=inflight.get(key);if(running)return running;
- const promise=buildRmJourney(from,to).then(value=>{if(snapshotCache.size>=8)snapshotCache.delete(snapshotCache.keys().next().value!);snapshotCache.set(key,{expires:Date.now()+120000,value});return value;}).finally(()=>inflight.delete(key));
+ const generation=snapshotGeneration;
+ const promise=buildRmJourney(from,to).then(value=>{if(generation===snapshotGeneration){if(snapshotCache.size>=8)snapshotCache.delete(snapshotCache.keys().next().value!);snapshotCache.set(key,{expires:Date.now()+120000,value});}return value;}).finally(()=>{if(inflight.get(key)===promise)inflight.delete(key);});
  inflight.set(key,promise);return promise;
 }
-export function invalidateRmJourney(){snapshotCache.clear();}
+export function invalidateRmJourney(){snapshotGeneration+=1;snapshotCache.clear();inflight.clear();}
 async function buildRmJourney(from:string,to:string){
  if(process.env.DEMO_MODE==='true')throw new Error('Live HubSpot required');
  const [meetings,owners,stages,fields,outcomes]=await Promise.all([
@@ -23,7 +25,7 @@ async function buildRmJourney(from:string,to:string){
  const ids=scoped.map(r=>r.m.id);
  const [meetingContacts,meetingCompanies,directDeals]=await Promise.all([readAssociations('meetings','contacts',ids),readAssociations('meetings','companies',ids),readAssociations('meetings','deals',ids)]);
  const contactIds=[...new Set([...meetingContacts.values()].flat())];
- const [contacts,contactCompanies,contactDeals]=await Promise.all([batchRead('contacts',contactIds,['firstname','lastname','email','phone','mobilephone','jobtitle','company','createdate','hs_analytics_source']),readAssociations('contacts','companies',contactIds),readAssociations('contacts','deals',contactIds)]);
+ const [contacts,contactCompanies,contactDeals]=await Promise.all([batchRead('contacts',contactIds,['firstname','lastname','email','phone','mobilephone','jobtitle','company','hubspot_owner_id','createdate','hs_analytics_source']),readAssociations('contacts','companies',contactIds),readAssociations('contacts','deals',contactIds)]);
  const internalEmails=new Set(owners.map(o=>o.email?.toLowerCase()).filter(Boolean));
  const externalContacts=contacts.filter(c=>!internalEmails.has(String(c.properties.email||'').toLowerCase()));
  const contactMap=new Map(externalContacts.map(c=>[c.id,c]));
@@ -46,9 +48,18 @@ async function buildRmJourney(from:string,to:string){
   const candidates=[...new Set([...direct,...indirect])].map(id=>dealMap.get(id)!).filter(Boolean);
   const taskIds=[...new Set([...cids.flatMap(id=>contactTasks.get(id)||[]),...candidates.flatMap(d=>dealTasks.get(d.id)||[])])];
   const linkedTasks=taskIds.map(id=>taskMap.get(id)!).filter(Boolean).map(t=>({id:t.id,title:String(t.properties.hs_task_subject||'Follow-up task'),status:String(t.properties.hs_task_status||''),due:String(t.properties.hs_timestamp||''),completedAt:String(t.properties.hs_task_completion_date||''),ownerId:String(t.properties.hubspot_owner_id||''),owner:name(String(t.properties.hubspot_owner_id||'')),dealIds:candidates.filter(d=>(dealTasks.get(d.id)||[]).includes(t.id)).map(d=>d.id)}));
+  const rmIds=new Set<string>(RM_PROFILES.map(p=>p.id));
+  const unique=(ids:string[])=>[...new Set(ids.filter(id=>rmIds.has(id)))];
+  const directOwners=unique(candidates.filter(d=>direct.includes(d.id)).map(d=>String(d.properties.hubspot_owner_id||'')));
+  const assignedOwners=unique([people.assignedId]);
+  const contactOwners=unique(cs.map(c=>String(c.properties.hubspot_owner_id||'')));
+  const indirectOwners=unique(candidates.map(d=>String(d.properties.hubspot_owner_id||'')));
+  const responsibleRmIds=directOwners.length?directOwners:assignedOwners.length?assignedOwners:contactOwners.length?contactOwners:indirectOwners.length===1?indirectOwners:[];
+  const responsibilitySource=directOwners.length?'Direct opportunity owner':assignedOwners.length?'Meeting assigned owner':contactOwners.length?'Contact owner':indirectOwners.length===1?'Contact-linked opportunity owner':'No follow-up owner confirmed';
+  const responsibleRmNames=responsibleRmIds.map(id=>name(id));
   const recordUrl=cs[0]?hubspotRecordUrl('contact',cs[0].id):company?hubspotRecordUrl('company',company.id):'';
   const followups=outreach.events.filter(e=>afterMeeting(e.at,String(m.properties.hs_meeting_end_time||m.properties.hs_meeting_start_time),now)&&(e.contactIds.some(id=>cids.includes(id))||e.dealIds.some(id=>candidates.some(d=>d.id===id))));
-  return {followups,id:m.id,title:String(m.properties.hs_meeting_title||'Untitled meeting'),start:String(m.properties.hs_meeting_start_time||''),end:String(m.properties.hs_meeting_end_time||m.properties.hs_meeting_start_time||''),outcome:String(m.properties.hs_meeting_outcome||''),version:String(m.properties.hs_lastmodifieddate||''),people,assignedName:name(people.assignedId),creatorName:name(people.creatorId),company:company?{id:company.id,name:String(company.properties.name||''),domain:String(company.properties.domain||''),url:hubspotRecordUrl('company',company.id)}:null,contacts:cs.map(c=>({id:c.id,name:[c.properties.firstname,c.properties.lastname].filter(Boolean).join(' ')||String(c.properties.email||'Contact'),email:String(c.properties.email||''),title:String(c.properties.jobtitle||''),createdAt:String(c.properties.createdate||''),source:String(c.properties.hs_analytics_source||''),url:hubspotRecordUrl('contact',c.id)})),deals:candidates.map(d=>({id:d.id,name:String(d.properties.dealname||'Opportunity'),ownerId:String(d.properties.hubspot_owner_id||''),owner:name(String(d.properties.hubspot_owner_id||'')),stage:stages.get(String(d.properties.dealstage))||String(d.properties.dealstage||''),properties:d.properties,direct:direct.includes(d.id),url:hubspotRecordUrl('deal',d.id)})),tasks:linkedTasks,notes:plainText(m.properties.hs_internal_meeting_notes),summary:plainText(m.properties.hs_meeting_summary),description:plainText(m.properties.hs_meeting_body),hasTranscript:m.properties.hs_has_meeting_transcript==='true',recordUrl,prospectKey:companyId?'company:'+companyId:cids.length?'contact:'+cids.slice().sort().join(','):'meeting:'+m.id};
+  return {responsibleRmIds,responsibleRmNames,responsibilitySource,followups,id:m.id,title:String(m.properties.hs_meeting_title||'Untitled meeting'),start:String(m.properties.hs_meeting_start_time||''),end:String(m.properties.hs_meeting_end_time||m.properties.hs_meeting_start_time||''),outcome:String(m.properties.hs_meeting_outcome||''),version:String(m.properties.hs_lastmodifieddate||''),people,assignedName:name(people.assignedId),creatorName:name(people.creatorId),company:company?{id:company.id,name:String(company.properties.name||''),domain:String(company.properties.domain||''),url:hubspotRecordUrl('company',company.id)}:null,contacts:cs.map(c=>({id:c.id,name:[c.properties.firstname,c.properties.lastname].filter(Boolean).join(' ')||String(c.properties.email||'Contact'),email:String(c.properties.email||''),title:String(c.properties.jobtitle||''),createdAt:String(c.properties.createdate||''),source:String(c.properties.hs_analytics_source||''),url:hubspotRecordUrl('contact',c.id)})),deals:candidates.map(d=>({id:d.id,name:String(d.properties.dealname||'Opportunity'),ownerId:String(d.properties.hubspot_owner_id||''),owner:name(String(d.properties.hubspot_owner_id||'')),stage:stages.get(String(d.properties.dealstage))||String(d.properties.dealstage||''),properties:d.properties,direct:direct.includes(d.id),url:hubspotRecordUrl('deal',d.id)})),tasks:linkedTasks,notes:plainText(m.properties.hs_internal_meeting_notes),summary:plainText(m.properties.hs_meeting_summary),description:plainText(m.properties.hs_meeting_body),hasTranscript:m.properties.hs_has_meeting_transcript==='true',recordUrl,prospectKey:companyId?'company:'+companyId:cids.length?'contact:'+cids.slice().sort().join(','):'meeting:'+m.id};
  }).sort((a,b)=>b.start.localeCompare(a.start));
  return {warnings:outreach.warnings,rows,profiles:RM_PROFILES,fields,outcomes:outcomes[0]?.options||[],updatedAt:new Date().toISOString(),from,to,counts:{scannedMeetings:meetings.length,matchedMeetings:rows.length},coverage:'Meeting start date cohort. RM must be creator, assigned owner or listed attendee; SDR must have explicit meeting involvement. Attendance is not booking credit. Contact-linked opportunities are labeled separately. Counts across RMs overlap for shared meetings.'};
 }

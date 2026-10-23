@@ -23,7 +23,7 @@ test('attendance without SDR evidence does not attribute the meeting to an SDR',
 test('future scheduled activities cannot count as completed follow-up',()=>{
  assert.equal(afterMeeting('2026-10-26T08:00:00Z','2026-10-25T07:00:00Z','2026-10-25T10:00:00Z'),false);
 });
-const base={end:'2026-10-25T07:00:00Z',outcome:'COMPLETED',notes:'Discovery notes',followups:[{ownerId:'other',at:'2026-10-25T08:00:00Z'}],tasks:[{id:'task',ownerId:'other',due:'2026-10-26T10:00:00Z',status:'NOT_STARTED',dealIds:[]}],deals:[]};
+const base={responsibleRmIds:['31558980'],end:'2026-10-25T07:00:00Z',outcome:'COMPLETED',notes:'Discovery notes',followups:[{ownerId:'other',at:'2026-10-25T08:00:00Z'}],tasks:[{id:'task',ownerId:'other',due:'2026-10-26T10:00:00Z',status:'NOT_STARTED',dealIds:[]}],deals:[]};
 test('another RM task or outreach never clears this RM follow-up gap',()=>{
  const s=journeyStatus(base,'31558980','2026-10-25T11:00:00Z');assert.equal(s.followups.length,0);assert.equal(s.future.length,0);assert.ok(s.issues.includes('No upcoming RM task recorded'));
 });
@@ -34,4 +34,19 @@ test('ambiguous contact-linked opportunities are not automatically selected',()=
 test('a completed follow-up meeting with this RM as listed attendee is counted',()=>{
  const row={...base,followups:[{ownerId:'31644369',participantIds:['31558980'],at:'2026-10-25T08:00:00Z'}]};
  assert.equal(journeyStatus(row,'31558980','2026-10-25T11:00:00Z').followups.length,1);
+});
+
+test('a meeting participant with no assigned ownership or RM task gets no personal SLA breach',()=>{
+ const row={...base,responsibleRmIds:[],tasks:[],followups:[]};
+ const status=journeyStatus(row,'75863674','2026-10-25T11:00:00Z');
+ assert.equal(status.responsible,false);assert.deepEqual(status.issues,[]);
+});
+test('an explicitly assigned RM task establishes task responsibility even without account ownership',()=>{
+ const row={...base,responsibleRmIds:[],tasks:[{id:'owned',ownerId:'75863674',due:'2026-10-25T08:00:00Z',status:'NOT_STARTED',dealIds:[]}]};
+ const status=journeyStatus(row,'75863674','2026-10-25T11:00:00Z');
+ assert.equal(status.responsible,true);assert.ok(status.issues.includes('1 overdue RM task'));
+});
+test('a historic completed task does not assign an attendee an ongoing follow-up SLA',()=>{
+ const row={...base,responsibleRmIds:[],tasks:[{id:'old',ownerId:'75863674',due:'2026-09-01T08:00:00Z',status:'COMPLETED',dealIds:[]}]};
+ assert.equal(journeyStatus(row,'75863674','2026-10-25T11:00:00Z').responsible,false);
 });
