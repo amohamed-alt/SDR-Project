@@ -17,9 +17,10 @@ test('task create resolves association direction and never retries an ambiguous 
     creates++;
     const payload = JSON.parse(init.body);
     assert.equal(payload.properties.hs_task_status, 'NOT_STARTED');
+    assert.equal(payload.properties.hs_task_reminders,String(Date.parse('2026-11-01T08:00:00Z')));
     assert.deepEqual(payload.associations.map(a => a.types[0].associationTypeId), [204, 216]);
     return new Response('uncertain server error', { status: 503 });
   };
-  await assert.rejects(createFollowupTaskOnce({ contactId: '10', dealId: '20', ownerId: '30', title: 'Follow up', dueAt: '2026-11-01T09:00:00Z', type: 'CALL' }), /HubSpot request failed/);
+  await assert.rejects(createFollowupTaskOnce({ contactId: '10', dealId: '20', ownerId: '30', title: 'Follow up', dueAt: '2026-11-01T09:00:00Z', type: 'CALL',reminderAt:'2026-11-01T08:00:00Z' }), /HubSpot request failed/);
   assert.equal(creates, 1);
 });
