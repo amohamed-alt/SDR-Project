@@ -28,6 +28,14 @@ Cache generations prevent an in-flight pre-save read from repopulating a stale p
 
 Only `hs_has_meeting_transcript` establishes reported HubSpot availability. `hs_meeting_summary` is displayed as a summary, never a transcript. The drawer opens the associated CRM record so authorized users can select the meeting and review its private transcript/recording in HubSpot. Full transcript text is not fetched through an undocumented endpoint or synthesized when unavailable.
 
+## Create a follow-up task
+
+The Update HubSpot tab can explicitly create one follow-up task per source meeting and RM. The user confirms the RM, selected external contact, task type, title and future due time in Riyadh (UTC+3). A uniquely selected acquisition opportunity is linked alongside the contact when available. Unconfirmed responsibility, ambiguous opportunity linkage, a closed opportunity or an existing open RM task blocks creation. The server checks current CRM evidence and task enums; call tasks require a phone and email tasks require an email.
+
+Task creates use the existing tools authorization, not individual RM identities. They do not send an email, call a customer, change opportunity properties or create a calendar invitation. The UI declares success only after HubSpot read-back confirms the task fields and contact/opportunity associations.
+
+The existing persistent `/app/data` volume holds the task journal and per-RM create lock. A saved task ID is reused for verification; a changed payload never silently updates it. A timed-out or interrupted create stays reserved, and the non-idempotent task POST is never retried automatically. Review the source meeting's CRM timeline and reconcile the journal before enabling another create after an uncertain write. An interrupted lock also requires reconciliation, not automatic expiry. Completed tasks are managed in HubSpot; the dashboard does not create a recurring task chain from the same meeting.
+
 ## Not changed
 
-No CRM properties, customer records, tasks, meetings or email sends are created by loading the dashboard. Existing mutation confirmations and CRM read-back remain. Scheduled email summaries/escalation, individual RM identity and task creation are separate rollout work.
+No CRM properties, customer records, tasks, meetings or email sends are created by loading the dashboard. Existing mutation confirmations and CRM read-back remain. Scheduled email summaries/escalation and individual RM identity remain separate rollout work. Live customer task creation must be verified on an explicitly selected record; isolated automated tests never write to the production CRM.
