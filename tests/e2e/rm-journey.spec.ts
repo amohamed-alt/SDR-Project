@@ -139,3 +139,26 @@ test('RM reporting starts July 13 and ends on the current Riyadh day',async({pag
  await expect(page.getByRole('region',{name:'Where changes are saved'})).toContainText('Saved directly to HubSpot');
  await expect(page.getByRole('region',{name:'Where changes are saved'}).getByRole('link',{name:'Contact: Example Director'})).toHaveAttribute('href','https://example.invalid');
 });
+
+test('long RM queues paginate without changing totals and reset pages after filtering',async({page})=>{
+ await setup(page);
+ const many=structuredClone(fixture);
+ many.rows=Array.from({length:21},(_,i)=>({...structuredClone(fixture.rows[0]),id:String(i+1),prospectKey:`company:${i}`,company:{...fixture.rows[0].company,id:String(i),name:`Review account ${i+1}`}}));
+ await page.route('**/api/rm-journey?**',r=>r.fulfill({json:many}));
+ await page.goto('/rm/zein');
+ await expect(page.getByRole('button',{name:'Open journey',exact:true})).toHaveCount(20);
+ await expect(page.getByRole('article').filter({hasText:'Linked CRM prospects'})).toContainText('21');
+ const pages=page.getByRole('navigation',{name:'Account pages'});
+ await pages.getByRole('button',{name:'Next',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Open journey',exact:true})).toHaveCount(1);
+ await expect(page.getByText('Review account 21',{exact:true})).toBeVisible();
+ await expect(pages.getByRole('button',{name:'Next',exact:true})).toBeDisabled();
+ await page.getByRole('textbox',{name:'Search prospects'}).fill('Review account 1');
+ await expect(pages).toHaveCount(0);
+ await expect(page.getByText('Review account 1',{exact:true})).toBeVisible();
+ const row=page.getByRole('row').filter({has:page.getByText('Review account 1',{exact:true})});
+ await expect(row.getByText('No upcoming RM task recorded',{exact:true})).toHaveCount(1);
+ await row.getByRole('button',{name:'Update HubSpot',exact:true}).click();
+ await expect(page.getByRole('tab',{name:'Update HubSpot',exact:true})).toHaveAttribute('aria-selected','true');
+ await expect(page.getByRole('region',{name:'Where changes are saved'})).toBeVisible();
+});
