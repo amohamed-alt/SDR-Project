@@ -59,6 +59,34 @@ jobs:
           echo 'Paid provider reveals: disabled (0 Apollo / SignalHire contact credits).'
           echo 'This workflow never sends emails or WhatsApp.'
 
+      - name: Wait for compatible Meeting Creator API to be live
+        env:
+          BASE_URL: https://sdr.dashboardtalentera.tech
+          OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN || secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD }}
+          DASHBOARD_PASSWORD: ${{ secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # A workflow-file push can start before main CI triggers the Hostinger
+          # deploy. Never report zero candidates or push tasks on an old schema.
+          URL="$BASE_URL/api/meeting-creator/queue?source=wrong_number&offset=0&scan=20&limit=20"
+          for attempt in $(seq 1 36); do
+            code=$(curl -sS --connect-timeout 8 --max-time 55 \
+              -o /tmp/creator-readiness.json -w '%{http_code}' \
+              -u "talentera:$DASHBOARD_PASSWORD" \
+              -H "x-acquisition-owner-token: $OWNER_TOKEN" \
+              -H 'Cache-Control: no-cache' "$URL" || true)
+            if [ "$code" = 200 ] && jq -e \
+              '.previewOnly == true and (.summary | has("needsAlternate")) and (.pagination | has("sourceTotal"))' \
+              /tmp/creator-readiness.json >/dev/null 2>&1; then
+              echo "Meeting Creator compatible CRM queue is live. HTTP 200."
+              exit 0
+            fi
+            echo "Meeting Creator readiness attempt $attempt/36: HTTP ${code:-000} (not ready)"
+            sleep 10
+          done
+          echo "::error::Meeting Creator live queue not compatible. Refusing to plan or push tasks."
+          exit 1
+
       - name: Research and schedule verified existing HubSpot contacts
         uses: actions/github-script@v7
         with:
