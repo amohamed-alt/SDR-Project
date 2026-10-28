@@ -42,7 +42,7 @@ export function TaskAiMessage({ contactId, contactName }: { contactId: string; c
   }
   return <>
     <button ref={trigger} type="button" className={styles.trigger} onClick={() => void generate()} aria-label={`Generate AI message for ${contactName || "contact"}`}><Sparkles size={13} aria-hidden="true"/>AI Message</button>
-    {open && createPortal(<dialog ref={dialog} className={styles.dialog} aria-label="Saudi Arabic AI messages" onCancel={event => { event.preventDefault(); close(); }}>
+    {open && createPortal(<dialog ref={dialog} className={styles.dialog} role="dialog" aria-modal="true" aria-label="Saudi Arabic AI messages" onCancel={event => { event.preventDefault(); close(); }}>
       <div className={styles.header}><strong>AI Message · {contactName || "Contact"}</strong><button type="button" onClick={close} autoFocus>Close</button></div>
       <p>Saudi Arabic · Review before sending · No message is sent automatically</p>
       {loading && <p role="status">Preparing hook and LinkedIn messages…</p>}
