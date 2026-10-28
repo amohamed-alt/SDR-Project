@@ -523,3 +523,15 @@ docker compose up -d --build
 - Contact and deal validation cards show filled/missing review fields. Contact review edits are limited to the associated contact owned by the selected RM: Lead Status, Unqualified sub-reason, RM Meeting Outcome, RM Validation Reason, RM Feedback, RM Next Follow-up Date. Values use live CRM definitions; stale versions are rejected and saves are read back.
 - Explicit Unqualified or No need on all associated meeting contacts removes follow-up SLA and inactivity queue inclusion. One excluded contact does not exempt other active contacts. Closed opportunities are also exempt. Validation omissions remain visible. Bad timing, an unset interest checkbox, or free-text notes do not automatically disqualify anyone. Existing tasks are not deleted/completed.
 - Task creation offers no reminder, at due time, 1 hour before, or 1 day before. Reminder times must be future and no later than due. HubSpot owns delivery; the dashboard verifies the stored timestamp, not email receipt. Existing duplicate prevention and uncertain-create journal remain active.
+
+## AI Message في التاسكات
+
+زر **AI Message** يظهر في My Day Queue وقوائم التاسكات المرتبطة بـContact. يقرأ الاسم والشركة والمسمى و` sdr_owner ` من HubSpot، ويجهّز هوك وLinkedIn connection note ورسالة أولى بعد قبول الإضافة، بسعودي مهني. ماريتا لـTalentera ودانيال لـEvalufy؛ الـowner غير المعروف أو غياب الشركة/المسمى يظهر كتوقف واضح بدل تخمين البيانات. نطاقه prospects خارجيين؛ بريد Bayt/Talentera/Evalufy الداخلي محظور.
+
+النص قابل للتعديل والنسخ مع عداد حروف، وطلب الاتصال محدود بـ200 حرف. زر LinkedIn الحالي يظل لفتح البروفايل؛ إرسال الطلب أو الرسالة يتم يدويًا في LinkedIn. لا ينشئ الزر تاسكات أو يسجل تواصلًا لم يحدث.
+
+التشغيل يحتاج `COMMANDCODE_API` (أو `COMMANDCODE_API_KEY`) على السيرفر وحساب يدعم Provider API. النموذج الافتراضي `deepseek/deepseek-v4-flash` من مثال المورد الرسمي، ويمكن تغييره عبر `COMMANDCODE_MODEL` إلى نموذج يدعم `/chat/completions`. هذا اختيار تكامل أولي؛ جودة السعودي تحتاج تجربة فعلية بالمفتاح قبل اعتباره معتمدًا. لا يتم إرسال البريد أو الهاتف أو ملاحظات CRM للمورد. لا يتم الرجوع تلقائيًا إلى مورد مدفوع آخر عند الفشل.
+
+الكاش لمدة 24 ساعة ويتغير بتغير البيانات/الموديل/التعليمات، والضغطات المتزامنة لنفس البيانات تشترك في طلب واحد. حد الطلبات الافتراضي 200 يوميًا بتوقيت الرياض عبر `COMMANDCODE_DAILY_LIMIT`، محفوظ في `/app/data/commandcode-outreach.json` على volume التطبيق. الطلب الفاشل يُحسب كمحاولة. التصميم يستخدم عملية Node واحدة، ولا يقدم حجز ميزانية موزعًا لنسخ أفقية متعددة. صلاحية Unlock SDR tools مطلوبة؛ الـdemo يمنع استدعاء المورد. مراجعة طول الرسائل واللغة والبراند آلية؛ صحة أي ادعاء ونبرة النص تحتاج مراجعة الـSDR.
+
+مرجع التكامل: https://commandcode.ai/docs/provider

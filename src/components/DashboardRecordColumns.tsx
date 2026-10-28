@@ -1,5 +1,6 @@
 "use client";
 import { ExternalLink } from "lucide-react";
+import { TaskAiMessage } from "@/components/TaskAiMessage";
 import { LinkedInQuickAction } from "@/components/LinkedInQuickAction";
 import { WhatsAppQuickAction } from "@/components/WhatsAppQuickAction";
 import type { GtmColumn } from "@/components/GtmTable";
@@ -44,7 +45,7 @@ export const activityColumns: GtmColumn<ActivityRow>[] = [
   { id: "status", header: "Status", accessor: (row) => row.status, width: 120 },
   { id: "metricAt", header: "Activity date", accessor: (row) => row.metricAt, width: 150, render: (row) => dateTime(row.dueAt || row.occurredAt || row.metricAt) },
   { id: "dueBucket", header: "Due bucket", accessor: (row) => row.dueBucket, width: 120, render: (row) => row.type === "Task" ? row.dueBucket || "—" : "—" },
-  { id: "actions", header: "Actions", accessor: () => "", width: 240, sortable: false, render: (row) => <div className="cell-actions">{row.type === "Task" && row.relatedContactId && row.relatedContactHasPhone && <WhatsAppQuickAction contactId={row.relatedContactId}/>} {row.type === "Task" && <LinkedInQuickAction url={row.relatedContactLinkedinUrl} contactName={row.relatedContactName}/>} {externalLink(row.url)}</div> },
+  { id: "actions", header: "Actions", accessor: () => "", width: 340, sortable: false, render: (row) => <div className="cell-actions">{row.type === "Task" && row.relatedContactId && row.relatedContactHasPhone && <WhatsAppQuickAction contactId={row.relatedContactId}/>} {row.type === "Task" && row.relatedContactId && <TaskAiMessage contactId={row.relatedContactId} contactName={row.relatedContactName}/>} {row.type === "Task" && <LinkedInQuickAction url={row.relatedContactLinkedinUrl} contactName={row.relatedContactName}/>} {externalLink(row.url)}</div> },
 ];
 
 export const companyColumns: GtmColumn<CompanyRow>[] = [
