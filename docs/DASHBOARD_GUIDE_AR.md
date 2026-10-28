@@ -535,3 +535,5 @@ docker compose up -d --build
 الكاش لمدة 24 ساعة ويتغير بتغير البيانات/الموديل/التعليمات، والضغطات المتزامنة لنفس البيانات تشترك في طلب واحد. حد الطلبات الافتراضي 200 يوميًا بتوقيت الرياض عبر `COMMANDCODE_DAILY_LIMIT`، محفوظ في `/app/data/commandcode-outreach.json` على volume التطبيق. الطلب الفاشل يُحسب كمحاولة. التصميم يستخدم عملية Node واحدة، ولا يقدم حجز ميزانية موزعًا لنسخ أفقية متعددة. صلاحية Unlock SDR tools مطلوبة؛ الـdemo يمنع استدعاء المورد. مراجعة طول الرسائل واللغة والبراند آلية؛ صحة أي ادعاء ونبرة النص تحتاج مراجعة الـSDR.
 
 مرجع التكامل: https://commandcode.ai/docs/provider
+
+GitHub Secrets: اسم المفتاح `COMMANDCODE_API` (أو `COMMANDCODE_API_KEY`). مسار النشر الحالي يمرره إلى Hostinger ثم Compose ثم عملية التطبيق؛ لا يتم طباعته. يمكن تخصيص الموديل عبر Repository Variable باسم `COMMANDCODE_MODEL`.

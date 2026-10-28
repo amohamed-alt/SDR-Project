@@ -45,6 +45,11 @@ test("task actions open a saved LinkedIn profile and expose missing profiles wit
 });
 
 test('task AI copy supports review, counts, cached reopening and provider errors', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('sdr_v2_visitor_id', 'visitor_ai_message_ci');
+    localStorage.setItem('sdr_v2_visitor_name', 'AI message QA');
+    sessionStorage.setItem('sdr_v2_session_id', 'session_ai_message_ci');
+  });
   const task = { id:'ai-task', type:'Task', subject:'AI outreach task', status:'Not started', detail:'Outreach', assignedTo:'Marita', occurredAt:'2026-10-13T10:00:00Z',metricAt:'2026-10-13T10:00:00Z',dueAt:'2026-10-13T10:00:00Z',dueBucket:'Today',isOpen:true,isHighPriority:true,relatedContactId:'123',relatedContactName:'Ahmad',url:'https://app.hubspot.com/contacts/1/contact/123' };
   await page.route('**/api/dashboard/records**', route=>route.fulfill({json:{rows:[task],total:1,offset:0,limit:25,version:'qa'}}));
   let calls=0;
