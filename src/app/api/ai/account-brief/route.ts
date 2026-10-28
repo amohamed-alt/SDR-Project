@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getMaritaExtensiveAccountScope } from "@/lib/marita-account-scope";
-import { getOpenRouterStatus, openRouterCompletion } from "@/lib/openrouter-low-cost";
+import { getCommandCodeStatus, commandCodeCompletion } from "@/lib/commandcode-gateway";
 import { scoreTalenteraAccount } from "@/lib/talentera-intelligence";
 
 export const runtime = "nodejs";
@@ -61,7 +61,7 @@ function sameOrigin(request: NextRequest) {
 }
 
 export async function GET() {
-  const status = await getOpenRouterStatus();
+  const status = await getCommandCodeStatus();
   return NextResponse.json({
     ok: true,
     feature: "account-brief",
@@ -134,17 +134,17 @@ export async function POST(request: NextRequest) {
 
     const user = `Create a concise evidence-backed SDR brief from this account object:\n${JSON.stringify(evidence)}`;
     const fingerprint = JSON.stringify(evidence);
-    const completion = await openRouterCompletion({
+    const completion = await commandCodeCompletion({
       cacheKey: `marita-account-brief:v2:${company.companyId}:${fingerprint}`,
       system,
       user,
       mode: parsed.data.mode,
-      maxOutputTokens: parsed.data.mode === "deep" ? 360 : 220,
+      maxOutputTokens: parsed.data.mode === "deep" ? 1200 : 900,
       temperature: 0.1,
     });
 
     const brief = parseBrief(completion.content);
-    const status = await getOpenRouterStatus();
+    const status = await getCommandCodeStatus();
     return NextResponse.json({
       account: {
         companyId: account.companyId,

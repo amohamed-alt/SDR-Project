@@ -6,6 +6,7 @@ import {
   LoaderCircle, Mail, MapPin, Phone, Plus, Sparkles, Target, UserRound, Users, Video, X,
 } from "lucide-react";
 import type { Drilldown } from "@/components/DrilldownDrawer";
+import { TaskAiMessage } from "@/components/TaskAiMessage";
 import { LinkedInQuickAction } from "@/components/LinkedInQuickAction";
 import { WhatsAppQuickAction } from "@/components/WhatsAppQuickAction";
 import styles from "@/components/MaritaWorkspace.module.css";
@@ -638,7 +639,7 @@ function WorkspaceStat({ icon: Icon, label, value, helper, tone, onClick, helper
 }
 
 function TaskQueueItem({ row, timezone }: { row: ActivityRow; timezone: string }) {
-  return <article className="queue-item"><div className={"queue-icon " + (row.isHighPriority ? "urgent" : "")}><CheckCircle2 size={16}/></div><div className="queue-item-main"><strong>{row.subject}</strong><span>{row.relatedContactName ? row.relatedContactName + " · " : ""}{row.detail} · Due {shortTime(row.dueAt, timezone)}</span></div><span className={"queue-status " + (row.isHighPriority ? "high" : "")}>{row.isHighPriority ? "High" : row.status}</span><div className="queue-quick-actions">{row.relatedContactId && row.relatedContactHasPhone && <WhatsAppQuickAction contactId={row.relatedContactId}/>}<LinkedInQuickAction url={row.relatedContactLinkedinUrl} contactName={row.relatedContactName} compact/><HubSpotButton href={row.url} label={row.relatedContactUrl ? "Timeline" : "Tasks"}/></div></article>;
+  return <article className="queue-item"><div className={"queue-icon " + (row.isHighPriority ? "urgent" : "")}><CheckCircle2 size={16}/></div><div className="queue-item-main"><strong>{row.subject}</strong><span>{row.relatedContactName ? row.relatedContactName + " · " : ""}{row.detail} · Due {shortTime(row.dueAt, timezone)}</span></div><span className={"queue-status " + (row.isHighPriority ? "high" : "")}>{row.isHighPriority ? "High" : row.status}</span><div className="queue-quick-actions">{row.relatedContactId && row.relatedContactHasPhone && <WhatsAppQuickAction contactId={row.relatedContactId}/>}{row.relatedContactId && <TaskAiMessage contactId={row.relatedContactId} contactName={row.relatedContactName}/>}<LinkedInQuickAction url={row.relatedContactLinkedinUrl} contactName={row.relatedContactName} compact/><HubSpotButton href={row.url} label={row.relatedContactUrl ? "Timeline" : "Tasks"}/></div></article>;
 }
 
 function LeadQueueItem({ row, timezone }: { row: ContactRow; timezone: string }) {

@@ -26,7 +26,7 @@ The dashboard is exposed **only through Traefik** on the shared external `n8n_de
 - SignalHire
 - MillionVerifier
 - Apollo where configured
-- Tavily / Gemini / OpenRouter where configured for bounded research and AI features
+- Tavily / Gemini / CommandCode where configured for bounded research and AI features
 
 Cancelled outbound vendors are intentionally absent from application code, production Compose, deployment environment generation, runtime environment loading, tests, and UI.
 

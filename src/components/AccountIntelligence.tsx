@@ -520,7 +520,7 @@ export function AccountIntelligence({ onBack }: { onBack?: () => void } = {}) {
 
           <section className={styles.aiCard}>
             <div className={styles.aiHeader}>
-              <div className={styles.sectionTitle}><span className={styles.aiIcon}><BrainCircuit size={16}/></span><div><strong>OpenRouter Deep Research</strong><span>Explicit only · cached · Tier A/B</span></div></div>
+              <div className={styles.sectionTitle}><span className={styles.aiIcon}><BrainCircuit size={16}/></span><div><strong>CommandCode Deep Research</strong><span>Explicit only · cached · Tier A/B</span></div></div>
               {selectedAi?.ai?.cached ? <span className={styles.cachedBadge}>Cached</span> : null}
             </div>
             {selectedAi?.brief ? <div className={styles.aiResult}>

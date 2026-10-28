@@ -7,7 +7,7 @@ import {
   type AcquisitionAccount,
 } from "@/lib/acquisition-data-api";
 import { searchAll } from "@/lib/hubspot";
-import { openRouterCompletion, getOpenRouterStatus } from "@/lib/openrouter-low-cost";
+import { commandCodeCompletion, getCommandCodeStatus } from "@/lib/commandcode-gateway";
 import { inspectProspectCompany } from "@/lib/prospecting-company-intelligence-gemini";
 import { normalizeCompanyDomain } from "@/lib/prospecting-company-intelligence";
 import { scoreTalenteraAccount } from "@/lib/talentera-intelligence";
@@ -231,7 +231,7 @@ function parseAiJson(content: string) {
 }
 
 async function generateAiBrief(account: AcquisitionAccount, research: Record<string, unknown>, product: MeetingCreatorAccountScore) {
-  if (!String(process.env.OPENROUTER_API_KEY || "").trim()) return null;
+  if (!String(process.env.COMMANDCODE_API || process.env.COMMANDCODE_API_KEY || "").trim()) return null;
 
   const evidence = {
     company: account.name,
@@ -257,10 +257,10 @@ async function generateAiBrief(account: AcquisitionAccount, research: Record<str
     research,
   };
 
-  const result = await openRouterCompletion({
+  const result = await commandCodeCompletion({
     cacheKey: `meeting-creator:${account.domain}:${product.recommendedProduct}:${product.talenteraScore}:${product.evalufyScore}:${account.activeJobs}:${account.detectedAts}:${clean(research.checkedAt, 30)}`,
     mode: "fast",
-    maxOutputTokens: 190,
+    maxOutputTokens: 900,
     temperature: 0.1,
     system: [
       "You are the evidence-first GCC account analyst for Talentera and Evalufy.",
@@ -446,7 +446,7 @@ async function researchAccount(input: AcquisitionAccount) {
       };
     }
   } catch (error) {
-    console.error("Best Accounts OpenRouter brief failed", input.domain, error);
+    console.error("Best Accounts CommandCode brief failed", input.domain, error);
   }
 
   await upsertAcquisitionAccounts([updated]);
@@ -486,7 +486,7 @@ export async function GET(request: NextRequest) {
       .map(asBestAccount)
       .sort((a, b) => b.priorityScore - a.priorityScore || b.gtmScore - a.gtmScore || b.activeJobs - a.activeJobs || a.name.localeCompare(b.name));
     const eligible = accounts.filter((account) => account.exclusionStatus === "eligible");
-    const openRouter = await getOpenRouterStatus().catch(() => null);
+    const commandCode = await getCommandCodeStatus().catch(() => null);
 
     return NextResponse.json({
       generatedAt: new Date().toISOString(),
@@ -501,10 +501,10 @@ export async function GET(request: NextRequest) {
         researched: eligible.filter((account) => account.researched).length,
       },
       configuration: {
-        openRouterConfigured: Boolean(String(process.env.OPENROUTER_API_KEY || "").trim()),
-        openRouterModel: String(process.env.OPENROUTER_FAST_MODEL || "openai/gpt-4.1-nano"),
-        openRouterPolicy: "Deterministic ranking; AI explains evidence only",
-        openRouter,
+        commandCodeConfigured: Boolean(String(process.env.COMMANDCODE_API || process.env.COMMANDCODE_API_KEY || "").trim()),
+        commandCodeModel: String(process.env.COMMANDCODE_MODEL || "deepseek/deepseek-v4-flash"),
+        commandCodePolicy: "Deterministic ranking; AI explains evidence only",
+        commandCode,
         researchLimit: 8,
       },
     }, { headers: { "Cache-Control": "private, no-store" } });
