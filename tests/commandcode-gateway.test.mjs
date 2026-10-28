@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {commandCodeModelOptions} from '../src/lib/commandcode-model-options.ts';
 import {mkdtemp, rm, writeFile, readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
@@ -30,4 +31,9 @@ test('production no longer injects the retired gateway; runtime strips legacy ke
  for(const p of ['docker-compose.yml','.github/workflows/deploy-hostinger.yml','.env.example'])assert.doesNotMatch(await readFile(p,'utf8'),/OPENROUTER/);
  const entry=await readFile('docker/sdr-entrypoint.sh','utf8');assert.match(entry,/OPENROUTER_/);assert.doesNotMatch(entry,/DEPLOY_OPENROUTER/);
  const hiring=await readFile('src/lib/hiring-verification.ts','utf8');assert.doesNotMatch(hiring,/Completion\(/);assert.match(hiring,/ambiguous and stale roles are excluded/);
+});
+
+test("short-copy settings disable DeepSeek hidden thinking without sending vendor options to other models",()=>{
+ assert.deepEqual(commandCodeModelOptions("deepseek/deepseek-v4-flash"),{thinking:{type:"disabled"},reasoning_effort:"none"});
+ assert.deepEqual(commandCodeModelOptions("other/model"),{});
 });

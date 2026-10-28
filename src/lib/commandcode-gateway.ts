@@ -1,3 +1,4 @@
+import { commandCodeModelOptions } from "./commandcode-model-options.ts";
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -206,6 +207,7 @@ function cacheHash(input: CommandCodeCompletionInput, model: string, maxOutputTo
   return createHash("sha256")
     .update(JSON.stringify({
       input: input.cacheKey,
+      generationOptions: commandCodeModelOptions(model),
       model,
       mode: input.mode || "fast",
       maxOutputTokens,
@@ -326,6 +328,7 @@ export async function commandCodeCompletion(input: CommandCodeCompletionInput): 
     },
     body: JSON.stringify({
       model,
+      ...commandCodeModelOptions(model),
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },

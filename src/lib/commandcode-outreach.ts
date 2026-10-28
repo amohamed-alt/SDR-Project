@@ -1,3 +1,4 @@
+import { commandCodeModelOptions } from "./commandcode-model-options.ts";
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -31,7 +32,7 @@ export async function commandCodeOutreach(evidence: OutreachEvidence): Promise<R
   const cfg = commandCodeConfig();
   if (!cfg.apiKey || !cfg.model) throw new Error("CommandCode requires COMMANDCODE_API on the server.");
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Riyadh" }).format(new Date());
-  const key = createHash("sha256").update(JSON.stringify({ evidence, model: cfg.model, prompt: TASK_OUTREACH_SYSTEM })).digest("hex");
+  const key = createHash("sha256").update(JSON.stringify({ evidence, model: cfg.model, options: commandCodeModelOptions(cfg.model), prompt: TASK_OUTREACH_SYSTEM })).digest("hex");
   const existing = inflight.get(key);
   if (existing) return existing;
   const read = async (): Promise<State> => {
@@ -64,10 +65,10 @@ export async function commandCodeOutreach(evidence: OutreachEvidence): Promise<R
     const response = await fetch("https://api.commandcode.ai/provider/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${cfg.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: cfg.model, messages: [
+      body: JSON.stringify({ model: cfg.model, ...commandCodeModelOptions(cfg.model), messages: [
         { role: "system", content: TASK_OUTREACH_SYSTEM },
         { role: "user", content: JSON.stringify({ firstName: evidence.firstName, company: evidence.company, title: evidence.title, brand: evidence.brand }) },
-      ], max_tokens: 900, temperature: 0.4 }),
+      ], max_tokens: 1200, temperature: 0.4 }),
       signal: AbortSignal.timeout(20_000), cache: "no-store",
     });
     // Do not echo vendor bodies: they can contain submitted business data.
