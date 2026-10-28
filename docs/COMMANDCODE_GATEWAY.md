@@ -9,3 +9,5 @@ Native web-search tools from the retired provider are removed. Authoritative ATS
 The deployment job runs scripts/commandcode-live-smoke.mjs using synthetic contacts for both brands plus the general gateway. It checks the deployed provider configuration and authenticated task-input rejection. It performs no CRM writes and sends no outreach. Its separate step reports a provider/key/plan failure without rolling back a healthy application or restoring the retired provider.
 
 Official API contract: https://commandcode.ai/docs/provider
+
+DeepSeek thinking is explicitly disabled for bounded SDR outputs so hidden reasoning cannot consume the visible answer budget. Task copy permits up to 1,200 output tokens while keeping the same strict displayed character limits. The full synthetic test must print `CommandCode live smoke passed` to prove success; deployment success alone is not provider success.

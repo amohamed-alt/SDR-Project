@@ -33,7 +33,7 @@ test('provider coalesces clicks, persists cache, reserves a daily budget and hid
    assert.equal(url,'https://api.commandcode.ai/provider/v1/chat/completions');
    const body=JSON.parse(init.body);
    assert.equal(init.headers.Authorization,'Bearer test-secret');
-   assert.equal(body.max_tokens,900);
+   assert.equal(body.max_tokens,1200);
    assert.ok(!body.messages[1].content.includes('contactId'));
    return Response.json({choices:[{message:{content:JSON.stringify(draft)},finish_reason:'stop'}]});
   };
