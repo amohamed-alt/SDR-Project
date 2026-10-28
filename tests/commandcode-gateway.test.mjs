@@ -34,6 +34,6 @@ test('production no longer injects the retired gateway; runtime strips legacy ke
 });
 
 test("short-copy settings disable DeepSeek hidden thinking without sending vendor options to other models",()=>{
- assert.deepEqual(commandCodeModelOptions("deepseek/deepseek-v4-flash"),{reasoning_effort:"none"});
+ assert.deepEqual(commandCodeModelOptions("deepseek/deepseek-v4-flash"),{reasoning_effort:"off"});
  assert.deepEqual(commandCodeModelOptions("other/model"),{});
 });
