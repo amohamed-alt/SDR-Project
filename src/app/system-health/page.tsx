@@ -26,7 +26,7 @@ export default async function SystemHealthPage() {
     ["Apollo", health.integrations.apollo.status, "Prospecting data"],
     ["Tavily", health.integrations.tavily.status, "Research search"],
     ["Gemini", health.integrations.gemini.status, "AI research"],
-    ["OpenRouter", health.integrations.openRouter.status, "AI routing"],
+    ["CommandCode", health.integrations.commandCode.status, "AI routing"],
     ["Maqsam", health.integrations.maqsam.status, "Call synchronization"],
   ] as const;
   const refreshHref = `/system-health?check=${encodeURIComponent(health.timestamp)}`;

@@ -219,7 +219,6 @@ jobs:
           GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
           COMMANDCODE_API=${COMMANDCODE_API}
           COMMANDCODE_MODEL=${COMMANDCODE_MODEL}
-          OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
           GOOGLE_SHEETS_SERVICE_ACCOUNT_B64=${SHEETS_SERVICE_ACCOUNT_B64}
           GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
@@ -400,6 +399,21 @@ jobs:
               | grep -E 'Maqsam (sync worker started|sync failed|historical import through|sync:|Daniel identities)'  \
               | tail -12 || true
           fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify live CommandCode copy and protected application routes
+        id: commandcode_smoke
+        continue-on-error: true
+        env:
+          COMMANDCODE_API: ${{ secrets.COMMANDCODE_API || secrets.COMMANDCODE_API_KEY }}
+          COMMANDCODE_MODEL: ${{ vars.COMMANDCODE_MODEL || 'deepseek/deepseek-v4-flash' }}
+          ACQUISITION_OWNER_TOKEN: ${{ secrets.ACQUISITION_OWNER_TOKEN }}
+          SDR_ADMIN_PASSWORD: ${{ secrets.SDR_ADMIN_PASSWORD || secrets.DASHBOARD_PASSWORD || secrets.ACQUISITION_OWNER_TOKEN }}
+        run: |
+          node --experimental-strip-types scripts/commandcode-live-smoke.mjs
 
       - name: Mark deployment successful
         if: success()

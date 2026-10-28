@@ -78,7 +78,7 @@ type BestAccount = {
   };
 };
 
-type OpenRouterStatus = {
+type CommandCodeStatus = {
   configured: boolean;
   fastModel: string;
   policy: string;
@@ -86,6 +86,8 @@ type OpenRouterStatus = {
     fastRequests: number;
     estimatedCostUsd: number;
     reportedCostUsd: number;
+    promptTokens: number;
+    completionTokens: number;
   };
   limits: { fastDaily: number };
 };
@@ -103,10 +105,10 @@ type Payload = {
     researched: number;
   };
   configuration: {
-    openRouterConfigured: boolean;
-    openRouterModel: string;
-    openRouterPolicy: string;
-    openRouter: OpenRouterStatus | null;
+    commandCodeConfigured: boolean;
+    commandCodeModel: string;
+    commandCodePolicy: string;
+    commandCode: CommandCodeStatus | null;
     researchLimit: number;
   };
   error?: string;
@@ -216,7 +218,7 @@ export function BestAccounts({ onBack }: { onBack: () => void }) {
   const spotlights = useMemo(() => eligible.slice(0, 3), [eligible]);
   const config = payload?.configuration;
   const summary = payload?.summary;
-  const openRouter = config?.openRouter;
+  const commandCode = config?.commandCode;
 
   function saveOwnerKey() {
     const value = ownerDraft.trim();
@@ -257,7 +259,7 @@ export function BestAccounts({ onBack }: { onBack: () => void }) {
   }
 
   async function researchTop() {
-    const approved = window.confirm(`Deep-research the top ${researchLimit} accounts? The system uses the existing Career/ATS engine first and OpenRouter Nano only for concise evidence summaries.`);
+    const approved = window.confirm(`Deep-research the top ${researchLimit} accounts? The system uses the existing Career/ATS engine first and CommandCode only for concise evidence summaries.`);
     if (!approved) return;
     setBusy("research-top");
     setError("");
@@ -311,7 +313,7 @@ export function BestAccounts({ onBack }: { onBack: () => void }) {
           </div>
         </div>
         <div className={styles.headerActions}>
-          <span className={styles.systemPill} data-ok={Boolean(config?.openRouterConfigured)}><BrainCircuit size={13}/>{config?.openRouterConfigured ? "AI analyst online" : "AI optional"}</span>
+          <span className={styles.systemPill} data-ok={Boolean(config?.commandCodeConfigured)}><BrainCircuit size={13}/>{config?.commandCodeConfigured ? "AI analyst online" : "AI optional"}</span>
           <button type="button" className={styles.iconButton} onClick={() => void load()} disabled={loading}><RefreshCw className={loading ? styles.spin : ""} size={15}/> Refresh</button>
         </div>
       </header>
@@ -397,12 +399,12 @@ export function BestAccounts({ onBack }: { onBack: () => void }) {
 
         <aside className={styles.sidePanel}>
           <div className={styles.aiCard}>
-            <div className={styles.aiHeader}><span className={styles.aiIcon}><BrainCircuit size={17}/></span><div><span>OPENROUTER ANALYST</span><strong>{config?.openRouterConfigured ? "Product-aware evidence analyst ready" : "Optional AI layer"}</strong></div></div>
-            <p>The score and product route stay deterministic. OpenRouter only writes the <b>Why now</b>, opener, risk and next action from verified evidence.</p>
+            <div className={styles.aiHeader}><span className={styles.aiIcon}><BrainCircuit size={17}/></span><div><span>COMMANDCODE ANALYST</span><strong>{config?.commandCodeConfigured ? "Product-aware evidence analyst ready" : "Optional AI layer"}</strong></div></div>
+            <p>The score and product route stay deterministic. CommandCode only writes the <b>Why now</b>, opener, risk and next action from verified evidence.</p>
             <div className={styles.aiStats}>
-              <div><span>Model</span><strong>{config?.openRouterModel?.split("/").pop() || "Nano"}</strong></div>
-              <div><span>Today</span><strong>{openRouter ? `${openRouter.today.fastRequests}/${openRouter.limits.fastDaily}` : "—"}</strong></div>
-              <div><span>Est. cost</span><strong>{openRouter ? `$${openRouter.today.estimatedCostUsd.toFixed(4)}` : "—"}</strong></div>
+              <div><span>Model</span><strong>{config?.commandCodeModel?.split("/").pop() || "Configured model"}</strong></div>
+              <div><span>Today</span><strong>{commandCode ? `${commandCode.today.fastRequests}/${commandCode.limits.fastDaily}` : "—"}</strong></div>
+              <div><span>Tokens</span><strong>{commandCode ? commandCode.today.promptTokens + commandCode.today.completionTokens : "—"}</strong></div>
             </div>
           </div>
 

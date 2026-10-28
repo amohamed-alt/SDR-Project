@@ -70,7 +70,7 @@ test("best account details reuse modal focus and named dismissal", async ({ page
   await page.route("**/api/best-accounts", route => route.fulfill({ json: {
     generatedAt: "2026-07-19T09:00:00Z",
     summary: { total: 1, eligible: 1, aPlus: 0, tierA: 0, hiringNow: 1, phoneReady: 0, researched: 0 },
-    configuration: { openRouterConfigured: false, openRouterModel: "", openRouterPolicy: "", openRouter: null, researchLimit: 6 },
+    configuration: { commandCodeConfigured: false, commandCodeModel: "", commandCodePolicy: "", commandCode: null, researchLimit: 6 },
     accounts: [{
       domain: "example.com", name: "Best account modal QA", source: "test fixture", sourceId: "modal-qa", country: "Saudi Arabia",
       employeeCount: 250, industry: "Technology", activeJobs: 1, headcountGrowth: 0, hrHeadcount: 0, careerPageUrl: "https://example.com/careers",

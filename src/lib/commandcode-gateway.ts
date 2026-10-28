@@ -2,14 +2,14 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-export type OpenRouterMode = "fast" | "deep";
+export type CommandCodeMode = "fast" | "deep";
 
-export type OpenRouterServerTool = {
-  type: "openrouter:web_search" | string;
+export type CommandCodeServerTool = {
+  type: string;
   parameters?: Record<string, unknown>;
 };
 
-export type OpenRouterUsage = {
+export type CommandCodeUsage = {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
@@ -18,18 +18,18 @@ export type OpenRouterUsage = {
   reportedCostUsd: number | null;
 };
 
-export type OpenRouterResult = {
+export type CommandCodeResult = {
   content: string;
   model: string;
-  mode: OpenRouterMode;
+  mode: CommandCodeMode;
   cached: boolean;
-  usage: OpenRouterUsage;
+  usage: CommandCodeUsage;
 };
 
 type CacheEntry = {
   createdAt: number;
   expiresAt: number;
-  result: OpenRouterResult;
+  result: CommandCodeResult;
 };
 
 type CostState = {
@@ -45,20 +45,20 @@ type CostState = {
   cache: Record<string, CacheEntry>;
 };
 
-export type OpenRouterCompletionInput = {
+export type CommandCodeCompletionInput = {
   cacheKey: string;
   system: string;
   user: string;
-  mode?: OpenRouterMode;
+  mode?: CommandCodeMode;
   maxOutputTokens?: number;
   temperature?: number;
-  serverTools?: OpenRouterServerTool[];
+  serverTools?: CommandCodeServerTool[];
   maxToolCalls?: number;
   forceServerTool?: boolean;
   estimatedServerToolCostUsdPerUse?: number;
 };
 
-type OpenRouterPayload = {
+type CommandCodePayload = {
   model?: string;
   choices?: Array<{ message?: { content?: string } }>;
   usage?: {
@@ -75,9 +75,9 @@ type OpenRouterPayload = {
 };
 
 const DEFAULT_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
-const STATE_PATH = process.env.OPENROUTER_STATE_PATH || "/app/data/openrouter-cost-state.json";
-const FAST_MODEL = process.env.OPENROUTER_FAST_MODEL || "openai/gpt-4.1-nano";
-const DEEP_MODEL = process.env.OPENROUTER_DEEP_MODEL || "openai/gpt-4.1-mini";
+const STATE_PATH = process.env.COMMANDCODE_GATEWAY_STATE_PATH || "/app/data/commandcode-gateway-state.json";
+const FAST_MODEL = process.env.COMMANDCODE_MODEL || "deepseek/deepseek-v4-flash";
+const DEEP_MODEL = process.env.COMMANDCODE_DEEP_MODEL || FAST_MODEL;
 
 let stateQueue = Promise.resolve();
 
@@ -97,20 +97,20 @@ function config() {
   return {
     fastModel: FAST_MODEL,
     deepModel: DEEP_MODEL,
-    fastDailyLimit: numberEnv("OPENROUTER_FAST_DAILY_LIMIT", 150, 1, 10_000),
-    deepDailyLimit: numberEnv("OPENROUTER_DEEP_DAILY_LIMIT", 10, 0, 1_000),
-    webSearchDailyLimit: numberEnv("OPENROUTER_WEB_SEARCH_DAILY_LIMIT", 60, 0, 2_000),
-    fastMaxOutputTokens: numberEnv("OPENROUTER_FAST_MAX_OUTPUT_TOKENS", 220, 32, 1_000),
-    deepMaxOutputTokens: numberEnv("OPENROUTER_DEEP_MAX_OUTPUT_TOKENS", 360, 64, 2_000),
-    maxInputChars: numberEnv("OPENROUTER_MAX_INPUT_CHARS", 12_000, 1_000, 100_000),
-    cacheTtlSeconds: numberEnv("OPENROUTER_CACHE_TTL_SECONDS", DEFAULT_CACHE_TTL_SECONDS, 60, 30 * 24 * 60 * 60),
-    cacheMaxEntries: numberEnv("OPENROUTER_CACHE_MAX_ENTRIES", 500, 10, 10_000),
-    timeoutMs: numberEnv("OPENROUTER_TIMEOUT_MS", 25_000, 3_000, 120_000),
+    fastDailyLimit: numberEnv("COMMANDCODE_FAST_DAILY_LIMIT", 150, 1, 10_000),
+    deepDailyLimit: numberEnv("COMMANDCODE_DEEP_DAILY_LIMIT", 10, 0, 1_000),
+    webSearchDailyLimit: 0,
+    fastMaxOutputTokens: numberEnv("COMMANDCODE_FAST_MAX_OUTPUT_TOKENS", 900, 32, 2_000),
+    deepMaxOutputTokens: numberEnv("COMMANDCODE_DEEP_MAX_OUTPUT_TOKENS", 1200, 64, 2_000),
+    maxInputChars: numberEnv("COMMANDCODE_MAX_INPUT_CHARS", 12_000, 1_000, 100_000),
+    cacheTtlSeconds: numberEnv("COMMANDCODE_CACHE_TTL_SECONDS", DEFAULT_CACHE_TTL_SECONDS, 60, 30 * 24 * 60 * 60),
+    cacheMaxEntries: numberEnv("COMMANDCODE_CACHE_MAX_ENTRIES", 500, 10, 10_000),
+    timeoutMs: numberEnv("COMMANDCODE_TIMEOUT_MS", 25_000, 3_000, 120_000),
   };
 }
 
 function todayUtc() {
-  return new Date().toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Riyadh" }).format(new Date());
 }
 
 function emptyState(): CostState {
@@ -128,7 +128,7 @@ function emptyState(): CostState {
   };
 }
 
-function normalizeResult(result: OpenRouterResult): OpenRouterResult {
+function normalizeResult(result: CommandCodeResult): CommandCodeResult {
   return {
     ...result,
     usage: {
@@ -177,8 +177,9 @@ async function readState() {
   try {
     const raw = await fs.readFile(/* turbopackIgnore: true */ STATE_PATH, "utf8");
     return normalizeState(JSON.parse(raw) as Partial<CostState>);
-  } catch {
-    return emptyState();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyState();
+    throw new Error("CommandCode usage storage is unavailable.");
   }
 }
 
@@ -201,7 +202,7 @@ async function withStateLock<T>(callback: () => Promise<T>) {
   }
 }
 
-function cacheHash(input: OpenRouterCompletionInput, model: string, maxOutputTokens: number) {
+function cacheHash(input: CommandCodeCompletionInput, model: string, maxOutputTokens: number) {
   return createHash("sha256")
     .update(JSON.stringify({
       input: input.cacheKey,
@@ -210,6 +211,7 @@ function cacheHash(input: OpenRouterCompletionInput, model: string, maxOutputTok
       maxOutputTokens,
       system: input.system,
       user: input.user,
+      temperature: input.temperature ?? 0.15,
       serverTools: input.serverTools || [],
       maxToolCalls: input.maxToolCalls || 0,
       forceServerTool: Boolean(input.forceServerTool),
@@ -218,15 +220,14 @@ function cacheHash(input: OpenRouterCompletionInput, model: string, maxOutputTok
 }
 
 function pricingForModel(model: string) {
-  if (model.includes("gpt-4.1-nano")) return { inputPerMillion: 0.10, outputPerMillion: 0.40 };
-  if (model.includes("gpt-4.1-mini")) return { inputPerMillion: 0.40, outputPerMillion: 1.60 };
+  void model; // Rates are explicit configuration, never borrowed from another provider.
   return {
-    inputPerMillion: decimalEnv("OPENROUTER_CUSTOM_INPUT_USD_PER_M", 0, 0, 1_000),
-    outputPerMillion: decimalEnv("OPENROUTER_CUSTOM_OUTPUT_USD_PER_M", 0, 0, 1_000),
+    inputPerMillion: decimalEnv("COMMANDCODE_CUSTOM_INPUT_USD_PER_M", 0, 0, 1_000),
+    outputPerMillion: decimalEnv("COMMANDCODE_CUSTOM_OUTPUT_USD_PER_M", 0, 0, 1_000),
   };
 }
 
-export function estimateOpenRouterCostUsd(model: string, promptTokens: number, completionTokens: number) {
+export function estimateCommandCodeCostUsd(model: string, promptTokens: number, completionTokens: number) {
   const pricing = pricingForModel(model);
   const total = (Math.max(0, promptTokens) / 1_000_000) * pricing.inputPerMillion
     + (Math.max(0, completionTokens) / 1_000_000) * pricing.outputPerMillion;
@@ -240,15 +241,17 @@ function trimCache(state: CostState, maxEntries: number) {
   state.cache = Object.fromEntries(entries.slice(0, maxEntries));
 }
 
-export async function getOpenRouterStatus() {
+export async function getCommandCodeStatus() {
   const state = normalizeState(await readState());
   const cfg = config();
   return {
-    configured: Boolean(String(process.env.OPENROUTER_API_KEY || "").trim()),
+    configured: Boolean(String(process.env.COMMANDCODE_API || process.env.COMMANDCODE_API_KEY || "").trim()),
     fastModel: cfg.fastModel,
     deepModel: cfg.deepModel,
-    policy: "nano-first, mini-explicit-only",
-    webSearchBounded: true,
+    provider: "commandcode",
+    policy: "bounded-evidence-only",
+    nativeWebSearch: false,
+    webSearchBounded: false,
     cacheTtlSeconds: cfg.cacheTtlSeconds,
     maxInputChars: cfg.maxInputChars,
     limits: {
@@ -272,26 +275,27 @@ export async function getOpenRouterStatus() {
   };
 }
 
-export async function openRouterCompletion(input: OpenRouterCompletionInput): Promise<OpenRouterResult> {
-  const apiKey = String(process.env.OPENROUTER_API_KEY || "").trim();
-  if (!apiKey) throw new Error("OPENROUTER_API_KEY is not configured.");
+export async function commandCodeCompletion(input: CommandCodeCompletionInput): Promise<CommandCodeResult> {
+  const apiKey = String(process.env.COMMANDCODE_API || process.env.COMMANDCODE_API_KEY || "").trim();
+  if (!apiKey) throw new Error("COMMANDCODE_API_KEY is not configured.");
 
   const cfg = config();
-  const mode: OpenRouterMode = input.mode === "deep" ? "deep" : "fast";
+  const mode: CommandCodeMode = input.mode === "deep" ? "deep" : "fast";
   const model = mode === "deep" ? cfg.deepModel : cfg.fastModel;
   const hardOutputCap = mode === "deep" ? cfg.deepMaxOutputTokens : cfg.fastMaxOutputTokens;
   const maxOutputTokens = Math.min(hardOutputCap, Math.max(32, Math.round(input.maxOutputTokens || hardOutputCap)));
   const system = String(input.system || "").slice(0, Math.floor(cfg.maxInputChars * 0.35));
   const user = String(input.user || "").slice(0, cfg.maxInputChars - system.length);
   const serverTools = Array.isArray(input.serverTools) ? input.serverTools.slice(0, 4) : [];
-  const usesWebSearch = serverTools.some((tool) => tool?.type === "openrouter:web_search");
+  if (serverTools.length) throw new Error("CommandCode gateway does not provide native web verification.");
+  const usesWebSearch = false;
   const key = cacheHash({ ...input, mode, system, user, serverTools }, model, maxOutputTokens);
 
   const cached = await withStateLock(async () => {
     const state = normalizeState(await readState());
     const hit = state.cache[key];
     if (!hit) return null;
-    return { ...normalizeResult(hit.result), cached: true } satisfies OpenRouterResult;
+    return { ...normalizeResult(hit.result), cached: true } satisfies CommandCodeResult;
   });
   if (cached) return cached;
 
@@ -300,10 +304,10 @@ export async function openRouterCompletion(input: OpenRouterCompletionInput): Pr
     const current = mode === "deep" ? state.deepRequests : state.fastRequests;
     const limit = mode === "deep" ? cfg.deepDailyLimit : cfg.fastDailyLimit;
     if (current >= limit) {
-      throw new Error(`OpenRouter ${mode} daily safety limit reached (${limit}).`);
+      throw new Error(`CommandCode ${mode} daily safety limit reached (${limit}).`);
     }
     if (usesWebSearch && state.webSearchRequests >= cfg.webSearchDailyLimit) {
-      throw new Error(`OpenRouter web-search daily safety limit reached (${cfg.webSearchDailyLimit}).`);
+      throw new Error(`CommandCode web-search daily safety limit reached (${cfg.webSearchDailyLimit}).`);
     }
     if (mode === "deep") state.deepRequests += 1;
     else state.fastRequests += 1;
@@ -312,7 +316,7 @@ export async function openRouterCompletion(input: OpenRouterCompletionInput): Pr
     await writeState(state);
   });
 
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const response = await fetch("https://api.commandcode.ai/provider/v1/chat/completions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -336,14 +340,13 @@ export async function openRouterCompletion(input: OpenRouterCompletionInput): Pr
     signal: AbortSignal.timeout(cfg.timeoutMs),
   });
 
-  const payload = await response.json().catch(() => ({})) as OpenRouterPayload;
+  const payload = await response.json().catch(() => ({})) as CommandCodePayload;
   if (!response.ok) {
-    const message = payload.error?.message || payload.message || `HTTP ${response.status}`;
-    throw new Error(`OpenRouter request failed: ${message}`);
+    throw new Error(`CommandCode request failed (HTTP ${response.status}).`);
   }
 
   const content = String(payload.choices?.[0]?.message?.content || "").trim();
-  if (!content) throw new Error("OpenRouter returned an empty completion.");
+  if (!content) throw new Error("CommandCode returned an empty completion.");
 
   const promptTokens = Math.max(0, Number(payload.usage?.prompt_tokens || 0));
   const completionTokens = Math.max(0, Number(payload.usage?.completion_tokens || 0));
@@ -351,12 +354,12 @@ export async function openRouterCompletion(input: OpenRouterCompletionInput): Pr
   const webSearchRequests = Math.max(0, Number(payload.usage?.server_tool_use?.web_search_requests || 0));
   const serverToolCostPerUse = Math.max(0, Number(input.estimatedServerToolCostUsdPerUse || 0));
   const estimatedCostUsd = Number((
-    estimateOpenRouterCostUsd(model, promptTokens, completionTokens)
+    estimateCommandCodeCostUsd(model, promptTokens, completionTokens)
     + webSearchRequests * serverToolCostPerUse
   ).toFixed(8));
-  const reportedRaw = Number(payload.usage?.cost);
+  const reportedRaw = payload.usage?.cost == null ? NaN : Number(payload.usage.cost);
   const reportedCostUsd = Number.isFinite(reportedRaw) && reportedRaw >= 0 ? reportedRaw : null;
-  const result: OpenRouterResult = {
+  const result: CommandCodeResult = {
     content,
     model: String(payload.model || model),
     mode,

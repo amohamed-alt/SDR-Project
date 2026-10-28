@@ -92,7 +92,7 @@ export async function getSystemHealth() {
       apollo: { status: configured("APOLLO_API_KEY") ? "configured" as const : "optional" as const },
       tavily: { status: configured("TAVILY_API_KEY") ? "configured" as const : "optional" as const },
       gemini: { status: configured("GEMINI_API_KEY") ? "configured" as const : "optional" as const },
-      openRouter: { status: configured("OPENROUTER_API_KEY") ? "configured" as const : "optional" as const },
+      commandCode: { status: (configured("COMMANDCODE_API") || configured("COMMANDCODE_API_KEY")) ? "configured" as const : "optional" as const },
       maqsam: { status: configured("MAQSAM_ACCESS_KEY") && configured("MAQSAM_ACCESS_SECRET") ? "configured" as const : "optional" as const },
     },
   };

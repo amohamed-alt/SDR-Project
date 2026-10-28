@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getHiringStore } from "@/lib/hiring-signals";
 import { batchRead } from "@/lib/hubspot";
-import { openRouterCompletion } from "@/lib/openrouter-low-cost";
+import { commandCodeCompletion } from "@/lib/commandcode-gateway";
 import { originMatchesRequestHosts } from "@/lib/request-origin";
 import {
   buildWhatsAppMobileUrl,
@@ -263,12 +263,12 @@ export async function POST(request: NextRequest) {
 
     try {
       const fingerprint = JSON.stringify(evidence);
-      const completion = await withDeadline(openRouterCompletion({
+      const completion = await withDeadline(commandCodeCompletion({
         cacheKey: `whatsapp-message-v4:${contact.id}:${fingerprint}`,
         system,
         user: `Write a human first WhatsApp message from this evidence object. Type it like a real SDR on a phone with line breaks and almost no punctuation. It should not look polished or campaign-generated.\n${JSON.stringify(evidence)}`,
         mode: "fast",
-        maxOutputTokens: 220,
+        maxOutputTokens: 900,
         temperature: 0.4,
       }), WHATSAPP_AI_BUDGET_MS);
       const aiResult = parseAiResult(completion.content);
