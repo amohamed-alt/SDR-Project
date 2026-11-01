@@ -37,3 +37,26 @@ for (const hasPublicProfile of [false, true]) test(`capture checks free CRM elig
   await expect(page.getByRole("link", { name: "LinkedIn", exact: true })).toHaveAttribute("href", "https://www.linkedin.com/in/classic-person");
   expect(checks).toBe(2); expect(reveals).toBe(1); expect(writes).toBe(0);
 });
+
+test('retry failed CRM checks only retries failed rows and never spends contact credits', async ({page}) => {
+  await page.addInitScript(()=>{localStorage.setItem('sdr_v2_visitor_id','retry_check_qa');localStorage.setItem('sdr_v2_visitor_name','Retry QA');});
+  await page.request.post('/api/sdr-admin',{data:{password:'playwright-tools-only-password'}});
+  const leads=['Good Person','Retry Person'].map((name,i)=>({name,company:'Example',title:'HR Director',location:'Riyadh',connectionDegree:'2nd',salesLeadUrl:`https://www.linkedin.com/sales/lead/RETRY${i}`,linkedinUrl:''}));
+  const run={id:'00000000-0000-4000-8000-000000000091',startedAt:'2026-11-01T08:00:00Z',updatedAt:'2026-11-01T08:00:00Z',complete:true,pagesRead:1,total:2,leads};
+  const calls:Record<string,number>={};let paid=0;
+  await page.route('**/api/prospecting/salesnav/full-run*',route=>route.fulfill({json:{run,history:[run]}}));
+  await page.route('**/api/prospecting/salesnav/companion',route=>route.fulfill({json:{ok:true,paired:true,unlocked:true,latestFullRun:run}}));
+  await page.route('**/api/prospecting/salesnav/task-options',route=>route.fulfill({json:{owners:[]}}));
+  await page.route('**/api/prospecting/salesnav/precheck-v2',route=>{
+    const name=route.request().postDataJSON().name;calls[name]=(calls[name]||0)+1;
+    if(name==='Retry Person'&&calls[name]===1)return route.fulfill({status:500,json:{error:'HubSpot check failed (HTTP 429). Retry this check; reveal and push remain disabled.'}});
+    return route.fulfill({json:{contact:{inHubSpot:false},company:{inHubSpot:false,protected:false}}});
+  });
+  await page.route(/\/api\/prospecting\/salesnav\/(reveal-fast|push-ready-v2)/,route=>{paid++;return route.fulfill({status:500,json:{error:'No paid actions'}});});
+  await page.goto('/signalhire-queue');await page.getByRole('button',{name:'HubSpot Check',exact:true}).click();
+  await expect(page.getByRole('row').filter({hasText:'Retry Person'})).toContainText('HTTP 429');
+  await page.getByRole('button',{name:'Retry failed checks (1)',exact:true}).click();
+  await expect(page.getByRole('row').filter({hasText:'Retry Person'})).toContainText('Needs profile URL');
+  expect(calls).toEqual({'Good Person':1,'Retry Person':2});expect(paid).toBe(0);
+  await expect(page.getByRole('button',{name:/Retry failed checks/})).toHaveCount(0);
+});

@@ -41,6 +41,7 @@ function unique(values: unknown[]) {
 function prospectPhones(row: Row) { return unique([row.prospect?.phone, row.prospect?.mobilephone, ...(Array.isArray(row.prospect?.phones) ? row.prospect?.phones || [] : [])]); }
 function readyPhone(row: Row) { return prospectPhones(row)[0] || ""; }
 function existingEmail(row: Row) { return String(row.precheck?.contact.properties?.email || "").trim(); }
+function failedCrmCheck(row: Row) { return row.stage === "error" && /HubSpot check failed|HubSpot precheck failed|HubSpot unavailable/i.test(row.error || ""); }
 function isRetention(row: Row) { return String(row.precheck?.company.accountType || "").trim().toLowerCase() === "retention"; }
 function recoverablePush(row: Row) {
   const company = row.precheck?.company;
@@ -236,18 +237,19 @@ export function SalesNavPipelineV2() {
     finally { setRepairing(false); }
   }
 
-  async function runPrecheck() {
+  async function runPrecheck(retryFailed = false) {
     if (!rows.length || processing || revealing || pushing) return;
-    const pending = rows.filter(row => row.stage !== "pushed");
+    const pending = rows.filter(row => row.stage !== "pushed" && (!retryFailed || failedCrmCheck(row)));
     if (!pending.length) return;
     const total = pending.length;
     const operationRunId = activeRunId.current;
     setProcessing(true); setError(""); setMessage(""); setSelected(new Set()); setView("all");
     setProgress({ done: 0, total, label: "HubSpot check" });
     let checkedCount = 0, failedCount = 0;
-    const workers = Array.from({ length: Math.min(4, pending.length) }, async () => {
+    const workers = Array.from({ length: Math.min(retryFailed ? 1 : 4, pending.length) }, async () => {
       while (pending.length) {
         const source = pending.shift(); if (!source) return;
+        if (retryFailed) await new Promise(resolve => setTimeout(resolve, 1000));
         // HubSpot supports name + company checks without a public URL. Missing
         // URLs gate paid reveal, not the free CRM check or its progress counter.
         setRows((current) => current.map((row) => row.key === source.key ? { ...row, stage: "checking", precheck: undefined, error: undefined } : row));
@@ -401,6 +403,7 @@ export function SalesNavPipelineV2() {
     callsEligible: rows.filter((row) => !isExistingPerson(row) && !blockedCompany(row) && (row.precheck?.company.connectedCallCount || 0) > 0 && (row.precheck?.company.meetingCount || 0) === 0).length,
     pushed: rows.filter((row) => row.stage === "pushed").length,
     review: rows.filter((row) => row.stage === "awaiting-profile" || row.stage === "needs-profile" || row.stage === "error" || row.stage === "no-phone").length,
+    failedChecks: rows.filter(failedCrmCheck).length,
     profiles: rows.filter((row) => row.stage === "needs-profile").length,
   }), [rows]);
 
@@ -434,7 +437,7 @@ export function SalesNavPipelineV2() {
     {(loading || processing || revealing || pushing) && <div className={styles.progress}><LoaderCircle className={styles.spin} size={15}/>{loading ? "Loading…" : `${progress.label} ${progress.done}/${progress.total}`}</div>}
 
     <details open={view === "needs-profile" || undefined}><summary>Profile URL reader</summary><SalesNavCollectorControls runId={run?.id || ""} missing={rows.filter(row => !publicPersonProfile(row.lead.linkedinUrl)).length} captureLocked={processing || revealing || pushing} readLocked={revealing || pushing}/></details>
-      <section className={styles.runBar}><div className={styles.runSelect}><label>Search history</label><select aria-label="Search history" value={run?.id || ""} onChange={(event) => void loadRun(event.target.value)} disabled={loading || processing || revealing || pushing}>{history.map((item) => <option key={item.id} value={item.id}>{runLabel(item)}</option>)}</select><small>{run ? `${run.pagesRead} pages · ${run.total} unique leads · ${run.complete ? run.stopReason || "completed" : "capture can resume"} · Companion ${run.clientVersion || "version unknown"}` : "No run loaded"}</small></div><div className={styles.runActions}><button onClick={() => void loadRun(run?.id || "")} disabled={loading || processing || revealing || pushing}><RefreshCw size={14}/>Reload</button><button onClick={exportRunCsv} disabled={loading || !run?.complete || !rows.length} title={run?.complete ? "Download all captured leads in this run, including available enrichment and checks" : "Capture is still running; export unlocks when the batch is saved"}><Download size={14}/>Export CSV ({rows.length})</button><button className={styles.primary} onClick={() => void runPrecheck()} disabled={!rows.length || loading || processing || revealing || pushing}><ShieldCheck size={14}/>HubSpot Check</button>{run?.sourceUrl && <a href={run.sourceUrl} target="_blank" rel="noreferrer">Open Sales Nav <ExternalLink size={11}/></a>}</div></section>
+      <section className={styles.runBar}><div className={styles.runSelect}><label>Search history</label><select aria-label="Search history" value={run?.id || ""} onChange={(event) => void loadRun(event.target.value)} disabled={loading || processing || revealing || pushing}>{history.map((item) => <option key={item.id} value={item.id}>{runLabel(item)}</option>)}</select><small>{run ? `${run.pagesRead} pages · ${run.total} unique leads · ${run.complete ? run.stopReason || "completed" : "capture can resume"} · Companion ${run.clientVersion || "version unknown"}` : "No run loaded"}</small></div><div className={styles.runActions}><button onClick={() => void loadRun(run?.id || "")} disabled={loading || processing || revealing || pushing}><RefreshCw size={14}/>Reload</button><button onClick={exportRunCsv} disabled={loading || !run?.complete || !rows.length} title={run?.complete ? "Download all captured leads in this run, including available enrichment and checks" : "Capture is still running; export unlocks when the batch is saved"}><Download size={14}/>Export CSV ({rows.length})</button><button className={styles.primary} onClick={() => void runPrecheck()} disabled={!rows.length || loading || processing || revealing || pushing}><ShieldCheck size={14}/>HubSpot Check</button>{counts.failedChecks > 0 && <button onClick={() => void runPrecheck(true)} disabled={loading || processing || revealing || pushing}><RefreshCw size={14}/>Retry failed checks ({counts.failedChecks})</button>}{run?.sourceUrl && <a href={run.sourceUrl} target="_blank" rel="noreferrer">Open Sales Nav <ExternalLink size={11}/></a>}</div></section>
 
     {counts.profiles > 0 && <div className={styles.notice}><CircleAlert size={15}/>{counts.profiles} people need a public LinkedIn URL before Reveal. Open Needs profile and use the profile URL reader. Reading URLs uses no contact credits.</div>}
     <section className={styles.metrics}><article><UsersRound size={16}/><span>Saved</span><strong>{counts.total}</strong></article><article><Phone size={16}/><span>Ready · NEW + phone</span><strong>{counts.ready}</strong></article><article><Sparkles size={16}/><span>Needs reveal</span><strong>{counts.reveal}</strong></article><article><ShieldCheck size={16}/><span>Blocked</span><strong>{counts.blocked}</strong></article><article><UserRoundCheck size={16}/><span>Retention</span><strong>{counts.retention}</strong></article><article><UserRoundCheck size={16}/><span>Existing people</span><strong>{counts.existingPeople}</strong></article><article><CheckCircle2 size={16}/><span>Calls · no meeting</span><strong>{counts.callsEligible}</strong></article><article><Send size={16}/><span>Pushed</span><strong>{counts.pushed}</strong></article></section>
