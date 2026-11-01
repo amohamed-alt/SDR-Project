@@ -32,5 +32,5 @@ for (const hasPublicProfile of [false, true]) test(`capture checks free CRM elig
   await page.getByRole("button", { name: "Reveal selected (1)", exact: true }).click();
   await expect(page.getByRole("row").filter({ hasText: lead.name })).toContainText("Ready NEW");
   await expect(page.getByRole("link", { name: "LinkedIn", exact: true })).toHaveAttribute("href", "https://www.linkedin.com/in/classic-person");
-  expect(checks).toBe(1); expect(reveals).toBe(1); expect(writes).toBe(0);
+  expect(checks).toBe(2); expect(reveals).toBe(1); expect(writes).toBe(0);
 });

@@ -419,7 +419,7 @@ export function SalesNavPipelineV2() {
 
   const selectable = visible.filter((row) => (row.stage === "ready" && readyPhone(row)) || row.stage === "needs-reveal");
   const allSelected = selectable.length > 0 && selectable.every((row) => selected.has(row.key));
-  const selectedReveal = rows.filter((row) => selected.has(row.key) && row.stage === "needs-reveal" && !isExistingPerson(row)).length;
+  const selectedReveal = rows.filter((row) => selected.has(row.key) && row.stage === "needs-reveal" && publicPersonProfile(row.lead.linkedinUrl) && !isExistingPerson(row) && !blockedCompany(row)).length;
   const selectedPush = rows.filter((row) => selected.has(row.key) && row.stage === "ready" && readyPhone(row) && !isExistingPerson(row)).length;
   const ownerName = owners.find((owner) => owner.id === ownerId)?.name || "—";
   function toggleVisible() { setSelected((current) => { const next = new Set(current); for (const row of selectable) { if (allSelected) next.delete(row.key); else next.add(row.key); } return next; }); }
