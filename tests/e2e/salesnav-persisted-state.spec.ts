@@ -6,11 +6,11 @@ test('reload restores revealed phones, no-phone results and completed pushes wit
  await page.request.post('/api/sdr-admin',{data:{password:'playwright-tools-only-password'}});
  let paid=0,checks=0,metadataChanged=false;
  const leads=[baseLead,{...baseLead,name:'Saved Pushed Person',salesLeadUrl:'https://www.linkedin.com/sales/lead/PERSIST2',linkedinUrl:'https://www.linkedin.com/in/saved-pushed-person'},{...baseLead,name:'Saved No Phone Person',salesLeadUrl:'https://www.linkedin.com/sales/lead/PERSIST3',linkedinUrl:'https://www.linkedin.com/in/saved-no-phone-person'}];
- const states=leads.map((lead,index)=>({prospect:{fullName:lead.name,company:lead.company,linkedinUrl:lead.linkedinUrl,phone:index<2?`+96279123456${index}`:''},revealStatus:'completed',...(index===1?{lastPushAt:'2026-10-17T09:00:00Z',taskId:'saved-task-2'}:{})}));
+ const states=leads.map((lead,index)=>({prospect:{fullName:lead.name,company:lead.company,linkedinUrl:lead.linkedinUrl,companyDomain:'example.com',phone:index<2?`+96279123456${index}`:''},revealStatus:'completed',...(index===1?{lastPushAt:'2026-10-17T09:00:00Z',taskId:'saved-task-2'}:{})}));
  await page.route('**/api/prospecting/salesnav/full-run*',route=>route.fulfill({json:{run:{...run,leads:leads.map(lead=>({...lead,title:metadataChanged?'Updated HR Director':lead.title})),leadStates:states},history:[run]}}));
  await page.route('**/api/prospecting/salesnav/companion',route=>route.fulfill({json:{ok:true,paired:true,unlocked:true,latestFullRun:run}}));
  await page.route('**/api/prospecting/salesnav/task-options',route=>route.fulfill({json:{owners:[]}}));
- await page.route('**/api/prospecting/salesnav/precheck-v2',route=>{checks++;return route.fulfill({json:{contact:{inHubSpot:false},company:{inHubSpot:false,protected:false}}});});
+ await page.route('**/api/prospecting/salesnav/precheck-v2',route=>{checks++;expect(route.request().postDataJSON().companyDomain).toBe('example.com');return route.fulfill({json:{contact:{inHubSpot:false},company:{inHubSpot:false,protected:false}}});});
  await page.route(/\/api\/prospecting\/salesnav\/(reveal-fast|push-ready-v2)/,route=>{paid++;return route.fulfill({status:500,json:{error:'No paid or CRM actions in this test'}});});
  await page.goto('/signalhire-queue');
  const ready=page.getByRole('row').filter({hasText:'Saved Ready Person'}),pushed=page.getByRole('row').filter({hasText:'Saved Pushed Person'}),noPhone=page.getByRole('row').filter({hasText:'Saved No Phone Person'});
