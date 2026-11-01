@@ -13,7 +13,7 @@ test("classic capture checks people immediately without requiring profile reads"
   await page.route("**/api/prospecting/salesnav/reveal-fast", route => { reveals += 1; return route.fulfill({ status: 500, json: { error: "Paid requests must not run in this fixture." } }); });
   await page.goto("/signalhire-queue");
   await page.getByRole("button", { name: "HubSpot Check", exact: true }).click();
-  await expect(page.getByRole("table").getByText("Needs reveal", { exact: true })).toBeVisible();
+  await expect(page.getByRole("table").getByText("Needs profile URL", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Reveal selected (0)", exact: true })).toBeDisabled();
   await expect(page.getByText("Missing public profile URLs: 1", { exact: true })).toHaveCount(0);
   expect(reveals).toBe(0);
@@ -103,9 +103,10 @@ test("HubSpot checks all 100 captured people without skipping missing URLs or hi
   releaseLast();
   await expect(page.getByText("HubSpot: 99/100 checked · 1 failed. Eligible people need a public profile URL before contact reveal.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /^All 100$/ })).toHaveAttribute("data-active", "true");
-  await expect(page.getByRole("table").getByText("Needs reveal", { exact: true })).toHaveCount(95);
+  await expect(page.getByRole("table").getByText("Needs reveal", { exact: true })).toHaveCount(4);
+  await expect(page.getByRole("button", { name: /^Needs profile 91$/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /^Blocked 4$/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Review 1$/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Review 92$/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Reveal selected (0)", exact: true })).toBeDisabled();
   await expect(page.getByRole("row").filter({ hasText: "Check Person 99" })).toContainText("HubSpot unavailable");
   expect(paidActions).toBe(0);

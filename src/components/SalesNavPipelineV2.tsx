@@ -24,12 +24,12 @@ type CompanyCheck = {
 type Precheck = { contact: ContactCheck; company: CompanyCheck; checkedAt?: string };
 type Prospect = Record<string, unknown> & {
   fullName?: string; title?: string; company?: string; location?: string; linkedinUrl?: string;
-  phone?: string; phones?: string[]; email?: string; emails?: string[]; detectedAts?: string; careerPageUrl?: string; companyDomain?: string;
+  phone?: string; mobilephone?: string; phones?: string[]; email?: string; emails?: string[]; detectedAts?: string; careerPageUrl?: string; companyDomain?: string;
 };
 type Stage = "awaiting-profile" | "needs-profile" | "pending" | "checking" | "blocked" | "needs-reveal" | "revealing" | "ready" | "no-phone" | "pushed" | "error";
 type Row = { key: string; lead: Lead; stage: Stage; precheck?: Precheck; prospect?: Prospect; error?: string; message?: string; cachedReveal?: boolean; revealStatus?: string; resumeContactId?: string; pushRetryable?: boolean };
 type Owner = { id: string; name: string };
-type View = "ready" | "needs-reveal" | "blocked" | "pushed" | "review" | "all";
+type View = "ready" | "needs-profile" | "needs-reveal" | "blocked" | "pushed" | "review" | "all";
 
 function keyFor(lead: Lead) { return lead.salesLeadUrl || lead.linkedinUrl || `${lead.name}:${lead.company}`; }
 function unique(values: unknown[]) {
@@ -38,7 +38,7 @@ function unique(values: unknown[]) {
     const key = value.toLowerCase(); if (!value || seen.has(key)) return false; seen.add(key); return true;
   });
 }
-function prospectPhones(row: Row) { return unique([row.prospect?.phone, ...(Array.isArray(row.prospect?.phones) ? row.prospect?.phones || [] : [])]); }
+function prospectPhones(row: Row) { return unique([row.prospect?.phone, row.prospect?.mobilephone, ...(Array.isArray(row.prospect?.phones) ? row.prospect?.phones || [] : [])]); }
 function readyPhone(row: Row) { return prospectPhones(row)[0] || ""; }
 function existingEmail(row: Row) { return String(row.precheck?.contact.properties?.email || "").trim(); }
 function isRetention(row: Row) { return String(row.precheck?.company.accountType || "").trim().toLowerCase() === "retention"; }
@@ -67,7 +67,7 @@ function checkedStage(row: Row, checked: Precheck): Stage {
   if (row.revealStatus === "pending" || row.revealStatus === "uncertain") return "error";
   if (readyPhone(row)) return "ready";
   if (row.revealStatus === "no-result" || row.revealStatus === "completed" || row.stage === "no-phone") return "no-phone";
-  return "needs-reveal";
+  return publicPersonProfile(row.lead.linkedinUrl) ? "needs-reveal" : "needs-profile";
 }
 
 function tomorrowLocal() {
@@ -401,12 +401,13 @@ export function SalesNavPipelineV2() {
     callsEligible: rows.filter((row) => !isExistingPerson(row) && !blockedCompany(row) && (row.precheck?.company.connectedCallCount || 0) > 0 && (row.precheck?.company.meetingCount || 0) === 0).length,
     pushed: rows.filter((row) => row.stage === "pushed").length,
     review: rows.filter((row) => row.stage === "awaiting-profile" || row.stage === "needs-profile" || row.stage === "error" || row.stage === "no-phone").length,
-    profiles: rows.filter((row) => !publicPersonProfile(row.lead.linkedinUrl) && row.stage !== "pushed").length,
+    profiles: rows.filter((row) => row.stage === "needs-profile").length,
   }), [rows]);
 
   const visible = useMemo(() => {
     const term = query.trim().toLowerCase();
     return rows.filter((row) => {
+      if (view === "needs-profile" && row.stage !== "needs-profile") return false;
       if (view === "ready" && (row.stage !== "ready" || isExistingPerson(row))) return false;
       if (view === "needs-reveal" && (row.stage !== "needs-reveal" || isExistingPerson(row))) return false;
       if (view === "blocked" && row.stage !== "blocked") return false;
@@ -432,14 +433,15 @@ export function SalesNavPipelineV2() {
     {error && <div className={styles.error}><CircleAlert size={15}/>{error}</div>}{message && <div className={styles.notice}><CheckCircle2 size={15}/>{message}</div>}
     {(loading || processing || revealing || pushing) && <div className={styles.progress}><LoaderCircle className={styles.spin} size={15}/>{loading ? "Loading…" : `${progress.label} ${progress.done}/${progress.total}`}</div>}
 
-    <details><summary>Optional profile tools</summary><SalesNavCollectorControls runId={run?.id || ""} missing={rows.filter(row => !publicPersonProfile(row.lead.linkedinUrl)).length} captureLocked={processing || revealing || pushing} readLocked={revealing || pushing}/></details>
+    <details open={view === "needs-profile" || undefined}><summary>Profile URL reader</summary><SalesNavCollectorControls runId={run?.id || ""} missing={rows.filter(row => !publicPersonProfile(row.lead.linkedinUrl)).length} captureLocked={processing || revealing || pushing} readLocked={revealing || pushing}/></details>
       <section className={styles.runBar}><div className={styles.runSelect}><label>Search history</label><select aria-label="Search history" value={run?.id || ""} onChange={(event) => void loadRun(event.target.value)} disabled={loading || processing || revealing || pushing}>{history.map((item) => <option key={item.id} value={item.id}>{runLabel(item)}</option>)}</select><small>{run ? `${run.pagesRead} pages · ${run.total} unique leads · ${run.complete ? run.stopReason || "completed" : "capture can resume"} · Companion ${run.clientVersion || "version unknown"}` : "No run loaded"}</small></div><div className={styles.runActions}><button onClick={() => void loadRun(run?.id || "")} disabled={loading || processing || revealing || pushing}><RefreshCw size={14}/>Reload</button><button onClick={exportRunCsv} disabled={loading || !run?.complete || !rows.length} title={run?.complete ? "Download all captured leads in this run, including available enrichment and checks" : "Capture is still running; export unlocks when the batch is saved"}><Download size={14}/>Export CSV ({rows.length})</button><button className={styles.primary} onClick={() => void runPrecheck()} disabled={!rows.length || loading || processing || revealing || pushing}><ShieldCheck size={14}/>HubSpot Check</button>{run?.sourceUrl && <a href={run.sourceUrl} target="_blank" rel="noreferrer">Open Sales Nav <ExternalLink size={11}/></a>}</div></section>
 
+    {counts.profiles > 0 && <div className={styles.notice}><CircleAlert size={15}/>{counts.profiles} people need a public LinkedIn URL before Reveal. Open Needs profile and use the profile URL reader. Reading URLs uses no contact credits.</div>}
     <section className={styles.metrics}><article><UsersRound size={16}/><span>Saved</span><strong>{counts.total}</strong></article><article><Phone size={16}/><span>Ready · NEW + phone</span><strong>{counts.ready}</strong></article><article><Sparkles size={16}/><span>Needs reveal</span><strong>{counts.reveal}</strong></article><article><ShieldCheck size={16}/><span>Blocked</span><strong>{counts.blocked}</strong></article><article><UserRoundCheck size={16}/><span>Retention</span><strong>{counts.retention}</strong></article><article><UserRoundCheck size={16}/><span>Existing people</span><strong>{counts.existingPeople}</strong></article><article><CheckCircle2 size={16}/><span>Calls · no meeting</span><strong>{counts.callsEligible}</strong></article><article><Send size={16}/><span>Pushed</span><strong>{counts.pushed}</strong></article></section>
 
     <section className={styles.dispatch}><div><label>Task owner</label><select disabled={pushing} value={ownerId} onChange={(event) => setOwnerId(event.target.value)}>{owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}</select></div><div><label>Due date</label><input disabled={pushing} type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)}/></div><div><label>Time</label><input disabled={pushing} type="time" value={dueTime} onChange={(event) => setDueTime(event.target.value)}/></div><div className={styles.dispatchSummary}><CalendarClock size={15}/><span>CALL tasks → <b>{ownerName}</b> → {dueDate} {dueTime}</span></div><button className={styles.revealButton} disabled={!selectedReveal || loading || processing || revealing || pushing} onClick={() => void revealSelected()}><Sparkles size={14}/>Reveal selected ({selectedReveal})</button><button className={styles.pushButton} disabled={!selectedPush || loading || processing || revealing || pushing} onClick={() => void pushSelected()}><Send size={14}/>Push NEW Ready + Tasks ({selectedPush})</button></section>
 
-    <section className={styles.toolbar}><div className={styles.tabs}><button data-active={view === "ready"} onClick={() => setView("ready")}>Ready NEW <b>{counts.ready}</b></button><button data-active={view === "needs-reveal"} onClick={() => setView("needs-reveal")}>Need reveal <b>{counts.reveal}</b></button><button data-active={view === "blocked"} onClick={() => setView("blocked")}>Blocked <b>{counts.blocked}</b></button><button data-active={view === "pushed"} onClick={() => setView("pushed")}>Pushed <b>{counts.pushed}</b></button><button data-active={view === "review"} onClick={() => setView("review")}>Review <b>{counts.review}</b></button><button data-active={view === "all"} onClick={() => setView("all")}>All <b>{counts.total}</b></button></div><label className={styles.search}><Search size={14}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search person, company, status, ATS…"/></label></section>
+    <section className={styles.toolbar}><div className={styles.tabs}><button data-active={view === "ready"} onClick={() => setView("ready")}>Ready NEW <b>{counts.ready}</b></button><button data-active={view === "needs-profile"} onClick={() => setView("needs-profile")}>Needs profile <b>{counts.profiles}</b></button><button data-active={view === "needs-reveal"} onClick={() => setView("needs-reveal")}>Need reveal <b>{counts.reveal}</b></button><button data-active={view === "blocked"} onClick={() => setView("blocked")}>Blocked <b>{counts.blocked}</b></button><button data-active={view === "pushed"} onClick={() => setView("pushed")}>Pushed <b>{counts.pushed}</b></button><button data-active={view === "review"} onClick={() => setView("review")}>Review <b>{counts.review}</b></button><button data-active={view === "all"} onClick={() => setView("all")}>All <b>{counts.total}</b></button></div><label className={styles.search}><Search size={14}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search person, company, status, ATS…"/></label></section>
     <section className={styles.selection}><button onClick={toggleVisible}>{allSelected ? "Unselect visible" : "Select visible"}</button><span><b>{selected.size}</b> selected · {selectedReveal} reveal · {selectedPush} NEW push-ready</span></section>
 
     <section className={styles.tablePanel}><div className={styles.tableHeader}><div><h2>Review queue</h2><p>Existing person or company = block · Government = block · Ready = NEW person and company with phone.</p></div><span>{visible.length} visible</span></div>

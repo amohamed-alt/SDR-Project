@@ -22,13 +22,16 @@ for (const hasPublicProfile of [false, true]) test(`capture checks free CRM elig
   await expect(page.getByRole("button", { name: "HubSpot Check", exact: true })).toBeEnabled();
   await expect(page.getByRole("button", { name: /Read \/ retry/ })).toBeHidden();
   await page.getByRole("button", { name: "HubSpot Check", exact: true }).click();
-  await expect(page.getByRole("row").filter({ hasText: lead.name })).toContainText("Needs reveal");
-  await page.getByRole("button", { name: "Select visible", exact: true }).click();
+  await expect(page.getByRole("row").filter({ hasText: lead.name })).toContainText(hasPublicProfile ? "Needs reveal" : "Needs profile URL");
   if (!hasPublicProfile) {
+    await expect(page.getByRole("button", {name: "Needs profile 1",exact:true})).toBeVisible();
+    await page.getByRole("button", {name: "Needs profile 1",exact:true}).click();
+    await expect(page.getByRole("button", {name:/Read \/ retry/})).toBeVisible();
     await expect(page.getByRole("button", { name: "Reveal selected (0)", exact: true })).toBeDisabled();
     expect(checks).toBe(1); expect(reveals).toBe(0); expect(writes).toBe(0);
     return;
   }
+  await page.getByRole("button", { name: "Select visible", exact: true }).click();
   await page.getByRole("button", { name: "Reveal selected (1)", exact: true }).click();
   await expect(page.getByRole("row").filter({ hasText: lead.name })).toContainText("Ready NEW");
   await expect(page.getByRole("link", { name: "LinkedIn", exact: true })).toHaveAttribute("href", "https://www.linkedin.com/in/classic-person");
