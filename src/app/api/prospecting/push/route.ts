@@ -160,11 +160,12 @@ async function findContact(emails: string[], linkedinUrl: string) {
 }
 
 async function verifyContactPhones(contactId: string, expected: Record<string, string>) {
-  const keys = ["phone", "mobilephone"].filter(key => Boolean(expected[key]));
+  const keys = ["phone", "mobilephone", "gtm_additional_phone_numbers"].filter(key => Boolean(expected[key]));
   if (!keys.length) return;
   const stored = (await batchRead("contacts", [contactId], keys))[0];
   const digits = (value: string) => value.replace(/\D/g, "").replace(/^00/, "");
-  if (!stored || keys.some(key => digits(String(stored.properties[key] || "")) !== digits(expected[key]))) {
+  const normalized = (key: string, value: string) => key === "gtm_additional_phone_numbers" ? value.split(/[;,\n]+/).map(digits).filter(Boolean).join("\n") : digits(value);
+  if (!stored || keys.some(key => normalized(key, String(stored.properties[key] || "")) !== normalized(key, expected[key]))) {
     throw new Error(`Contact ${contactId} was written but phone verification failed. Reconcile before another push.`);
   }
 }
@@ -190,7 +191,7 @@ async function createContact(prospect: Prospect, ownerId: string) {
 }
 
 async function syncMissingContactDetails(contactId: string, prospect: Prospect, ownerId: string) {
-  const current = (await batchRead("contacts", [contactId], ["email", "phone", "mobilephone", "gtm_linkedin_url", "company", "jobtitle", "hubspot_owner_id"]))[0];
+  const current = (await batchRead("contacts", [contactId], ["email", "phone", "mobilephone", "gtm_additional_phone_numbers", "gtm_linkedin_url", "company", "jobtitle", "hubspot_owner_id"]))[0];
   if (!current) throw new Error("The saved HubSpot contact could not be read. Retry after verifying the contact; no new contact was created.");
   const properties: Record<string, string> = {};
   if (prospect.email && !String(current.properties.email || "").trim()) properties.email = prospect.email.toLowerCase();

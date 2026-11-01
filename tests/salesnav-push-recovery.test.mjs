@@ -1,3 +1,4 @@
+import * as phoneDetails from '../src/lib/prospect-phone-details.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -58,7 +59,7 @@ async function fixture(options = {}) {
     '@/lib/saudi-coverage-store': {},
     '@/lib/saudi-ats-policy': {},
     '@/lib/marita-task-scheduler': { createScheduledMaritaTask: () => { throw new Error('Dashboard must not invoke automatic scheduling'); }, MaritaScheduleError: class extends Error {} },
-    '@/lib/prospect-phone-details': { distinctProspectPhones: values => [...new Set(values.filter(Boolean))], missingProspectPhoneProperties: (p, current = {}) => current.phone ? {} : { phone: p.phone } },
+    '@/lib/prospect-phone-details': phoneDetails,
     '@/lib/hubspot': hubspot,
     '@/lib/prospecting-company-intelligence': { normalizeCompanyDomain: () => '' },
     '@/lib/company-dedupe': { normalizedCompanyName: () => '', compatibleCompanyIdentity: () => false },
@@ -221,4 +222,17 @@ test('different people share a company receipt through search-index lag; uncerta
     await attempts.withSalesNavPushAttempt(input, () => attempts.withSalesNavPushCompany('uncertain.com', async (_id, remember) => { await remember(''); }));
     await assert.rejects(attempts.withSalesNavPushAttempt(input, () => attempts.withSalesNavPushCompany('uncertain.com', async () => { throw new Error('must not create'); })), /uncertain/);
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('push preserves primary, explicit mobile and all additional phones before creating a task', async () => {
+  const f = await fixture();
+  try {
+    const result = await f.run({...payload, prospect:{...payload.prospect,phone:'+966112345678',mobilephone:'+966551234567',phones:['+966501234567','+966541234567']}});
+    assert.equal(result.status,200);
+    const stored = f.contacts.get('contact-1').properties;
+    assert.equal(stored.phone,'+966112345678');
+    assert.equal(stored.mobilephone,'+966551234567');
+    assert.equal(stored.gtm_additional_phone_numbers,'+966501234567\n+966541234567');
+    assert.equal(f.tasks.size,1);
+  } finally { await f.cleanup(); }
 });

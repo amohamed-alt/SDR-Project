@@ -56,7 +56,7 @@ function unique(values: unknown[]) {
 }
 
 function prospectPhones(prospect: JsonObject) {
-  return unique([prospect.phone, ...(Array.isArray(prospect.phones) ? prospect.phones : [])]);
+  return unique([prospect.phone, prospect.mobilephone, ...(Array.isArray(prospect.phones) ? prospect.phones : [])]);
 }
 
 function dueIso(value: string) {
