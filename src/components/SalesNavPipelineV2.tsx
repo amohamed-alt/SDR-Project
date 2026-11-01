@@ -83,10 +83,10 @@ async function readJson<T>(response: Response): Promise<T> {
   const text = await response.text(); if (!text.trim()) return {} as T;
   try { return JSON.parse(text) as T; } catch { throw new Error(`Server returned non-JSON: ${text.slice(0, 160)}`); }
 }
-async function fetchPrecheckLead(lead: Lead) {
+async function fetchPrecheckLead(lead: Lead, prospect?: Prospect) {
   const response = await fetch("/api/prospecting/salesnav/precheck-v2", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: lead.name, company: lead.company, linkedinUrl: lead.linkedinUrl, email: "", emails: [], phone: "", phones: [] }),
+    body: JSON.stringify({ name: lead.name, company: lead.company, companyDomain: prospect?.companyDomain || "", linkedinUrl: lead.linkedinUrl, email: prospect?.email || "", emails: prospect?.emails || [], phone: prospect?.phone || "", phones: prospect?.phones || [] }),
     signal: AbortSignal.timeout(90_000),
   });
   const payload = await readJson<Precheck & { error?: string }>(response);
@@ -97,11 +97,11 @@ async function fetchPrecheckLead(lead: Lead) {
 // Manual and streaming checks can overlap. Share only the active request;
 // completed or failed checks are never cached here, so Retry always revalidates.
 const inFlightPrechecks = new Map<string, Promise<Precheck>>();
-function precheckLead(lead: Lead) {
-  const key = JSON.stringify([lead.name, lead.company, lead.linkedinUrl]);
+function precheckLead(lead: Lead, prospect?: Prospect) {
+  const key = JSON.stringify([lead.name, lead.company, lead.linkedinUrl, prospect || null]);
   const existing = inFlightPrechecks.get(key);
   if (existing) return existing;
-  const request = fetchPrecheckLead(lead).finally(() => inFlightPrechecks.delete(key));
+  const request = fetchPrecheckLead(lead, prospect).finally(() => inFlightPrechecks.delete(key));
   inFlightPrechecks.set(key, request);
   return request;
 }
@@ -202,7 +202,7 @@ export function SalesNavPipelineV2() {
             const source = pending.shift()!;
             const lead = source.lead;
             try {
-              const checked = await precheckLead(lead);
+              const checked = await precheckLead(lead, source.prospect);
               if (!active) return;
               setRows(current => current.map(row => row.key === keyFor(lead) ? { ...row, lead, precheck: checked, stage: checkedStage(row, checked), error: undefined } : row));
             } catch (requestError) {
@@ -252,7 +252,7 @@ export function SalesNavPipelineV2() {
         // URLs gate paid reveal, not the free CRM check or its progress counter.
         setRows((current) => current.map((row) => row.key === source.key ? { ...row, stage: "checking", precheck: undefined, error: undefined } : row));
         try {
-          const checked = await precheckLead(source.lead);
+          const checked = await precheckLead(source.lead, source.prospect);
           if (activeRunId.current !== operationRunId) return;
           const stage = checkedStage(source, checked);
           checkedCount += 1;
@@ -265,11 +265,11 @@ export function SalesNavPipelineV2() {
       }
     });
     await Promise.all(workers); setSelected(new Set()); setProcessing(false);
-    setMessage(`HubSpot: ${checkedCount}/${total} checked · ${failedCount} failed. Eligible people can be revealed by public URL or name + company.`);
+    setMessage(`HubSpot: ${checkedCount}/${total} checked · ${failedCount} failed. Eligible people need a public profile URL before contact reveal.`);
   }
 
   async function revealSelected() {
-    const queue = rows.filter((row) => selected.has(row.key) && row.stage === "needs-reveal" && !isExistingPerson(row) && !blockedCompany(row));
+    const queue = rows.filter((row) => selected.has(row.key) && row.stage === "needs-reveal" && publicPersonProfile(row.lead.linkedinUrl) && !isExistingPerson(row) && !blockedCompany(row));
     if (!queue.length || loading || processing || revealing || pushing) return;
     if (!window.confirm(`Reveal ${queue.length} eligible net-new person${queue.length === 1 ? "" : "s"}? First-time successful reveals can consume SignalHire Contact Credits; cached reveals cost 0.`)) return;
     const operationRunId = activeRunId.current;
@@ -419,7 +419,7 @@ export function SalesNavPipelineV2() {
 
   const selectable = visible.filter((row) => (row.stage === "ready" && readyPhone(row)) || row.stage === "needs-reveal");
   const allSelected = selectable.length > 0 && selectable.every((row) => selected.has(row.key));
-  const selectedReveal = rows.filter((row) => selected.has(row.key) && row.stage === "needs-reveal" && !isExistingPerson(row)).length;
+  const selectedReveal = rows.filter((row) => selected.has(row.key) && row.stage === "needs-reveal" && publicPersonProfile(row.lead.linkedinUrl) && !isExistingPerson(row) && !blockedCompany(row)).length;
   const selectedPush = rows.filter((row) => selected.has(row.key) && row.stage === "ready" && readyPhone(row) && !isExistingPerson(row)).length;
   const ownerName = owners.find((owner) => owner.id === ownerId)?.name || "—";
   function toggleVisible() { setSelected((current) => { const next = new Set(current); for (const row of selectable) { if (allSelected) next.delete(row.key); else next.add(row.key); } return next; }); }
@@ -427,7 +427,7 @@ export function SalesNavPipelineV2() {
   if (unauthorized) return <main className={styles.page}><div className={styles.shell}><section className={styles.warning}><CircleAlert size={18}/><div><strong>Sales Nav setup is locked.</strong><span>Unlock Companion setup on this browser, then return to the queue.</span><Link href="/salesnav-prospecting">Open Companion setup</Link></div></section></div></main>;
 
   return <main className={styles.page}><div className={styles.shell}>
-    <header className={styles.header}><div><Link href="/" className={styles.back}><ArrowLeft size={15}/>SDR Command Center</Link><span className={styles.eyebrow}><ShieldCheck size={14}/>SALES NAV → HUBSPOT → SIGNALHIRE</span><h1>Persistent Prospecting Queue</h1><p>Ready to Push = NEW person only + eligible company + phone. Existing companies are allowed unless Retention or they already have a meeting.</p></div><div className={styles.headerStats}><span><History size={13}/>{history.length} saved runs</span><span><Phone size={13}/>{counts.ready} new phone-ready</span></div></header>
+    <header className={styles.header}><div><Link href="/" className={styles.back}><ArrowLeft size={15}/>SDR Command Center</Link><span className={styles.eyebrow}><ShieldCheck size={14}/>SALES NAV → HUBSPOT → SIGNALHIRE</span><h1>Persistent Prospecting Queue</h1><p>Ready to Push = NEW person only + NEW company + suitable phone. Every company already in HubSpot is excluded before reveal and Push.</p></div><div className={styles.headerStats}><span><History size={13}/>{history.length} saved runs</span><span><Phone size={13}/>{counts.ready} new phone-ready</span></div></header>
     {newRunNotice && <div className={styles.notice}>{newRunNotice}<button disabled={loading || processing || revealing || pushing} onClick={() => void loadRun(newRunId)}>Open new capture</button></div>}
     {error && <div className={styles.error}><CircleAlert size={15}/>{error}</div>}{message && <div className={styles.notice}><CheckCircle2 size={15}/>{message}</div>}
     {(loading || processing || revealing || pushing) && <div className={styles.progress}><LoaderCircle className={styles.spin} size={15}/>{loading ? "Loading…" : `${progress.label} ${progress.done}/${progress.total}`}</div>}
@@ -442,7 +442,7 @@ export function SalesNavPipelineV2() {
     <section className={styles.toolbar}><div className={styles.tabs}><button data-active={view === "ready"} onClick={() => setView("ready")}>Ready NEW <b>{counts.ready}</b></button><button data-active={view === "needs-reveal"} onClick={() => setView("needs-reveal")}>Need reveal <b>{counts.reveal}</b></button><button data-active={view === "blocked"} onClick={() => setView("blocked")}>Blocked <b>{counts.blocked}</b></button><button data-active={view === "pushed"} onClick={() => setView("pushed")}>Pushed <b>{counts.pushed}</b></button><button data-active={view === "review"} onClick={() => setView("review")}>Review <b>{counts.review}</b></button><button data-active={view === "all"} onClick={() => setView("all")}>All <b>{counts.total}</b></button></div><label className={styles.search}><Search size={14}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search person, company, status, ATS…"/></label></section>
     <section className={styles.selection}><button onClick={toggleVisible}>{allSelected ? "Unselect visible" : "Select visible"}</button><span><b>{selected.size}</b> selected · {selectedReveal} reveal · {selectedPush} NEW push-ready</span></section>
 
-    <section className={styles.tablePanel}><div className={styles.tableHeader}><div><h2>Review queue</h2><p>Existing person = block · Retention = block · Meeting = block · Connected call without meeting = eligible · Ready = NEW person with phone.</p></div><span>{visible.length} visible</span></div>
+    <section className={styles.tablePanel}><div className={styles.tableHeader}><div><h2>Review queue</h2><p>Existing person or company = block · Government = block · Ready = NEW person and company with phone.</p></div><span>{visible.length} visible</span></div>
     <div className={styles.tableWrap}><table><thead><tr><th/><th>Person</th><th>Company</th><th>HubSpot gate</th><th>Contact</th><th>ATS / Career</th><th>Status</th></tr></thead><tbody>
       {visible.map((row) => { const company = row.precheck?.company; const phone = readyPhone(row); const canSelect = (row.stage === "ready" && Boolean(phone)) || row.stage === "needs-reveal"; const ats = String(row.prospect?.detectedAts || company?.detectedAts || ""); const career = String(row.prospect?.careerPageUrl || company?.careerPageUrl || ""); return <tr key={row.key} data-blocked={row.stage === "blocked"}><td><input type="checkbox" disabled={!canSelect} checked={selected.has(row.key)} onChange={() => setSelected((current) => { const next = new Set(current); if (next.has(row.key)) next.delete(row.key); else next.add(row.key); return next; })}/></td><td><strong>{String(row.prospect?.fullName || row.lead.name)}</strong><span>{String(row.prospect?.title || row.lead.title || "—")}</span><small>{String(row.prospect?.location || row.lead.location || "—")}</small><div className={styles.links}>{row.lead.salesLeadUrl && <a href={row.lead.salesLeadUrl} target="_blank" rel="noreferrer">Sales Nav <ExternalLink size={10}/></a>}{(row.prospect?.linkedinUrl || row.lead.linkedinUrl) && <a href={String(row.prospect?.linkedinUrl || row.lead.linkedinUrl)} target="_blank" rel="noreferrer">LinkedIn <ExternalLink size={10}/></a>}</div>{!publicPersonProfile(row.lead.linkedinUrl) && row.lead.salesLeadUrl && <div className={styles.profileRepair}>{repairKey === row.key ? <><label>Public LinkedIn URL for {row.lead.name}<input type="url" aria-label={`Public LinkedIn URL for ${row.lead.name}`} placeholder="https://www.linkedin.com/in/…" value={repairUrl} onChange={event => setRepairUrl(event.target.value)}/></label><button onClick={() => void repairProfile(row)} disabled={repairing || !publicPersonProfile(repairUrl)}>Save profile URL</button><button onClick={() => setRepairKey("")} disabled={repairing}>Cancel</button></> : <button onClick={() => { setRepairKey(row.key); setRepairUrl(""); }} disabled={processing || revealing || pushing}>Add profile URL</button>}</div>}</td><td><strong>{String(row.prospect?.company || company?.name || row.lead.company || "—")}</strong><span>{String(row.prospect?.companyDomain || company?.domain || "")}</span><small>{company?.inHubSpot ? `${company.accountType || "Existing"}${company.accountStatus ? ` · ${company.accountStatus}` : ""}` : row.precheck ? "Net-new company" : "Not checked"}</small></td><td>{row.stage === "checking" ? <span className={styles.badge}><LoaderCircle className={styles.spin} size={11}/>Checking</span> : blockedCompany(row) || isExistingPerson(row) ? <><span className={styles.blockedBadge}><ShieldCheck size={11}/>Blocked</span><small>{company?.protectedReason || "Existing HubSpot person"}</small></> : row.precheck ? <><span className={styles.goodBadge}><CheckCircle2 size={11}/>Eligible</span><small>{company?.gateReason || "No blocker found"}</small></> : <span>Pending</span>}</td><td>{phone ? <strong className={styles.phone}><Phone size={11}/>{phone}</strong> : <span>No phone yet</span>}<small>{String(row.prospect?.email || existingEmail(row) || "") || (isExistingPerson(row) ? "Existing HubSpot contact" : "")}</small></td><td><strong>{ats || "—"}</strong>{career && <a href={career} target="_blank" rel="noreferrer">Career <ExternalLink size={10}/></a>}<small>{row.prospect && !ats && !career ? "Deferred for faster reveal" : ""}</small></td><td><strong>{row.stage === "awaiting-profile" ? "Awaiting profile read" : row.stage === "needs-profile" ? "Needs profile URL" : row.stage === "ready" ? row.pushRetryable && row.resumeContactId ? "Resume Push" : "Ready NEW" : row.stage === "needs-reveal" ? "Needs reveal" : row.stage === "revealing" ? "Revealing" : row.stage === "no-phone" ? "No phone" : row.stage === "pushed" ? "Pushed" : row.stage === "blocked" ? "Blocked" : row.stage === "error" ? "Error" : row.stage}</strong><small>{row.stage === "awaiting-profile" ? "Use Read / retry missing URLs above; see collector progress and per-person errors here." : row.stage === "needs-profile" ? "Use Read / retry missing URLs above before reveal. No contact credits used." : row.error || row.message || (row.cachedReveal ? "Cached reveal · 0 credit" : "")}</small></td></tr>; })}
       {!visible.length && <tr><td colSpan={7}><div className={styles.empty}>{loading ? "Loading…" : "No rows in this view."}</div></td></tr>}

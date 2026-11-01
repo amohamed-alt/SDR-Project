@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     const forwarded = new NextRequest(new URL("/api/prospecting/signalhire/precheck", request.url), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, strictNetNewCompany: true }),
     });
     const response = await basePrecheck(forwarded);
     const payload = await jsonFrom(response);
@@ -35,6 +35,9 @@ export async function POST(request: NextRequest) {
     const rawCompany = (payload.company && typeof payload.company === "object" ? payload.company : {}) as JsonObject;
     const company: JsonObject = { ...rawCompany };
 
+    if (typeof contact.inHubSpot !== "boolean" || typeof company.inHubSpot !== "boolean") {
+      throw new Error("Incomplete CRM identity check. Reveal and Push remain disabled.");
+    }
     const existingPerson = Boolean(contact.inHubSpot);
     const companyExists = Boolean(company.inHubSpot);
     const retention = normalize(company.accountType) === "retention";
@@ -43,7 +46,8 @@ export async function POST(request: NextRequest) {
     const communicationUnknown = companyExists && company.engagementChecked === false;
 
     // Canonical safety policy for Meeting Creator and Sales Navigator:
-    // Protect existing people, Retention accounts, meetings and any connected call.
+    // Strict prospecting excludes every existing company and person.
+    // Recovery retains fresh engagement evidence for an already started write.
     // Reactivation is only a candidate after unsuccessful attempts, with a
     // different verified decision maker and no open owner follow-up.
     // A separate CRM task check is still required before final execution.
@@ -51,6 +55,14 @@ export async function POST(request: NextRequest) {
       company.protected = true;
       company.protectedReason = `Existing HubSpot person${contact.matchedBy ? ` · matched by ${String(contact.matchedBy)}` : ""} — Ready to Push is for net-new people only.`;
       company.gateReason = "Existing person blocked";
+    } else if (companyExists) {
+      company.protected = true;
+      company.protectedReason = "Existing HubSpot company — strict net-new company prospecting excludes every CRM company before reveal or Push.";
+      company.gateReason = "Existing company blocked";
+    } else if (/(^|\.)gov\.sa$/i.test(String(company.domain || ""))) {
+      company.protected = true;
+      company.protectedReason = "Government account — excluded from this Saudi private-sector campaign.";
+      company.gateReason = "Government blocked";
     } else if (retention) {
       company.protected = true;
       company.protectedReason = "Retention account — excluded from acquisition / SDR prospecting.";
@@ -86,7 +98,7 @@ export async function POST(request: NextRequest) {
         retention: "blocked",
         meeting: "blocked",
         connectedCallWithoutMeeting: "blocked",
-        existingCompanyNoCommunication: "eligible",
+        existingCompanyNoCommunication: "blocked",
       },
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

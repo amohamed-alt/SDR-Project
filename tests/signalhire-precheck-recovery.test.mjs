@@ -106,3 +106,22 @@ test('property metadata outage falls back to the existing LinkedIn searches', as
   assert.equal(result.body.contact.id, 'contact-1');
   assert.equal(result.body.contact.matchedBy, 'linkedin:hs_linkedin_url');
 });
+
+
+test('strict company-first screening skips contact searches and relationship scans for CRM companies', async () => {
+  const f = fixture({ failFirstEngagement: true });
+  const result = await f.post({ strictNetNewCompany: true });
+  assert.equal(result.body.company.inHubSpot, true);
+  assert.equal(result.body.company.protected, true);
+  assert.equal(result.body.company.gateReason, 'Existing company blocked');
+  assert.equal(result.body.contact.checked, false);
+  assert.equal(f.calls.search.filter(call => call.object === 'contacts').length, 0);
+  assert.equal(f.calls.associations.length, 0);
+});
+
+test('a final strict recovery check retains fresh engagement and person checks', async () => {
+  const f = fixture({ failFirstEngagement: true });
+  await f.post({ strictNetNewCompany: true, freshCompanyEngagement: true });
+  assert.ok(f.calls.search.some(call => call.object === 'contacts'));
+  assert.ok(f.calls.associations.length > 0);
+});

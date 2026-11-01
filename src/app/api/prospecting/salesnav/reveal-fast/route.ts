@@ -55,7 +55,6 @@ async function postRevealCheck(request: NextRequest, lead: z.infer<typeof schema
     emails: prospect.emails || [],
     phone: prospect.phone || "",
     phones: prospect.phones || [],
-    freshCompanyEngagement: true,
   }));
   const payload = await jsonFrom(response);
   if (!response.ok) throw new Error(String(payload.error || "HubSpot post-reveal check failed."));
@@ -68,8 +67,8 @@ export async function POST(request: NextRequest) {
     if (!parsed.success) return NextResponse.json({ error: "Invalid Sales Nav reveal payload." }, { status: 400 });
     const { lead, runId } = parsed.data;
     const publicProfile = normalizePersonUrl(lead.linkedinUrl);
-    if (lead.linkedinUrl && !publicProfile) return NextResponse.json({ error: "Invalid public LinkedIn profile URL. Clear it to use name + company search.", creditUsed: false }, { status: 422 });
-    if (!publicProfile && !lead.company) return NextResponse.json({ error: "Company is required for name + company search. No contact credits were used.", creditUsed: false }, { status: 422 });
+    if (lead.linkedinUrl && !publicProfile) return NextResponse.json({ error: "Invalid public LinkedIn profile URL. Read the matching public profile before reveal.", creditUsed: false }, { status: 422 });
+    if (!publicProfile) return NextResponse.json({ error: "Read the public LinkedIn profile URL before regular contact reveal. No contact credits were used.", creditUsed: false }, { status: 422 });
     lead.linkedinUrl = publicProfile;
 
     const previous = await lookupSalesNavLead(lead);

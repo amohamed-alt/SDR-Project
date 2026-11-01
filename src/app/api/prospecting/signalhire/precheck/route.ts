@@ -26,6 +26,7 @@ const schema = z.object({
   phone: z.string().trim().max(120).default(""),
   phones: z.array(z.string().trim().max(120)).max(20).default([]),
   freshCompanyEngagement: z.boolean().default(false),
+  strictNetNewCompany: z.boolean().default(false),
 });
 
 type EngagementCheck = {
@@ -343,6 +344,24 @@ async function companyCheck(input: z.infer<typeof schema>) {
   const accountType = String(p.account_type || "").trim();
   const accountStatus = String(p.account_status || "").trim();
   const openDeals = Math.max(0, Number(p.hs_num_open_deals || 0) || 0);
+  // A known CRM company is already excluded in strict prospecting. Avoid
+  // scanning contacts/calls/meetings merely to rediscover the same exclusion.
+  // Final execution checks still read engagement for partial-write recovery.
+  if (input.strictNetNewCompany && !input.freshCompanyEngagement) {
+    return {
+      inHubSpot: true, id: String(match.id), matchedBy,
+      name: String(p.name || input.company), domain: String(p.domain || domain),
+      accountType, accountStatus, openDeals, ownerId: String(p.hubspot_owner_id || ""),
+      searchStatus: String(p.search_status || ""), detectedAts: String(p.detected_ats || ""),
+      atsStatus: String(p.ats_status || ""), careerPageUrl: String(p.career_page_url || ""),
+      leadStatus: String(p.hs_lead_status || ""), engagementChecked: false,
+      engagementError: "", engaged: false, connectedCallCount: 0, meetingCount: 0,
+      latestConnectedCallAt: "", latestMeetingAt: "", latestEngagementAt: "",
+      recentConnectedCall: false, connectedCallAgeDays: null, engagementReason: "Not scanned: CRM company excluded",
+      protected: true, protectedReason: "Existing HubSpot company — excluded before contact reveal.",
+      gateReason: "Existing company blocked",
+    };
+  }
   const engagement = await companyEngagementCheck(String(match.id), input.freshCompanyEngagement);
   const isRetention = retentionAccount(accountType);
   const engagementUnknown = !engagement.checked;
@@ -408,10 +427,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Missing person name — review before Push." }, { status: 422 });
     }
 
-    const [contact, company] = await Promise.all([
-      contactCheck(parsed.data),
-      companyCheck(parsed.data),
-    ]);
+    // Company-first strict checks avoid spending contact searches and full
+    // relationship scans on an account that cannot enter this prospecting run.
+    const strictCompany = parsed.data.strictNetNewCompany && !parsed.data.freshCompanyEngagement
+      ? await companyCheck(parsed.data) : null;
+    const [contact, company] = strictCompany
+      ? [strictCompany.inHubSpot
+          ? { inHubSpot: false, id: "", matchedBy: "not-checked-company-blocked", properties: {}, checked: false }
+          : await contactCheck(parsed.data), strictCompany]
+      : await Promise.all([contactCheck(parsed.data), companyCheck(parsed.data)]);
 
     return NextResponse.json({
       contact,
