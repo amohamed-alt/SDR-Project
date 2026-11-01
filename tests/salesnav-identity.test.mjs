@@ -99,16 +99,12 @@ test('both push routes reject a same-company colleague before any CRM access or 
 
 
 
-test('classic name + company reveal works without per-profile URL capture and reuses cached results', async () => {
-  const requestLead = { ...lead, linkedinUrl: '' };
-  const fresh = revealFixture();
-  assert.equal((await fresh.run({ lead: requestLead })).status, 200);
-  assert.deepEqual(fresh.calls, ['lookup', 'save-attempt', 'crm-check', 'provider', 'save-result', 'crm-check']);
-  const cached = revealFixture({ cached: { revealAttemptedAt: 'now', cachedProspect: prospect } });
-  const result = await cached.run({ lead: requestLead });
-  assert.equal(result.status, 200); assert.equal(result.data.creditUsed, false);
-  assert.deepEqual(cached.calls, ['lookup', 'crm-check']);
-  const missingCompany = revealFixture();
-  assert.equal((await missingCompany.run({ lead: { ...requestLead, company: '' } })).status, 422);
-  assert.deepEqual(missingCompany.calls, []);
+test('missing public profile URL never reaches lookup or paid contact reveal', async () => {
+  for (const cached of [null, { revealAttemptedAt: 'now', cachedProspect: prospect }]) {
+    const f = revealFixture({ cached });
+    const result = await f.run({ lead: { ...lead, linkedinUrl: '' } });
+    assert.equal(result.status, 422);
+    assert.equal(result.data.creditUsed, false);
+    assert.deepEqual(f.calls, []);
+  }
 });
