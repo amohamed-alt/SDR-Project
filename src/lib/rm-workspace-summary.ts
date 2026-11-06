@@ -24,12 +24,12 @@ export function latestAccountUpdate(group: JourneyRow[], rmId: string, now: stri
   const updates: Update[] = [];
   for (const row of group) {
     for (const event of row.followups) {
-      if (event.ownerId === rmId || event.participantIds?.includes(rmId)) {
-        updates.push({ title: event.type, text: event.type === 'Call attempt' ? 'Recorded call attempt. Connection is not confirmed.' : 'Recorded RM outreach', at: event.at });
+      if (!rmId || event.ownerId === rmId || event.participantIds?.includes(rmId)) {
+        updates.push({ title: event.type, text: event.type === 'Call attempt' ? 'Recorded call attempt. Connection is not confirmed.' : rmId ? 'Recorded RM outreach' : 'Recorded account outreach', at: event.at });
       }
     }
     if (row.notes || row.summary) updates.push({ title: 'Meeting record updated', text: plain(row.notes || row.summary), at: row.version });
-    for (const deal of row.deals.filter(d => d.ownerId === rmId)) {
+    for (const deal of row.deals.filter(d => !rmId || d.ownerId === rmId)) {
       const text = plain(deal.properties.deal_update_rm_notes || deal.properties.deal_next_step || deal.properties.next_steps_planned_by_rm);
       updates.push({ title: 'Deal record updated', text: text || `${deal.name} · ${deal.stage}`, at: String(deal.properties.hs_lastmodifieddate || '') });
     }
