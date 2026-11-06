@@ -569,3 +569,5 @@
   .sidebarTools .toolItem { min-height: 44px; }
   .toolContent { padding-top: 64px; }
 }
+
+.rmNavigation{margin:18px 0}.rmNavigation>a{display:flex;align-items:center;gap:12px;padding:15px 13px;background:#123f42;border:1px solid #3b7777;border-radius:12px;color:#fff;text-decoration:none}.rmNavigation>a>span:first-of-type{flex:1}.rmNavigation strong{display:block;font-size:14px}.rmNavigation small{display:block;font-size:11px;color:#c0dddb;margin-top:5px}.rmNavigation>a:hover{background:#1b5355}.rmNavigation>a:focus-visible{outline:3px solid #75c5bd;outline-offset:3px}

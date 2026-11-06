@@ -190,6 +190,7 @@ export function Dashboard({
     ["Company Repair", "Evidence-backed HubSpot property fixes"],
   ] as const;
 
+  const revenueNavigation = <>{workspaceNavigation}<section className={styles.rmNavigation} aria-label="Relationship management"><div className="nav-label">RELATIONSHIP MANAGEMENT</div><Link href="/rm"><BriefcaseBusiness size={21}/><span><strong>RM workspace</strong><small>Latest updates & open deals</small></span><span aria-hidden="true">↗</span></Link></section></>;
   // Render inside both sidebar layouts; navigation must never depend on a popup.
   const sidebarTools = <section className={styles.sidebarTools} aria-label="SDR Tools">
     <div className={styles.toolsTitle}>SDR TOOLS · {adminUnlocked ? "UNLOCKED" : "PASSWORD PROTECTED"}</div>
@@ -202,7 +203,6 @@ export function Dashboard({
               <span className={`${styles.toolIcon} ${styles.gtmIcon}`}><BriefcaseBusiness size={17}/></span>
               <span className={styles.toolCopy}><strong>Sales Handoff</strong><small>Booking SDR → RM · follow-up · opportunities</small></span>
             </button>
-            <Link className={styles.toolItem} href="/rm"><span className={`${styles.toolIcon} ${styles.gtmIcon}`}><BriefcaseBusiness size={17}/></span><span className={styles.toolCopy}><strong>RM Workspaces</strong><small>Zein · Jehad · Fadi · Faizan · Ursula · Bassam</small></span></Link>
             <button className={`${styles.toolItem} ${view === "inventory" ? styles.activeTool : ""}`} type="button" aria-current={view === "inventory" ? "page" : undefined} onClick={() => changeView("inventory")}>
               <span className={`${styles.toolIcon} ${styles.companyIcon}`}><Building2 size={17}/></span>
               <span className={styles.toolCopy}><strong>Lead Inventory</strong><small>Company stock · sources · qualification · Marita & Daniel</small></span>
@@ -275,7 +275,7 @@ export function Dashboard({
       sdr={sdr}
       active={active}
       initialSearch={viewSearch}
-      workspaceNavigation={workspaceNavigation}
+      workspaceNavigation={revenueNavigation}
       onOpenMotion={() => changeView("motion")}
       onOpenMaqsam={() => changeView("maqsam")}
       sidebarTools={sidebarTools}
@@ -305,7 +305,7 @@ export function Dashboard({
           <nav><button type="button" onClick={() => changeView("core")}><BadgeCheck size={18}/><span>Analytics Dashboard</span></button></nav>
           <div className="nav-label">ANALYSIS</div>
           <nav><button className={view === "motion" ? "active" : ""} type="button" onClick={() => changeView("motion")}><Activity size={18}/><span>Inbound vs Outbound</span></button><button className={view === "maqsam" ? "active" : ""} aria-current={view === "maqsam" ? "page" : undefined} type="button" onClick={() => changeView("maqsam")}><PhoneCall size={18}/><span>Maqsam Calls</span></button></nav>
-          {workspaceNavigation}
+          {revenueNavigation}
           <div className="nav-label owner-label">SDR OWNER</div>
           <div className="owner-card"><div className="avatar">{owner.initials}</div><div><span>Reporting for</span><strong>{owner.name}</strong></div><BadgeCheck size={17}/></div>
           {sidebarTools}

@@ -2,7 +2,13 @@
 
 ## Entry points
 
-`/rm` is the team overview. Six bookmarkable pages use the same protected workspace: `/rm/zein`, `/rm/jehad`, `/rm/fadi`, `/rm/faizan`, `/rm/ursula`, `/rm/bassam`. Navigation is available from SDR Tools, Sales Handoff and the older meeting follow-up page. Existing signed tools access protects every page and API; separate URLs are not individual authentication or a new permission model.
+`/rm` is the team overview with six bookmarkable RM pages. The RM workspace is a separate relationship-management entry outside SDR Tools. Its pages and four read APIs (snapshot, detail, trackers and lookup) open without a tools password. Responses remain uncached by browsers. Anyone with the URL can read this workspace.
+
+CRM writes retain existing authorization, origin, ownership, version and read-back checks. Visitors without a current authorized session get direct links to the original HubSpot records in the Update tab; no dashboard password prompt is needed to review accounts. Signed-in tool sessions retain the existing deal, meeting and task editors.
+
+The account table shows the latest recorded account update, follow-up health, overdue and upcoming tasks, and open deals with stages. Contact validation scores and the RM outcome / feedback / next-follow-up-date editor are no longer rendered here. Existing contact values remain part of eligibility checks; no CRM property or stored value is removed.
+
+Open-deal totals deduplicate by deal ID and require `hs_is_closed=false`. Unknown status is not counted as confirmed open. Latest updates are sourced from recorded RM outreach, meeting record modifications and deal record modifications. Record modification timestamps do not claim to be note creation times. On track requires recorded outreach, an upcoming task, no overdue task, no SLA breach and no history warning. A call attempt is not a confirmed connection.
 
 ## Attribution and counting
 

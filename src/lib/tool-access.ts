@@ -9,6 +9,7 @@ export function normalizedToolPath(path: string) {
 }
 export function isProtectedToolApi(path: string, method: string) {
   path = normalizedToolPath(path);
+  if (method === "GET" && ["/api/rm-journey", "/api/rm-journey/detail", "/api/rm-journey/trackers", "/api/rm-journey/lookup"].includes(path)) return false;
   // Presence/event ingestion remains public; the user-level usage report does not.
   if (path === "/api/hubspot/task-countries" || (path === "/api/maqsam/calls" && method === "GET")) return false;
   if (path === "/api/usage") return method !== "POST";
@@ -17,7 +18,7 @@ export function isProtectedToolApi(path: string, method: string) {
 export function isProtectedToolPage(path: string, params: URLSearchParams) {
   path = normalizedToolPath(path);
   if (path === "/marita-calls" || (path === "/" && params.get("view") === "maqsam" && params.get("studio") !== "tools")) return false;
-  return path === "/rm" || path.startsWith("/rm/") || PAGES.has(path) || (path === "/" && (Boolean(params.get("view") && params.get("view") !== "core") || params.get("studio") === "tools"));
+  return PAGES.has(path) || (path === "/" && (Boolean(params.get("view") && params.get("view") !== "core") || params.get("studio") === "tools"));
 }
 function equalSecret(value: string | null, expected: string | undefined) {
   if (!value || !expected?.trim()) return false;
