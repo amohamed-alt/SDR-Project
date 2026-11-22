@@ -1,8 +1,8 @@
 import "server-only";
 import { createSign } from "node:crypto";
-import { MEETING_SHEETS, parseMeetingTab, type SheetSnapshot } from "./meeting-sheet-data";
+import { MEETING_SHEETS, parseMeetingTab, sheetDate, type MeetingSheetSource } from "./meeting-sheet-data";
 const TTL=120_000;
-const state=globalThis as typeof globalThis & {__sdrMeetingSheets?: {cached:Map<string,{snapshot:SheetSnapshot;expires:number}>;pending:Map<string,Promise<SheetSnapshot>>}};
+const state=globalThis as typeof globalThis & {__sdrMeetingSheets?: {cached:Map<string,{snapshot:MeetingSheetSource;expires:number}>;pending:Map<string,Promise<MeetingSheetSource>>}};
 const {cached,pending}=state.__sdrMeetingSheets ??= {cached:new Map(),pending:new Map()};
 let token:{value:string;expires:number}|undefined;
 function credentials() {
@@ -33,12 +33,12 @@ async function googleRead(path:string) {
   }
   return response.json();
 }
-export async function readMeetingSheet(ownerId:string,force=false): Promise<SheetSnapshot|null> {
+export async function readMeetingSheet(ownerId:string,force=false): Promise<MeetingSheetSource|null> {
   const config=MEETING_SHEETS[ownerId as keyof typeof MEETING_SHEETS];if(!config)return null;
   const previous=cached.get(ownerId);if(!force&&previous&&previous.expires>Date.now())return previous.snapshot;
   const inflight=pending.get(ownerId);if(inflight)return previous?.snapshot ?? inflight;
   const url=`https://docs.google.com/spreadsheets/d/${config.id}/edit`;
-  const job=(async():Promise<SheetSnapshot>=>{
+  const job=(async():Promise<MeetingSheetSource>=>{
     try {
       const meta=await googleRead(`${config.id}?fields=sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))`) as {sheets:{properties:{sheetId:number;title:string;gridProperties:{rowCount:number;columnCount:number}}}[]};
       const tabs=meta.sheets.map(s=>s.properties).filter(s=>config.monthly?/^[A-Za-z]{3} \d{4}$/.test(s.title):s.title==="Meetings Log");
@@ -48,12 +48,26 @@ export async function readMeetingSheet(ownerId:string,force=false): Promise<Shee
       for(const tab of tabs)query.append("ranges",`'${tab.title.replaceAll("'","''")}'!A1:${config.monthly?"R":"O"}${tab.gridProperties.rowCount}`);
       const batch=await googleRead(`${config.id}/values:batchGet?${query}`) as {valueRanges:{values?:unknown[][]}[]};
       if(batch.valueRanges.length!==tabs.length)throw new Error("Incomplete meeting tracker response");
-      const parsed=batch.valueRanges.map((r,i)=>{ const result=parseMeetingTab(r.values||[],config.id,tabs[i].sheetId,config.owner); return {...result,warnings:result.warnings.map(w=>`${tabs[i].title}: ${w}`)}; });
-      const snapshot:SheetSnapshot={status:"ready",url,syncedAt:new Date().toISOString(),rows:parsed.flatMap(r=>r.rows),warnings:parsed.flatMap(r=>r.warnings)};
+      const parsed = batch.valueRanges.map((range, index) => {
+        const tab = tabs[index];
+        const { rows, rowNotices } = parseMeetingTab(range.values || [], config.id, tab.sheetId, config.owner);
+        const month = config.monthly ? sheetDate(`1 ${tab.title}`).slice(0, 7) : undefined;
+        return {
+          rows,
+          rowNotices: rowNotices.map(notice => ({ ...notice, month, message: `${tab.title}: ${notice.message}` })),
+        };
+      });
+      const snapshot: MeetingSheetSource = {
+        status: "ready", url, syncedAt: new Date().toISOString(),
+        rows: parsed.flatMap(result => result.rows), warnings: [],
+        rowNotices: parsed.flatMap(result => result.rowNotices),
+      };
       cached.set(ownerId,{snapshot,expires:Date.now()+TTL});return snapshot;
     } catch(error) {
       const reason=error instanceof Error?error.message:"Unable to read tracker";
-      const snapshot:SheetSnapshot=previous?.snapshot.status==="ready"?{...previous.snapshot,warnings:[...previous.snapshot.warnings,`Last successful sheet snapshot retained; sync failed: ${reason}`]}:{status:"unavailable",url,syncedAt:"",rows:[],warnings:[],error:reason};
+      const snapshot: MeetingSheetSource = previous?.snapshot.status === "ready"
+        ? { ...previous.snapshot, warnings: [`Last successful sheet snapshot retained; sync failed: ${reason}`] }
+        : { status: "unavailable", url, syncedAt: "", rows: [], warnings: [], error: reason };
       cached.set(ownerId,{snapshot,expires:Date.now()+30_000});return snapshot;
     }
   })().finally(()=>pending.delete(ownerId));pending.set(ownerId,job);

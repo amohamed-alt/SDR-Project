@@ -26,6 +26,11 @@ export function readDashboardView(search: string, defaults: DashboardFilters) {
     to: safeDate(params.get("to"), defaults.to),
   };
 
+  if (filters.from > filters.to) {
+    filters.from = defaults.from;
+    filters.to = defaults.to;
+  }
+
   const country = clean(params.get("country"));
   const originalSource = clean(params.get("originalSource"));
   const latestSource = clean(params.get("latestSource"));

@@ -42,3 +42,24 @@ test("dashboard toolbar keeps navigation and sharing without presentation mode",
   await expect(page.getByRole("button", { name: "Copy link to current dashboard view" })).toBeVisible();
   await expect(page.locator("aside.sidebar")).toBeVisible();
 });
+
+test("the date filter starts the reporting week on Sunday and blocks an inverted range", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-11-22T10:00:00Z"));
+  await page.goto("/?from=2026-11-01&to=2026-11-22");
+  await page.getByRole("button", { name: "Toggle filters" }).click();
+  await page.getByRole("button", { name: "This week" }).click();
+  const from = page.getByLabel("From", { exact: true });
+  const to = page.getByLabel("To", { exact: true });
+  const apply = page.getByRole("button", { name: "Apply", exact: true });
+  await expect(from).toHaveValue("2026-11-22");
+  await expect(to).toHaveValue("2026-11-22");
+
+  await to.fill("2026-11-21");
+  await expect(apply).toBeDisabled();
+  await expect(page.getByRole("alert").filter({ hasText: "From must be on or before To" })).toBeVisible();
+  await expect(page).toHaveURL(/from=2026-11-01&to=2026-11-22/);
+
+  await to.fill("2026-11-22");
+  await apply.click();
+  await expect(page).toHaveURL(/from=2026-11-22&to=2026-11-22/);
+});

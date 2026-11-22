@@ -99,7 +99,12 @@ export function selectDashboardRecords(data: DashboardData, selection: RecordSel
     const alert = selection.alert;
     rows = rows.filter(row => {
       if ("type" in row) {
-        if (alert === "meeting-outcomes" || alert === "outcomes") return row.type === "Meeting" && ["Unknown", "Scheduled"].includes(row.status) && Date.parse(row.occurredAt) <= now && inPeriod(row.occurredAt, data);
+        if (alert === "meeting-outcomes" || alert === "outcomes") {
+          if (row.type !== "Meeting" || !["Unknown", "Scheduled"].includes(row.status) || !inPeriod(row.occurredAt, data)) return false;
+          if (data.meetingSheet?.status !== "ready") return Date.parse(row.occurredAt) <= now;
+          const day = dayInZone(row.occurredAt, data.meta.timezone);
+          return day <= dayInZone(data.meta.generatedAt, data.meta.timezone);
+        }
         if (row.type !== "Task" || !row.isOpen) return false;
         if (alert === "due-today") return row.dueBucket === "Due today";
         if (alert === "due-tomorrow" || alert === "due") return row.dueBucket === "Due tomorrow";

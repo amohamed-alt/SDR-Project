@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sheetDate, parseMeetingTab, sheetMeetingPerformance, applyMeetingSheet } from '../src/lib/meeting-sheet-data.ts';
+import { sheetDate, parseMeetingTab, scopeMeetingSheet, sheetMeetingPerformance, applyMeetingSheet } from '../src/lib/meeting-sheet-data.ts';
+import { selectDashboardRecords } from '../src/lib/dashboard-records.ts';
 function createMockDashboard(from,to,ownerId) {
- return {meta:{from,to,ownerId,ownerName:'Daniel',warnings:[]}, kpis:{bookedMeetings:99,completedMeetings:5,calls:20,connectedCalls:10,dealsCreated:2},recentActivities:[{id:'crm-meeting',type:'Meeting'},{id:'call',type:'Call'}],dailyActivities:[{date:'2026-10-05',meetingsBooked:99}],intelligence:{}};
+ return {meta:{from,to,ownerId,ownerName:'Daniel',warnings:[],timezone:'Asia/Riyadh',generatedAt:`${to}T05:00:00Z`}, alerts:[{id:'meeting-outcomes',count:9}], kpis:{bookedMeetings:99,completedMeetings:5,calls:20,connectedCalls:10,dealsCreated:2},recentActivities:[{id:'crm-meeting',type:'Meeting'},{id:'call',type:'Call'}],dailyActivities:[{date:'2026-10-05',meetingsBooked:99}],intelligence:{}};
 }
 const header=['Meeting Date','Meeting Time','Company','Contact Name','Contact Email','Booked By','Sales Rep','Product ','Meeting Status','Lead Source','HubSpot Meeting Link / ID','Notes'];
 const row=(date,status,source='Outbound',owner='Daniel')=>[date,'10:00 AM','Example Co','Person','private@example.com',owner,'Zain','Evalufy',status,source,'','private notes'];
@@ -13,7 +14,7 @@ test('dates parse both trackers and reject impossible dates',()=>{
 test('reads headers by name, preserves row provenance and owner, excludes private fields',()=>{
   const p=parseMeetingTab([['title'],header,row('05-Oct-2026','Attended'),row('06-Oct-2026','Scheduled','Inbound','Marita'),row('bad','Attended')],'abc',12,'Daniel');
   assert.equal(p.rows.length,1);assert.equal(p.rows[0].status,'Completed');assert.ok(p.rows[0].sheetUrl.endsWith('gid=12&range=A3'));
-  assert.equal(JSON.stringify(p).includes('private@'),false);assert.equal(JSON.stringify(p).includes('private notes'),false);assert.equal(p.warnings.length,1);
+  assert.equal(JSON.stringify(p).includes('private@'),false);assert.equal(JSON.stringify(p).includes('private notes'),false);assert.equal(p.rowNotices.length,1);
   assert.throws(()=>parseMeetingTab([['bad']], 'abc',12,'Daniel'));
 });
 test('future, canceled, rescheduled and missing outcomes have distinct reporting semantics',()=>{
@@ -45,4 +46,40 @@ test('independent sheet refresh retains original CRM evidence and clears resolve
   assert.equal(refreshed.kpis.bookedMeetings,2);
   assert.deepEqual(refreshed.hubspotMeetingEvidence,[{id:'crm-meeting',type:'Meeting'}]);
   assert.equal(refreshed.meta.warnings.some(w=>w.includes('403')),false);
+});
+
+test('meeting notices follow the selected period while sync failures remain visible', () => {
+  const source = {
+    status: 'ready', syncedAt: '2026-11-22T00:00:00Z', url: 'x', rows: [],
+    warnings: ['Last successful sheet snapshot retained'],
+    rowNotices: [
+      { message: 'October row', date: '2026-10-20', month: '2026-10' },
+      { message: 'November row', date: '2026-11-05', month: '2026-11' },
+      { message: 'Later November row', date: '2026-11-27', month: '2026-11' },
+      { message: 'Undated October row', date: '', month: '2026-10' },
+      { message: 'Undated November row', date: '', month: '2026-11' },
+    ],
+  };
+  const scoped = scopeMeetingSheet(source, '2026-11-01', '2026-11-22');
+  assert.deepEqual(scoped.warnings, ['Last successful sheet snapshot retained', 'November row', 'Undated November row']);
+  assert.equal('rowNotices' in scoped, false);
+});
+
+test('sheet outcome alert counts the same rows as its drill-down, including today', () => {
+  const filters = { from: '2026-11-01', to: '2026-11-30', ownerId: '37624223' };
+  const data = createMockDashboard(filters.from, filters.to, filters.ownerId);
+  data.meta.generatedAt = '2026-11-22T05:00:00Z';
+  const { rows } = parseMeetingTab([
+    header,
+    row('20-Nov-2026', 'Attended'),
+    row('21-Nov-2026', 'Scheduled'),
+    row('22-Nov-2026', ''),
+    row('23-Nov-2026', 'Scheduled'),
+  ], 'abc', 12, 'Daniel');
+  const out = applyMeetingSheet(data, {
+    rows, status: 'ready', syncedAt: data.meta.generatedAt, warnings: [], url: 'x'
+  }, filters, '2026-11-22');
+  const records = selectDashboardRecords(out, { kind: 'activities', alert: 'meeting-outcomes' });
+  assert.equal(out.alerts.find(alert => alert.id === 'meeting-outcomes').count, 2);
+  assert.deepEqual(records.map(record => record.occurredAt.slice(0, 10)), ['2026-11-21', '2026-11-22']);
 });

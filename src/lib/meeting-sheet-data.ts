@@ -4,7 +4,10 @@ export const MEETING_SHEETS = {
   "37624223": { id: "1OAub1dzDrSwTP02gQUdhEa4gwPIYiLGmNpr9ny5Nbp4", owner: "Daniel", monthly: false },
 } as const;
 export type SheetMeeting = { id: string; date: string; company: string; salesRep: string; product: string; status: string; motion: "Inbound" | "Outbound" | "Unknown"; sheetUrl: string; hubspotUrl: string };
+type SheetRowNotice = { message: string; date: string; month?: string };
 export type SheetSnapshot = { rows: SheetMeeting[]; syncedAt: string; warnings: string[]; url: string; status: "ready" | "unavailable"; error?: string };
+export type MeetingSheetSource = SheetSnapshot & { rowNotices?: SheetRowNotice[] };
+
 const clean = (v: unknown) => String(v ?? "").replace(/\s+/g," ").trim();
 export function sheetDate(raw: unknown): string {
   const s = clean(raw).replace(/0ct/ig,"Oct");
@@ -31,24 +34,36 @@ export function parseMeetingTab(values: unknown[][], sheetId: string, gid: numbe
   const col=(name:string)=>names.indexOf(name);
   const required=["Meeting Date","Booked By","Company","Meeting Status","Lead Source"];
   if (required.some(n=>col(n)<0)) throw new Error("Meeting tracker required columns changed");
-  const rows: SheetMeeting[]=[], warnings: string[]=[];
+  const rows: SheetMeeting[] = [], rowNotices: SheetRowNotice[] = [];
   for (let i=header+1;i<values.length;i++) {
     const cells=values[i]; const get=(name:string)=>clean(cells[col(name)]);
     if (!cells.some(v=>clean(v))) continue;
     if (get("Booked By").toLowerCase()!==owner.toLowerCase()) continue;
     const date=sheetDate(get("Meeting Date"));
-    if (!date) { warnings.push(`Row ${i+1}: invalid or missing meeting date`); continue; }
+    if (!date) { rowNotices.push({ message: `Row ${i+1}: invalid or missing meeting date`, date }); continue; }
     const source=get("Lead Source").toLowerCase();
     const motion=source==="inbound" ? "Inbound" : source==="outbound" ? "Outbound" : "Unknown";
     const rawStatus=get("Meeting Status").toLowerCase().replace(/[-_]/g," ");
     const status=({attended:"Completed",completed:"Completed","no show":"No show",canceled:"Canceled",cancelled:"Canceled",rescheduled:"Rescheduled",scheduled:"Scheduled"} as Record<string,string>)[rawStatus] || "Unknown";
     const rawLink=get("HubSpot Meeting Link / ID");
-    if (motion==="Unknown") warnings.push(`Row ${i+1}: unknown lead source`);
-    if (rawLink && !safeHubSpotLink(rawLink)) warnings.push(`Row ${i+1}: HubSpot link needs review`);
+    if (motion==="Unknown") rowNotices.push({ message: `Row ${i+1}: unknown lead source`, date });
+    if (rawLink && !safeHubSpotLink(rawLink)) rowNotices.push({ message: `Row ${i+1}: HubSpot link needs review`, date });
     rows.push({id:`sheet-${sheetId}-${gid}-${i+1}`,date,company:get("Company")||"Company missing",salesRep:get("Sales Rep"),product:get("Product"),status,motion,sheetUrl:`https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${gid}&range=A${i+1}`,hubspotUrl:safeHubSpotLink(rawLink)});
   }
-  return {rows,warnings};
+  return { rows, rowNotices };
 }
+export function scopeMeetingSheet(source: MeetingSheetSource, from: string, to: string): SheetSnapshot {
+  const { rowNotices = [], ...snapshot } = source;
+  const warnings = rowNotices.filter(({ date, month }) => date
+    ? date >= from && date <= to
+    : !month || (month >= from.slice(0, 7) && month <= to.slice(0, 7)));
+  return {
+    ...snapshot,
+    rows: snapshot.rows.filter(row => row.date >= from && row.date <= to),
+    warnings: [...snapshot.warnings, ...warnings.map(notice => notice.message)],
+  };
+}
+
 export function sheetMeetingPerformance(rows: SheetMeeting[], from: string, to: string, today: string) {
   const selected=rows.filter(r=>r.date>=from&&r.date<=to);
   const active=selected.filter(r=>!["Canceled","Rescheduled"].includes(r.status));
@@ -63,7 +78,15 @@ export function applyMeetingSheet(data: DashboardData, source: SheetSnapshot, fi
   if (source.status!=="ready") return {...data,meetingSheet:{...source,rows:[]},meetingPerformance:undefined,meta:{...data.meta,warnings:[...warnings,`Meeting sheet unavailable: ${source.error}. Meeting activity falls back to HubSpot; targets unavailable.`]}};
   const rows=source.rows.filter(r=>r.date>=filters.from&&r.date<=filters.to);
   const p=sheetMeetingPerformance(rows,filters.from,filters.to,today);
+  const alerts = data.alerts.filter(alert => alert.id !== "meeting-outcomes");
+  if (p.missingOutcomes > 0) {
+    alerts.push({
+      id: "meeting-outcomes", severity: "warning", title: "Missing meeting outcomes",
+      detail: "Past or current-day tracker meetings still marked Scheduled or Unknown.",
+      count: p.missingOutcomes, action: "Review tracker rows",
+    });
+  }
   const counts=(field:"status"|"motion"|"salesRep")=>Object.entries(rows.reduce<Record<string,number>>((acc,r)=>{const v=r[field]||"Unassigned";acc[v]=(acc[v]||0)+1;return acc;},{})).map(([name,value])=>({name,value}));
   const activities: ActivityRow[]=rows.map(r=>({id:r.id,type:"Meeting",subject:`${r.company} · ${r.product}`,status:r.status,detail:r.motion,assignedTo:r.salesRep||"Unassigned",occurredAt:`${r.date}T12:00:00+03:00`,metricAt:`${r.date}T12:00:00+03:00`,bookedInPeriod:true,heldInPeriod:r.date<=today&&r.status==="Completed",dueAt:"",dueBucket:"",isOpen:["Scheduled","Unknown"].includes(r.status),isHighPriority:false,opened:false,clicked:false,replied:false,url:r.sheetUrl}));
-  return {...data,hubspotMeetingEvidence:data.hubspotMeetingEvidence ?? data.recentActivities.filter(r=>r.type==="Meeting"),meetingSheet:{...source,rows,scope},meetingPerformance:p,kpis:{...data.kpis,bookedMeetings:p.booked,completedMeetings:p.held,meetingCompletionRate:p.attendanceRate},dailyActivities:data.dailyActivities.map(d=>({...d,meetingsBooked:rows.filter(r=>r.date===d.date).length})),meetingOutcomes:counts("status"),meetingOwners:counts("salesRep"),meetingSources:counts("motion"),recentActivities:[...data.recentActivities.filter(r=>r.type!=="Meeting"),...activities],intelligence:{...data.intelligence,meetingToDealConversion:{numerator:data.kpis.dealsCreated,denominator:p.booked,rate:p.booked?Math.round(data.kpis.dealsCreated/p.booked*1000)/10:0},connectedCallToMeetingConversion:{numerator:p.booked,denominator:data.kpis.connectedCalls,rate:data.kpis.connectedCalls?Math.round(p.booked/data.kpis.connectedCalls*1000)/10:0}},meta:{...data.meta,warnings:[...warnings,...source.warnings.map(w=>`Meeting sheet: ${w}`)]}};
+  return {...data,alerts,hubspotMeetingEvidence:data.hubspotMeetingEvidence ?? data.recentActivities.filter(r=>r.type==="Meeting"),meetingSheet:{...source,rows,scope},meetingPerformance:p,kpis:{...data.kpis,bookedMeetings:p.booked,completedMeetings:p.held,meetingCompletionRate:p.attendanceRate},dailyActivities:data.dailyActivities.map(d=>({...d,meetingsBooked:rows.filter(r=>r.date===d.date).length})),meetingOutcomes:counts("status"),meetingOwners:counts("salesRep"),meetingSources:counts("motion"),recentActivities:[...data.recentActivities.filter(r=>r.type!=="Meeting"),...activities],intelligence:{...data.intelligence,meetingToDealConversion:{numerator:data.kpis.dealsCreated,denominator:p.booked,rate:p.booked?Math.round(data.kpis.dealsCreated/p.booked*1000)/10:0},connectedCallToMeetingConversion:{numerator:p.booked,denominator:data.kpis.connectedCalls,rate:data.kpis.connectedCalls?Math.round(p.booked/data.kpis.connectedCalls*1000)/10:0}},meta:{...data.meta,warnings:[...warnings,...source.warnings.map(w=>`Meeting sheet: ${w}`)]}};
 }
