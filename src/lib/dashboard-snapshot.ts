@@ -1,7 +1,7 @@
 import { unstable_cache } from "next/cache";
 import { SDR_OWNERS } from "@/lib/sdr-owners";
 import { readMeetingSheet } from "@/lib/meeting-sheet";
-import { applyMeetingSheet } from "@/lib/meeting-sheet-data";
+import { applyMeetingSheet, scopeMeetingSheet } from "@/lib/meeting-sheet-data";
 import { buildDashboard } from "@/lib/analytics";
 import { DashboardSnapshotHistory } from "@/lib/dashboard-snapshot-history";
 import { dashboardToday } from "@/lib/dashboard-values";
@@ -238,7 +238,8 @@ export async function getDashboardSnapshot(
   // Sheet reads have their own short cache and must not wait behind a full CRM
   // rebuild. Reuse this exact overlay until the source changes, so ETags and
   // record-drawer versions remain stable between identical reads.
-  const sheet = await readMeetingSheet(filters.ownerId);
+  const source = await readMeetingSheet(filters.ownerId);
+  const sheet = source && scopeMeetingSheet(source, filters.from, filters.to);
   const previousSheet = snapshot.data.meetingSheet;
   if (sheet && (previousSheet?.syncedAt !== sheet.syncedAt
     || previousSheet?.status !== sheet.status
@@ -262,7 +263,7 @@ export async function getDashboardSnapshot(
 function queuedBuild(filters: DashboardFilters): Promise<DashboardData> {
   const next = dashboardStore.buildTail.then(async () => {
     const [data, sheet] = await Promise.all([buildDashboard(filters), readMeetingSheet(filters.ownerId)]);
-    return sheet ? applyMeetingSheet(data, sheet, filters, dashboardToday()) : data;
+    return sheet ? applyMeetingSheet(data, scopeMeetingSheet(sheet, filters.from, filters.to), filters, dashboardToday()) : data;
   });
   dashboardStore.buildTail = next.catch(() => undefined);
   return next;
